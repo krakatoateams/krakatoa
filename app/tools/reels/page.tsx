@@ -14,6 +14,9 @@ export default function ReelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   
+  const [testAudioPredictionId, setTestAudioPredictionId] = useState("g99vpsrf3hrmr0cy1jvtwy72cw");
+  const [testVideoPredictionId, setTestVideoPredictionId] = useState("qxhe8d8dqhrmr0cy1jvryg745r");
+  
   const [captionStyle, setCaptionStyle] = useState({
     fontname: "Poppins",
     fontsize: 60,
@@ -307,42 +310,70 @@ export default function ReelsPage() {
                   <RefreshCw className="w-4 h-4 text-emerald-400" />
                   <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Dev Pipeline Testing</h4>
                 </div>
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-                  <div className="max-w-md">
-                    <p className="text-sm text-slate-400 leading-relaxed text-center md:text-left">
-                      Test the Whisper + Rendi stitching pipeline instantly using pre-cached assets from your storage.
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col gap-6">
+                  <div className="max-w-full">
+                    <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      Test the Whisper + Rendi stitching pipeline instantly using pre-generated assets from Replicate prediction IDs.
                     </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Audio Prediction ID</label>
+                        <input 
+                          type="text" 
+                          value={testAudioPredictionId} 
+                          onChange={(e) => setTestAudioPredictionId(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-sm font-mono"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Video Prediction ID</label>
+                        <input 
+                          type="text" 
+                          value={testVideoPredictionId} 
+                          onChange={(e) => setTestVideoPredictionId(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <button 
-                    onClick={async () => {
-                      if (loading) return;
-                      setLoading(true);
-                      setError(null);
-                      setVideoUrl(null);
-                      setLogs(["Starting test pipeline (Whisper -> Rendi)..."]);
-                      try {
-                        const response = await fetch("/api/test-stitch", { 
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ captionStyle })
-                        });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.error || "Failed to test pipeline");
-                        setVideoUrl(data.videoUrl);
-                        setLogs((prev) => [...prev, "Test pipeline completed successfully!"]);
-                      } catch (err: unknown) {
-                        const message = err instanceof Error ? err.message : "An unexpected error occurred";
-                        setError(message);
-                        setLogs((prev) => [...prev, `Error: ${message}`]);
-                      } finally {
-                        setLoading(false);
-                      }
-                    }}
-                    disabled={loading}
-                    className="whitespace-nowrap px-8 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-all font-bold text-sm"
-                  >
-                    Run Stitching Test
-                  </button>
+                  <div className="flex justify-end">
+                    <button 
+                      type="button"
+                      onClick={async () => {
+                        if (loading) return;
+                        setLoading(true);
+                        setError(null);
+                        setVideoUrl(null);
+                        setLogs(["Starting test pipeline (Fetching Replicate Outputs -> Whisper -> Rendi)..."]);
+                        try {
+                          const response = await fetch("/api/test-stitch", { 
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ 
+                              captionStyle,
+                              audioPredictionId: testAudioPredictionId,
+                              videoPredictionId: testVideoPredictionId
+                            })
+                          });
+                          const data = await response.json();
+                          if (!response.ok) throw new Error(data.error || "Failed to test pipeline");
+                          setVideoUrl(data.videoUrl);
+                          setLogs((prev) => [...prev, "Test pipeline completed successfully!"]);
+                        } catch (err: unknown) {
+                          const message = err instanceof Error ? err.message : "An unexpected error occurred";
+                          setError(message);
+                          setLogs((prev) => [...prev, `Error: ${message}`]);
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading}
+                      className="px-8 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-all font-bold text-sm flex items-center justify-center gap-2 w-full md:w-auto"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                      Run Stitching Test
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -384,7 +415,7 @@ export default function ReelsPage() {
                         <div 
                           className="absolute w-full left-0 px-4 flex justify-center pointer-events-none transition-all duration-300"
                           style={{ 
-                            bottom: `calc(${captionStyle.marginV}% + ${captionStyle.fontsize * (400 / 854) * offsetScale}px)`,
+                            bottom: `calc(${captionStyle.marginV * (854 - captionStyle.fontsize * 1.5) / 854}% + ${captionStyle.fontsize * (260 / 480) * offsetScale}px)`,
                           }}
                         >
                           <div 
@@ -447,11 +478,13 @@ export default function ReelsPage() {
                         <Download className="w-5 h-5" />
                       </a>
                     </div>
-                    <video 
-                      src={videoUrl} 
-                      controls 
-                      className="w-full aspect-[9/16] max-h-[500px] object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
-                    ></video>
+                    <div className="flex justify-center">
+                      <video 
+                        src={videoUrl} 
+                        controls 
+                        className="aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                      ></video>
+                    </div>
                     <a 
                       href={videoUrl} 
                       target="_blank" 

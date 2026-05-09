@@ -151,23 +151,27 @@ Return ONLY raw JSON array, nothing else.`;
 
     const mediaResults = await Promise.all(mediaPromises);
 
-    console.log('[Step 3] WhisperX Timestamps...');
-    // Step 3: Whisper Timestamps
-    const whisperPromises = mediaResults.map(async (media) => {
-      const whisperRes = await replicate.run("victor-upmeet/whisperx:84d2ad2d6194fe98a17d2b60bef1c7f910c46b2f6fd38996ca457afd9c8abfcb", {
-        input: {
-          audio_file: media.audioUrl,
-          language: "en",
-          align_output: true
+    // Step 3: Whisper Timestamps — run sequentially per scene (not parallel) to avoid rate limits
+    const whisperResults = [];
+    for (const media of mediaResults) {
+      if (!media.audioUrl) {
+        throw new Error(`Audio URL is missing for scene ${media.scene_id}. TTS generation may have failed.`);
+      }
+      console.log(`[Whisper] Processing scene ${media.scene_id} audio: ${media.audioUrl}`);
+      const whisperRes = await replicate.run(
+        "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c",
+        {
+          input: {
+            audio: media.audioUrl,
+            language: "english",
+            timestamp: "word",
+            batch_size: 64,
+          }
         }
-      });
-      return {
-        ...media,
-        whisper: whisperRes
-      };
-    });
-
-    const whisperResults = await Promise.all(whisperPromises);
+      );
+      console.log(`[Whisper] Scene ${media.scene_id} result:`, JSON.stringify(whisperRes).slice(0, 200));
+      whisperResults.push({ ...media, whisper: whisperRes });
+    }
 
     console.log('[Step 4] Build ASS subtitle file...');
     // Step 4: Build ASS subtitles (For accurate MarginV mapping)
@@ -203,20 +207,49 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     for (const res of whisperResults) {
       const offset = res.offset;
-      const segments = (res.whisper as any)?.segments || [];
+      const whisperOutput = res.whisper as any;
 
-      for (const segment of segments) {
-        const words = segment.words || [];
+      // incredibly-fast-whisper returns { chunks: [{text, timestamp:[start,end]}] }
+      // openai/whisper returns { segments: [{words:[{word,start,end}]}] }
+      const chunks: Array<{ text: string; start: number; end: number }> = [];
 
-        for (let i = 0; i < words.length; i++) {
-          const wordInfo = words[i];
-          const start = (wordInfo.start ?? segment.start ?? 0) + offset;
-          const end = (wordInfo.end ?? segment.end ?? (start + 0.5)) + offset;
-
-          const lineText = `{\\c${highlightColorASS}}{\\b1}${(words[i].word || '').trim().toUpperCase()}{\\b0}`;
-          
-          assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
+      if (whisperOutput?.chunks) {
+        // incredibly-fast-whisper format
+        for (const chunk of whisperOutput.chunks) {
+          chunks.push({
+            text: (chunk.text || '').trim(),
+            start: chunk.timestamp?.[0] ?? 0,
+            end: chunk.timestamp?.[1] ?? (chunk.timestamp?.[0] ?? 0) + 0.5,
+          });
         }
+      } else if (whisperOutput?.segments) {
+        // openai/whisper / whisperx format
+        for (const segment of whisperOutput.segments) {
+          const words = segment.words || [];
+          if (words.length > 0) {
+            for (const w of words) {
+              chunks.push({
+                text: (w.word || w.text || '').trim(),
+                start: w.start ?? segment.start ?? 0,
+                end: w.end ?? segment.end ?? (w.start ?? 0) + 0.5,
+              });
+            }
+          } else {
+            chunks.push({
+              text: (segment.text || '').trim(),
+              start: segment.start ?? 0,
+              end: segment.end ?? (segment.start ?? 0) + 0.5,
+            });
+          }
+        }
+      }
+
+      for (const chunk of chunks) {
+        if (!chunk.text) continue;
+        const start = chunk.start + offset;
+        const end = chunk.end + offset;
+        const lineText = `{\\c${highlightColorASS}}{\\b1}${chunk.text.toUpperCase()}{\\b0}`;
+        assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
       }
     }
 

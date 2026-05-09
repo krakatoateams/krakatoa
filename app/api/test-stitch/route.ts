@@ -95,6 +95,7 @@ function extractRendiOutputUrl(pollData: any, alias: string): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
+    const { audioPredictionId, videoPredictionId } = body;
     const style = body.captionStyle || {
       fontname: "Arial",
       fontsize: 28,
@@ -122,45 +123,62 @@ export async function POST(req: Request) {
       throw new Error("RENDI_API_KEY is not set.");
     }
 
-    // Step 1: Get files from Supabase temp bucket
-    console.log('[Test Step 1] Getting files from Supabase temp bucket...');
-    const { data: videoData } = supabase.storage.from('temp').getPublicUrl('video.mp4');
-    const { data: audioData } = supabase.storage.from('temp').getPublicUrl('audio.mp3');
-    
-    const videoUrl = videoData.publicUrl;
-    const audioUrl = audioData.publicUrl;
+    if (!audioPredictionId || !videoPredictionId) {
+      throw new Error("audioPredictionId and videoPredictionId are required for testing.");
+    }
+
+    // Step 1: Get Prediction outputs from Replicate
+    console.log('[Test Step 1] Fetching prediction outputs from Replicate...');
+    const [audioPrediction, videoPrediction] = await Promise.all([
+      replicate.predictions.get(audioPredictionId),
+      replicate.predictions.get(videoPredictionId)
+    ]);
+
+    let audioUrl = "";
+    const audioRes = audioPrediction.output;
+    if (typeof audioRes === "string") {
+      audioUrl = audioRes;
+    } else if (audioRes && typeof audioRes === "object") {
+      if ('audio' in audioRes && (audioRes as any).audio?.url) audioUrl = (audioRes as any).audio.url;
+      else if ('audio_url' in audioRes) audioUrl = (audioRes as any).audio_url;
+      else if ('audio_file' in audioRes) audioUrl = (audioRes as any).audio_file;
+      else if ('url' in audioRes) audioUrl = (audioRes as any).url;
+      else if ('output' in audioRes && typeof (audioRes as any).output === 'string') audioUrl = (audioRes as any).output;
+      else if (Array.isArray(audioRes)) audioUrl = audioRes[0];
+    }
+
+    let videoUrl = "";
+    const videoRes = videoPrediction.output;
+    if (typeof videoRes === "string") {
+      videoUrl = videoRes;
+    } else if (videoRes && typeof videoRes === "object") {
+      if ('url' in videoRes) videoUrl = (videoRes as any).url;
+      else if ('video' in videoRes) videoUrl = (videoRes as any).video;
+      else if ('output' in videoRes && typeof (videoRes as any).output === 'string') videoUrl = (videoRes as any).output;
+      else if (Array.isArray(videoRes)) videoUrl = videoRes[0];
+    }
+
+    if (!audioUrl || !videoUrl) {
+      throw new Error(`Failed to extract URLs from predictions. Audio URL: ${audioUrl}, Video URL: ${videoUrl}`);
+    }
+
     console.log('[Test Step 1] Video URL:', videoUrl);
     console.log('[Test Step 1] Audio URL:', audioUrl);
 
-    // Step 2: WhisperX Timestamps (MOCKED for fast styling iteration)
-    console.log('[Test Step 2] Skipping WhisperX, using mock timestamps for fast iteration...');
-    const whisperRes = {
-      segments: [
-        {
-          "end": 4.553,
-          "start": 0.089,
-          "text": " We're getting close to Saturn, and the rings are more breathtaking than we ever imagined.",
-          "words": [
-            { "end": 0.291, "score": 0.676, "start": 0.089, "word": "We're" },
-            { "end": 0.532, "score": 0.889, "start": 0.311, "word": "getting" },
-            { "end": 0.813, "score": 0.928, "start": 0.572, "word": "close" },
-            { "end": 0.934, "score": 0.746, "start": 0.854, "word": "to" },
-            { "end": 1.356, "score": 0.594, "start": 0.974, "word": "Saturn," },
-            { "end": 2.02, "score": 0.841, "start": 1.919, "word": "and" },
-            { "end": 2.14, "score": 0.833, "start": 2.06, "word": "the" },
-            { "end": 2.482, "score": 0.891, "start": 2.201, "word": "rings" },
-            { "end": 2.663, "score": 0.824, "start": 2.563, "word": "are" },
-            { "end": 2.905, "score": 0.768, "start": 2.724, "word": "more" },
-            { "end": 3.548, "score": 0.913, "start": 2.985, "word": "breathtaking" },
-            { "end": 3.729, "score": 0.875, "start": 3.608, "word": "than" },
-            { "end": 3.85, "score": 0.84, "start": 3.749, "word": "we" },
-            { "end": 4.111, "score": 0.834, "start": 3.95, "word": "ever" },
-            { "end": 4.553, "score": 0.957, "start": 4.171, "word": "imagined." }
-          ]
+    // Step 2: Run Whisper Timestamping
+    console.log(`[Test Step 2] Running Whisper on audio URL...`);
+    const whisperRes = await replicate.run(
+      "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c",
+      {
+        input: {
+          audio: audioUrl,
+          language: "english",
+          timestamp: "word",
+          batch_size: 64,
         }
-      ]
-    };
-    console.log('[Test Step 2] WhisperX done. Segments:', JSON.stringify(whisperRes).substring(0, 300));
+      }
+    );
+    console.log('[Test Step 2] Whisper done. Result preview:', JSON.stringify(whisperRes).substring(0, 300));
 
     // Step 3: Build ASS subtitle file
     console.log('[Test Step 3] Build ASS subtitle file...');
@@ -187,27 +205,57 @@ Style: Default,${style.fontname},${style.fontsize},${primaryColorASS},&H000000FF
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-    const segments = (whisperRes as any)?.segments || [];
-    for (const segment of segments) {
-      const words = segment.words || [];
-      for (let i = 0; i < words.length; i++) {
-        const wordInfo = words[i];
-        const start = (wordInfo.start ?? segment.start ?? 0);
-        const end = (wordInfo.end ?? segment.end ?? (start + 0.5));
+    const whisperOutput = whisperRes as any;
+    const chunks: Array<{ text: string; start: number; end: number }> = [];
 
-        const lineText = `{\\c${highlightColorASS}}{\\b1}${(words[i].word || '').trim().toUpperCase()}{\\b0}`;
-        
-        // ASS timestamp: H:MM:SS.cs
-        const formatAssTime = (s: number) => {
-          const h = Math.floor(s / 3600);
-          const m = Math.floor((s % 3600) / 60);
-          const sec = Math.floor(s % 60);
-          const cs = Math.floor((s % 1) * 100);
-          return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
-        };
-
-        assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
+    if (whisperOutput?.chunks) {
+      // incredibly-fast-whisper format
+      for (const chunk of whisperOutput.chunks) {
+        chunks.push({
+          text: (chunk.text || '').trim(),
+          start: chunk.timestamp?.[0] ?? 0,
+          end: chunk.timestamp?.[1] ?? (chunk.timestamp?.[0] ?? 0) + 0.5,
+        });
       }
+    } else if (whisperOutput?.segments) {
+      // openai/whisper / whisperx format
+      for (const segment of whisperOutput.segments) {
+        const words = segment.words || [];
+        if (words.length > 0) {
+          for (const w of words) {
+            chunks.push({
+              text: (w.word || w.text || '').trim(),
+              start: w.start ?? segment.start ?? 0,
+              end: w.end ?? segment.end ?? (w.start ?? 0) + 0.5,
+            });
+          }
+        } else {
+          chunks.push({
+            text: (segment.text || '').trim(),
+            start: segment.start ?? 0,
+            end: segment.end ?? (segment.start ?? 0) + 0.5,
+          });
+        }
+      }
+    }
+
+    for (const chunk of chunks) {
+      if (!chunk.text) continue;
+      const start = chunk.start;
+      const end = chunk.end;
+
+      const lineText = `{\\c${highlightColorASS}}{\\b1}${chunk.text.toUpperCase()}{\\b0}`;
+      
+      // ASS timestamp: H:MM:SS.cs
+      const formatAssTime = (s: number) => {
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = Math.floor(s % 60);
+        const cs = Math.floor((s % 1) * 100);
+        return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+      };
+
+      assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
     }
 
     if (!assContent.includes('Dialogue:')) {
