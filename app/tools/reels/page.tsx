@@ -293,7 +293,7 @@ export default function ReelsPage() {
                   {loading ? (
                     <>
                       <Loader2 className="w-6 h-6 animate-spin" />
-                      Generating Cinematic Reel...
+                      Generating scenes for visual consistency, this may take a few minutes...
                     </>
                   ) : (
                     <>
