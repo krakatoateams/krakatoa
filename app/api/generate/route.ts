@@ -371,6 +371,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const vInputArgs = whisperResults.map((_, i) => `-i {{in_v${i+1}}}`).join(" ");
       const vFilterStreams = whisperResults.map((_, i) => `[${i}:v]`).join("");
 
+      const aInputFiles: Record<string, string> = {};
+      whisperResults.forEach((res, i) => { aInputFiles[`in_a${i+1}`] = res.audioUrl; });
+      const aInputArgs = whisperResults.map((_, i) => `-i {{in_a${i+1}}}`).join(" ");
+      const aFilterStreams = whisperResults.map((_, i) => `[${i}:a]`).join("");
+
+      console.log(`[Rendi] Concatenating ${SCENE_COUNT} videos...`);
       const concatVResult = await runRendiSingle(
         `${vInputArgs} -filter_complex "${vFilterStreams}concat=n=${SCENE_COUNT}:v=1:a=0[v]" -map "[v]" {{out_v}}`,
         vInputFiles,
@@ -378,11 +384,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       );
       const combinedVideoUrl = getRendiUrl(concatVResult, 'out_v');
 
-      const aInputFiles: Record<string, string> = {};
-      whisperResults.forEach((res, i) => { aInputFiles[`in_a${i+1}`] = res.audioUrl; });
-      const aInputArgs = whisperResults.map((_, i) => `-i {{in_a${i+1}}}`).join(" ");
-      const aFilterStreams = whisperResults.map((_, i) => `[${i}:a]`).join("");
-
+      console.log(`[Rendi] Concatenating ${SCENE_COUNT} audios...`);
       const concatAResult = await runRendiSingle(
         `${aInputArgs} -filter_complex "${aFilterStreams}concat=n=${SCENE_COUNT}:v=0:a=1[a]" -map "[a]" {{out_a}}`,
         aInputFiles,
