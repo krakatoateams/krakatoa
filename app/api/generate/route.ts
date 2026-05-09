@@ -48,9 +48,7 @@ export async function POST(req: Request) {
     });
 
     // Use requested values with fallbacks
-    const SCENE_COUNT = numScenes || 1;
     const DURATION_PER_SCENE = durationPerScene || 5;
-    const RESOLUTION = resolution || "480p";
 
     // Calculate approximate word limit (avg speaking rate is ~150 words per minute, so ~2.5 words per second)
     const WORD_LIMIT = Math.floor(DURATION_PER_SCENE * 2.5);

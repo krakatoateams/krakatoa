@@ -1,114 +1,220 @@
 import Link from 'next/link';
-import { ArrowRight, Video, Camera, CalendarClock, Zap } from 'lucide-react';
+import { ArrowRight, Video, Camera, CalendarClock, Zap, Sparkles, Layout, BarChart3, ShieldCheck } from 'lucide-react';
 
 export default function Home() {
   const tools = [
     {
       name: 'ReelsGen',
-      description: 'Generate faceless video reels with AI narration and captions.',
+      description: 'Generate faceless video reels with AI narration and captions automatically.',
       href: '/tools/reels',
-      icon: <Video className="w-6 h-6 text-indigo-600" />
+      icon: <Video className="w-6 h-6 text-indigo-400" />,
+      color: 'from-blue-500 to-indigo-600'
     },
     {
       name: 'Product Photo',
-      description: 'Transform any product image into a professional studio shot.',
+      description: 'Transform any product image into a professional studio shot with AI lighting.',
       href: '/tools/photo',
-      icon: <Camera className="w-6 h-6 text-indigo-600" />
+      icon: <Camera className="w-6 h-6 text-purple-400" />,
+      color: 'from-purple-500 to-pink-600'
     },
     {
       name: 'Scheduler',
-      description: 'Schedule and automate your social media posts.',
+      description: 'Intelligent scheduling that knows when your audience is most active.',
       href: '/tools/scheduler',
-      icon: <CalendarClock className="w-6 h-6 text-indigo-600" />
+      icon: <CalendarClock className="w-6 h-6 text-emerald-400" />,
+      color: 'from-emerald-500 to-teal-600'
     },
     {
       name: 'IG Automation',
-      description: 'Auto-generate and post Instagram content on a schedule.',
+      description: 'Auto-generate and post Instagram content on a schedule with smart engagement.',
       href: '/tools/ig',
-      icon: <Zap className="w-6 h-6 text-indigo-600" />
+      icon: <Zap className="w-6 h-6 text-amber-400" />,
+      color: 'from-amber-500 to-orange-600'
     }
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen flex flex-col bg-[#030712] text-white font-sans selection:bg-indigo-500/30">
+      {/* Background Glows */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-indigo-600/20 blur-[120px] rounded-full animate-pulse"></div>
+        <div className="absolute top-[20%] -right-[10%] w-[35%] h-[35%] bg-purple-600/20 blur-[120px] rounded-full animate-pulse [animation-delay:2s]"></div>
+        <div className="absolute -bottom-[10%] left-[20%] w-[30%] h-[30%] bg-blue-600/10 blur-[100px] rounded-full animate-pulse [animation-delay:4s]"></div>
+      </div>
+
       {/* Navbar */}
-      <header className="w-full bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="text-2xl font-black tracking-tight text-indigo-700">
-            Krakatoa
+      <header className="w-full h-20 flex items-center justify-center sticky top-0 z-50 px-6 backdrop-blur-md border-b border-white/5 bg-black/20">
+        <div className="max-w-7xl w-full flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 group">
+            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform">
+              <Sparkles className="w-6 h-6 text-white" />
+            </div>
+            <span className="text-2xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+              Krakatoa
+            </span>
           </Link>
+          
+          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
+            <Link href="#tools" className="hover:text-white transition-colors">Tools</Link>
+            <Link href="#" className="hover:text-white transition-colors">Features</Link>
+            <Link href="#" className="hover:text-white transition-colors">Pricing</Link>
+          </nav>
+
           <Link 
             href="#tools" 
-            className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-colors shadow-sm"
+            className="px-6 py-2.5 text-sm font-bold text-white bg-white/10 hover:bg-white/20 border border-white/10 rounded-full transition-all backdrop-blur-sm shadow-xl"
           >
             Get Started
           </Link>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="w-full py-24 md:py-32 px-6 bg-white overflow-hidden relative">
-        <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-30 pointer-events-none"></div>
-        <div className="max-w-4xl mx-auto text-center relative z-10">
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 text-slate-900">
-            AI-powered tools for <br className="hidden md:block"/>
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600">
-              content creators
-            </span>
-          </h1>
-          <p className="text-xl md:text-2xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-            Generate faceless reels, product photos, and automate your social media — all in one place.
-          </p>
-          <Link 
-            href="#tools" 
-            className="inline-flex items-center px-8 py-4 text-lg font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-colors shadow-lg hover:shadow-indigo-500/30 transform hover:-translate-y-0.5"
-          >
-            Explore Tools
-            <ArrowRight className="w-5 h-5 ml-2" />
-          </Link>
-        </div>
-      </section>
+      <main className="relative z-10">
+        {/* Hero Section */}
+        <section className="relative pt-24 pb-32 md:pt-40 md:pb-52 px-6 overflow-hidden">
+          <div className="max-w-5xl mx-auto text-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold tracking-widest uppercase mb-8 animate-fade-in">
+              <Zap className="w-3 h-3" />
+              <span>Next Gen AI Platform</span>
+            </div>
+            <h1 className="text-6xl md:text-8xl font-black tracking-tight mb-8 leading-[0.9] md:leading-[0.9]">
+              Scale your content <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-500">
+                with intelligence.
+              </span>
+            </h1>
+            <p className="text-lg md:text-xl text-slate-400 mb-12 max-w-2xl mx-auto leading-relaxed">
+              The all-in-one creative engine for modern brands. Generate, automate, and dominate your social presence with Krakatoa&apos;s AI suite.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Link 
+                href="#tools" 
+                className="w-full sm:w-auto px-10 py-5 text-lg font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl hover:scale-105 transition-all shadow-[0_0_40px_-10px_rgba(79,70,229,0.5)] flex items-center justify-center group"
+              >
+                Start Creating Free
+                <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link 
+                href="#" 
+                className="w-full sm:w-auto px-10 py-5 text-lg font-bold text-white bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all flex items-center justify-center"
+              >
+                Watch Demo
+              </Link>
+            </div>
+          </div>
+        </section>
 
-      {/* Tools Section */}
-      <section id="tools" className="w-full py-20 px-6 bg-slate-50 flex-grow">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-slate-900">Our Suite of Tools</h2>
-            <p className="text-slate-600 text-lg max-w-xl mx-auto">
-              Everything you need to scale your content creation effortlessly.
+        {/* Tools Section */}
+        <section id="tools" className="py-32 px-6 relative">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex flex-col md:flex-row items-end justify-between mb-20 gap-8">
+              <div className="max-w-2xl">
+                <h2 className="text-4xl md:text-5xl font-black mb-6 tracking-tight">Our Creative Suite</h2>
+                <p className="text-slate-400 text-lg leading-relaxed">
+                  Everything you need to scale your content creation effortlessly. From video generation to smart automation, we&apos;ve got you covered.
+                </p>
+              </div>
+              <div className="hidden md:flex gap-2">
+                <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-slate-500 hover:text-white hover:border-white transition-all cursor-pointer">
+                  <Layout className="w-5 h-5" />
+                </div>
+                <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-slate-500 hover:text-white hover:border-white transition-all cursor-pointer">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {tools.map((tool) => (
+                <div 
+                  key={tool.name} 
+                  className="group relative bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 hover:bg-white/[0.05] hover:border-white/20 transition-all duration-500 flex flex-col overflow-hidden"
+                >
+                  <div className={`absolute -top-24 -right-24 w-48 h-48 bg-gradient-to-br ${tool.color} opacity-0 group-hover:opacity-20 blur-[60px] transition-opacity duration-500`}></div>
+                  
+                  <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-500 border border-white/10">
+                    {tool.icon}
+                  </div>
+                  <h3 className="text-3xl font-bold mb-4 tracking-tight group-hover:text-indigo-400 transition-colors">{tool.name}</h3>
+                  <p className="text-slate-400 text-lg mb-12 flex-grow leading-relaxed">
+                    {tool.description}
+                  </p>
+                  <Link 
+                    href={tool.href} 
+                    className="inline-flex items-center gap-3 text-white font-bold group-hover:gap-5 transition-all w-fit"
+                  >
+                    Launch Tool
+                    <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
+                      <ArrowRight className="w-5 h-5" />
+                    </div>
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Features/Trust Section */}
+        <section className="py-24 px-6 border-y border-white/5 bg-white/[0.01]">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12 text-center md:text-left">
+            <div className="flex flex-col gap-4">
+              <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mx-auto md:mx-0">
+                <ShieldCheck className="w-6 h-6 text-blue-500" />
+              </div>
+              <h4 className="text-xl font-bold">Enterprise Security</h4>
+              <p className="text-slate-400">Your data and assets are protected with industry-leading encryption and privacy standards.</p>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center mx-auto md:mx-0">
+                <Zap className="w-6 h-6 text-purple-500" />
+              </div>
+              <h4 className="text-xl font-bold">Lightning Fast</h4>
+              <p className="text-slate-400">Proprietary AI infrastructure designed for speed, delivering results in seconds, not hours.</p>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center mx-auto md:mx-0">
+                <BarChart3 className="w-6 h-6 text-emerald-500" />
+              </div>
+              <h4 className="text-xl font-bold">Actionable Insights</h4>
+              <p className="text-slate-400">Deep analytics to help you understand what content drives the most engagement.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* Footer */}
+      <footer className="w-full bg-black py-20 px-6 border-t border-white/5 relative z-10">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-12">
+          <div className="flex flex-col items-center md:items-start gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-xl font-black tracking-tighter">Krakatoa</span>
+            </div>
+            <p className="text-slate-500 text-sm max-w-xs text-center md:text-left">
+              The next generation AI platform for creators and modern brands.
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-            {tools.map((tool) => (
-              <div 
-                key={tool.name} 
-                className="group bg-white rounded-2xl p-8 border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-100 transition-all duration-300 flex flex-col"
-              >
-                <div className="w-14 h-14 bg-indigo-50 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                  {tool.icon}
-                </div>
-                <h3 className="text-2xl font-bold mb-3 text-slate-900">{tool.name}</h3>
-                <p className="text-slate-600 text-lg mb-8 flex-grow">
-                  {tool.description}
-                </p>
-                <Link 
-                  href={tool.href} 
-                  className="inline-flex items-center text-indigo-600 font-semibold group-hover:text-indigo-700 w-fit"
-                >
-                  Try it 
-                  <ArrowRight className="w-5 h-5 ml-1 transition-transform duration-300 group-hover:translate-x-1" />
-                </Link>
-              </div>
-            ))}
+          <div className="flex gap-12 text-sm text-slate-500">
+            <div className="flex flex-col gap-4">
+              <span className="font-bold text-white uppercase tracking-widest text-xs">Product</span>
+              <Link href="#" className="hover:text-white transition-colors">Tools</Link>
+              <Link href="#" className="hover:text-white transition-colors">Features</Link>
+              <Link href="#" className="hover:text-white transition-colors">API</Link>
+            </div>
+            <div className="flex flex-col gap-4">
+              <span className="font-bold text-white uppercase tracking-widest text-xs">Company</span>
+              <Link href="#" className="hover:text-white transition-colors">About</Link>
+              <Link href="#" className="hover:text-white transition-colors">Blog</Link>
+              <Link href="#" className="hover:text-white transition-colors">Careers</Link>
+            </div>
           </div>
-        </div>
-      </section>
 
-      {/* Footer */}
-      <footer className="w-full bg-white border-t border-slate-200 py-8 px-6">
-        <div className="max-w-6xl mx-auto text-center text-slate-500 text-sm">
-          &copy; 2025 Krakatoa. All rights reserved.
+          <div className="text-slate-500 text-sm text-center md:text-right">
+            &copy; 2025 Krakatoa. Built for the future of content.
+          </div>
         </div>
       </footer>
     </div>

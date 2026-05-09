@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --background: 3 7 18;
+  --foreground: 255 255 255;
+}
+
+@layer base {
+  body {
+    @apply bg-[#030712] text-white;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
