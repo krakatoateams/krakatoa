@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor } from "lucide-react";
 
 export default function ReelsPage() {
   const [theme, setTheme] = useState("");
@@ -56,310 +55,443 @@ export default function ReelsPage() {
 
       setVideoUrl(data.videoUrl);
       setLogs((prev) => [...prev, "Video generated successfully!"]);
-    } catch (err: any) {
-      setError(err.message || "An unexpected error occurred");
-      setLogs((prev) => [...prev, `Error: ${err.message}`]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen flex flex-col bg-[#030712] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+      {/* Background Glows */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
+      </div>
+
       {/* Navbar */}
-      <nav className="border-b border-gray-200 py-4 px-6 mb-8">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <Link href="/" className="flex items-center text-indigo-600 hover:text-indigo-700 font-semibold">
-            <ArrowLeft className="w-5 h-5 mr-2" />
-            Back to Krakatoa
+      <header className="w-full h-20 flex items-center justify-center sticky top-0 z-50 px-6 backdrop-blur-md border-b border-white/5 bg-black/20">
+        <div className="max-w-7xl w-full flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 group text-slate-400 hover:text-white transition-all">
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-sm font-bold tracking-tight">Back to Krakatoa</span>
           </Link>
-          <span className="text-xl font-bold text-gray-900">ReelsGen</span>
-        </div>
-      </nav>
-
-      <main style={{ maxWidth: "800px", margin: "0 auto", padding: "0 2rem 4rem", fontFamily: "sans-serif" }}>
-        <h1>ReelsGen</h1>
-        <p>Generate a faceless video from a theme.</p>
-        
-        <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "2rem" }}>
-          <input
-            type="text"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value)}
-            placeholder="Enter a theme (e.g., A cyberpunk city in the rain)"
-            required
-            style={{ padding: "0.5rem", fontSize: "1rem", border: "1px solid #ccc", borderRadius: "4px" }}
-            disabled={loading}
-          />
           
-          <div style={{ display: "flex", gap: "1rem" }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: "block", marginBottom: "0.5rem" }}>Number of Scenes:</label>
-              <select 
-                value={numScenes} 
-                onChange={(e) => setNumScenes(Number(e.target.value))}
-                style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                disabled={loading}
-              >
-                <option value={1}>1 Scene</option>
-                <option value={2}>2 Scenes (Stitched)</option>
-                <option value={3}>3 Scenes (Stitched)</option>
-              </select>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <Video className="w-5 h-5 text-white" />
             </div>
-            
-            <div style={{ flex: 1 }}>
-              <label style={{ display: "block", marginBottom: "0.5rem" }}>Duration per Scene:</label>
-              <select 
-                value={durationPerScene} 
-                onChange={(e) => setDurationPerScene(Number(e.target.value))}
-                style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                disabled={loading}
-              >
-                <option value={5}>5 Seconds</option>
-                <option value={10}>10 Seconds</option>
-              </select>
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <label style={{ display: "block", marginBottom: "0.5rem" }}>Resolution:</label>
-              <select 
-                value={resolution} 
-                onChange={(e) => setResolution(e.target.value)}
-                style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                disabled={loading}
-              >
-                <option value="480p">480p (Fast)</option>
-                <option value="720p">720p (HD)</option>
-              </select>
-            </div>
+            <span className="text-xl font-black tracking-tighter">ReelsGen</span>
           </div>
 
-          <div style={{ borderTop: "1px solid #ccc", paddingTop: "1rem", marginTop: "1rem" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "1.5rem" }}>Caption Styler</h3>
-            
-            <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
-              {/* Left side: Controls */}
-              <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Font Family:</label>
-                  <select 
-                    value={captionStyle.fontname} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, fontname: e.target.value})}
-                    style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                  >
-                    <option value="Arial">Arial (System)</option>
-                    <option value="Poppins">Poppins (ExtraBold)</option>
-                    <option value="Montserrat">Montserrat (Bold)</option>
-                    <option value="Bangers">Bangers (Comic)</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Font Size:</label>
-                  <input 
-                    type="number" 
-                    value={captionStyle.fontsize} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, fontsize: Number(e.target.value)})}
-                    style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Text Color:</label>
-                  <input 
-                    type="color" 
-                    value={captionStyle.highlightColor} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, highlightColor: e.target.value})}
-                    style={{ width: "100%", padding: "0.5rem", height: "40px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Outline Color:</label>
-                  <input 
-                    type="color" 
-                    value={captionStyle.outlineColor} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, outlineColor: e.target.value})}
-                    style={{ width: "100%", padding: "0.5rem", height: "40px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Outline Thickness:</label>
-                  <input 
-                    type="number" 
-                    value={captionStyle.outlineThickness} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, outlineThickness: Number(e.target.value)})}
-                    style={{ width: "100%", padding: "0.5rem", border: "1px solid #ccc", borderRadius: "4px" }}
-                  />
-                </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Vertical Margin (% from bottom):</label>
-                  <input 
-                    type="range" 
-                    min="0" max="100" 
-                    value={captionStyle.marginV} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, marginV: Number(e.target.value)})}
-                    style={{ width: "100%" }}
-                  />
-                  <div style={{ textAlign: "right", fontSize: "0.8rem", marginTop: "0.25rem" }}>{captionStyle.marginV}%</div>
+          <div className="w-32 hidden md:block"></div> {/* Spacer */}
+        </div>
+      </header>
+
+      <main className="relative z-10 flex-grow py-12 px-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header Section */}
+          <div className="mb-12">
+            <h1 className="text-4xl md:text-5xl font-black mb-4 tracking-tight">Faceless Reel Generator</h1>
+            <p className="text-slate-400 text-lg max-w-2xl">
+              Turn your ideas into viral vertical content. Our AI handles the script, scenes, narration, and captions.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+            {/* Left Column: Form Controls (7 cols) */}
+            <div className="lg:col-span-7 space-y-8">
+              <form onSubmit={handleGenerate} className="space-y-8">
+                {/* Theme Input */}
+                <div className="space-y-4">
+                  <label className="block text-sm font-bold uppercase tracking-widest text-indigo-400">Video Theme</label>
+                  <div className="relative group">
+                    <input
+                      type="text"
+                      value={theme}
+                      onChange={(e) => setTheme(e.target.value)}
+                      placeholder="e.g., The history of space exploration in 60 seconds"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
+                      disabled={loading}
+                    />
+                    <Sparkles className="absolute right-5 top-5 w-6 h-6 text-indigo-500/50 group-hover:text-indigo-400 transition-colors" />
+                  </div>
                 </div>
 
-              </div>
-
-              {/* Right side: 9:16 Preview */}
-              <div style={{ padding: "1.5rem", background: "#000", borderRadius: "8px", border: "1px solid #333", height: "100%", position: "relative" }}>
-                <div style={{ color: "#888", fontSize: "0.8rem", marginBottom: "0.5rem" }}>9:16 Preview</div>
-                <style dangerouslySetInnerHTML={{__html: `
-                  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');
-                `}} />
-                {(() => {
-                  const FONT_METRIC_SCALES: Record<string, number> = {
-                    "Arial": 0.87,
-                    "Poppins": 0.86,
-                    "Montserrat": 0.86,
-                    "Bangers": 0.65
-                  };
-                  const DESCENDER_OFFSET_SCALES: Record<string, number> = {
-                    "Arial": 0.08,
-                    "Poppins": 0.08,
-                    "Montserrat": 0.08,
-                    "Bangers": 0.12
-                  };
+                {/* Grid Settings */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Layers className="w-4 h-4" />
+                      Scenes
+                    </label>
+                    <select 
+                      value={numScenes} 
+                      onChange={(e) => setNumScenes(Number(e.target.value))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value={1} className="bg-[#030712]">1 Scene</option>
+                      <option value={2} className="bg-[#030712]">2 Scenes</option>
+                      <option value={3} className="bg-[#030712]">3 Scenes</option>
+                    </select>
+                  </div>
                   
-                  const metricScale = FONT_METRIC_SCALES[captionStyle.fontname] || 0.85;
-                  const offsetScale = DESCENDER_OFFSET_SCALES[captionStyle.fontname] || 0.08;
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Clock className="w-4 h-4" />
+                      Duration/Scene
+                    </label>
+                    <select 
+                      value={durationPerScene} 
+                      onChange={(e) => setDurationPerScene(Number(e.target.value))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value={5} className="bg-[#030712]">5 Seconds</option>
+                      <option value={10} className="bg-[#030712]">10 Seconds</option>
+                    </select>
+                  </div>
 
-                  return (
-                    <div style={{ 
-                      width: "225px", 
-                      height: "400px", 
-                      background: "#000",
-                      position: "relative",
-                      margin: "0 auto",
-                      borderRadius: "8px",
-                      border: "1px solid #333",
-                      overflow: "hidden"
-                    }}>
-                      <div style={{ 
-                        position: "absolute", 
-                        width: "100%", 
-                        bottom: `calc(${captionStyle.marginV}% + ${captionStyle.fontsize * (400 / 854) * offsetScale}px)`,
-                        left: 0,
-                        padding: "0 10px",
-                        boxSizing: "border-box",
-                        display: "flex",
-                        justifyContent: "center",
-                        pointerEvents: "none"
-                      }}>
-                        <div style={{ 
-                          position: "relative",
-                          fontFamily: `'${captionStyle.fontname}', sans-serif`, 
-                          fontSize: `${captionStyle.fontsize * (400 / 854) * metricScale}px`,
-                          fontWeight: 800,
-                          textAlign: "center",
-                          lineHeight: "1.2",
-                          textTransform: "uppercase"
-                        }}>
-                          <div style={{
-                            position: "absolute",
-                            left: 0, top: 0, right: 0, bottom: 0,
-                            WebkitTextStroke: `${captionStyle.outlineThickness * (400 / 854) * 2}px ${captionStyle.outlineColor}`,
-                            color: captionStyle.outlineColor,
-                            zIndex: 0
-                          }}>
-                            <span>BREATHTAKING</span>
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Monitor className="w-4 h-4" />
+                      Resolution
+                    </label>
+                    <select 
+                      value={resolution} 
+                      onChange={(e) => setResolution(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value="480p" className="bg-[#030712]">480p (Fast)</option>
+                      <option value="720p" className="bg-[#030712]">720p (HD)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Caption Styler Card */}
+                <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-8">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                      <Settings className="w-5 h-5 text-indigo-400" />
+                      Caption Styler
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Font Family</label>
+                        <select 
+                          value={captionStyle.fontname} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, fontname: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                        >
+                          <option value="Arial" className="bg-[#030712]">Arial</option>
+                          <option value="Poppins" className="bg-[#030712]">Poppins</option>
+                          <option value="Montserrat" className="bg-[#030712]">Montserrat</option>
+                          <option value="Bangers" className="bg-[#030712]">Bangers</option>
+                        </select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Font Size</label>
+                        <input 
+                          type="number" 
+                          value={captionStyle.fontsize} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, fontsize: Number(e.target.value)})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Text Color</label>
+                          <div className="flex items-center gap-2 p-1.5 bg-white/5 border border-white/10 rounded-xl">
+                            <input 
+                              type="color" 
+                              value={captionStyle.highlightColor} 
+                              onChange={(e) => setCaptionStyle({...captionStyle, highlightColor: e.target.value})}
+                              className="w-10 h-10 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden"
+                            />
+                            <span className="text-xs font-mono">{captionStyle.highlightColor}</span>
                           </div>
-                          <div style={{ position: "relative", zIndex: 1, color: captionStyle.highlightColor }}>
-                            <span>BREATHTAKING</span>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Outline</label>
+                          <div className="flex items-center gap-2 p-1.5 bg-white/5 border border-white/10 rounded-xl">
+                            <input 
+                              type="color" 
+                              value={captionStyle.outlineColor} 
+                              onChange={(e) => setCaptionStyle({...captionStyle, outlineColor: e.target.value})}
+                              className="w-10 h-10 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden"
+                            />
+                            <span className="text-xs font-mono">{captionStyle.outlineColor}</span>
                           </div>
                         </div>
                       </div>
                     </div>
-                  );
-                })()}
+
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Outline Thickness</label>
+                        <input 
+                          type="number" 
+                          value={captionStyle.outlineThickness} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, outlineThickness: Number(e.target.value)})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Vertical Position</label>
+                          <span className="text-xs font-bold text-indigo-400">{captionStyle.marginV}%</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={captionStyle.marginV} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, marginV: Number(e.target.value)})}
+                          className="w-full accent-indigo-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="highlightOnly"
+                          checked={captionStyle.highlightOnly}
+                          onChange={(e) => setCaptionStyle({...captionStyle, highlightOnly: e.target.checked})}
+                          className="w-5 h-5 rounded border-white/10 bg-white/5 accent-indigo-600 cursor-pointer"
+                        />
+                        <label htmlFor="highlightOnly" className="text-sm font-bold text-slate-400 cursor-pointer select-none">
+                          Highlight Only Mode
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className={`w-full py-5 rounded-2xl text-xl font-bold transition-all shadow-xl flex items-center justify-center gap-3 ${
+                    loading 
+                      ? "bg-white/10 text-slate-500 cursor-not-allowed" 
+                      : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:scale-[1.02] shadow-indigo-500/20"
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      Generating Cinematic Reel...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-6 h-6" />
+                      Generate Video
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Advanced Testing Section */}
+              <div className="pt-8 border-t border-white/5">
+                <div className="flex items-center gap-2 mb-4">
+                  <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Dev Pipeline Testing</h4>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="max-w-md">
+                    <p className="text-sm text-slate-400 leading-relaxed text-center md:text-left">
+                      Test the Whisper + Rendi stitching pipeline instantly using pre-cached assets from your storage.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (loading) return;
+                      setLoading(true);
+                      setError(null);
+                      setVideoUrl(null);
+                      setLogs(["Starting test pipeline (Whisper -> Rendi)..."]);
+                      try {
+                        const response = await fetch("/api/test-stitch", { 
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ captionStyle })
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || "Failed to test pipeline");
+                        setVideoUrl(data.videoUrl);
+                        setLogs((prev) => [...prev, "Test pipeline completed successfully!"]);
+                      } catch (err: unknown) {
+                        const message = err instanceof Error ? err.message : "An unexpected error occurred";
+                        setError(message);
+                        setLogs((prev) => [...prev, `Error: ${message}`]);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    className="whitespace-nowrap px-8 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-all font-bold text-sm"
+                  >
+                    Run Stitching Test
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Preview & Logs (5 cols) */}
+            <div className="lg:col-span-5 space-y-8">
+              {/* 9:16 Preview Box */}
+              <div className="bg-black border border-white/10 rounded-[3rem] p-8 pb-12 shadow-2xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none"></div>
+                <div className="absolute inset-0 bg-indigo-600/5 opacity-0 group-hover:opacity-100 transition-opacity blur-[100px] pointer-events-none"></div>
+                
+                <div className="relative z-20 flex flex-col items-center">
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-[0.3em] mb-8">Live Styler Preview</div>
+                  
+                  <style dangerouslySetInnerHTML={{__html: `
+                    @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');
+                  `}} />
+                  {(() => {
+                    const FONT_METRIC_SCALES: Record<string, number> = {
+                      "Arial": 0.87,
+                      "Poppins": 0.86,
+                      "Montserrat": 0.86,
+                      "Bangers": 0.65
+                    };
+                    const DESCENDER_OFFSET_SCALES: Record<string, number> = {
+                      "Arial": 0.08,
+                      "Poppins": 0.08,
+                      "Montserrat": 0.08,
+                      "Bangers": 0.12
+                    };
+                    
+                    const metricScale = FONT_METRIC_SCALES[captionStyle.fontname] || 0.85;
+                    const offsetScale = DESCENDER_OFFSET_SCALES[captionStyle.fontname] || 0.08;
+
+                    return (
+                      <div className="w-[260px] aspect-[9/16] bg-slate-900 rounded-[2.5rem] border-[8px] border-white/10 overflow-hidden relative shadow-inner">
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60"></div>
+                        
+                        <div 
+                          className="absolute w-full left-0 px-4 flex justify-center pointer-events-none transition-all duration-300"
+                          style={{ 
+                            bottom: `calc(${captionStyle.marginV}% + ${captionStyle.fontsize * (400 / 854) * offsetScale}px)`,
+                          }}
+                        >
+                          <div 
+                            className="relative font-extrabold text-center leading-none uppercase tracking-tight"
+                            style={{ 
+                              fontFamily: `"${captionStyle.fontname}", sans-serif`, 
+                              fontSize: `${captionStyle.fontsize * (260 / 480) * metricScale}px`,
+                            }}
+                          >
+                            {/* Outline effect via multiple layers */}
+                            <div className="absolute inset-0 z-0" style={{
+                              WebkitTextStroke: `${captionStyle.outlineThickness * (260 / 480) * 1.5}px ${captionStyle.outlineColor}`,
+                              color: captionStyle.outlineColor,
+                            }}>
+                              BREATHTAKING
+                            </div>
+                            <div className="relative z-10" style={{ color: captionStyle.highlightColor }}>
+                              BREATHTAKING
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Mock UI Elements */}
+                        <div className="absolute bottom-10 right-4 flex flex-col gap-4">
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Status / Results Card */}
+              <div className="space-y-6">
+                {error && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 flex items-start gap-4 animate-fade-in">
+                    <AlertCircle className="w-6 h-6 text-red-500 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-red-500">Pipeline Error</h4>
+                      <p className="text-sm text-red-500/80 mt-1">{error}</p>
+                    </div>
+                  </div>
+                )}
+
+                {videoUrl && (
+                  <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 space-y-6 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xl font-bold flex items-center gap-2">
+                        <Play className="w-5 h-5 text-emerald-400" />
+                        Final Result
+                      </h3>
+                      <a 
+                        href={videoUrl} 
+                        download 
+                        className="p-3 bg-white/5 hover:bg-indigo-600 rounded-xl transition-all"
+                        title="Download Video"
+                      >
+                        <Download className="w-5 h-5" />
+                      </a>
+                    </div>
+                    <video 
+                      src={videoUrl} 
+                      controls 
+                      className="w-full aspect-[9/16] max-h-[500px] object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                    ></video>
+                    <a 
+                      href={videoUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-4 bg-indigo-600 hover:bg-indigo-700 rounded-2xl font-bold transition-all"
+                    >
+                      <Download className="w-5 h-5" />
+                      Save to Gallery
+                    </a>
+                  </div>
+                )}
+
+                {/* Log Output */}
+                <div className="bg-black/40 border border-white/5 rounded-3xl p-6 font-mono text-[10px] md:text-xs">
+                  <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
+                    <span className="text-slate-500 uppercase tracking-widest font-bold">Process Logs</span>
+                    {loading && <div className="flex items-center gap-2 text-indigo-400 animate-pulse">
+                      <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
+                      Processing...
+                    </div>}
+                  </div>
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
+                    {logs.length === 0 ? (
+                      <div className="text-slate-700 italic">No process running.</div>
+                    ) : (
+                      logs.map((log, i) => (
+                        <div key={i} className="flex gap-3">
+                          <span className="text-slate-600">[{i+1}]</span>
+                          <span className={log.startsWith("Error") ? "text-red-400" : "text-slate-400"}>{log}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-
-          <button 
-            type="submit" 
-            disabled={loading}
-            style={{ padding: "0.75rem", fontSize: "1rem", cursor: loading ? "not-allowed" : "pointer", background: "#0070f3", color: "white", border: "none", borderRadius: "4px", fontWeight: "bold" }}
-          >
-            {loading ? "Generating your video..." : "Generate Video"}
-          </button>
-        </form>
-
-        <div style={{ borderTop: "1px solid #ccc", paddingTop: "2rem", marginBottom: "2rem" }}>
-          <h2>Test Pipeline (Stitch Only)</h2>
-          <p style={{ fontSize: "0.9rem", color: "#666" }}>
-            This tests the Whisper + Rendi pipeline using existing <code>video.mp4</code> and <code>audio.mp3</code> files from your Supabase <code>temp</code> bucket.
-          </p>
-          <button 
-            onClick={async () => {
-              if (loading) return;
-              setLoading(true);
-              setError(null);
-              setVideoUrl(null);
-              setLogs(["Starting test pipeline (Whisper -> Rendi)..."]);
-
-              try {
-                const response = await fetch("/api/test-stitch", { 
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ captionStyle })
-                });
-                const data = await response.json();
-
-                if (!response.ok) throw new Error(data.error || "Failed to test pipeline");
-
-                setVideoUrl(data.videoUrl);
-                setLogs((prev) => [...prev, "Test pipeline completed successfully!"]);
-              } catch (err: any) {
-                setError(err.message || "An unexpected error occurred");
-                setLogs((prev) => [...prev, `Error: ${err.message}`]);
-              } finally {
-                setLoading(false);
-              }
-            }}
-            disabled={loading}
-            style={{ padding: "0.5rem 1rem", fontSize: "0.9rem", cursor: loading ? "not-allowed" : "pointer", background: "#28a745", color: "white", border: "none", borderRadius: "4px" }}
-          >
-            {loading ? "Processing..." : "Run Stitching Test"}
-          </button>
-        </div>
-
-        {error && (
-          <div style={{ color: "red", marginBottom: "1rem", padding: "1rem", background: "#fff5f5", borderRadius: "4px", border: "1px solid #fed7d7" }}>
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-
-        {videoUrl && (
-          <div style={{ marginBottom: "2rem" }}>
-            <h2>Result</h2>
-            <video src={videoUrl} controls style={{ width: "100%", maxHeight: "500px", background: "#000", borderRadius: "8px" }}></video>
-            <div style={{ marginTop: "1rem" }}>
-              <a 
-                href={videoUrl} 
-                download 
-                target="_blank" 
-                rel="noreferrer"
-                style={{ display: "inline-block", padding: "0.5rem 1rem", background: "#0070f3", color: "white", textDecoration: "none", borderRadius: "4px" }}
-              >
-                Download Video
-              </a>
-            </div>
-          </div>
-        )}
-
-        <div style={{ background: "#f8f9fa", padding: "1.5rem", borderRadius: "8px", minHeight: "150px", border: "1px solid #e9ecef" }}>
-          <h3 style={{ marginTop: 0 }}>Logs</h3>
-          {logs.map((log, i) => (
-            <div key={i} style={{ fontSize: "0.9rem", color: "#495057", marginBottom: "0.25rem", fontFamily: "monospace" }}>
-              {log}
-            </div>
-          ))}
-          {loading && <div style={{ fontSize: "0.9rem", color: "#6c757d", fontStyle: "italic", marginTop: "0.5rem" }}>Processing... check console for status.</div>}
         </div>
       </main>
     </div>
   );
 }
+
