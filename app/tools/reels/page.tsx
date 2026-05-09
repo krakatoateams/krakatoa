@@ -23,7 +23,7 @@ export default function ReelsPage() {
     outlineColor: "#000000",
     outlineThickness: 4,
     marginV: 15,
-    highlightOnly: false
+    highlightOnly: true
   });
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -166,15 +166,6 @@ export default function ReelsPage() {
                   <label style={{ display: "block", marginBottom: "0.5rem" }}>Text Color:</label>
                   <input 
                     type="color" 
-                    value={captionStyle.primaryColor} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, primaryColor: e.target.value})}
-                    style={{ width: "100%", padding: "0.5rem", height: "40px" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: "0.5rem" }}>Highlight Color:</label>
-                  <input 
-                    type="color" 
                     value={captionStyle.highlightColor} 
                     onChange={(e) => setCaptionStyle({...captionStyle, highlightColor: e.target.value})}
                     style={{ width: "100%", padding: "0.5rem", height: "40px" }}
@@ -209,16 +200,7 @@ export default function ReelsPage() {
                   />
                   <div style={{ textAlign: "right", fontSize: "0.8rem", marginTop: "0.25rem" }}>{captionStyle.marginV}%</div>
                 </div>
-                <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <input 
-                    type="checkbox" 
-                    id="highlightOnly"
-                    checked={captionStyle.highlightOnly} 
-                    onChange={(e) => setCaptionStyle({...captionStyle, highlightOnly: e.target.checked})}
-                    style={{ width: "auto" }}
-                  />
-                  <label htmlFor="highlightOnly">Highlight Only (Single word style)</label>
-                </div>
+
               </div>
 
               {/* Right side: 9:16 Preview */}
@@ -282,18 +264,10 @@ export default function ReelsPage() {
                             color: captionStyle.outlineColor,
                             zIndex: 0
                           }}>
-                            {captionStyle.highlightOnly ? (
-                              <span>BREATHTAKING</span>
-                            ) : (
-                              <>EXPLORING THE <span>BREATHTAKING</span> IN MOTION</>
-                            )}
+                            <span>BREATHTAKING</span>
                           </div>
-                          <div style={{ position: "relative", zIndex: 1, color: captionStyle.primaryColor }}>
-                            {captionStyle.highlightOnly ? (
-                              <span style={{ color: captionStyle.highlightColor }}>BREATHTAKING</span>
-                            ) : (
-                              <>EXPLORING THE <span style={{ color: captionStyle.highlightColor }}>BREATHTAKING</span> IN MOTION</>
-                            )}
+                          <div style={{ position: "relative", zIndex: 1, color: captionStyle.highlightColor }}>
+                            <span>BREATHTAKING</span>
                           </div>
                         </div>
                       </div>

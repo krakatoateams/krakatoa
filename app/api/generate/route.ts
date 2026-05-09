@@ -215,21 +215,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           const start = (wordInfo.start ?? segment.start ?? 0) + offset;
           const end = (wordInfo.end ?? segment.end ?? (start + 0.5)) + offset;
 
-          let lineText = "";
-          if (style.highlightOnly) {
-            lineText = `{\\c${highlightColorASS}}{\\b1}${(words[i].word || '').trim().toUpperCase()}{\\b0}`;
-          } else {
-            for (let j = 0; j < words.length; j++) {
-              const w = (words[j].word || '').trim();
-              if (i === j) {
-                lineText += `{\\c${highlightColorASS}}{\\b1}${w.toUpperCase()}{\\b0}{\\c} `;
-              } else {
-                lineText += `${w} `;
-              }
-            }
-          }
-          lineText = lineText.trim();
-
+          const lineText = `{\\c${highlightColorASS}}{\\b1}${(words[i].word || '').trim().toUpperCase()}{\\b0}`;
+          
           assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
         }
       }
