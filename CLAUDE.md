@@ -1,7 +1,7 @@
 # Krakatoa Monorepo & AI Tools
 
 ## Project Overview
-Krakatoa is a premium AI-powered platform tailored for content creators. It features a modern, high-conversion landing page and hosts multiple AI tools under one monorepo. Currently, the flagship application is the **ReelsGen Tool** (`/app/tools/reels`), an autonomous pipeline for creating faceless vertical videos (Reels/TikToks) with dynamic, burned-in styled captions.
+Krakatoa is a premium AI-powered platform tailored for content creators. It features a modern, high-conversion landing page and hosts multiple AI tools under one monorepo. Currently, the flagship application is the **Reels Generator** (`/app/tools/reels`), an autonomous pipeline for creating vertical videos (Reels/TikToks) with dynamic, burned-in styled captions.
 
 ## Tech Stack
 - **Framework**: Next.js 14 (App Router)

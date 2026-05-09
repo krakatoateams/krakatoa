@@ -89,8 +89,6 @@ export default function ReelsPage() {
             </div>
             <span className="text-xl font-black tracking-tighter">ReelsGen</span>
           </div>
-
-          <div className="w-32 hidden md:block"></div> {/* Spacer */}
         </div>
       </header>
 
@@ -98,7 +96,7 @@ export default function ReelsPage() {
         <div className="max-w-7xl mx-auto">
           {/* Header Section */}
           <div className="mb-12">
-            <h1 className="text-4xl md:text-5xl font-black mb-4 tracking-tight">Faceless Reel Generator</h1>
+            <h1 className="text-4xl md:text-5xl font-black mb-4 tracking-tight">Reels Generator</h1>
             <p className="text-slate-400 text-lg max-w-2xl">
               Turn your ideas into viral vertical content. Our AI handles the script, scenes, narration, and captions.
             </p>
