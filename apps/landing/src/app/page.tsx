@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Video, Camera, CalendarClock, Instagram } from 'lucide-react';
+import { ArrowRight, Video, Camera, CalendarClock, Zap } from 'lucide-react';
 
 export default function Home() {
   const tools = [
@@ -25,7 +25,7 @@ export default function Home() {
       name: 'IG Automation',
       description: 'Auto-generate and post Instagram content on a schedule.',
       href: '/tools/ig',
-      icon: <Instagram className="w-6 h-6 text-indigo-600" />
+      icon: <Zap className="w-6 h-6 text-indigo-600" />
     }
   ];
 
