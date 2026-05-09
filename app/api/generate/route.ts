@@ -117,22 +117,41 @@ Return ONLY raw JSON array, nothing else.`;
       if (typeof videoRes === "string") {
         videoUrl = videoRes;
       } else if (videoRes && typeof videoRes === "object") {
-        if ('url' in videoRes) videoUrl = (videoRes as any).url;
+        if (typeof (videoRes as any).url === 'function') videoUrl = (videoRes as any).url().href || (videoRes as any).url();
+        else if (videoRes instanceof URL) videoUrl = videoRes.toString();
+        else if (typeof (videoRes as any).toString === 'function' && (videoRes as any).toString().startsWith('http')) videoUrl = (videoRes as any).toString();
+        else if ('url' in videoRes && typeof (videoRes as any).url === 'string') videoUrl = (videoRes as any).url;
         else if ('video' in videoRes) videoUrl = (videoRes as any).video;
         else if ('output' in videoRes && typeof (videoRes as any).output === 'string') videoUrl = (videoRes as any).output;
-        else if (Array.isArray(videoRes)) videoUrl = videoRes[0];
+        else if (Array.isArray(videoRes)) {
+          const first = videoRes[0];
+          videoUrl = typeof first?.url === 'function' ? first.url() : String(first);
+        }
+        else videoUrl = String(videoRes);
+      } else {
+        videoUrl = String(videoRes);
       }
 
       let audioUrl = "";
       if (typeof audioRes === "string") {
         audioUrl = audioRes;
       } else if (audioRes && typeof audioRes === "object") {
-        if ('audio' in audioRes && (audioRes as any).audio?.url) audioUrl = (audioRes as any).audio.url;
+        if (typeof (audioRes as any).url === 'function') audioUrl = (audioRes as any).url().href || (audioRes as any).url();
+        else if (audioRes instanceof URL) audioUrl = audioRes.toString();
+        else if (typeof (audioRes as any).toString === 'function' && (audioRes as any).toString().startsWith('http')) audioUrl = (audioRes as any).toString();
+        else if ('audio' in audioRes && typeof (audioRes as any).audio?.url === 'function') audioUrl = (audioRes as any).audio.url();
+        else if ('audio' in audioRes && typeof (audioRes as any).audio?.url === 'string') audioUrl = (audioRes as any).audio.url;
         else if ('audio_url' in audioRes) audioUrl = (audioRes as any).audio_url;
         else if ('audio_file' in audioRes) audioUrl = (audioRes as any).audio_file;
-        else if ('url' in audioRes) audioUrl = (audioRes as any).url;
+        else if ('url' in audioRes && typeof (audioRes as any).url === 'string') audioUrl = (audioRes as any).url;
         else if ('output' in audioRes && typeof (audioRes as any).output === 'string') audioUrl = (audioRes as any).output;
-        else if (Array.isArray(audioRes)) audioUrl = audioRes[0];
+        else if (Array.isArray(audioRes)) {
+          const first = audioRes[0];
+          audioUrl = typeof first?.url === 'function' ? first.url() : String(first);
+        }
+        else audioUrl = String(audioRes);
+      } else {
+        audioUrl = String(audioRes);
       }
 
       if (!videoUrl || !audioUrl) {
