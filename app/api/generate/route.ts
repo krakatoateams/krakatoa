@@ -53,12 +53,44 @@ export async function POST(req: Request) {
     // Calculate approximate word limit (avg speaking rate is ~150 words per minute, so ~2.5 words per second)
     const WORD_LIMIT = Math.floor(DURATION_PER_SCENE * 2.5);
 
-    console.log(`[Step 1] Breaking down scenes (${SCENE_COUNT} x ${DURATION_PER_SCENE}s) with LLM...`);
-    // Step 1: LLM Scene Breakdown
+    console.log(`[Step 1A] Generating Style Anchor and Negative Prompt for theme: "${theme}"...`);
+    // Step 1A: LLM Style Anchor Generation
+    const styleSystemPrompt = `You are a cinematographer. Given a video theme, return a JSON object with two fields: style_anchor (a comma-separated string of 6-8 visual descriptors that define the consistent look, setting, lighting, and style for ALL scenes of this video — photorealistic, 9:16 vertical always included) and negative_prompt (things to avoid visually). Return ONLY raw JSON, nothing else.`;
+
+    const styleLlmOutput = await replicate.run('meta/meta-llama-3-8b-instruct', {
+      input: {
+        prompt: theme,
+        system_prompt: styleSystemPrompt,
+        max_tokens: 512,
+      },
+    });
+
+    const styleRawJson = Array.isArray(styleLlmOutput) ? styleLlmOutput.join('') : String(styleLlmOutput);
+    const styleCleanJson = styleRawJson.replace(/```json\n?|\n?```/g, '').trim();
+    
+    let styleAnchor = "";
+    let negativePrompt = "";
+    try {
+      const styleData = JSON.parse(styleCleanJson);
+      styleAnchor = styleData.style_anchor || "photorealistic, 9:16 vertical";
+      negativePrompt = styleData.negative_prompt || "ugly, broken, blurry";
+    } catch (e) {
+      console.warn('Failed to parse style JSON, using fallbacks:', styleCleanJson);
+      styleAnchor = "photorealistic, highly detailed, cinematic lighting, 9:16 vertical";
+      negativePrompt = "blurry, low quality, distorted, watermark";
+    }
+    
+    console.log(`[Style Anchor]: ${styleAnchor}`);
+    console.log(`[Negative Prompt]: ${negativePrompt}`);
+
+    console.log(`[Step 1B] Breaking down scenes (${SCENE_COUNT} x ${DURATION_PER_SCENE}s) with LLM...`);
+    // Step 1B: LLM Scene Breakdown
     const systemPrompt = `You are a video producer. The user gives a theme. Return a JSON array of exactly ${SCENE_COUNT} scene(s) to make a faceless video (Reels/TikTok). 
+All scenes must exist in the same visual world. Every video_prompt must end with: ${styleAnchor}
+
 Each scene must have:
 - "scene_id": number (e.g., 1)
-- "video_prompt": string (highly detailed visual description for a text-to-video model, 9:16 vertical, photorealistic)
+- "video_prompt": string (highly detailed visual description for a text-to-video model. CRITICAL: Every video_prompt MUST end exactly with the style anchor provided above.)
 - "narration": string (voiceover text. CRITICAL: For a ${DURATION_PER_SCENE}s video, this MUST be exactly ${WORD_LIMIT} words or less. Do not exceed this limit.)
 - "duration": ${DURATION_PER_SCENE}
 
@@ -98,6 +130,7 @@ Return ONLY raw JSON array, nothing else.`;
         input: {
           prompt: scene.video_prompt,
           aspect_ratio: "9:16",
+          negative_prompt: negativePrompt,
           duration: DURATION_PER_SCENE,
           resolution: RESOLUTION
         }
