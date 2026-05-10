@@ -22,7 +22,7 @@ Krakatoa is a premium AI-powered platform tailored for content creators. It feat
 - `app/`: Next.js App Router root.
   - `page.tsx`: Main Krakatoa Landing Page.
   - `api/generate/route.ts`: Core AI video generation pipeline endpoint.
-  - `api/test-stitch/route.ts`: Developer utility for testing Whisper to Rendi stitching pipeline without rerunning generation.
+  - `api/test-stitch/route.ts`: Developer utility for testing Whisper to Rendi stitching pipeline without rerunning generation (UI section currently hidden).
   - `tools/reels/`: The ReelsGen application frontend.
 - `lib/`: Shared utility functions (e.g., Supabase client configuration).
 - `public/`: Static assets (images, fonts, icons).

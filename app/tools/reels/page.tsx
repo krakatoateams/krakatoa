@@ -302,7 +302,7 @@ export default function ReelsPage() {
                 </button>
               </form>
 
-              {/* Advanced Testing Section */}
+              {/* Advanced Testing Section - Hidden for now
               <div className="pt-8 border-t border-white/5">
                 <div className="flex items-center gap-2 mb-4">
                   <RefreshCw className="w-4 h-4 text-emerald-400" />
@@ -374,6 +374,7 @@ export default function ReelsPage() {
                   </div>
                 </div>
               </div>
+              */}
             </div>
 
             {/* Right Column: Preview & Logs (5 cols) */}
