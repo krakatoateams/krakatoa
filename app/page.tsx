@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Video, Camera, CalendarClock, Zap, Sparkles, BarChart3, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Video, Camera, CalendarClock, Zap, Mountain, BarChart3, ShieldCheck } from 'lucide-react';
 
 export default function Home() {
   const tools = [
@@ -47,7 +47,7 @@ export default function Home() {
         <div className="max-w-7xl w-full flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
             <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform">
-              <Sparkles className="w-6 h-6 text-white" />
+              <Mountain className="w-6 h-6 text-white" />
             </div>
             <span className="text-2xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
               Krakatoa
@@ -180,7 +180,7 @@ export default function Home() {
           <div className="flex flex-col items-center md:items-start gap-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
+                <Mountain className="w-5 h-5 text-white" />
               </div>
               <span className="text-xl font-black tracking-tighter">Krakatoa</span>
             </div>
