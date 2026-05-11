@@ -76,3 +76,21 @@ The pipeline in `/app/api/generate/route.ts` runs a complex, automated sequence 
    - `REPLICATE_API_TOKEN` - Replicate access (used for gpt-4o-mini, Seedance, MiniMax TTS, and Whisper).
    - `RENDI_API_KEY` - Rendi FFmpeg stitching access.
    - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase config.
+
+## Team & Collaboration Workflow
+### Roles
+- **Project Lead (@lead)**: Reviews everything, specifically core files and API.
+- **Product Photo (@tim-photo)**: Owner of `/app/tools/photo/`.
+- **Scheduler (@tim-scheduler)**: Owner of `/app/tools/scheduler/`.
+
+### Branch Strategy
+- `main`: Production.
+- `dev`: Integration.
+- `feature/[tool]-[name]`: Individual features (e.g., `feature/reels-fx`).
+- Always branch from `dev`.
+
+### GitHub configuration
+- `.github/CODEOWNERS`: Automated review assignments.
+- `.github/pull_request_template.md`: Required PR format.
+- `.github/workflows/ci.yml`: CI Check (build test) on PRs to `dev` or `main`.
+- `CONTRIBUTING.md`: Full workflow documentation.

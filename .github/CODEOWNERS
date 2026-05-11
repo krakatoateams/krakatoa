@@ -1,0 +1,13 @@
+# Global fallback — project lead reviews everything
+*                           @lead
+
+# Tool-specific owners
+/app/tools/photo/           @tim-photo
+/app/tools/scheduler/       @tim-scheduler
+/app/tools/reels/           @lead
+/app/api/                   @lead
+
+# Shared files — lead must always review
+/package.json               @lead
+/app/layout.tsx             @lead
+/app/page.tsx               @lead
