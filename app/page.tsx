@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Video, Camera, CalendarClock, Zap, Sparkles, Layout, BarChart3, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Video, Camera, CalendarClock, Zap, Sparkles, BarChart3, ShieldCheck } from 'lucide-react';
 
 export default function Home() {
   const tools = [
@@ -113,14 +113,6 @@ export default function Home() {
                 <p className="text-slate-400 text-lg leading-relaxed">
                   Everything you need to scale your content creation effortlessly. From video generation to smart automation, we&apos;ve got you covered.
                 </p>
-              </div>
-              <div className="hidden md:flex gap-2">
-                <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-slate-500 hover:text-white hover:border-white transition-all cursor-pointer">
-                  <Layout className="w-5 h-5" />
-                </div>
-                <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-slate-500 hover:text-white hover:border-white transition-all cursor-pointer">
-                  <BarChart3 className="w-5 h-5" />
-                </div>
               </div>
             </div>
             
