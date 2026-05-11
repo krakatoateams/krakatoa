@@ -385,7 +385,7 @@ export default function ReelsPage() {
                 <div className="absolute inset-0 bg-indigo-600/5 opacity-0 group-hover:opacity-100 transition-opacity blur-[100px] pointer-events-none"></div>
                 
                 <div className="relative z-20 flex flex-col items-center">
-                  <div className="text-xs font-bold text-slate-500 uppercase tracking-[0.3em] mb-8">Live Styler Preview</div>
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-[0.3em] mb-8">Live Caption Preview</div>
                   
                   <style dangerouslySetInnerHTML={{__html: `
                     @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');
