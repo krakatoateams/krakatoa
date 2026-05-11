@@ -65,7 +65,7 @@ The pipeline in `/app/api/generate/route.ts` runs a complex, automated sequence 
    - Ensure a premium, dark-mode first, glassmorphism aesthetic.
    - Use high-quality typography and dynamic animations (e.g., smooth Tailwind `transition-all`, micro-interactions).
 2. **ReelsGen UI Adjustments**:
-   - Maintain the Live Styler Preview. The `bottom: calc(...)` CSS property in the preview must mathematically match the `.ass` generator `maxMarginV` cap to ensure WYSIWYG parity.
+   - Maintain the Live Caption Preview. The `bottom: calc(...)` CSS property in the preview must mathematically match the `.ass` generator `maxMarginV` cap to ensure WYSIWYG parity.
 3. **API Routing**:
    - For long-running API routes (like generation), ensure the Next.js `maxDuration = 600` is defined and handle any potential polling blockages gracefully.
 4. **LLM Prompts**:
