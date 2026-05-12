@@ -80,9 +80,11 @@ export async function POST(req: Request) {
     const DURATION_PER_SCENE = durationPerScene || 5;
     const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
 
-    // Use gpt-4o-mini on Replicate — far more reliable than Llama 3 8B for
-    // structured JSON output (Llama frequently returned 1 scene when asked for N).
-    const LLM_MODEL = 'openai/gpt-4o-mini';
+    // Use Gemini 2.5 Flash on Replicate — strong creative writing for cinematic
+    // prompts and reliable structured JSON. Dynamic thinking is enabled on the
+    // scene-breakdown step where hard constraints (exact scene count, word caps,
+    // verbatim style-anchor copy) benefit from a touch of reasoning.
+    const LLM_MODEL = 'google/gemini-2.5-flash';
 
     // Robust JSON extractor: strips markdown fences, finds the first balanced
     // JSON object/array in the response, and parses it.
@@ -125,9 +127,10 @@ Return ONLY raw JSON, nothing else.`;
     const styleLlmOutput = await runWithRetry(LLM_MODEL, {
       input: {
         prompt: theme,
-        system_prompt: styleSystemPrompt,
-        max_completion_tokens: 512,
+        system_instruction: styleSystemPrompt,
+        max_output_tokens: 512,
         temperature: 0.7,
+        thinking_budget: 0,
       },
     });
 
@@ -199,9 +202,10 @@ Return ONLY raw JSON array, nothing else.`;
       const llmOutput = await runWithRetry(LLM_MODEL, {
         input: {
           prompt: theme,
-          system_prompt: systemPrompt,
-          max_completion_tokens: 1500,
+          system_instruction: systemPrompt,
+          max_output_tokens: 1500,
           temperature: 0.8,
+          dynamic_thinking: true,
         },
       });
 
