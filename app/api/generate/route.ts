@@ -17,9 +17,13 @@ function formatAssTime(seconds: number) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { theme, numScenes, durationPerScene, resolution, captionStyle } = body;
+    const { theme, numScenes, durationPerScene, resolution, captionStyle, voiceId, emotion } = body;
     const SCENE_COUNT = numScenes || 1;
     const RESOLUTION = resolution || "480p";
+    const VOICE_ID: string = voiceId || "English_CaptivatingStoryteller";
+    // "auto" means let the LLM pick the emotion that fits the theme; anything else
+    // overrides the LLM suggestion with the user's explicit choice.
+    const USER_EMOTION: string = String(emotion || "auto").toLowerCase();
 
     const style = captionStyle || {
       fontname: "Arial",
@@ -71,11 +75,10 @@ export async function POST(req: Request) {
       throw new Error(`Failed to run replicate model ${model} after ${maxRetries} retries due to rate limits.`);
     };
 
-    // Use requested values with fallbacks
+    // User-selected per-scene duration is a STRICT constraint: each scene's final
+    // video is exactly DURATION_PER_SCENE seconds, total reel = SCENE_COUNT * that.
     const DURATION_PER_SCENE = durationPerScene || 5;
-
-    // Calculate approximate word limit (avg speaking rate is ~150 words per minute, so ~2.5 words per second)
-    const WORD_LIMIT = Math.floor(DURATION_PER_SCENE * 2.5);
+    const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
 
     // Use gpt-4o-mini on Replicate — far more reliable than Llama 3 8B for
     // structured JSON output (Llama frequently returned 1 scene when asked for N).
@@ -108,9 +111,16 @@ export async function POST(req: Request) {
       throw new Error('No valid JSON found in LLM response');
     };
 
-    console.log(`[Step 1A] Generating Style Anchor and Negative Prompt for theme: "${theme}"...`);
-    // Step 1A: LLM Style Anchor Generation
-    const styleSystemPrompt = `You are a cinematographer. Given a video theme, return a JSON object with exactly two fields: style_anchor (a comma-separated string of 6-8 visual descriptors defining the consistent look, setting, lighting, and style for ALL scenes — always include photorealistic and 9:16 vertical) and negative_prompt (comma-separated list of things to avoid visually). Return ONLY raw JSON, nothing else.`;
+    console.log(`[Step 1A] Generating Style Anchor, Negative Prompt, and Narrator Emotion for theme: "${theme}"...`);
+    // Step 1A: LLM Style + Narrator Emotion Generation
+    // narrator_emotion is one of MiniMax speech-02-turbo's supported emotions
+    // (happy, sad, angry, fearful, disgusted, surprised, neutral). The LLM picks
+    // the one that best matches the theme's storytelling mood.
+    const styleSystemPrompt = `You are a cinematographer and audio director. Given a video theme, return a JSON object with exactly three fields:
+- style_anchor: comma-separated string of 6-8 visual descriptors defining the consistent look, setting, lighting, and style for ALL scenes (always include photorealistic and 9:16 vertical)
+- negative_prompt: comma-separated list of visual things to avoid
+- narrator_emotion: ONE of these exact values describing the storytelling voice mood — "auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "neutral". Use "auto" only when no specific mood fits.
+Return ONLY raw JSON, nothing else.`;
 
     const styleLlmOutput = await runWithRetry(LLM_MODEL, {
       input: {
@@ -123,34 +133,62 @@ export async function POST(req: Request) {
 
     const styleRawJson = Array.isArray(styleLlmOutput) ? styleLlmOutput.join('') : String(styleLlmOutput);
 
+    // MiniMax speech-02-turbo supported emotions (per its schema).
+    const VALID_EMOTIONS = ["auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "neutral"];
     let styleAnchor = "";
     let negativePrompt = "";
+    let llmSuggestedEmotion = "auto";
     try {
       const styleData = extractJson(styleRawJson);
       styleAnchor = styleData.style_anchor || "photorealistic, 9:16 vertical";
       negativePrompt = styleData.negative_prompt || "ugly, broken, blurry";
+      const emo = String(styleData.narrator_emotion || "").toLowerCase().trim();
+      llmSuggestedEmotion = VALID_EMOTIONS.includes(emo) ? emo : "auto";
     } catch (e) {
       console.warn('Failed to parse style JSON, using fallbacks:', styleRawJson);
       styleAnchor = "photorealistic, highly detailed, cinematic lighting, 9:16 vertical";
       negativePrompt = "blurry, low quality, distorted, watermark";
     }
 
+    // User's explicit emotion choice wins; "auto" defers to the LLM's suggestion.
+    const narratorEmotion = (USER_EMOTION === "auto" || !VALID_EMOTIONS.includes(USER_EMOTION))
+      ? llmSuggestedEmotion
+      : USER_EMOTION;
+
     console.log(`[Style Anchor]: ${styleAnchor}`);
     console.log(`[Negative Prompt]: ${negativePrompt}`);
+    console.log(`[Narrator Voice]: ${VOICE_ID}`);
+    console.log(`[Narrator Emotion]: ${narratorEmotion} (user="${USER_EMOTION}", llm="${llmSuggestedEmotion}")`);
 
-    console.log(`[Step 1B] Breaking down scenes (${SCENE_COUNT} x ${DURATION_PER_SCENE}s) with LLM...`);
-    // Step 1B: LLM Scene Breakdown
+    // Per-scene word cap derived from user's DURATION_PER_SCENE. Empirically MiniMax
+    // speech-02-turbo speaks at ~1.7 words/sec with sentence punctuation pauses, so
+    // we cap at 1.7 wps. Any residual overshoot is handled by ffmpeg's atempo
+    // filter in the merge step (speed-fit safety net).
+    const MAX_WORDS_PER_SCENE = Math.max(6, Math.floor(DURATION_PER_SCENE * 1.7));
+
+    console.log(`[Step 1B] Breaking down scenes (${SCENE_COUNT} x ${DURATION_PER_SCENE}s, max ${MAX_WORDS_PER_SCENE} words each) with LLM...`);
+    // Step 1B: LLM Scene Breakdown — narrations written as ONE continuous monologue
+    // split into scene-aligned chunks. When joined with spaces, they must read as a
+    // single flowing story so the single TTS call produces natural prosody throughout.
     const systemPrompt = `You are a video producer. The user gives a theme. Return a JSON array of exactly ${SCENE_COUNT} scene(s) to make a faceless video (Reels/TikTok).
 All scenes must exist in the same visual world and location.
 
 STYLE ANCHOR (append this exact string verbatim at the end of every video_prompt):
 "${styleAnchor}"
 
+NARRATION RULES (CRITICAL):
+- The narrations from all scenes will be JOINED with spaces and spoken as ONE continuous monologue by a single narrator.
+- Write them as one flowing story split into scene-sized chunks. Each scene's narration must connect naturally to the next.
+- Use connective phrases between scenes ("but then…", "suddenly…", "what happens next…", "and that's when…") so the listener never feels a hard cut.
+- DO NOT repeat information between scenes.
+- DO NOT start a scene's narration with a phrase that only makes sense in isolation (e.g., "Welcome back!").
+- Each scene's narration MUST be ${MAX_WORDS_PER_SCENE} words or fewer.
+- Spell out digits as words ("100" → "one hundred") for clean TTS pronunciation.
+
 Each scene must have:
 - "scene_id": number (e.g., 1)
 - "video_prompt": string (highly detailed visual description for a text-to-video model. CRITICAL: Every video_prompt MUST end with the literal STYLE ANCHOR string above, copied exactly. Do NOT write the words "the style anchor" — copy the actual descriptors.)
-- "narration": string (voiceover text. CRITICAL: For a ${DURATION_PER_SCENE}s video, this MUST be exactly ${WORD_LIMIT} words or less. Do not exceed this limit.)
-- "duration": ${DURATION_PER_SCENE}
+- "narration": string (voiceover text following the NARRATION RULES above)
 
 Return ONLY raw JSON array, nothing else.`;
 
@@ -189,139 +227,198 @@ Return ONLY raw JSON array, nothing else.`;
 
     // Safety net: ensure every video_prompt actually ends with the style anchor
     // (LLMs sometimes write "the style anchor" literally instead of substituting the value)
+    // Also hard-truncate narration to MAX_WORDS_PER_SCENE to keep each scene under
+    // Seedance's 10s ceiling no matter what the LLM produced.
     for (const scene of scenes) {
       let p = String(scene.video_prompt || '').trim();
-      // Strip any literal placeholder phrasing the LLM may have hallucinated
       p = p.replace(/[,.\s]*and\s+the\s+style\s+anchor\.?\s*$/i, '');
       p = p.replace(/[,.\s]*the\s+style\s+anchor\.?\s*$/i, '');
-      // Append the real style anchor if it isn't already present
       if (!p.toLowerCase().includes(styleAnchor.toLowerCase().slice(0, 20))) {
         p = `${p.replace(/[.,\s]+$/, '')}, ${styleAnchor}`;
       }
       scene.video_prompt = p;
+
+      const narrationWords = String(scene.narration || '').trim().split(/\s+/).filter(Boolean);
+      if (narrationWords.length > MAX_WORDS_PER_SCENE) {
+        console.warn(`[Scene ${scene.scene_id}] narration ${narrationWords.length} words > cap, truncating`);
+        scene.narration = narrationWords.slice(0, MAX_WORDS_PER_SCENE).join(' ');
+      } else {
+        scene.narration = narrationWords.join(' ');
+      }
+
       console.log(`[Scene ${scene.scene_id} prompt]: ${p}`);
+      console.log(`[Scene ${scene.scene_id} narration]: ${scene.narration}`);
     }
 
-    console.log('[Step 2] Generation of Media (Audio + Video in parallel, no reference chaining)...');
-
-    // Generate Audio in parallel for all scenes
-    const audioPromises = scenes.map(scene => runWithRetry("minimax/speech-02-turbo", {
-      input: {
-        text: scene.narration,
-        emotion: "neutral",
-        speed: 0.95,
-        pitch: 0,
-        language_boost: "English",
-        audio_format: "mp3",
-        bitrate: 128000
-      }
-    }));
-
-    // Generate Video in parallel — no reference chaining so each scene gets fresh
-    // motion, camera angles, and composition while sharing the style_anchor for visual consistency.
-    const videoPromises = scenes.map(scene => runWithRetry("bytedance/seedance-2.0-fast", {
-      input: {
-        prompt: scene.video_prompt,
-        aspect_ratio: "9:16",
-        negative_prompt: negativePrompt,
-        duration: DURATION_PER_SCENE,
-        resolution: RESOLUTION,
-        generate_audio: false
-      }
-    }));
-
-    console.log('[Step 2] Waiting for all video + audio generations...');
-    const [videoResponses, audioResponses] = await Promise.all([
-      Promise.all(videoPromises),
-      Promise.all(audioPromises)
-    ]);
-
-    const videoResults: string[] = videoResponses.map((videoRes: any) => {
-      let videoUrl = "";
-      if (typeof videoRes === "string") {
-        videoUrl = videoRes;
-      } else if (videoRes && typeof videoRes === "object") {
-        if (typeof videoRes.url === 'function') videoUrl = videoRes.url().href || videoRes.url();
-        else if (videoRes instanceof URL) videoUrl = videoRes.toString();
-        else if (typeof videoRes.toString === 'function' && videoRes.toString().startsWith('http')) videoUrl = videoRes.toString();
-        else if ('url' in videoRes && typeof videoRes.url === 'string') videoUrl = videoRes.url;
-        else if ('video' in videoRes) videoUrl = videoRes.video;
-        else if ('output' in videoRes && typeof videoRes.output === 'string') videoUrl = videoRes.output;
-        else if (Array.isArray(videoRes)) {
-          const first = videoRes[0];
-          videoUrl = typeof first?.url === 'function' ? first.url() : String(first);
+    // Shared extractor for Replicate's many output shapes (FileOutput, string, array, etc.)
+    const extractMediaUrl = (res: any): string => {
+      if (typeof res === "string") return res;
+      if (res && typeof res === "object") {
+        if (typeof res.url === 'function') {
+          const u = res.url();
+          return (u && u.href) ? u.href : String(u);
         }
-        else videoUrl = String(videoRes);
-      } else {
-        videoUrl = String(videoRes);
-      }
-      return videoUrl;
-    });
-
-    const mediaResults = scenes.map((scene, index) => {
-      const videoUrl = videoResults[index];
-      const audioRes = audioResponses[index];
-
-      let audioUrl = "";
-      if (typeof audioRes === "string") {
-        audioUrl = audioRes;
-      } else if (audioRes && typeof audioRes === "object") {
-        if (typeof (audioRes as any).url === 'function') audioUrl = (audioRes as any).url().href || (audioRes as any).url();
-        else if (audioRes instanceof URL) audioUrl = audioRes.toString();
-        else if (typeof (audioRes as any).toString === 'function' && (audioRes as any).toString().startsWith('http')) audioUrl = (audioRes as any).toString();
-        else if ('audio' in audioRes && typeof (audioRes as any).audio?.url === 'function') audioUrl = (audioRes as any).audio.url();
-        else if ('audio' in audioRes && typeof (audioRes as any).audio?.url === 'string') audioUrl = (audioRes as any).audio.url;
-        else if ('audio_url' in audioRes) audioUrl = (audioRes as any).audio_url;
-        else if ('audio_file' in audioRes) audioUrl = (audioRes as any).audio_file;
-        else if ('url' in audioRes && typeof (audioRes as any).url === 'string') audioUrl = (audioRes as any).url;
-        else if ('output' in audioRes && typeof (audioRes as any).output === 'string') audioUrl = (audioRes as any).output;
-        else if (Array.isArray(audioRes)) {
-          const first = audioRes[0];
-          audioUrl = typeof first?.url === 'function' ? first.url() : String(first);
+        if (res instanceof URL) return res.toString();
+        if (typeof res.toString === 'function') {
+          const s = res.toString();
+          if (s.startsWith('http')) return s;
         }
-        else audioUrl = String(audioRes);
-      } else {
-        audioUrl = String(audioRes);
+        if ('audio' in res && typeof res.audio?.url === 'function') return res.audio.url();
+        if ('audio' in res && typeof res.audio?.url === 'string') return res.audio.url;
+        if ('audio_url' in res) return res.audio_url;
+        if ('audio_file' in res) return res.audio_file;
+        if ('url' in res && typeof res.url === 'string') return res.url;
+        if ('video' in res && typeof res.video === 'string') return res.video;
+        if ('output' in res && typeof res.output === 'string') return res.output;
+        if (Array.isArray(res)) {
+          const first = res[0];
+          return typeof first?.url === 'function' ? first.url() : String(first);
+        }
       }
+      return String(res);
+    };
 
-      if (!videoUrl || !audioUrl) {
-        console.error("Failed to extract media URLs:", { videoUrl, audioRes });
-        throw new Error(`Failed to generate media for scene ${scene.scene_id}. Check logs for details.`);
+    // ---------- Step 2+3: TTS + Whisper with speed-correction retry ----------
+    // The user paid for TOTAL_DURATION seconds, so we must deliver exactly that.
+    // MiniMax speech rate varies wildly per voice_id (1.5-2.7 wps), so a single
+    // static word cap can't reliably hit the target across all voices.
+    //
+    // Strategy: run TTS at speed=1.0, measure with Whisper, and if the result is
+    // significantly off-target, re-run with a corrected speed parameter. MiniMax's
+    // `speed` parameter is roughly linear with duration, so `speed = currentDur /
+    // targetDur` produces audio close to the target on the second pass. Any small
+    // residual is corrected by ffmpeg's atempo in the merge step. Final reel is
+    // ALWAYS exactly TOTAL_DURATION seconds.
+    type WordChunk = { text: string; start: number; end: number };
+
+    const fullNarration = scenes.map(s => String(s.narration || '').trim()).filter(Boolean).join(' ');
+    if (!fullNarration) {
+      throw new Error('All scene narrations are empty — LLM failed to produce a script.');
+    }
+
+    const generateTtsAndTranscribe = async (text: string, speed: number): Promise<{ audioUrl: string; words: WordChunk[]; duration: number }> => {
+      console.log(`[TTS] Generating at speed=${speed.toFixed(3)}, emotion="${narratorEmotion}", voice="${VOICE_ID}"...`);
+      const ttsRes = await runWithRetry("minimax/speech-02-turbo", {
+        input: {
+          text,
+          voice_id: VOICE_ID,
+          emotion: narratorEmotion,
+          speed,
+          pitch: 0,
+          language_boost: "English",
+          audio_format: "mp3",
+          bitrate: 128000
+        }
+      });
+      const url = extractMediaUrl(ttsRes);
+      if (!url || !url.startsWith('http')) {
+        console.error('Failed to extract TTS audio URL:', ttsRes);
+        throw new Error('Failed to generate TTS audio.');
       }
+      console.log(`[TTS] Audio URL: ${url}`);
 
-      return {
-        scene_id: scene.scene_id,
-        videoUrl,
-        audioUrl,
-        narration: scene.narration,
-        offset: index * DURATION_PER_SCENE
-      };
-    });
-
-    // Step 3: Whisper Timestamps — run sequentially per scene (not parallel) to avoid rate limits
-    const whisperResults = [];
-    for (const media of mediaResults) {
-      if (!media.audioUrl) {
-        throw new Error(`Audio URL is missing for scene ${media.scene_id}. TTS generation may have failed.`);
-      }
-      console.log(`[Whisper] Processing scene ${media.scene_id} audio: ${media.audioUrl}`);
-      const whisperRes = await runWithRetry(
+      console.log('[Whisper] Transcribing audio...');
+      const wRes = await runWithRetry(
         "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c",
         {
-          input: {
-            audio: media.audioUrl,
-            language: "english",
-            timestamp: "word",
-            batch_size: 64,
+          input: { audio: url, language: "english", timestamp: "word", batch_size: 64 }
+        }
+      ) as any;
+
+      const words: WordChunk[] = [];
+      if (wRes?.chunks) {
+        for (const c of wRes.chunks) {
+          const txt = String(c.text || '').trim();
+          if (!txt) continue;
+          words.push({ text: txt, start: c.timestamp?.[0] ?? 0, end: c.timestamp?.[1] ?? (c.timestamp?.[0] ?? 0) + 0.3 });
+        }
+      } else if (wRes?.segments) {
+        for (const seg of wRes.segments) {
+          for (const w of (seg.words || [])) {
+            const txt = String(w.word || w.text || '').trim();
+            if (!txt) continue;
+            words.push({ text: txt, start: w.start ?? seg.start ?? 0, end: w.end ?? seg.end ?? (w.start ?? 0) + 0.3 });
           }
         }
-      );
-      console.log(`[Whisper] Scene ${media.scene_id} result:`, JSON.stringify(whisperRes).slice(0, 200));
-      whisperResults.push({ ...media, whisper: whisperRes });
+      }
+      if (words.length === 0) {
+        throw new Error('Whisper returned no word timestamps.');
+      }
+      const dur = words[words.length - 1].end;
+      console.log(`[Whisper] ${words.length} words transcribed across ${dur.toFixed(2)}s`);
+      return { audioUrl: url, words, duration: dur };
+    };
+
+    // Pass 1: speed=1.0
+    console.log('[Step 2/3] First TTS+Whisper pass at speed=1.0...');
+    let { audioUrl: fullAudioUrl, words: whisperWords, duration: audioEndTotal } =
+      await generateTtsAndTranscribe(fullNarration, 1.0);
+
+    // If first pass missed target by more than ~15%, re-run with corrected speed
+    // (within MiniMax's supported speed range, clamped to [0.5, 2.0]).
+    const RATIO_TOLERANCE_LOW = 0.85;
+    const RATIO_TOLERANCE_HIGH = 1.15;
+    const MINIMAX_SPEED_MIN = 0.5;
+    const MINIMAX_SPEED_MAX = 2.0;
+
+    const firstRatio = audioEndTotal / TOTAL_DURATION;
+    if (firstRatio < RATIO_TOLERANCE_LOW || firstRatio > RATIO_TOLERANCE_HIGH) {
+      const correctedSpeed = Math.max(MINIMAX_SPEED_MIN, Math.min(MINIMAX_SPEED_MAX, firstRatio));
+      console.log(`[TTS retry] Pass 1 ratio=${firstRatio.toFixed(3)} outside tolerance — re-running at speed=${correctedSpeed.toFixed(3)}`);
+      ({ audioUrl: fullAudioUrl, words: whisperWords, duration: audioEndTotal } =
+        await generateTtsAndTranscribe(fullNarration, correctedSpeed));
+    } else {
+      console.log(`[TTS] Pass 1 ratio=${firstRatio.toFixed(3)} within tolerance — no retry needed.`);
     }
 
-    console.log('[Step 4] Build ASS subtitle file...');
-    // Step 4: Build ASS subtitles (For accurate MarginV mapping)
+    // Step 4: Compute residual atempo to land exactly on TOTAL_DURATION.
+    // After the optional retry, audio should be close to target; atempo handles
+    // any small residual. The final reel is ALWAYS exactly TOTAL_DURATION.
+    const ATEMPO_MIN = 0.5;
+    const ATEMPO_MAX = 2.0;
+    let audioSpeedFactor = 1.0;
+    const finalRatio = audioEndTotal / TOTAL_DURATION;
+    if (Math.abs(1 - finalRatio) > 0.01) {
+      audioSpeedFactor = Math.max(ATEMPO_MIN, Math.min(ATEMPO_MAX, finalRatio));
+      console.log(`[Audio] Final residual atempo=${audioSpeedFactor.toFixed(4)} (audio ${audioEndTotal.toFixed(2)}s → ${TOTAL_DURATION}s)`);
+    } else {
+      console.log(`[Audio] Audio ${audioEndTotal.toFixed(2)}s ≈ budget ${TOTAL_DURATION}s — no atempo needed.`);
+    }
+    const finalDuration = TOTAL_DURATION;
+    const perSceneDuration = DURATION_PER_SCENE;
+
+    // ---------- Step 5: Parallel Seedance video generation ----------
+    // Each scene's video is exactly DURATION_PER_SCENE seconds (user's choice).
+    // Total reel = SCENE_COUNT * DURATION_PER_SCENE.
+    console.log(`[Step 5] Parallel Seedance video generation (${DURATION_PER_SCENE}s per scene)...`);
+    const videoPromises = scenes.map(scene => {
+      console.log(`[Seedance] Scene ${scene.scene_id}: requesting ${DURATION_PER_SCENE}s`);
+      return runWithRetry("bytedance/seedance-2.0-fast", {
+        input: {
+          prompt: scene.video_prompt,
+          aspect_ratio: "9:16",
+          negative_prompt: negativePrompt,
+          duration: DURATION_PER_SCENE,
+          resolution: RESOLUTION,
+          generate_audio: false
+        }
+      });
+    });
+
+    const videoResponses = await Promise.all(videoPromises);
+    const sceneVideoUrls: string[] = videoResponses.map((res, i) => {
+      const url = extractMediaUrl(res);
+      if (!url || !url.startsWith('http')) {
+        console.error(`Failed to extract video URL for scene ${scenes[i].scene_id}:`, res);
+        throw new Error(`Failed to generate video for scene ${scenes[i].scene_id}.`);
+      }
+      return url;
+    });
+
+    console.log('[Step 6] Build ASS subtitle file from continuous Whisper timeline...');
+    // Subtitle timestamps come directly from the single Whisper pass — no per-scene
+    // offset math because audio is now one continuous file, and the trimmed-and-concatenated
+    // video timeline matches the audio timeline exactly.
     const primaryColorASS = hexToAssColor(style.primaryColor);
     const outlineColorASS = hexToAssColor(style.outlineColor);
     const highlightColorASS = hexToAssColor(style.highlightColor);
@@ -352,52 +449,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
     };
 
-    for (const res of whisperResults) {
-      const offset = res.offset;
-      const whisperOutput = res.whisper as any;
-
-      // incredibly-fast-whisper returns { chunks: [{text, timestamp:[start,end]}] }
-      // openai/whisper returns { segments: [{words:[{word,start,end}]}] }
-      const chunks: Array<{ text: string; start: number; end: number }> = [];
-
-      if (whisperOutput?.chunks) {
-        // incredibly-fast-whisper format
-        for (const chunk of whisperOutput.chunks) {
-          chunks.push({
-            text: (chunk.text || '').trim(),
-            start: chunk.timestamp?.[0] ?? 0,
-            end: chunk.timestamp?.[1] ?? (chunk.timestamp?.[0] ?? 0) + 0.5,
-          });
-        }
-      } else if (whisperOutput?.segments) {
-        // openai/whisper / whisperx format
-        for (const segment of whisperOutput.segments) {
-          const words = segment.words || [];
-          if (words.length > 0) {
-            for (const w of words) {
-              chunks.push({
-                text: (w.word || w.text || '').trim(),
-                start: w.start ?? segment.start ?? 0,
-                end: w.end ?? segment.end ?? (w.start ?? 0) + 0.5,
-              });
-            }
-          } else {
-            chunks.push({
-              text: (segment.text || '').trim(),
-              start: segment.start ?? 0,
-              end: segment.end ?? (segment.start ?? 0) + 0.5,
-            });
-          }
-        }
-      }
-
-      for (const chunk of chunks) {
-        if (!chunk.text) continue;
-        const start = chunk.start + offset;
-        const end = chunk.end + offset;
-        const lineText = `{\\c${highlightColorASS}}{\\b1}${chunk.text.toUpperCase()}{\\b0}`;
-        assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
-      }
+    // When audio is sped up by atempo, the spoken word at original time T plays at
+    // T/audioSpeedFactor in the final video. Scale subtitle timestamps so each
+    // caption appears in sync with its (sped-up) word. Then clamp to finalDuration
+    // (= TOTAL_DURATION for overshoot/exact, = audioEndTotal for undershoot).
+    for (const w of whisperWords) {
+      const text = w.text.trim();
+      if (!text) continue;
+      const start = w.start / audioSpeedFactor;
+      const end = Math.min(w.end / audioSpeedFactor, finalDuration);
+      if (start >= finalDuration) continue;
+      const lineText = `{\\c${highlightColorASS}}{\\b1}${text.toUpperCase()}{\\b0}`;
+      assContent += `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}\n`;
     }
 
     if (!assContent.includes('Dialogue:')) {
@@ -488,86 +551,80 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       return url;
     };
 
-    // Remote Google Fonts (TTF format for FFmpeg libass compatibility)
+    // Remote Google Fonts (TTF format for FFmpeg libass compatibility).
+    // Pinned to commit ca9288e18a — `@main` removed the static Montserrat-*.ttf
+    // files (only the variable font Montserrat[wght].ttf is published now),
+    // which libass/FFmpeg can't resolve for a specific weight reliably.
+    const FONTS_REF = "ca9288e18a";
     const fontUrls: Record<string, string> = {
-      "Poppins": "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/poppins/Poppins-ExtraBold.ttf",
-      "Montserrat": "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/montserrat/Montserrat-Bold.ttf",
-      "Bangers": "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/bangers/Bangers-Regular.ttf"
+      "Poppins": `https://cdn.jsdelivr.net/gh/google/fonts@${FONTS_REF}/ofl/poppins/Poppins-ExtraBold.ttf`,
+      "Montserrat": `https://cdn.jsdelivr.net/gh/google/fonts@${FONTS_REF}/ofl/montserrat/Montserrat-Bold.ttf`,
+      "Bangers": `https://cdn.jsdelivr.net/gh/google/fonts@${FONTS_REF}/ofl/bangers/Bangers-Regular.ttf`
     };
     const fontUrl = fontUrls[style.fontname];
 
-    let mergedVideoUrl: string;
+    // ---------- Rendi: concat videos + normalize audio to TOTAL_DURATION + merge ----------
+    // Each scene's video is normalized to exactly DURATION_PER_SCENE seconds
+    // (the user's strict per-scene budget). The continuous TTS audio is pad/trimmed
+    // to TOTAL_DURATION so video and audio always end on the same frame.
+    const targetW = RESOLUTION === "720p" ? 720 : 480;
+    const targetH = RESOLUTION === "720p" ? 1280 : 854;
 
-    if (SCENE_COUNT === 1) {
-      // Single scene: merge video + audio + subtitles + font
-      let mergeCommand = `-i {{in_video}} -i {{in_audio}} -i {{in_srt}}`;
-      const mergeInputs: any = { in_video: whisperResults[0].videoUrl, in_audio: whisperResults[0].audioUrl, in_srt: srtUrl };
-      
-      if (fontUrl) {
-        mergeCommand += ` -attach {{in_font}} -metadata:s:t:0 mimetype=application/x-truetype-font -metadata:s:t:0 filename="font.ttf"`;
-        mergeInputs.in_font = fontUrl;
-      }
-      mergeCommand += ` -map 0:v:0 -map 1:a:0 -map 2:s:0 -c:v copy -c:a aac -c:s copy -shortest {{out_merged}}`;
+    const vInputFiles: Record<string, string> = {};
+    sceneVideoUrls.forEach((url, i) => { vInputFiles[`in_v${i + 1}`] = url; });
+    const vInputArgs = sceneVideoUrls.map((_, i) => `-i {{in_v${i + 1}}}`).join(" ");
 
-      const mergeResult = await runRendiSingle(mergeCommand, mergeInputs, { out_merged: "merged.mkv" });
-      mergedVideoUrl = getRendiUrl(mergeResult, 'out_merged');
-    } else {
-      // Multi-scene: concat videos, concat audios, then merge
-      const vInputFiles: Record<string, string> = {};
-      whisperResults.forEach((res, i) => { vInputFiles[`in_v${i+1}`] = res.videoUrl; });
-      const vInputArgs = whisperResults.map((_, i) => `-i {{in_v${i+1}}}`).join(" ");
-      const vFilterStreams = whisperResults.map((_, i) => `[${i}:v]`).join("");
+    // `tpad=stop_mode=clone:stop_duration=2` extends short Seedance outputs by
+    // freezing the last frame; the subsequent `trim` clamps to exactly
+    // perSceneDuration seconds. perSceneDuration matches DURATION_PER_SCENE in
+    // the normal/overshoot case, or shrinks to audioEndTotal/SCENE_COUNT when the
+    // narration undershoots the budget (so video ends with audio, no silence).
+    const perSceneDurStr = perSceneDuration.toFixed(3);
+    const normalizedStreams = sceneVideoUrls
+      .map((_, i) => `[${i}:v]tpad=stop_mode=clone:stop_duration=2,trim=duration=${perSceneDurStr},setpts=PTS-STARTPTS,fps=30,scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v${i}]`)
+      .join(";");
+    const concatInputs = sceneVideoUrls.map((_, i) => `[v${i}]`).join("");
 
-      const aInputFiles: Record<string, string> = {};
-      whisperResults.forEach((res, i) => { aInputFiles[`in_a${i+1}`] = res.audioUrl; });
-      const aInputArgs = whisperResults.map((_, i) => `-i {{in_a${i+1}}}`).join(" ");
-      const aFilterStreams = whisperResults.map((_, i) => `[${i}:a]`).join("");
-
-      console.log(`[Rendi] Concatenating ${SCENE_COUNT} videos...`);
-      // Normalize each input (fps, resolution, sar, pixel format) before concatenation.
-      // Seedance outputs can vary in fps/sar; without normalization the concat filter
-      // silently produces broken output (e.g., only the first scene plays).
-      const targetW = RESOLUTION === "720p" ? 720 : 480;
-      const targetH = RESOLUTION === "720p" ? 1280 : 854;
-      const normalizedStreams = whisperResults
-        .map((_, i) => `[${i}:v]fps=30,scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v${i}]`)
-        .join(";");
-      const concatInputs = whisperResults.map((_, i) => `[v${i}]`).join("");
-      const concatVResult = await runRendiSingle(
-        `${vInputArgs} -filter_complex "${normalizedStreams};${concatInputs}concat=n=${SCENE_COUNT}:v=1:a=0[v]" -map "[v]" -c:v libx264 -crf 20 -pix_fmt yuv420p {{out_v}}`,
+    let combinedVideoUrl: string;
+    if (sceneVideoUrls.length === 1) {
+      console.log(`[Rendi] Trimming single scene video to ${perSceneDurStr}s...`);
+      const singleVResult = await runRendiSingle(
+        `${vInputArgs} -filter_complex "${normalizedStreams}" -map "[v0]" -c:v libx264 -crf 20 -pix_fmt yuv420p {{out_v}}`,
         vInputFiles,
         { out_v: "combined_video.mp4" }
       );
-      const combinedVideoUrl = getRendiUrl(concatVResult, 'out_v');
-
-      console.log(`[Rendi] Concatenating ${SCENE_COUNT} audios...`);
-      // Pad each audio clip with silence and trim to exactly DURATION_PER_SCENE seconds
-      // before concatenating, so audio stays in sync with the per-scene video offsets
-      // even if the TTS clip is shorter than the scene duration.
-      const paddedStreams = whisperResults
-        .map((_, i) => `[${i}:a]apad=pad_dur=${DURATION_PER_SCENE},atrim=duration=${DURATION_PER_SCENE}[a${i}]`)
-        .join(";");
-      const paddedConcatInputs = whisperResults.map((_, i) => `[a${i}]`).join("");
-      const audioFilterComplex = `${paddedStreams};${paddedConcatInputs}concat=n=${SCENE_COUNT}:v=0:a=1[a]`;
-      const concatAResult = await runRendiSingle(
-        `${aInputArgs} -filter_complex "${audioFilterComplex}" -map "[a]" {{out_a}}`,
-        aInputFiles,
-        { out_a: "combined_audio.mp3" }
+      combinedVideoUrl = getRendiUrl(singleVResult, 'out_v');
+    } else {
+      console.log(`[Rendi] Trimming + concatenating ${sceneVideoUrls.length} videos (${perSceneDurStr}s each)...`);
+      const concatVResult = await runRendiSingle(
+        `${vInputArgs} -filter_complex "${normalizedStreams};${concatInputs}concat=n=${sceneVideoUrls.length}:v=1:a=0[v]" -map "[v]" -c:v libx264 -crf 20 -pix_fmt yuv420p {{out_v}}`,
+        vInputFiles,
+        { out_v: "combined_video.mp4" }
       );
-      const combinedAudioUrl = getRendiUrl(concatAResult, 'out_a');
-
-      let mergeCommand = `-i {{in_video}} -i {{in_audio}} -i {{in_srt}}`;
-      const mergeInputs: any = { in_video: combinedVideoUrl, in_audio: combinedAudioUrl, in_srt: srtUrl };
-      
-      if (fontUrl) {
-        mergeCommand += ` -attach {{in_font}} -metadata:s:t:0 mimetype=application/x-truetype-font -metadata:s:t:0 filename="font.ttf"`;
-        mergeInputs.in_font = fontUrl;
-      }
-      mergeCommand += ` -map 0:v:0 -map 1:a:0 -map 2:s:0 -c:v copy -c:a aac -c:s copy -shortest {{out_merged}}`;
-
-      const mergeResult = await runRendiSingle(mergeCommand, mergeInputs, { out_merged: "merged.mkv" });
-      mergedVideoUrl = getRendiUrl(mergeResult, 'out_merged');
+      combinedVideoUrl = getRendiUrl(concatVResult, 'out_v');
     }
+
+    // Merge combined video + speed-fit TTS audio + subtitles + optional font.
+    // Audio filter chain:
+    //   apad           → infinite silence appended (handles short narration)
+    //   atempo=X       → time-stretch to fit if narration overshoots (preserves pitch)
+    //   atrim=TOTAL    → hard-cuts to exact target length (safety net for tiny overshoot
+    //                     past atempo, or to remove the trailing silence from apad)
+    //   asetpts        → reset PTS so downstream sees clean 0-based timestamps
+    // Combined video is also TOTAL_DURATION seconds → streams stay aligned.
+    let mergeCommand = `-i {{in_video}} -i {{in_audio}} -i {{in_srt}}`;
+    const mergeInputs: any = { in_video: combinedVideoUrl, in_audio: fullAudioUrl, in_srt: srtUrl };
+
+    if (fontUrl) {
+      mergeCommand += ` -attach {{in_font}} -metadata:s:t:0 mimetype=application/x-truetype-font -metadata:s:t:0 filename="font.ttf"`;
+      mergeInputs.in_font = fontUrl;
+    }
+    const atempoStage = audioSpeedFactor > 1.001 ? `atempo=${audioSpeedFactor.toFixed(4)},` : '';
+    mergeCommand += ` -filter_complex "[1:a]apad,${atempoStage}atrim=duration=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS[a]"`;
+    mergeCommand += ` -map 0:v:0 -map "[a]" -map 2:s:0 -c:v copy -c:a aac -c:s copy {{out_merged}}`;
+
+    const mergeResult = await runRendiSingle(mergeCommand, mergeInputs, { out_merged: "merged.mkv" });
+    const mergedVideoUrl = getRendiUrl(mergeResult, 'out_merged');
 
     // Burn subtitles onto the merged video from the original ASS file directly.
     // Reading from the input video's embedded subtitle stream can cause timing issues

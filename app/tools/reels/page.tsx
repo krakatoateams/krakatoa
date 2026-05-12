@@ -2,13 +2,71 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor } from "lucide-react";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile } from "lucide-react";
+
+// MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
+// narration first so the default lands on a strong storytelling voice.
+const ENGLISH_VOICES = [
+  "English_CaptivatingStoryteller",
+  "English_WiseScholar",
+  "English_Wiselady",
+  "English_Steadymentor",
+  "English_MaturePartner",
+  "English_Trustworth_Man",
+  "English_Deep-VoicedGentleman",
+  "English_ManWithDeepVoice",
+  "English_Gentle-voiced_man",
+  "English_Diligent_Man",
+  "English_PatientMan",
+  "English_DecentYoungMan",
+  "English_ReservedYoungMan",
+  "English_FriendlyPerson",
+  "English_MatureBoss",
+  "English_BossyLeader",
+  "English_Debator",
+  "English_ImposingManner",
+  "English_PassionateWarrior",
+  "English_Comedian",
+  "English_Jovialman",
+  "English_Aussie_Bloke",
+  "English_ConfidentWoman",
+  "English_AssertiveQueen",
+  "English_Graceful_Lady",
+  "English_CalmWoman",
+  "English_SereneWoman",
+  "English_SentimentalLady",
+  "English_StressedLady",
+  "English_LovelyGirl",
+  "English_Kind-heartedGirl",
+  "English_Soft-spokenGirl",
+  "English_PlayfulGirl",
+  "English_WhimsicalGirl",
+  "English_Whispering_girl",
+  "English_UpsetGirl",
+  "English_SadTeen",
+  "English_Strong-WilledBoy",
+  "English_AnimeCharacter",
+];
+
+const EMOTIONS = ["auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "neutral"];
+
+const humanizeVoice = (id: string) =>
+  id.replace(/^English_/, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase());
+
+const humanizeEmotion = (e: string) => e === "auto" ? "Auto (let AI decide)" : e.charAt(0).toUpperCase() + e.slice(1);
 
 export default function ReelsPage() {
   const [theme, setTheme] = useState("");
   const [numScenes, setNumScenes] = useState(1);
   const [durationPerScene, setDurationPerScene] = useState(5);
   const [resolution, setResolution] = useState("480p");
+  const [voiceId, setVoiceId] = useState("English_CaptivatingStoryteller");
+  const [emotion, setEmotion] = useState("auto");
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,11 +99,13 @@ export default function ReelsPage() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          theme, 
-          numScenes: Number(numScenes), 
+        body: JSON.stringify({
+          theme,
+          numScenes: Number(numScenes),
           durationPerScene: Number(durationPerScene),
           resolution,
+          voiceId,
+          emotion,
           captionStyle
         }),
       });
@@ -172,6 +232,52 @@ export default function ReelsPage() {
                       <option value="480p" className="bg-[#030712]">480p (Fast)</option>
                       <option value="720p" className="bg-[#030712]">720p (HD)</option>
                     </select>
+                  </div>
+                </div>
+
+                {/* Narrator Card */}
+                <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                      <Mic className="w-5 h-5 text-indigo-400" />
+                      Narrator
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                        <Mic className="w-3.5 h-3.5" />
+                        Voice
+                      </label>
+                      <select
+                        value={voiceId}
+                        onChange={(e) => setVoiceId(e.target.value)}
+                        disabled={loading}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                      >
+                        {ENGLISH_VOICES.map((v) => (
+                          <option key={v} value={v} className="bg-[#030712]">{humanizeVoice(v)}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                        <Smile className="w-3.5 h-3.5" />
+                        Emotion
+                      </label>
+                      <select
+                        value={emotion}
+                        onChange={(e) => setEmotion(e.target.value)}
+                        disabled={loading}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                      >
+                        {EMOTIONS.map((e) => (
+                          <option key={e} value={e} className="bg-[#030712]">{humanizeEmotion(e)}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
