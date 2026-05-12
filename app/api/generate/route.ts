@@ -453,10 +453,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
     };
 
-    // When audio is sped up by atempo, the spoken word at original time T plays at
-    // T/audioSpeedFactor in the final video. Scale subtitle timestamps so each
-    // caption appears in sync with its (sped-up) word. Then clamp to finalDuration
-    // (= TOTAL_DURATION for overshoot/exact, = audioEndTotal for undershoot).
+    // When audio is time-stretched by atempo, the spoken word at original time T
+    // plays at T/audioSpeedFactor in the final video. Scale subtitle timestamps to
+    // match. Then clamp to finalDuration (= TOTAL_DURATION).
     for (const w of whisperWords) {
       const text = w.text.trim();
       if (!text) continue;
@@ -611,7 +610,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // Merge combined video + speed-fit TTS audio + subtitles + optional font.
     // Audio filter chain:
     //   apad           → infinite silence appended (handles short narration)
-    //   atempo=X       → time-stretch to fit if narration overshoots (preserves pitch)
+    //   atempo=X       → time-stretch when measured audio ≠ target (preserves pitch)
     //   atrim=TOTAL    → hard-cuts to exact target length (safety net for tiny overshoot
     //                     past atempo, or to remove the trailing silence from apad)
     //   asetpts        → reset PTS so downstream sees clean 0-based timestamps
@@ -623,7 +622,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       mergeCommand += ` -attach {{in_font}} -metadata:s:t:0 mimetype=application/x-truetype-font -metadata:s:t:0 filename="font.ttf"`;
       mergeInputs.in_font = fontUrl;
     }
-    const atempoStage = audioSpeedFactor > 1.001 ? `atempo=${audioSpeedFactor.toFixed(4)},` : '';
+    // Apply atempo whenever duration differs from target (both speed-up and slow-down).
+    // Omitting atempo when factor < 1 used to break sync with subtitle scaling below.
+    const atempoStage =
+      Math.abs(audioSpeedFactor - 1) > 0.001 ? `atempo=${audioSpeedFactor.toFixed(4)},` : '';
     mergeCommand += ` -filter_complex "[1:a]apad,${atempoStage}atrim=duration=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS[a]"`;
     mergeCommand += ` -map 0:v:0 -map "[a]" -map 2:s:0 -c:v copy -c:a aac -c:s copy {{out_merged}}`;
 
