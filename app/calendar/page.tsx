@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
@@ -443,8 +443,6 @@ export default function CalendarPage() {
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Fetch posts ────────────────────────────────────────────────────────────
   const fetchPosts = useCallback(async () => {

@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { supabase } from '@/lib/supabase';
-import { STORAGE_BUCKET, videosStoragePath } from '@/lib/storage-buckets';
+import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
 
 // Allow up to 5 minutes for this route (WhisperX + Rendi polling)
 export const maxDuration = 300;
@@ -263,7 +263,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       assContent += `Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,(No speech detected)\n`;
     }
 
-    const srtFilename = videosStoragePath(`captions_${Date.now()}.ass`);
+    const srtFilename = videosTempStoragePath(`captions_${Date.now()}.ass`);
     const { error: uploadError } = await supabase
       .storage
       .from(STORAGE_BUCKET)
