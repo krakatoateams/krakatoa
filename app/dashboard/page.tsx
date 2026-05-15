@@ -95,16 +95,16 @@ function Navbar() {
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-800 bg-gray-950/80 px-6 backdrop-blur-md">
       <div className="flex items-center gap-6">
-        <Link href="/" className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600">
             <Zap className="h-4 w-4 text-white" />
           </div>
           <span className="text-base font-semibold tracking-tight text-white">Autopilot Scheduler</span>
-        </Link>
+        </div>
 
         <nav className="flex items-center gap-1">
           <Link
-            href="/tools/scheduler"
+            href="/dashboard"
             className="flex items-center gap-1.5 rounded-md bg-gray-800 px-3 py-1.5 text-sm font-medium text-white"
             aria-current="page"
           >
@@ -112,7 +112,7 @@ function Navbar() {
             Dashboard
           </Link>
           <Link
-            href="/tools/scheduler/calendar"
+            href="/calendar"
             className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
           >
             <CalendarDays className="h-3.5 w-3.5" />
@@ -143,7 +143,7 @@ function Navbar() {
       ) : (
         <button
           type="button"
-          onClick={() => signIn("google", { callbackUrl: "/tools/scheduler" })}
+          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
           className="flex cursor-pointer items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-all duration-200 hover:border-red-500/60 hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
           aria-label="Connect YouTube account"
         >
@@ -555,7 +555,7 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast }: ScheduleCardPro
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SchedulerDashboardPage() {
+export default function DashboardPage() {
   const [file, setFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
@@ -563,7 +563,7 @@ export default function SchedulerDashboardPage() {
   const [caption, setCaption] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
 
   const handleFileSelect = useCallback(async (selected: File | null) => {
     setFile(selected);
@@ -593,6 +593,7 @@ export default function SchedulerDashboardPage() {
     }
   }, []);
 
+  // Reset everything after a successful schedule
   const handleSuccess = useCallback(() => {
     setFile(null);
     setVideoUrl(null);
