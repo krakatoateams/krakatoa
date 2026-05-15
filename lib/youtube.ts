@@ -1,0 +1,96 @@
+import { google } from "googleapis";
+import { Readable } from "stream";
+
+export interface YouTubeUploadParams {
+  videoUrl: string;
+  title: string;
+  description: string;
+  tags: string[];
+  accessToken: string;
+  refreshToken: string;
+}
+
+/**
+ * Detect a reasonable MIME type from the storage URL's file extension.
+ * YouTube accepts MP4, MOV, and AVI among others; we pass the right type
+ * so the API doesn't have to guess.
+ */
+function mimeFromUrl(url: string): string {
+  const ext = url.split("?")[0].split(".").pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    mp4: "video/mp4",
+    mov: "video/quicktime",
+    avi: "video/x-msvideo",
+  };
+  return map[ext ?? ""] ?? "video/mp4";
+}
+
+/**
+ * Download a video from a URL (Supabase Storage public URL) and upload it
+ * to YouTube via the Data API v3.
+ *
+ * Returns the newly created YouTube video ID.
+ */
+export async function uploadToYouTube({
+  videoUrl,
+  title,
+  description,
+  tags,
+  accessToken,
+  refreshToken,
+}: YouTubeUploadParams): Promise<string> {
+  // ── Auth client ─────────────────────────────────────────────────────────
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID!,
+    process.env.GOOGLE_CLIENT_SECRET!,
+  );
+
+  auth.setCredentials({
+    access_token: accessToken,
+    // Providing the refresh_token lets the library silently renew an
+    // expired access token without any additional code on our side.
+    refresh_token: refreshToken || undefined,
+  });
+
+  // ── Stream the video from storage ───────────────────────────────────────
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok || !videoRes.body) {
+    throw new Error(
+      `Could not fetch video from storage (HTTP ${videoRes.status}): ${videoUrl}`,
+    );
+  }
+
+  // Bridge the WHATWG ReadableStream returned by fetch to a Node.js Readable
+  // so the googleapis media upload can consume it. Requires Node.js ≥ 18.
+  const videoStream = Readable.fromWeb(
+    videoRes.body as Parameters<typeof Readable.fromWeb>[0],
+  );
+
+  // ── Upload to YouTube ────────────────────────────────────────────────────
+  const youtube = google.youtube({ version: "v3", auth });
+
+  const { data } = await youtube.videos.insert({
+    part: ["snippet", "status"],
+    requestBody: {
+      snippet: {
+        title,
+        description,
+        tags,
+        categoryId: "22", // People & Blogs — safe default
+      },
+      status: {
+        privacyStatus: "unlisted", // Safe for testing; change to "public" for production
+      },
+    },
+    media: {
+      mimeType: mimeFromUrl(videoUrl),
+      body: videoStream,
+    },
+  });
+
+  if (!data.id) {
+    throw new Error("YouTube API returned a successful response but no video ID");
+  }
+
+  return data.id;
+}
