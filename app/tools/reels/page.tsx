@@ -86,6 +86,15 @@ export default function ReelsPage() {
     highlightOnly: true
   });
 
+  const [engineTab, setEngineTab] = useState<"seedance" | "veo">("seedance");
+  const [veoMode, setVeoMode] = useState<"single" | "perScene">("single");
+  const [veoDuration, setVeoDuration] = useState<4 | 6 | 8>(6);
+  const [veoResolution, setVeoResolution] = useState<"720p" | "1080p">("720p");
+  const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
+  const [veoNumScenes, setVeoNumScenes] = useState(1);
+
+  const resolveEmotionForVeo = () => (emotion === "auto" ? "neutral" : emotion);
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
@@ -127,6 +136,63 @@ export default function ReelsPage() {
     }
   };
 
+  const handleVeoGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!theme.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setLogs(["Starting Veo generation pipeline..."]);
+
+    try {
+      if (veoResolution === "1080p" && veoDuration !== 8) {
+        throw new Error("1080p requires 8 second duration.");
+      }
+      const emotionForApi = resolveEmotionForVeo();
+      const payload: Record<string, unknown> = {
+        theme,
+        captionStyle,
+        voiceId,
+        emotion: emotionForApi,
+        duration: veoDuration,
+        resolution: veoResolution,
+        mode: veoMode === "single" ? "single" : "perScene",
+      };
+      if (veoMode === "single") {
+        payload.singlePromptScenes = singlePromptScenes;
+      } else {
+        payload.numScenes = Number(veoNumScenes);
+      }
+
+      const response = await fetch("/api/generate-veo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate video");
+      }
+      setVideoUrl(data.videoUrl);
+      setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onFormSubmit = (e: React.FormEvent) => {
+    if (engineTab === "seedance") {
+      void handleGenerate(e);
+    } else {
+      void handleVeoGenerate(e);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#030712] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       {/* Background Glows */}
@@ -160,12 +226,36 @@ export default function ReelsPage() {
             <p className="text-slate-400 text-lg max-w-2xl">
               Turn your ideas into viral vertical content. Our AI handles the script, scenes, narration, and captions.
             </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setEngineTab("seedance")}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
+                  engineTab === "seedance"
+                    ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20"
+                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                Seedance
+              </button>
+              <button
+                type="button"
+                onClick={() => setEngineTab("veo")}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
+                  engineTab === "veo"
+                    ? "bg-violet-600 border-violet-500 text-white shadow-lg shadow-violet-500/20"
+                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                Veo
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
             {/* Left Column: Form Controls (7 cols) */}
             <div className="lg:col-span-7 space-y-8">
-              <form onSubmit={handleGenerate} className="space-y-8">
+              <form onSubmit={onFormSubmit} className="space-y-8">
                 {/* Theme Input */}
                 <div className="space-y-4">
                   <label className="block text-sm font-bold uppercase tracking-widest text-indigo-400">Video Theme</label>
@@ -183,7 +273,8 @@ export default function ReelsPage() {
                   </div>
                 </div>
 
-                {/* Grid Settings */}
+                {/* Grid Settings — Seedance */}
+                {engineTab === "seedance" && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-3">
                     <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
@@ -234,8 +325,119 @@ export default function ReelsPage() {
                     </select>
                   </div>
                 </div>
+                )}
 
-                {/* Narrator Card */}
+                {/* Veo controls */}
+                {engineTab === "veo" && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Mode</label>
+                      <select
+                        value={veoMode}
+                        onChange={(e) => setVeoMode(e.target.value as "single" | "perScene")}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading}
+                      >
+                        <option value="single" className="bg-[#030712]">Single Video</option>
+                        <option value="perScene" className="bg-[#030712]">Per Scene</option>
+                      </select>
+                    </div>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                        {veoMode === "perScene" ? "Seconds per scene" : "Clip length"}
+                      </label>
+                      <select
+                        value={veoDuration}
+                        onChange={(e) => {
+                          const v = Number(e.target.value) as 4 | 6 | 8;
+                          setVeoDuration(v);
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading || (veoResolution === "1080p")}
+                      >
+                        {veoResolution === "1080p" ? (
+                          <option value={8} className="bg-[#030712]">8 seconds{veoMode === "perScene" ? " per scene" : ""} (required for 1080p)</option>
+                        ) : (
+                          <>
+                            <option value={4} className="bg-[#030712]">4 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                            <option value={6} className="bg-[#030712]">6 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                            <option value={8} className="bg-[#030712]">8 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                          </>
+                        )}
+                      </select>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        {veoMode === "perScene" ? (
+                          <>
+                            Each generated scene runs for this long. Approximate final length:{" "}
+                            <span className="text-slate-400 font-medium">
+                              {veoDuration * veoNumScenes}s
+                            </span>{" "}
+                            ({veoNumScenes} scene{veoNumScenes !== 1 ? "s" : ""} × {veoDuration}s).
+                          </>
+                        ) : (
+                          <>Single mode uses one Veo call; the whole clip is this long (not multiplied by prompt structure).</>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Resolution</label>
+                      <select
+                        value={veoResolution}
+                        onChange={(e) => {
+                          const r = e.target.value as "720p" | "1080p";
+                          setVeoResolution(r);
+                          if (r === "1080p") setVeoDuration(8);
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading}
+                      >
+                        <option value="720p" className="bg-[#030712]">720p</option>
+                        <option value="1080p" className="bg-[#030712]">1080p (8s only)</option>
+                      </select>
+                    </div>
+                    {veoMode === "single" ? (
+                      <div className="space-y-3">
+                        <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Prompt structure</label>
+                        <select
+                          value={singlePromptScenes}
+                          onChange={(e) => setSinglePromptScenes(Number(e.target.value) as 1 | 2)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                          disabled={loading}
+                        >
+                          <option value={1} className="bg-[#030712]">1 continuous scene (one Veo call)</option>
+                          <option value={2} className="bg-[#030712]">2 scenes + camera cut in one prompt (one Veo call)</option>
+                        </select>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          This only changes how Gemini writes a single Veo prompt — still one generated video.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                          <Layers className="w-4 h-4" />
+                          Scenes
+                        </label>
+                        <select
+                          value={veoNumScenes}
+                          onChange={(e) => setVeoNumScenes(Number(e.target.value))}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                          disabled={loading}
+                        >
+                          <option value={1} className="bg-[#030712]">1 Scene</option>
+                          <option value={2} className="bg-[#030712]">2 Scenes</option>
+                          <option value={3} className="bg-[#030712]">3 Scenes</option>
+                        </select>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Scene count multiplies with seconds-per-scene for total run time (e.g. 3 × 8s ≈ 24s).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
                 <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xl font-bold flex items-center gap-2">
@@ -277,6 +479,11 @@ export default function ReelsPage() {
                           <option key={e} value={e} className="bg-[#030712]">{humanizeEmotion(e)}</option>
                         ))}
                       </select>
+                      {engineTab === "veo" && (
+                        <p className="text-xs text-slate-500">
+                          Veo sends a concrete voice mood to the server. &quot;Auto&quot; is mapped to <strong>neutral</strong> before the API call.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -391,24 +598,29 @@ export default function ReelsPage() {
                   className={`w-full py-5 rounded-2xl text-xl font-bold transition-all shadow-xl flex items-center justify-center gap-3 ${
                     loading 
                       ? "bg-white/10 text-slate-500 cursor-not-allowed" 
-                      : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:scale-[1.02] shadow-indigo-500/20"
+                      : engineTab === "veo"
+                        ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:scale-[1.02] shadow-violet-500/20"
+                        : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:scale-[1.02] shadow-indigo-500/20"
                   }`}
                 >
                   {loading ? (
                     <>
                       <Loader2 className="w-6 h-6 animate-spin" />
-                      Generating scenes for visual consistency, this may take a few minutes...
+                      {engineTab === "veo"
+                        ? "Veo + captions in progress — this may take several minutes..."
+                        : "Generating scenes for visual consistency, this may take a few minutes..."}
                     </>
                   ) : (
                     <>
                       <Play className="w-6 h-6" />
-                      Generate Video
+                      {engineTab === "veo" ? "Generate with Veo" : "Generate Video"}
                     </>
                   )}
                 </button>
               </form>
 
-              {/* Advanced Testing Section */}
+              {/* Advanced Testing Section — Seedance only */}
+              {engineTab === "seedance" && (
               <div className="pt-8 border-t border-white/5">
                 <div className="flex items-center gap-2 mb-4">
                   <RefreshCw className="w-4 h-4 text-emerald-400" />
@@ -480,9 +692,9 @@ export default function ReelsPage() {
                   </div>
                 </div>
               </div>
-            </div>
+              )}
 
-            {/* Right Column: Preview & Logs (5 cols) */}
+            </div>
             <div className="lg:col-span-5 space-y-8">
               {/* 9:16 Preview Box */}
               <div className="bg-black border border-white/10 rounded-[3rem] p-8 pb-12 shadow-2xl relative overflow-hidden group">
@@ -490,8 +702,12 @@ export default function ReelsPage() {
                 <div className="absolute inset-0 bg-indigo-600/5 opacity-0 group-hover:opacity-100 transition-opacity blur-[100px] pointer-events-none"></div>
                 
                 <div className="relative z-20 flex flex-col items-center">
-                  <div className="text-xs font-bold text-slate-500 uppercase tracking-[0.3em] mb-8">Live Caption Preview</div>
-                  
+                  <div className={`text-xs font-bold text-slate-500 uppercase tracking-[0.3em] ${engineTab === "seedance" ? "mb-8" : "mb-2"}`}>Live Caption Preview</div>
+                  {engineTab === "veo" && (
+                    <p className="text-[10px] text-amber-500/90 text-center max-w-[240px] mb-6 leading-relaxed">
+                      WYSIWYG note: this preview uses 480×854 math. Veo outputs are 720p or 1080p — vertical caption position may differ slightly until a future preview update.
+                    </p>
+                  )}
                   <style dangerouslySetInnerHTML={{__html: `
                     @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');
                   `}} />
