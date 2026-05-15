@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { supabase } from '@/lib/supabase';
+import { STORAGE_BUCKET, videosStoragePath } from '@/lib/storage-buckets';
 
 // Allow up to 10 minutes for this route (LLM + generation + whisper + rendi)
 export const maxDuration = 600;
@@ -472,10 +473,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     console.log('[Step 5] Upload ASS to Supabase...');
     // Step 5: Upload ASS to Supabase
-    const srtFilename = `captions_${Date.now()}.ass`;
+    const srtFilename = videosStoragePath(`captions_${Date.now()}.ass`);
     const { error: uploadError } = await supabase
       .storage
-      .from('videos')
+      .from(STORAGE_BUCKET)
       .upload(srtFilename, assContent, {
         contentType: 'text/plain',
         cacheControl: '3600',
@@ -487,7 +488,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error('Failed to upload captions to storage');
     }
 
-    const { data: { publicUrl: srtUrl } } = supabase.storage.from('videos').getPublicUrl(srtFilename);
+    const { data: { publicUrl: srtUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(srtFilename);
 
     console.log('[Step 6] Rendi FFmpeg Processing (2-step)...');
     // Step 6: Rendi API — single command endpoint (free plan compatible)
@@ -652,10 +653,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
     const videoBuffer = await videoResponse.arrayBuffer();
 
-    const finalFilename = `reels_${Date.now()}.mp4`;
+    const finalFilename = videosStoragePath(`reels_${Date.now()}.mp4`);
     const { error: finalUploadError } = await supabase
       .storage
-      .from('videos')
+      .from(STORAGE_BUCKET)
       .upload(finalFilename, videoBuffer, {
         contentType: 'video/mp4',
         cacheControl: '3600',
@@ -666,12 +667,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error(`Failed to upload final video to Supabase: ${finalUploadError.message}`);
     }
 
-    const { data: { publicUrl: finalVideoUrl } } = supabase.storage.from('videos').getPublicUrl(finalFilename);
+    const { data: { publicUrl: finalVideoUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(finalFilename);
 
     // Step 8: Cleanup intermediate SRT file
     console.log('[Step 8] Cleaning up...');
     try {
-      await supabase.storage.from('videos').remove([srtFilename]);
+      await supabase.storage.from(STORAGE_BUCKET).remove([srtFilename]);
     } catch (cleanupErr) {
       console.warn('Cleanup warning (non-fatal):', cleanupErr);
     }

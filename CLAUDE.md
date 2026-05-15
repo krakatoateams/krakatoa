@@ -58,7 +58,7 @@ The pipeline in `/app/api/generate/route.ts` runs a complex, automated sequence 
 - **Input normalization (CRITICAL):** Before video concatenation, every input stream is normalized via `fps=30`, `scale=W:H:force_original_aspect_ratio=decrease`, `pad`, `setsar=1`, and `format=yuv420p`. Without this, Seedance outputs with mismatched fps/SAR cause the `concat` filter to silently produce broken output where only the first scene plays. The concat output is re-encoded with `libx264 -crf 20 -pix_fmt yuv420p`.
 - **Merging:** A Rendi command merges the combined video, combined audio, `.ass` subtitles, and (optionally) an attached Google Font `.ttf` into an intermediate `merged.mkv`.
 - **Burning:** A final Rendi command burns subtitles directly from the original `.ass` URL using `-vf "subtitles={{in_srt}}"` (not from the embedded mkv subtitle stream — that path was unreliable for multi-scene videos), producing `final_video.mp4`.
-- **Storage:** Final video is downloaded and uploaded to the Supabase `videos` bucket, and a public URL is returned to the client.
+- **Storage:** Final video is uploaded to `{bucket}/videos/` (default bucket `krakatoa`). Product Photo uses `{bucket}/photos/` — never mixed under `videos/`.
 
 ## Developer Guidelines
 1. **Design Philosophy**:

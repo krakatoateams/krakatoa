@@ -45,7 +45,12 @@ NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-You'll also need a public Supabase Storage bucket named `videos` for generated `.ass` and `.mp4` files.
+Create one **public** Supabase Storage bucket (default name: `krakatoa`, or set `SUPABASE_STORAGE_BUCKET` in `.env.local`). Use top-level folders per feature:
+
+| Folder | Feature |
+| --- | --- |
+| `videos/` | ReelsGen — `.ass` captions and final `.mp4` files |
+| `photos/` | Product Photo — uploads and generated images (separate from `videos/`) |
 
 ### 3. Run the dev server
 
