@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { supabase } from '@/lib/supabase';
+import { STORAGE_BUCKET, videosStoragePath } from '@/lib/storage-buckets';
 
 // Allow up to 5 minutes for this route (WhisperX + Rendi polling)
 export const maxDuration = 300;
@@ -262,10 +263,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       assContent += `Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,(No speech detected)\n`;
     }
 
-    const srtFilename = `captions_${Date.now()}.ass`;
+    const srtFilename = videosStoragePath(`captions_${Date.now()}.ass`);
     const { error: uploadError } = await supabase
       .storage
-      .from('videos')
+      .from(STORAGE_BUCKET)
       .upload(srtFilename, assContent, {
         contentType: 'text/plain',
         cacheControl: '3600',
@@ -276,7 +277,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error(`Failed to upload captions: ${uploadError.message}`);
     }
 
-    const { data: { publicUrl: srtUrl } } = supabase.storage.from('videos').getPublicUrl(srtFilename);
+    const { data: { publicUrl: srtUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(srtFilename);
     console.log('[Test Step 4] SRT URL:', srtUrl);
 
     // Step 5a: Rendi - Merge video + audio and embed font into an MKV
@@ -328,10 +329,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
     const videoBuffer = await videoResponse.arrayBuffer();
     
-    const finalFilename = `reels_${Date.now()}.mp4`;
+    const finalFilename = videosStoragePath(`reels_${Date.now()}.mp4`);
     const { error: finalUploadError } = await supabase
       .storage
-      .from('videos')
+      .from(STORAGE_BUCKET)
       .upload(finalFilename, videoBuffer, {
         contentType: 'video/mp4',
         cacheControl: '3600',
@@ -342,13 +343,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error(`Failed to upload final video to Supabase: ${finalUploadError.message}`);
     }
 
-    const { data: { publicUrl: finalVideoUrl } } = supabase.storage.from('videos').getPublicUrl(finalFilename);
+    const { data: { publicUrl: finalVideoUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(finalFilename);
     console.log('[Test Step 6] Final Supabase URL:', finalVideoUrl);
 
     // Step 7: Cleanup intermediate SRT file
     console.log('[Test Step 7] Cleaning up intermediate files...');
     try {
-      await supabase.storage.from('videos').remove([srtFilename]);
+      await supabase.storage.from(STORAGE_BUCKET).remove([srtFilename]);
     } catch (cleanupErr) {
       console.warn('Cleanup warning (non-fatal):', cleanupErr);
     }
