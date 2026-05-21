@@ -1,0 +1,832 @@
+"use client";
+
+import { useState } from "react";
+import { Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile } from "lucide-react";
+
+// MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
+// narration first so the default lands on a strong storytelling voice.
+const ENGLISH_VOICES = [
+  "English_CaptivatingStoryteller",
+  "English_WiseScholar",
+  "English_Wiselady",
+  "English_Steadymentor",
+  "English_MaturePartner",
+  "English_Trustworth_Man",
+  "English_Deep-VoicedGentleman",
+  "English_ManWithDeepVoice",
+  "English_Gentle-voiced_man",
+  "English_Diligent_Man",
+  "English_PatientMan",
+  "English_DecentYoungMan",
+  "English_ReservedYoungMan",
+  "English_FriendlyPerson",
+  "English_MatureBoss",
+  "English_BossyLeader",
+  "English_Debator",
+  "English_ImposingManner",
+  "English_PassionateWarrior",
+  "English_Comedian",
+  "English_Jovialman",
+  "English_Aussie_Bloke",
+  "English_ConfidentWoman",
+  "English_AssertiveQueen",
+  "English_Graceful_Lady",
+  "English_CalmWoman",
+  "English_SereneWoman",
+  "English_SentimentalLady",
+  "English_StressedLady",
+  "English_LovelyGirl",
+  "English_Kind-heartedGirl",
+  "English_Soft-spokenGirl",
+  "English_PlayfulGirl",
+  "English_WhimsicalGirl",
+  "English_Whispering_girl",
+  "English_UpsetGirl",
+  "English_SadTeen",
+  "English_Strong-WilledBoy",
+  "English_AnimeCharacter",
+];
+
+const EMOTIONS = ["auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "neutral"];
+
+const humanizeVoice = (id: string) =>
+  id.replace(/^English_/, '')
+    .replace(/[_-]/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase());
+
+const humanizeEmotion = (e: string) => e === "auto" ? "Auto (let AI decide)" : e.charAt(0).toUpperCase() + e.slice(1);
+
+export default function ReelsPage() {
+  const [theme, setTheme] = useState("");
+  const [numScenes, setNumScenes] = useState(1);
+  const [durationPerScene, setDurationPerScene] = useState(5);
+  const [resolution, setResolution] = useState("480p");
+  const [voiceId, setVoiceId] = useState("English_CaptivatingStoryteller");
+  const [emotion, setEmotion] = useState("auto");
+  const [loading, setLoading] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  
+  const [testAudioPredictionId, setTestAudioPredictionId] = useState("g99vpsrf3hrmr0cy1jvtwy72cw");
+  const [testVideoPredictionId, setTestVideoPredictionId] = useState("qxhe8d8dqhrmr0cy1jvryg745r");
+  
+  const [captionStyle, setCaptionStyle] = useState({
+    fontname: "Poppins",
+    fontsize: 60,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#FFFF00",
+    outlineColor: "#000000",
+    outlineThickness: 4,
+    marginV: 15,
+    highlightOnly: true
+  });
+
+  const [engineTab, setEngineTab] = useState<"seedance" | "veo">("seedance");
+  const [veoMode, setVeoMode] = useState<"single" | "perScene">("single");
+  const [veoDuration, setVeoDuration] = useState<4 | 6 | 8>(6);
+  const [veoResolution, setVeoResolution] = useState<"720p" | "1080p">("720p");
+  const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
+  const [veoNumScenes, setVeoNumScenes] = useState(1);
+
+  const resolveEmotionForVeo = () => (emotion === "auto" ? "neutral" : emotion);
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!theme.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setLogs(["Starting generation pipeline..."]);
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          theme,
+          numScenes: Number(numScenes),
+          durationPerScene: Number(durationPerScene),
+          resolution,
+          voiceId,
+          emotion,
+          captionStyle
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate video");
+      }
+
+      setVideoUrl(data.videoUrl);
+      setLogs((prev) => [...prev, "Video generated successfully!"]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVeoGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!theme.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setLogs(["Starting Veo generation pipeline..."]);
+
+    try {
+      if (veoResolution === "1080p" && veoDuration !== 8) {
+        throw new Error("1080p requires 8 second duration.");
+      }
+      const emotionForApi = resolveEmotionForVeo();
+      const payload: Record<string, unknown> = {
+        theme,
+        captionStyle,
+        voiceId,
+        emotion: emotionForApi,
+        duration: veoDuration,
+        resolution: veoResolution,
+        mode: veoMode === "single" ? "single" : "perScene",
+      };
+      if (veoMode === "single") {
+        payload.singlePromptScenes = singlePromptScenes;
+      } else {
+        payload.numScenes = Number(veoNumScenes);
+      }
+
+      const response = await fetch("/api/generate-veo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate video");
+      }
+      setVideoUrl(data.videoUrl);
+      setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onFormSubmit = (e: React.FormEvent) => {
+    if (engineTab === "seedance") {
+      void handleGenerate(e);
+    } else {
+      void handleVeoGenerate(e);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-[#030712] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+      {/* Background Glows */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
+      </div>
+
+      <main className="relative z-10 flex-grow py-12 px-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header Section */}
+          <div className="mb-12">
+            <h1 className="text-4xl md:text-5xl font-black mb-4 tracking-tight">Reels Generator</h1>
+            <p className="text-slate-400 text-lg max-w-2xl">
+              Turn your ideas into viral vertical content. Our AI handles the script, scenes, narration, and captions.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setEngineTab("seedance")}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
+                  engineTab === "seedance"
+                    ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20"
+                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                Seedance
+              </button>
+              <button
+                type="button"
+                onClick={() => setEngineTab("veo")}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
+                  engineTab === "veo"
+                    ? "bg-violet-600 border-violet-500 text-white shadow-lg shadow-violet-500/20"
+                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                Veo
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+            {/* Left Column: Form Controls (7 cols) */}
+            <div className="lg:col-span-7 space-y-8">
+              <form onSubmit={onFormSubmit} className="space-y-8">
+                {/* Theme Input */}
+                <div className="space-y-4">
+                  <label className="block text-sm font-bold uppercase tracking-widest text-indigo-400">Video Theme</label>
+                  <div className="relative group">
+                    <input
+                      type="text"
+                      value={theme}
+                      onChange={(e) => setTheme(e.target.value)}
+                      placeholder="e.g., The history of space exploration in 60 seconds"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
+                      disabled={loading}
+                    />
+                    <Sparkles className="absolute right-5 top-5 w-6 h-6 text-indigo-500/50 group-hover:text-indigo-400 transition-colors" />
+                  </div>
+                </div>
+
+                {/* Grid Settings — Seedance */}
+                {engineTab === "seedance" && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Layers className="w-4 h-4" />
+                      Scenes
+                    </label>
+                    <select 
+                      value={numScenes} 
+                      onChange={(e) => setNumScenes(Number(e.target.value))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value={1} className="bg-[#030712]">1 Scene</option>
+                      <option value={2} className="bg-[#030712]">2 Scenes</option>
+                      <option value={3} className="bg-[#030712]">3 Scenes</option>
+                    </select>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Clock className="w-4 h-4" />
+                      Duration/Scene
+                    </label>
+                    <select 
+                      value={durationPerScene} 
+                      onChange={(e) => setDurationPerScene(Number(e.target.value))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value={5} className="bg-[#030712]">5 Seconds</option>
+                      <option value={10} className="bg-[#030712]">10 Seconds</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                      <Monitor className="w-4 h-4" />
+                      Resolution
+                    </label>
+                    <select 
+                      value={resolution} 
+                      onChange={(e) => setResolution(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+                      disabled={loading}
+                    >
+                      <option value="480p" className="bg-[#030712]">480p (Fast)</option>
+                      <option value="720p" className="bg-[#030712]">720p (HD)</option>
+                    </select>
+                  </div>
+                </div>
+                )}
+
+                {/* Veo controls */}
+                {engineTab === "veo" && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Mode</label>
+                      <select
+                        value={veoMode}
+                        onChange={(e) => setVeoMode(e.target.value as "single" | "perScene")}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading}
+                      >
+                        <option value="single" className="bg-[#030712]">Single Video</option>
+                        <option value="perScene" className="bg-[#030712]">Per Scene</option>
+                      </select>
+                    </div>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                        {veoMode === "perScene" ? "Seconds per scene" : "Clip length"}
+                      </label>
+                      <select
+                        value={veoDuration}
+                        onChange={(e) => {
+                          const v = Number(e.target.value) as 4 | 6 | 8;
+                          setVeoDuration(v);
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading || (veoResolution === "1080p")}
+                      >
+                        {veoResolution === "1080p" ? (
+                          <option value={8} className="bg-[#030712]">8 seconds{veoMode === "perScene" ? " per scene" : ""} (required for 1080p)</option>
+                        ) : (
+                          <>
+                            <option value={4} className="bg-[#030712]">4 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                            <option value={6} className="bg-[#030712]">6 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                            <option value={8} className="bg-[#030712]">8 seconds{veoMode === "perScene" ? " per scene" : ""}</option>
+                          </>
+                        )}
+                      </select>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        {veoMode === "perScene" ? (
+                          <>
+                            Each generated scene runs for this long. Approximate final length:{" "}
+                            <span className="text-slate-400 font-medium">
+                              {veoDuration * veoNumScenes}s
+                            </span>{" "}
+                            ({veoNumScenes} scene{veoNumScenes !== 1 ? "s" : ""} × {veoDuration}s).
+                          </>
+                        ) : (
+                          <>Single mode uses one Veo call; the whole clip is this long (not multiplied by prompt structure).</>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Resolution</label>
+                      <select
+                        value={veoResolution}
+                        onChange={(e) => {
+                          const r = e.target.value as "720p" | "1080p";
+                          setVeoResolution(r);
+                          if (r === "1080p") setVeoDuration(8);
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                        disabled={loading}
+                      >
+                        <option value="720p" className="bg-[#030712]">720p</option>
+                        <option value="1080p" className="bg-[#030712]">1080p (8s only)</option>
+                      </select>
+                    </div>
+                    {veoMode === "single" ? (
+                      <div className="space-y-3">
+                        <label className="flex items-center gap-2 text-sm font-bold text-slate-400">Prompt structure</label>
+                        <select
+                          value={singlePromptScenes}
+                          onChange={(e) => setSinglePromptScenes(Number(e.target.value) as 1 | 2)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                          disabled={loading}
+                        >
+                          <option value={1} className="bg-[#030712]">1 continuous scene (one Veo call)</option>
+                          <option value={2} className="bg-[#030712]">2 scenes + camera cut in one prompt (one Veo call)</option>
+                        </select>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          This only changes how Gemini writes a single Veo prompt — still one generated video.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <label className="flex items-center gap-2 text-sm font-bold text-slate-400">
+                          <Layers className="w-4 h-4" />
+                          Scenes
+                        </label>
+                        <select
+                          value={veoNumScenes}
+                          onChange={(e) => setVeoNumScenes(Number(e.target.value))}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-violet-500/50 cursor-pointer"
+                          disabled={loading}
+                        >
+                          <option value={1} className="bg-[#030712]">1 Scene</option>
+                          <option value={2} className="bg-[#030712]">2 Scenes</option>
+                          <option value={3} className="bg-[#030712]">3 Scenes</option>
+                        </select>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Scene count multiplies with seconds-per-scene for total run time (e.g. 3 × 8s ≈ 24s).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
+                <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                      <Mic className="w-5 h-5 text-indigo-400" />
+                      Narrator
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                        <Mic className="w-3.5 h-3.5" />
+                        Voice
+                      </label>
+                      <select
+                        value={voiceId}
+                        onChange={(e) => setVoiceId(e.target.value)}
+                        disabled={loading}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                      >
+                        {ENGLISH_VOICES.map((v) => (
+                          <option key={v} value={v} className="bg-[#030712]">{humanizeVoice(v)}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+                        <Smile className="w-3.5 h-3.5" />
+                        Emotion
+                      </label>
+                      <select
+                        value={emotion}
+                        onChange={(e) => setEmotion(e.target.value)}
+                        disabled={loading}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                      >
+                        {EMOTIONS.map((e) => (
+                          <option key={e} value={e} className="bg-[#030712]">{humanizeEmotion(e)}</option>
+                        ))}
+                      </select>
+                      {engineTab === "veo" && (
+                        <p className="text-xs text-slate-500">
+                          Veo sends a concrete voice mood to the server. &quot;Auto&quot; is mapped to <strong>neutral</strong> before the API call.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Caption Styler Card */}
+                <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-8">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                      <Settings className="w-5 h-5 text-indigo-400" />
+                      Caption Styler
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Font Family</label>
+                        <select 
+                          value={captionStyle.fontname} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, fontname: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                        >
+                          <option value="Arial" className="bg-[#030712]">Arial</option>
+                          <option value="Poppins" className="bg-[#030712]">Poppins</option>
+                          <option value="Montserrat" className="bg-[#030712]">Montserrat</option>
+                          <option value="Bangers" className="bg-[#030712]">Bangers</option>
+                        </select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Font Size</label>
+                        <input 
+                          type="number" 
+                          value={captionStyle.fontsize} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, fontsize: Number(e.target.value)})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Text Color</label>
+                          <div className="flex items-center gap-2 p-1.5 bg-white/5 border border-white/10 rounded-xl">
+                            <input 
+                              type="color" 
+                              value={captionStyle.highlightColor} 
+                              onChange={(e) => setCaptionStyle({...captionStyle, highlightColor: e.target.value})}
+                              className="w-10 h-10 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden"
+                            />
+                            <span className="text-xs font-mono">{captionStyle.highlightColor}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Outline</label>
+                          <div className="flex items-center gap-2 p-1.5 bg-white/5 border border-white/10 rounded-xl">
+                            <input 
+                              type="color" 
+                              value={captionStyle.outlineColor} 
+                              onChange={(e) => setCaptionStyle({...captionStyle, outlineColor: e.target.value})}
+                              className="w-10 h-10 bg-transparent border-none cursor-pointer rounded-lg overflow-hidden"
+                            />
+                            <span className="text-xs font-mono">{captionStyle.outlineColor}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Outline Thickness</label>
+                        <input 
+                          type="number" 
+                          value={captionStyle.outlineThickness} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, outlineThickness: Number(e.target.value)})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Vertical Position</label>
+                          <span className="text-xs font-bold text-indigo-400">{captionStyle.marginV}%</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0" max="100" 
+                          value={captionStyle.marginV} 
+                          onChange={(e) => setCaptionStyle({...captionStyle, marginV: Number(e.target.value)})}
+                          className="w-full accent-indigo-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="highlightOnly"
+                          checked={captionStyle.highlightOnly}
+                          onChange={(e) => setCaptionStyle({...captionStyle, highlightOnly: e.target.checked})}
+                          className="w-5 h-5 rounded border-white/10 bg-white/5 accent-indigo-600 cursor-pointer"
+                        />
+                        <label htmlFor="highlightOnly" className="text-sm font-bold text-slate-400 cursor-pointer select-none">
+                          Highlight Only Mode
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className={`w-full py-5 rounded-2xl text-xl font-bold transition-all shadow-xl flex items-center justify-center gap-3 ${
+                    loading 
+                      ? "bg-white/10 text-slate-500 cursor-not-allowed" 
+                      : engineTab === "veo"
+                        ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:scale-[1.02] shadow-violet-500/20"
+                        : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:scale-[1.02] shadow-indigo-500/20"
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      {engineTab === "veo"
+                        ? "Veo + captions in progress — this may take several minutes..."
+                        : "Generating scenes for visual consistency, this may take a few minutes..."}
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-6 h-6" />
+                      {engineTab === "veo" ? "Generate with Veo" : "Generate Video"}
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Advanced Testing Section — Seedance only */}
+              {engineTab === "seedance" && (
+              <div className="pt-8 border-t border-white/5">
+                <div className="flex items-center gap-2 mb-4">
+                  <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Dev Pipeline Testing</h4>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col gap-6">
+                  <div className="max-w-full">
+                    <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      Test the Whisper + Rendi stitching pipeline instantly using pre-generated assets from Replicate prediction IDs.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Audio Prediction ID</label>
+                        <input 
+                          type="text" 
+                          value={testAudioPredictionId} 
+                          onChange={(e) => setTestAudioPredictionId(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-sm font-mono"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Video Prediction ID</label>
+                        <input 
+                          type="text" 
+                          value={testVideoPredictionId} 
+                          onChange={(e) => setTestVideoPredictionId(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button 
+                      type="button"
+                      onClick={async () => {
+                        if (loading) return;
+                        setLoading(true);
+                        setError(null);
+                        setVideoUrl(null);
+                        setLogs(["Starting test pipeline (Fetching Replicate Outputs -> Whisper -> Rendi)..."]);
+                        try {
+                          const response = await fetch("/api/test-stitch", { 
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ 
+                              captionStyle,
+                              audioPredictionId: testAudioPredictionId,
+                              videoPredictionId: testVideoPredictionId
+                            })
+                          });
+                          const data = await response.json();
+                          if (!response.ok) throw new Error(data.error || "Failed to test pipeline");
+                          setVideoUrl(data.videoUrl);
+                          setLogs((prev) => [...prev, "Test pipeline completed successfully!"]);
+                        } catch (err: unknown) {
+                          const message = err instanceof Error ? err.message : "An unexpected error occurred";
+                          setError(message);
+                          setLogs((prev) => [...prev, `Error: ${message}`]);
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading}
+                      className="px-8 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/20 transition-all font-bold text-sm flex items-center justify-center gap-2 w-full md:w-auto"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                      Run Stitching Test
+                    </button>
+                  </div>
+                </div>
+              </div>
+              )}
+
+            </div>
+            <div className="lg:col-span-5 space-y-8">
+              {/* 9:16 Preview Box */}
+              <div className="bg-black border border-white/10 rounded-[3rem] p-8 pb-12 shadow-2xl relative overflow-hidden group">
+                <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none"></div>
+                <div className="absolute inset-0 bg-indigo-600/5 opacity-0 group-hover:opacity-100 transition-opacity blur-[100px] pointer-events-none"></div>
+                
+                <div className="relative z-20 flex flex-col items-center">
+                  <div className={`text-xs font-bold text-slate-500 uppercase tracking-[0.3em] ${engineTab === "seedance" ? "mb-8" : "mb-2"}`}>Live Caption Preview</div>
+                  {engineTab === "veo" && (
+                    <p className="text-[10px] text-amber-500/90 text-center max-w-[240px] mb-6 leading-relaxed">
+                      WYSIWYG note: this preview uses 480×854 math. Veo outputs are 720p or 1080p — vertical caption position may differ slightly until a future preview update.
+                    </p>
+                  )}
+                  <style dangerouslySetInnerHTML={{__html: `
+                    @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');
+                  `}} />
+                  {(() => {
+                    const FONT_METRIC_SCALES: Record<string, number> = {
+                      "Arial": 0.87,
+                      "Poppins": 0.86,
+                      "Montserrat": 0.86,
+                      "Bangers": 0.65
+                    };
+                    const DESCENDER_OFFSET_SCALES: Record<string, number> = {
+                      "Arial": 0.08,
+                      "Poppins": 0.08,
+                      "Montserrat": 0.08,
+                      "Bangers": 0.12
+                    };
+                    
+                    const metricScale = FONT_METRIC_SCALES[captionStyle.fontname] || 0.85;
+                    const offsetScale = DESCENDER_OFFSET_SCALES[captionStyle.fontname] || 0.08;
+
+                    return (
+                      <div className="w-[260px] aspect-[9/16] bg-slate-900 rounded-[2.5rem] border-[8px] border-white/10 overflow-hidden relative shadow-inner">
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60"></div>
+                        
+                        <div 
+                          className="absolute w-full left-0 px-4 flex justify-center pointer-events-none transition-all duration-300"
+                          style={{ 
+                            bottom: `calc(${captionStyle.marginV * (854 - captionStyle.fontsize * 1.5) / 854}% + ${captionStyle.fontsize * (260 / 480) * offsetScale}px)`,
+                          }}
+                        >
+                          <div 
+                            className="relative font-extrabold text-center leading-none uppercase tracking-tight"
+                            style={{ 
+                              fontFamily: `"${captionStyle.fontname}", sans-serif`, 
+                              fontSize: `${captionStyle.fontsize * (260 / 480) * metricScale}px`,
+                            }}
+                          >
+                            {/* Outline effect via multiple layers */}
+                            <div className="absolute inset-0 z-0" style={{
+                              WebkitTextStroke: `${captionStyle.outlineThickness * (260 / 480) * 1.5}px ${captionStyle.outlineColor}`,
+                              color: captionStyle.outlineColor,
+                            }}>
+                              BREATHTAKING
+                            </div>
+                            <div className="relative z-10" style={{ color: captionStyle.highlightColor }}>
+                              BREATHTAKING
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Mock UI Elements */}
+                        <div className="absolute bottom-10 right-4 flex flex-col gap-4">
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                          <div className="w-10 h-10 rounded-full bg-white/10 blur-[1px]"></div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Status / Results Card */}
+              <div className="space-y-6">
+                {error && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 flex items-start gap-4 animate-fade-in">
+                    <AlertCircle className="w-6 h-6 text-red-500 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-red-500">Pipeline Error</h4>
+                      <p className="text-sm text-red-500/80 mt-1">{error}</p>
+                    </div>
+                  </div>
+                )}
+
+                {videoUrl && (
+                  <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 space-y-6 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xl font-bold flex items-center gap-2">
+                        <Play className="w-5 h-5 text-emerald-400" />
+                        Final Result
+                      </h3>
+                      <a 
+                        href={videoUrl} 
+                        download 
+                        className="p-3 bg-white/5 hover:bg-indigo-600 rounded-xl transition-all"
+                        title="Download Video"
+                      >
+                        <Download className="w-5 h-5" />
+                      </a>
+                    </div>
+                    <div className="flex justify-center">
+                      <video 
+                        src={videoUrl} 
+                        controls 
+                        className="aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                      ></video>
+                    </div>
+                    <a 
+                      href={videoUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-4 bg-indigo-600 hover:bg-indigo-700 rounded-2xl font-bold transition-all"
+                    >
+                      <Download className="w-5 h-5" />
+                      Save to Gallery
+                    </a>
+                  </div>
+                )}
+
+                {/* Log Output */}
+                <div className="bg-black/40 border border-white/5 rounded-3xl p-6 font-mono text-[10px] md:text-xs">
+                  <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
+                    <span className="text-slate-500 uppercase tracking-widest font-bold">Process Logs</span>
+                    {loading && <div className="flex items-center gap-2 text-indigo-400 animate-pulse">
+                      <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
+                      Processing...
+                    </div>}
+                  </div>
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
+                    {logs.length === 0 ? (
+                      <div className="text-slate-700 italic">No process running.</div>
+                    ) : (
+                      logs.map((log, i) => (
+                        <div key={i} className="flex gap-3">
+                          <span className="text-slate-600">[{i+1}]</span>
+                          <span className={log.startsWith("Error") ? "text-red-400" : "text-slate-400"}>{log}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+

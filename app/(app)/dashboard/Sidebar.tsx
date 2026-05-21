@@ -1,0 +1,140 @@
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
+import {
+  Mountain,
+  Video,
+  Camera,
+  Zap,
+  CalendarClock,
+  CalendarDays,
+  LayoutDashboard,
+  LogOut,
+} from "lucide-react";
+
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ReactNode;
+}
+
+const SECTIONS: { title: string; items: NavItem[] }[] = [
+  {
+    title: "Overview",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Create",
+    items: [
+      { label: "ReelsGen", href: "/tools/reels", icon: <Video className="h-4 w-4" /> },
+      { label: "Product Photo", href: "/tools/photo", icon: <Camera className="h-4 w-4" /> },
+      { label: "IG Automation", href: "/tools/ig", icon: <Zap className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Post",
+    items: [
+      { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" /> },
+      { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" /> },
+    ],
+  },
+];
+
+export default function Sidebar() {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+
+  const isActive = (href: string) => {
+    // Routes whose subpaths are owned by another menu item must match exactly,
+    // otherwise multiple items would highlight at the same time
+    // (e.g. /tools/scheduler/calendar would also highlight "Schedule").
+    const exactOnly = href === "/dashboard" || href === "/tools/scheduler";
+    if (exactOnly) return pathname === href;
+    return pathname === href || pathname?.startsWith(`${href}/`);
+  };
+
+  return (
+    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-gray-800 bg-gray-950 sticky top-0">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600">
+          <Mountain className="h-4 w-4 text-white" />
+        </div>
+        <span className="text-base font-black tracking-tight text-white">Krakatoa</span>
+      </div>
+
+      {/* Nav sections */}
+      <nav className="flex-1 overflow-y-auto px-3 py-5">
+        {SECTIONS.map((section) => (
+          <div key={section.title} className="mb-6">
+            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+              {section.title}
+            </p>
+            <ul className="space-y-0.5">
+              {section.items.map((item) => {
+                const active = isActive(item.href);
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
+                        active
+                          ? "bg-violet-500/15 text-violet-300"
+                          : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                      }`}
+                    >
+                      <span className={active ? "text-violet-400" : "text-gray-500"}>
+                        {item.icon}
+                      </span>
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      {/* User profile */}
+      <div className="border-t border-gray-800 p-3">
+        {session?.user ? (
+          <div className="flex items-center gap-2.5 rounded-lg bg-gray-900 px-2.5 py-2">
+            {session.user.image ? (
+              <Image
+                src={session.user.image}
+                alt={session.user.name ?? "Profile"}
+                width={32}
+                height={32}
+                className="h-8 w-8 shrink-0 rounded-full"
+              />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-semibold text-violet-300">
+                {session.user.name?.[0]?.toUpperCase() ?? "?"}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-white">{session.user.name}</p>
+              <p className="truncate text-[10px] text-gray-500">{session.user.email}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: "/" })}
+              aria-label="Sign out"
+              className="shrink-0 cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="h-12 animate-pulse rounded-lg bg-gray-900" />
+        )}
+      </div>
+    </aside>
+  );
+}
