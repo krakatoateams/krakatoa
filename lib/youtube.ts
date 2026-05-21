@@ -45,12 +45,22 @@ export async function uploadToYouTube({
     process.env.GOOGLE_CLIENT_SECRET!,
   );
 
+  // Set refresh_token only — force the library to always fetch a fresh
+  // access token. Using the stored access_token directly causes 401s once
+  // it has expired (which happens after 1 hour). By omitting access_token
+  // and setting expiry_date to the past, getAccessToken() will always
+  // perform a refresh before the API call.
   auth.setCredentials({
-    access_token: accessToken,
-    // Providing the refresh_token lets the library silently renew an
-    // expired access token without any additional code on our side.
-    refresh_token: refreshToken || undefined,
+    refresh_token: refreshToken,
+    expiry_date: 1, // epoch past → library always refreshes
   });
+
+  // Explicitly refresh so we catch auth errors before streaming the video
+  const { token: freshToken } = await auth.getAccessToken();
+  if (!freshToken) {
+    throw new Error("Failed to obtain a fresh access token from Google. The user may need to re-authorise.");
+  }
+  console.log("[youtube] Fresh access token obtained:", freshToken.slice(0, 20) + "...");
 
   // ── Stream the video from storage ───────────────────────────────────────
   const videoRes = await fetch(videoUrl);

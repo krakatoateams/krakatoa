@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 
-// PATCH /api/posts/[id] — update scheduled_time (reschedule)
+// PATCH /api/posts/[id] — update scheduled_time and/or status
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -15,10 +15,10 @@ export async function PATCH(
 
   const { id } = params;
   const body = await req.json();
-  const { scheduled_time } = body as { scheduled_time: string };
+  const { scheduled_time, status } = body as { scheduled_time?: string; status?: string };
 
-  if (!scheduled_time) {
-    return NextResponse.json({ error: "scheduled_time is required." }, { status: 400 });
+  if (!scheduled_time && !status) {
+    return NextResponse.json({ error: "scheduled_time or status is required." }, { status: 400 });
   }
 
   // Confirm the post belongs to the requesting user before updating
@@ -42,9 +42,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
+  const updates: Record<string, string> = {};
+  if (scheduled_time) updates.scheduled_time = scheduled_time;
+  if (status) updates.status = status;
+
   const { data, error } = await supabaseServer
     .from("posts")
-    .update({ scheduled_time })
+    .update(updates)
     .eq("id", id)
     .select()
     .single();
