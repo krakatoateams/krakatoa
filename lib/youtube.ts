@@ -31,14 +31,8 @@ function mimeFromUrl(url: string): string {
  *
  * Returns the newly created YouTube video ID.
  */
-export async function uploadToYouTube({
-  videoUrl,
-  title,
-  description,
-  tags,
-  accessToken,
-  refreshToken,
-}: YouTubeUploadParams): Promise<string> {
+export async function uploadToYouTube(params: YouTubeUploadParams): Promise<string> {
+  const { videoUrl, title, description, tags, refreshToken } = params;
   // ── Auth client ─────────────────────────────────────────────────────────
   const auth = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID!,

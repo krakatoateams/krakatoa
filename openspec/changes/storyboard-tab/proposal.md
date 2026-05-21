@@ -27,3 +27,10 @@ ReelsGen today offers two long pipelines (Seedance multi-scene with captions and
 - **Shared:** `lib/storage-buckets.ts` (storyboard path helpers); possible small shared helper for Replicate output URL normalization (optional refactor vs inline copy).
 - **Dependencies:** Existing `REPLICATE_API_TOKEN`, Supabase service role + public URLs for inputs Replicate must fetch.
 - **Ops:** New routes need `maxDuration` tuned for image + video latency; no change to Product Photo `photos/` isolation rules.
+
+## Implementation Notes (Pre-Apply Review)
+
+- Seedance reference field must use `reference_images` (array of URIs), NOT the `image` field (first frame only)
+- GPT Image 2 prompt must explicitly instruct: generate 1 single image containing 6 panels in a grid layout, not 6 separate images
+- Video preview player in Storyboard tab must render 16:9 aspect ratio, not 9:16 like Seedance/Veo tabs
+- Both new routes must set `maxDuration = 600`
