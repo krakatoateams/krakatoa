@@ -4,7 +4,7 @@ ReelsGen today offers two long pipelines (Seedance multi-scene with captions and
 
 ## What Changes
 
-- Add a third engine tab **Storyboard** on the ReelsGen page (`app/tools/reels/page.tsx`) with theme input, storyboard generation, review/regenerate, and video creation with distinct loading states.
+- Add a third engine tab **Storyboard** on the ReelsGen page (`app/(app)/tools/reels/page.tsx`) with theme input, storyboard generation, review/regenerate, and video creation with distinct loading states.
 - Add **`POST /api/generate-storyboard`**: theme → Replicate `openai/gpt-image-2` → upload PNG to Supabase → `{ storyboardUrl }`.
 - Add **`POST /api/generate-storyboard-video`**: theme + `storyboardUrl` → Replicate `openai/gpt-5` (plain-text Seedance prompt) → Replicate `bytedance/seedance-2.0-fast` with `reference_images`, fixed 15s / 720p / 16:9 / `generate_audio: true` → upload MP4 → `{ videoUrl }`.
 - Extend storage helpers (or paths) for `videos/storyboard/` assets under the existing `krakatoa` bucket pattern.
@@ -22,7 +22,7 @@ ReelsGen today offers two long pipelines (Seedance multi-scene with captions and
 
 ## Impact
 
-- **Frontend:** `app/tools/reels/page.tsx` (tab state, conditional controls, handlers, 16:9 preview considerations vs current 9:16-centric player styling).
+- **Frontend:** `app/(app)/tools/reels/page.tsx` (tab state, conditional controls, handlers, 16:9 preview considerations vs current 9:16-centric player styling).
 - **Backend:** New route modules under `app/api/generate-storyboard/` and `app/api/generate-storyboard-video/` (or equivalent `route.ts` paths).
 - **Shared:** `lib/storage-buckets.ts` (storyboard path helpers); possible small shared helper for Replicate output URL normalization (optional refactor vs inline copy).
 - **Dependencies:** Existing `REPLICATE_API_TOKEN`, Supabase service role + public URLs for inputs Replicate must fetch.
