@@ -19,6 +19,8 @@ import {
   X,
   LayoutDashboard,
   CalendarDays,
+  ExternalLink,
+  ArrowRight,
 } from "lucide-react";
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -45,6 +47,31 @@ interface ScheduleForm {
 interface ToastState {
   type: "success" | "error";
   message: string;
+}
+
+// Task 1.1: Post interface
+interface Post {
+  id: string;
+  title: string;
+  status: "draft" | "scheduled" | "published" | "failed";
+  scheduled_time: string;
+  youtube_video_id?: string | null;
+  platform: string;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function fmtDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function fmtScheduledTime(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
 }
 
 // ─── Toast ───────────────────────────────────────────────────────────────────
@@ -182,19 +209,38 @@ interface UploadCardProps {
   uploadStatus: UploadStatus;
   uploadError: string | null;
   onFileSelect: (file: File | null) => void;
+  // Task 1.3: callback to report video duration to parent
+  onDurationChange: (duration: number | null) => void;
 }
 
-function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect }: UploadCardProps) {
+function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect, onDurationChange }: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
+  // Task 2.1: local object URL for instant preview
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [duration, setDuration] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
+
+  // Task 2.1: create / revoke object URL when file changes
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      setDuration(null);
+      onDurationChange(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, onDurationChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(false);
       const dropped = e.dataTransfer.files[0];
-      const ACCEPTED = ["video/mp4", "video/quicktime", "video/x-msvideo"];
-      if (dropped && ACCEPTED.includes(dropped.type)) onFileSelect(dropped);
+      if (dropped && ACCEPTED_TYPES.includes(dropped.type)) onFileSelect(dropped);
     },
     [onFileSelect],
   );
@@ -208,6 +254,14 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect }:
     e.stopPropagation();
     onFileSelect(null);
     if (inputRef.current) inputRef.current.value = "";
+  };
+
+  // Task 2.3: capture duration from video metadata
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const d = e.currentTarget.duration;
+    const valid = isFinite(d) ? d : null;
+    setDuration(valid);
+    onDurationChange(valid);
   };
 
   const dropZoneClass =
@@ -284,7 +338,24 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect }:
           )}
         </div>
 
-        <input ref={inputRef} type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
+        {/* Task 2.2 & 2.4: video preview + duration */}
+        {previewUrl && uploadStatus === "done" && (
+          <div className="mt-4 space-y-2">
+            <video
+              src={previewUrl}
+              controls
+              onLoadedMetadata={handleLoadedMetadata}
+              className="w-full max-h-[200px] rounded-lg border border-gray-700 bg-black"
+            />
+            {duration !== null && (
+              <p className="text-center text-xs text-gray-500">
+                Duration: {fmtDuration(duration)}
+              </p>
+            )}
+          </div>
+        )}
+
+        <input ref={inputRef} type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/avi,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
         <p className="mt-3 text-center text-xs text-gray-600">Max 60 seconds · MP4, MOV, AVI · Max 50MB</p>
       </div>
     </Card>
@@ -400,9 +471,11 @@ interface ScheduleCardProps {
   caption: string;
   onSuccess: () => void;
   onToast: (toast: ToastState) => void;
+  // Task 3.1: duration from parent for guard
+  videoDuration: number | null;
 }
 
-function ScheduleCard({ videoUrl, caption, onSuccess, onToast }: ScheduleCardProps) {
+function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: ScheduleCardProps) {
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState<ScheduleForm>({ title: "", tags: "", date: today, time: "18:00" });
   const [submitting, setSubmitting] = useState(false);
@@ -451,13 +524,25 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast }: ScheduleCardPro
     }
   };
 
-  const isReady = !!videoUrl && form.title.trim() && form.date && form.time;
+  // Task 3.3: duration guard included in isReady
+  const durationOk = videoDuration === null || videoDuration <= 60;
+  const isReady = !!videoUrl && !!form.title.trim() && !!form.date && !!form.time && durationOk;
 
   return (
     <Card className="sticky top-20">
       <CardHeader title="Schedule Post" icon={<Calendar className="h-4 w-4" />} />
 
       <div className="space-y-5 p-5">
+        {/* Task 3.2: duration warning banner */}
+        {videoDuration !== null && videoDuration > 60 && (
+          <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
+            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+            <p className="text-xs text-amber-400">
+              ⚠️ Video is {Math.round(videoDuration)}s — YouTube Shorts requires under 60s
+            </p>
+          </div>
+        )}
+
         {/* Platform */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-gray-400">Platform</label>
@@ -545,10 +630,100 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast }: ScheduleCardPro
 
         <p className="text-center text-xs text-gray-600">
           {!videoUrl ? "Upload a video to enable scheduling"
+            : videoDuration !== null && videoDuration > 60 ? "Shorten video to under 60s to schedule"
             : !form.title.trim() ? "Add a title to schedule"
             : ""}
         </p>
       </div>
+    </Card>
+  );
+}
+
+// ─── Recent Posts Card ────────────────────────────────────────────────────────
+
+const STATUS_CFG = {
+  scheduled: { label: "Scheduled", badge: "border-blue-500/30 bg-blue-500/10 text-blue-400", dot: "bg-blue-400" },
+  published: { label: "Published", badge: "border-green-500/30 bg-green-500/10 text-green-400", dot: "bg-green-400" },
+  failed:    { label: "Failed",    badge: "border-red-500/30 bg-red-500/10 text-red-400",     dot: "bg-red-400"   },
+  draft:     { label: "Draft",     badge: "border-gray-700 bg-gray-800 text-gray-400",        dot: "bg-gray-500"  },
+} as const;
+
+interface RecentPostsCardProps {
+  posts: Post[];
+  totalCount: number;
+  loading: boolean;
+  onRetry: (postId: string) => void;
+}
+
+function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCardProps) {
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+        <div className="flex items-center gap-2.5">
+          <span className="text-violet-400"><CalendarDays className="h-4 w-4" /></span>
+          <h2 className="text-sm font-semibold text-white">Your Recent Posts</h2>
+        </div>
+        {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-gray-600" />}
+      </div>
+
+      <div className="divide-y divide-gray-800/60">
+        {posts.length === 0 && !loading && (
+          <p className="px-5 py-6 text-center text-sm text-gray-600">
+            No posts yet. Schedule your first video above.
+          </p>
+        )}
+
+        {posts.map((post) => {
+          const cfg = STATUS_CFG[post.status] ?? STATUS_CFG.draft;
+          return (
+            <div key={post.id} className="flex items-center gap-3 px-5 py-3.5">
+              <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${cfg.dot}`} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">{post.title}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{fmtScheduledTime(post.scheduled_time)}</p>
+              </div>
+              <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${cfg.badge}`}>
+                {cfg.label}
+              </span>
+              {/* Task 5.5: View on YouTube for published */}
+              {post.status === "published" && post.youtube_video_id && (
+                <a
+                  href={`https://www.youtube.com/watch?v=${post.youtube_video_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="View on YouTube"
+                  className="shrink-0 cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              {/* Task 5.6: Retry for failed */}
+              {post.status === "failed" && (
+                <button
+                  type="button"
+                  onClick={() => onRetry(post.id)}
+                  className="shrink-0 cursor-pointer rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Task 5.8: "View all" link if more posts exist */}
+      {totalCount > 5 && (
+        <div className="border-t border-gray-800 px-5 py-3">
+          <Link
+            href="/tools/scheduler/calendar"
+            className="flex items-center gap-1.5 text-xs text-violet-400 transition-colors hover:text-violet-300"
+          >
+            View all in Calendar
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+      )}
     </Card>
   );
 }
@@ -562,13 +737,45 @@ export default function SchedulerDashboardPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Task 1.2: video duration state at page level
+  const [videoDuration, setVideoDuration] = useState<number | null>(null);
+  // Task 5.1: posts state
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [totalPostCount, setTotalPostCount] = useState(0);
+  const [postsLoading, setPostsLoading] = useState(false);
 
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+  // Task 5.1: fetch posts
+  const fetchPosts = useCallback(async () => {
+    setPostsLoading(true);
+    try {
+      const res = await fetch("/api/posts");
+      if (!res.ok) return;
+      const data = await res.json();
+      const all: Post[] = data.posts ?? [];
+      const sorted = [...all].sort(
+        (a, b) => new Date(b.scheduled_time).getTime() - new Date(a.scheduled_time).getTime(),
+      );
+      setTotalPostCount(sorted.length);
+      setPosts(sorted.slice(0, 5));
+    } finally {
+      setPostsLoading(false);
+    }
+  }, []);
+
+  // Task 5.1: fetch on mount; Task 5.2: auto-refresh every 30s
+  useEffect(() => {
+    fetchPosts();
+    const interval = setInterval(fetchPosts, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchPosts]);
 
   const handleFileSelect = useCallback(async (selected: File | null) => {
     setFile(selected);
     setVideoUrl(null);
     setUploadError(null);
+    setVideoDuration(null);
 
     if (!selected) { setUploadStatus("idle"); return; }
 
@@ -599,7 +806,23 @@ export default function SchedulerDashboardPage() {
     setUploadStatus("idle");
     setUploadError(null);
     setCaption("");
-  }, []);
+    setVideoDuration(null);
+    fetchPosts();
+  }, [fetchPosts]);
+
+  // Task 5.6: retry a failed post
+  const handleRetry = useCallback(async (postId: string) => {
+    try {
+      await fetch(`/api/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "scheduled" }),
+      });
+      fetchPosts();
+    } catch {
+      // silently ignore; cron will reflect the state
+    }
+  }, [fetchPosts]);
 
   return (
     <div className="min-h-screen bg-gray-950">
@@ -621,6 +844,7 @@ export default function SchedulerDashboardPage() {
               uploadStatus={uploadStatus}
               uploadError={uploadError}
               onFileSelect={handleFileSelect}
+              onDurationChange={setVideoDuration}
             />
             <DescriptionCard caption={caption} onCaptionChange={setCaption} />
           </div>
@@ -631,8 +855,19 @@ export default function SchedulerDashboardPage() {
               caption={caption}
               onSuccess={handleSuccess}
               onToast={setToast}
+              videoDuration={videoDuration}
             />
           </div>
+        </div>
+
+        {/* Task 5.9: Recent posts — full width below the grid */}
+        <div className="mt-6">
+          <RecentPostsCard
+            posts={posts}
+            totalCount={totalPostCount}
+            loading={postsLoading}
+            onRetry={handleRetry}
+          />
         </div>
       </main>
 

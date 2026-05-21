@@ -50,6 +50,15 @@ export async function GET(req: NextRequest) {
   let failed = 0;
 
   for (const post of posts) {
+    console.log(`[cron] Processing post:`, {
+      id: post.id,
+      title: post.title,
+      platform: post.platform,
+      user_id: post.user_id,
+      scheduled_time: post.scheduled_time,
+      video_url: post.video_url,
+    });
+
     try {
       // ── Get user's platform token ──────────────────────────────────────────
       const { data: token, error: tokenErr } = await supabaseServer
@@ -59,12 +68,24 @@ export async function GET(req: NextRequest) {
         .eq("platform", post.platform)
         .single();
 
-      if (tokenErr || !token) {
+      if (tokenErr) {
+        console.error(`[cron] Token lookup error for post ${post.id}:`, tokenErr.message);
+        throw new Error(`No ${post.platform} token for user ${post.user_id}: ${tokenErr.message}`);
+      }
+
+      if (!token) {
+        console.error(`[cron] No token row found for user ${post.user_id} / platform ${post.platform}`);
         throw new Error(
           `No ${post.platform} token for user ${post.user_id}. ` +
           "The user must sign in again to re-authorise.",
         );
       }
+
+      console.log(`[cron] Token retrieved:`, {
+        access_token_preview: token.access_token?.slice(0, 20) + "...",
+        has_refresh_token: !!token.refresh_token,
+        refresh_token_preview: token.refresh_token?.slice(0, 20) + "...",
+      });
 
       if (!token.refresh_token) {
         throw new Error(
@@ -76,6 +97,8 @@ export async function GET(req: NextRequest) {
       const tags = post.tags
         ? post.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
         : [];
+
+      console.log(`[cron] Calling uploadToYouTube for post ${post.id} with tags:`, tags);
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
       const youtubeId = await uploadToYouTube({
@@ -89,16 +112,24 @@ export async function GET(req: NextRequest) {
 
       console.log(`[cron] ✓ Post ${post.id} published → YouTube ID: ${youtubeId}`);
 
-      // ── Mark published ─────────────────────────────────────────────────────
+      // ── Mark published and store YouTube video ID ───────────────────────────
       await supabaseServer
         .from("posts")
-        .update({ status: "published" })
+        .update({ status: "published", youtube_video_id: youtubeId })
         .eq("id", post.id);
 
       published++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[cron] ✗ Post ${post.id} failed:`, message);
+      const stack = err instanceof Error ? err.stack : undefined;
+      console.error(`[cron] ✗ Post ${post.id} failed — message:`, message);
+      if (stack) console.error(`[cron] Stack trace:`, stack);
+      // Google API errors carry a .response.data field with the real reason
+      const anyErr = err as Record<string, unknown>;
+      if (anyErr?.response) {
+        console.error(`[cron] Google API response status:`, (anyErr.response as Record<string, unknown>)?.status);
+        console.error(`[cron] Google API response data:`, JSON.stringify((anyErr.response as Record<string, unknown>)?.data, null, 2));
+      }
 
       await supabaseServer
         .from("posts")

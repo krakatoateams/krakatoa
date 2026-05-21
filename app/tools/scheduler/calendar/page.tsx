@@ -26,6 +26,7 @@ interface Post {
   user_id: string;
   platform: string;
   video_url: string;
+  youtube_video_id?: string | null;
   title: string;
   description: string;
   tags: string;
@@ -289,7 +290,18 @@ function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
           )}
         </div>
 
-        <div className="border-t border-gray-800 p-5">
+        <div className="space-y-2 border-t border-gray-800 p-5">
+          {post.status === "published" && post.youtube_video_id && (
+            <a
+              href={`https://www.youtube.com/watch?v=${post.youtube_video_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500"
+            >
+              <YoutubeIcon className="h-4 w-4" />
+              View on YouTube
+            </a>
+          )}
           <a
             href={post.video_url}
             target="_blank"
@@ -297,7 +309,7 @@ function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
             className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
           >
             <ExternalLink className="h-4 w-4" />
-            View Video
+            View source video
           </a>
         </div>
       </div>
