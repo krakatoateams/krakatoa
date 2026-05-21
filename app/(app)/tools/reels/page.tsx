@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
+import { createClient } from "@supabase/supabase-js";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
+import { STORYBOARDS_TABLE } from "@/lib/storage-buckets";
 
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
@@ -59,6 +62,34 @@ const humanizeVoice = (id: string) =>
 
 const humanizeEmotion = (e: string) => e === "auto" ? "Auto (let AI decide)" : e.charAt(0).toUpperCase() + e.slice(1);
 
+type StoryboardRow = {
+  id: string;
+  created_at: string;
+  theme: string;
+  storyboard_url: string;
+  seedance_prompt: string;
+  scene_breakdown: unknown;
+  status: string | null;
+  video_url: string | null;
+  storyboard_style?: string | null;
+};
+
+const STORYBOARD_STYLE_OPTIONS = [
+  { value: "cinematic_sketch", label: "Cinematic Sketch" },
+  { value: "painterly_color", label: "Painterly Color" },
+  { value: "comic_book", label: "Comic Book" },
+  { value: "photorealistic", label: "Photorealistic" },
+  { value: "anime_manga", label: "Anime / Manga" },
+] as const;
+
+function storyboardStyleDisplayName(
+  style: string | null | undefined
+): string {
+  const key = style ?? "cinematic_sketch";
+  const found = STORYBOARD_STYLE_OPTIONS.find((o) => o.value === key);
+  return found?.label ?? "Cinematic Sketch";
+}
+
 export default function ReelsPage() {
   const [theme, setTheme] = useState("");
   const [numScenes, setNumScenes] = useState(1);
@@ -85,12 +116,67 @@ export default function ReelsPage() {
     highlightOnly: true
   });
 
-  const [engineTab, setEngineTab] = useState<"seedance" | "veo">("seedance");
+  const [engineTab, setEngineTab] = useState<"seedance" | "veo" | "storyboard">("seedance");
+  const [storyboardTheme, setStoryboardTheme] = useState("");
+  const [storyboardStyle, setStoryboardStyle] = useState<string>("cinematic_sketch");
+  const [storyboardStyleFilter, setStoryboardStyleFilter] = useState<string>("all");
+  const [storyboardUrl, setStoryboardUrl] = useState<string | null>(null);
+  const [storyboardId, setStoryboardId] = useState<string | null>(null);
+  const [storyboards, setStoryboards] = useState<StoryboardRow[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [highlightedVideoId, setHighlightedVideoId] = useState<string | null>(null);
+  const [videoJobStoryboardId, setVideoJobStoryboardId] = useState<string | null>(null);
+  const [storyboardLoading, setStoryboardLoading] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
+  /** Last successful `videoUrl` is 16:9 storyboard Seedance (not vertical Reels). */
+  const [resultIsStoryboardFormat, setResultIsStoryboardFormat] = useState(false);
   const [veoMode, setVeoMode] = useState<"single" | "perScene">("single");
   const [veoDuration, setVeoDuration] = useState<4 | 6 | 8>(6);
   const [veoResolution, setVeoResolution] = useState<"720p" | "1080p">("720p");
   const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
   const [veoNumScenes, setVeoNumScenes] = useState(1);
+
+  const fetchStoryboards = useCallback(async () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+    if (!url || !anon) return;
+    const client = createClient(url, anon);
+    const { data, error } = await client
+      .from(STORYBOARDS_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("[Storyboard gallery]", error);
+      return;
+    }
+    setStoryboards((data as StoryboardRow[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    void fetchStoryboards();
+  }, [fetchStoryboards]);
+
+  useEffect(() => {
+    if (engineTab !== "storyboard") setLightboxUrl(null);
+  }, [engineTab]);
+
+  const filteredStoryboardGalleryRows = useMemo(() => {
+    if (storyboardStyleFilter === "all") return storyboards;
+    return storyboards.filter(
+      (r) =>
+        (r.storyboard_style ?? "cinematic_sketch") === storyboardStyleFilter
+    );
+  }, [storyboards, storyboardStyleFilter]);
+
+  const scrollToVideoAndHighlight = (id: string) => {
+    setHighlightedVideoId(id);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`storyboard-video-${id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    window.setTimeout(() => setHighlightedVideoId(null), 4500);
+  };
 
   const resolveEmotionForVeo = () => (emotion === "auto" ? "neutral" : emotion);
 
@@ -101,6 +187,7 @@ export default function ReelsPage() {
     setLoading(true);
     setError(null);
     setVideoUrl(null);
+    setResultIsStoryboardFormat(false);
     setLogs(["Starting generation pipeline..."]);
 
     try {
@@ -142,6 +229,7 @@ export default function ReelsPage() {
     setLoading(true);
     setError(null);
     setVideoUrl(null);
+    setResultIsStoryboardFormat(false);
     setLogs(["Starting Veo generation pipeline..."]);
 
     try {
@@ -185,11 +273,91 @@ export default function ReelsPage() {
   };
 
   const onFormSubmit = (e: React.FormEvent) => {
+    if (engineTab === "storyboard") {
+      e.preventDefault();
+      return;
+    }
     if (engineTab === "seedance") {
       void handleGenerate(e);
     } else {
       void handleVeoGenerate(e);
     }
+  };
+
+  const handleGenerateStoryboard = async () => {
+    if (!storyboardTheme.trim()) return;
+    setStoryboardLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setResultIsStoryboardFormat(false);
+    setStoryboardId(null);
+    setLogs(["GPT-5: 6-scene breakdown + Seedance prompt, then storyboard image (GPT Image 2)..."]);
+    try {
+      const response = await fetch("/api/generate-storyboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme: storyboardTheme, storyboardStyle }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate storyboard");
+      }
+      setStoryboardUrl(
+        typeof data.storyboardUrl === "string" ? data.storyboardUrl : null
+      );
+      setStoryboardId(typeof data.storyboardId === "string" ? data.storyboardId : null);
+      setLogs((prev) => [...prev, "Storyboard saved — Create Video when ready."]);
+      await fetchStoryboards();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
+    } finally {
+      setStoryboardLoading(false);
+    }
+  };
+
+  const runStoryboardVideoJob = async (id: string) => {
+    setVideoLoading(true);
+    setVideoJobStoryboardId(id);
+    setError(null);
+    setVideoUrl(null);
+    setResultIsStoryboardFormat(false);
+    setLogs((prev) => [
+      ...prev,
+      `Starting Seedance for storyboard ${id.slice(0, 8)}…`,
+    ]);
+    try {
+      const response = await fetch("/api/generate-storyboard-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyboardId: id }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate video");
+      }
+      setVideoUrl(data.videoUrl);
+      setResultIsStoryboardFormat(true);
+      setLogs((prev) => [...prev, "Storyboard video saved — playback ready."]);
+      await fetchStoryboards();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message);
+      setLogs((prev) => [...prev, `Error: ${message}`]);
+    } finally {
+      setVideoLoading(false);
+      setVideoJobStoryboardId(null);
+    }
+  };
+
+  const handleCreateStoryboardVideo = async () => {
+    if (!storyboardId) return;
+    await runStoryboardVideoJob(storyboardId);
+  };
+
+  const handleGalleryCreateVideo = (id: string) => {
+    void runStoryboardVideoJob(id);
   };
 
   return (
@@ -199,6 +367,23 @@ export default function ReelsPage() {
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
       </div>
+
+      {/* Navbar */}
+      <header className="w-full h-20 flex items-center justify-center sticky top-0 z-50 px-6 backdrop-blur-md border-b border-white/5 bg-black/20">
+        <div className="max-w-7xl w-full flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 group text-slate-400 hover:text-white transition-all">
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-sm font-bold tracking-tight">Back to Krakatoa</span>
+          </Link>
+          
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <Video className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-xl font-black tracking-tighter">ReelsGen</span>
+          </div>
+        </div>
+      </header>
 
       <main className="relative z-10 flex-grow py-12 px-6">
         <div className="max-w-7xl mx-auto">
@@ -231,6 +416,20 @@ export default function ReelsPage() {
               >
                 Veo
               </button>
+              <button
+                type="button"
+                onClick={() => setEngineTab("storyboard")}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
+                  engineTab === "storyboard"
+                    ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
+                }`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 shrink-0" />
+                  Storyboard
+                </span>
+              </button>
             </div>
           </div>
 
@@ -242,18 +441,122 @@ export default function ReelsPage() {
                 <div className="space-y-4">
                   <label className="block text-sm font-bold uppercase tracking-widest text-indigo-400">Video Theme</label>
                   <div className="relative group">
-                    <input
-                      type="text"
-                      value={theme}
-                      onChange={(e) => setTheme(e.target.value)}
-                      placeholder="e.g., The history of space exploration in 60 seconds"
-                      required
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
-                      disabled={loading}
-                    />
+                    {engineTab === "storyboard" ? (
+                      <input
+                        type="text"
+                        value={storyboardTheme}
+                        onChange={(e) => setStoryboardTheme(e.target.value)}
+                        placeholder="e.g., A coffee shop reunion — 15s cinematic beat"
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
+                        disabled={storyboardLoading || videoLoading}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={theme}
+                        onChange={(e) => setTheme(e.target.value)}
+                        placeholder="e.g., The history of space exploration in 60 seconds"
+                        required
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
+                        disabled={loading}
+                      />
+                    )}
                     <Sparkles className="absolute right-5 top-5 w-6 h-6 text-indigo-500/50 group-hover:text-indigo-400 transition-colors" />
                   </div>
                 </div>
+
+                {engineTab === "storyboard" && (
+                  <div className="space-y-3">
+                    <label className="block text-sm font-bold uppercase tracking-widest text-emerald-400/90">
+                      Storyboard Style
+                    </label>
+                    <select
+                      value={storyboardStyle}
+                      onChange={(e) => setStoryboardStyle(e.target.value)}
+                      disabled={storyboardLoading || videoLoading}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer text-slate-200"
+                    >
+                      {STORYBOARD_STYLE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value} className="bg-[#030712]">
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {engineTab === "storyboard" && (
+                  <div className="space-y-6 bg-white/[0.03] border border-emerald-500/20 rounded-[2rem] p-8">
+                    <p className="text-sm text-slate-400 leading-relaxed">
+                      Generate a six-panel storyboard image, review it, then create a <strong className="text-slate-200">15s 16:9</strong> clip with native audio (Seedance + GPT-5 prompt).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateStoryboard()}
+                      disabled={storyboardLoading || videoLoading || !storyboardTheme.trim()}
+                      className="w-full py-4 rounded-2xl text-lg font-bold transition-all shadow-xl flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:scale-[1.01] shadow-emerald-500/20 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                    >
+                      {storyboardLoading ? (
+                        <>
+                          <Loader2 className="w-6 h-6 animate-spin" />
+                          Creating your storyboard...
+                        </>
+                      ) : (
+                        <>
+                          <LayoutGrid className="w-6 h-6" />
+                          Generate Storyboard
+                        </>
+                      )}
+                    </button>
+                    {storyboardUrl && (
+                      <div className="space-y-4">
+                        <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/40">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={storyboardUrl}
+                            alt="Generated storyboard"
+                            className="w-full h-auto object-contain max-h-[480px] mx-auto"
+                          />
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleGenerateStoryboard()}
+                            disabled={storyboardLoading || videoLoading || !storyboardTheme.trim()}
+                            className="flex-1 py-4 rounded-xl font-bold border border-white/15 bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                          >
+                            <RefreshCw className={`w-5 h-5 ${storyboardLoading ? "animate-spin" : ""}`} />
+                            Generate Again
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleCreateStoryboardVideo()}
+                            disabled={storyboardLoading || videoLoading || !storyboardId}
+                            className="flex-1 py-4 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-40"
+                          >
+                            {videoLoading && videoJobStoryboardId === storyboardId ? (
+                              <>
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                                Working...
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-5 h-5" />
+                                Create Video
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        {videoLoading && videoJobStoryboardId === storyboardId && (
+                          <p className="text-sm text-emerald-400/95 flex items-center gap-2 justify-center text-center">
+                            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                            Generating video with audio, this may take up to 2 minutes...
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Grid Settings — Seedance */}
                 {engineTab === "seedance" && (
@@ -420,6 +723,7 @@ export default function ReelsPage() {
                   </div>
                 </div>
                 )}
+                {engineTab !== "storyboard" && (
                 <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xl font-bold flex items-center gap-2">
@@ -469,7 +773,10 @@ export default function ReelsPage() {
                     </div>
                   </div>
                 </div>
+                )}
 
+                {engineTab !== "storyboard" && (
+                <>
                 {/* Caption Styler Card */}
                 <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-8">
                   <div className="flex items-center justify-between">
@@ -573,7 +880,10 @@ export default function ReelsPage() {
                     </div>
                   </div>
                 </div>
+                </>
+                )}
 
+                {engineTab !== "storyboard" && (
                 <button 
                   type="submit" 
                   disabled={loading}
@@ -599,6 +909,7 @@ export default function ReelsPage() {
                     </>
                   )}
                 </button>
+                )}
               </form>
 
               {/* Advanced Testing Section — Seedance only */}
@@ -678,6 +989,8 @@ export default function ReelsPage() {
 
             </div>
             <div className="lg:col-span-5 space-y-8">
+              {engineTab !== "storyboard" && (
+              <>
               {/* 9:16 Preview Box */}
               <div className="bg-black border border-white/10 rounded-[3rem] p-8 pb-12 shadow-2xl relative overflow-hidden group">
                 <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none"></div>
@@ -751,6 +1064,8 @@ export default function ReelsPage() {
                   })()}
                 </div>
               </div>
+              </>
+              )}
 
               {/* Status / Results Card */}
               <div className="space-y-6">
@@ -784,7 +1099,11 @@ export default function ReelsPage() {
                       <video 
                         src={videoUrl} 
                         controls 
-                        className="aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                        className={
+                          resultIsStoryboardFormat
+                            ? "aspect-video w-full max-w-3xl max-h-[480px] object-contain bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                            : "aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
+                        }
                       ></video>
                     </div>
                     <a 
@@ -803,10 +1122,12 @@ export default function ReelsPage() {
                 <div className="bg-black/40 border border-white/5 rounded-3xl p-6 font-mono text-[10px] md:text-xs">
                   <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
                     <span className="text-slate-500 uppercase tracking-widest font-bold">Process Logs</span>
-                    {loading && <div className="flex items-center gap-2 text-indigo-400 animate-pulse">
+                    {loading || storyboardLoading || videoLoading ? (
+                    <div className="flex items-center gap-2 text-indigo-400 animate-pulse">
                       <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
                       Processing...
-                    </div>}
+                    </div>
+                    ) : null}
                   </div>
                   <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
                     {logs.length === 0 ? (
@@ -824,6 +1145,183 @@ export default function ReelsPage() {
               </div>
             </div>
           </div>
+
+          {engineTab === "storyboard" && (
+            <>
+            <div className="mt-16 space-y-16 border-t border-white/10 pt-16 pb-8">
+              <div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setStoryboardStyleFilter("all")}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                      storyboardStyleFilter === "all"
+                        ? "bg-emerald-600 text-white border border-emerald-500"
+                        : "bg-transparent text-slate-400 border border-white/15 hover:border-white/30"
+                    }`}
+                  >
+                    All Styles
+                  </button>
+                  {STORYBOARD_STYLE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setStoryboardStyleFilter(opt.value)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                        storyboardStyleFilter === opt.value
+                          ? "bg-emerald-600 text-white border border-emerald-500"
+                          : "bg-transparent text-slate-400 border border-white/15 hover:border-white/30"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <h2 className="text-2xl font-black tracking-tight mb-2">Storyboard Gallery</h2>
+                <p className="text-sm text-slate-500 mb-6">
+                  Saved storyboards (newest first). Uses public Supabase URLs only.
+                </p>
+                {!process.env.NEXT_PUBLIC_SUPABASE_URL ||
+                !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? (
+                  <p className="text-amber-500/90 text-sm">
+                    Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to load the gallery (plus RLS select policy on <code className="text-amber-200/90">storyboards</code>).
+                  </p>
+                ) : storyboards.length === 0 ? (
+                  <p className="text-slate-600 text-sm">No storyboards yet.</p>
+                ) : filteredStoryboardGalleryRows.length === 0 ? (
+                  <p className="text-slate-600 text-sm">No storyboards match this filter.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredStoryboardGalleryRows.map((row) => (
+                      <div
+                        key={row.id}
+                        className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden flex flex-col"
+                      >
+                        <div className="aspect-[3/2] bg-black/50 border-b border-white/5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={row.storyboard_url}
+                            alt=""
+                            className="w-full h-full object-contain cursor-pointer"
+                            onClick={() => setLightboxUrl(row.storyboard_url)}
+                          />
+                        </div>
+                        <div className="p-4 flex flex-col gap-2 flex-1">
+                          <p className="text-sm text-slate-200 line-clamp-2 font-medium">{row.theme}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-slate-400 font-medium">
+                              {storyboardStyleDisplayName(row.storyboard_style)}
+                            </span>
+                            <span className="text-slate-500">
+                              {new Date(row.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="mt-auto pt-2">
+                            {!row.video_url ? (
+                              <button
+                                type="button"
+                                onClick={() => handleGalleryCreateVideo(row.id)}
+                                disabled={videoLoading}
+                                className="w-full py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 flex items-center justify-center gap-2"
+                              >
+                                {videoLoading && videoJobStoryboardId === row.id ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Generating…
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="w-4 h-4" />
+                                    Create Video
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => scrollToVideoAndHighlight(row.id)}
+                                className="w-full py-2.5 rounded-xl font-bold text-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                              >
+                                View Video
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h2 className="text-2xl font-black tracking-tight mb-2">Video Gallery</h2>
+                <p className="text-sm text-slate-500 mb-6">Completed storyboard videos.</p>
+                {storyboards.filter((r) => r.video_url).length === 0 ? (
+                  <p className="text-slate-600 text-sm">No videos yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {storyboards
+                      .filter((r) => r.video_url)
+                      .map((row) => (
+                        <div
+                          key={`vid-${row.id}`}
+                          id={`storyboard-video-${row.id}`}
+                          className={`bg-white/[0.03] border border-white/10 rounded-2xl p-4 space-y-3 transition-shadow ${
+                            highlightedVideoId === row.id
+                              ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[#030712]"
+                              : ""
+                          }`}
+                        >
+                          <div className="relative rounded-xl overflow-hidden bg-black">
+                            <video
+                              src={row.video_url!}
+                              controls
+                              playsInline
+                              className="w-full aspect-video object-contain relative z-0"
+                            />
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={row.storyboard_url}
+                              alt="Storyboard thumbnail — click to expand"
+                              className="absolute bottom-2 left-2 z-30 w-20 rounded-lg overflow-hidden border-2 border-white/20 shadow-lg bg-black/80 hover:border-emerald-400/60 transition-colors cursor-pointer pointer-events-auto"
+                              onClick={() => setLightboxUrl(row.storyboard_url)}
+                            />
+                          </div>
+                          <p className="text-sm text-slate-300 px-1">{row.theme}</p>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {lightboxUrl && (
+              <div
+                className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4"
+                role="presentation"
+                onClick={() => setLightboxUrl(null)}
+              >
+                <button
+                  type="button"
+                  className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white z-[201] border-0 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxUrl(null);
+                  }}
+                  aria-label="Close"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={lightboxUrl}
+                  alt="Storyboard full size"
+                  className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            )}
+            </>
+          )}
         </div>
       </main>
     </div>

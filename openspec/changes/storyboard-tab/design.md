@@ -1,6 +1,6 @@
 ## Context
 
-- **ReelsGen UI** (`app/tools/reels/page.tsx`): Client component with `engineTab` toggling Seedance vs Veo; both share `theme`, `loading`, `videoUrl`, `error`, `logs`. Seedance posts to `/api/generate`; Veo to `/api/generate-veo`. Result card uses `<video>` with `aspect-[9/16]` and download controls. Caption + narrator blocks are shared in the main form.
+- **ReelsGen UI** (`app/(app)/tools/reels/page.tsx`): Client component with `engineTab` toggling Seedance vs Veo; both share `theme`, `loading`, `videoUrl`, `error`, `logs`. Seedance posts to `/api/generate`; Veo to `/api/generate-veo`. Result card uses `<video>` with `aspect-[9/16]` and download controls. Caption + narrator blocks are shared in the main form.
 - **Main pipeline** (`app/api/generate/route.ts`): Uses `Replicate` with `replicate.run(model, { input: { ... } })`, a local `runWithRetry` for 429s, and `extractMediaUrl` for heterogeneous outputs. Seedance is invoked as `bytedance/seedance-2.0-fast` with **no** `reference_images` today (`aspect_ratio: "9:16"`, `generate_audio: false`).
 - **Storage** (`lib/storage-buckets.ts`): Bucket default `krakatoa`; `videosStoragePath(filename)` → `videos/<filename>`; temp under `videos/temp/`. No storyboard subfolder helper yet.
 - **Supabase** (`lib/supabase.ts`): `getSupabase()` with service role for server uploads.

@@ -12,7 +12,6 @@ import {
   Tag,
   ExternalLink,
   RefreshCw,
-  CalendarDays,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
