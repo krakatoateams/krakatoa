@@ -116,7 +116,7 @@ export default function ReelsPage() {
     highlightOnly: true
   });
 
-  const [engineTab, setEngineTab] = useState<"seedance" | "veo" | "storyboard">("seedance");
+  const [engineTab, setEngineTab] = useState<"storyboard" | "veo" | "seedance">("storyboard");
   const [storyboardTheme, setStoryboardTheme] = useState("");
   const [storyboardStyle, setStoryboardStyle] = useState<string>("cinematic_sketch");
   const [storyboardStyleFilter, setStoryboardStyleFilter] = useState<string>("all");
@@ -396,14 +396,17 @@ export default function ReelsPage() {
             <div className="mt-8 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => setEngineTab("seedance")}
+                onClick={() => setEngineTab("storyboard")}
                 className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
-                  engineTab === "seedance"
-                    ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20"
+                  engineTab === "storyboard"
+                    ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
                     : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
                 }`}
               >
-                Seedance
+                <span className="inline-flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 shrink-0" />
+                  Storyboard
+                </span>
               </button>
               <button
                 type="button"
@@ -418,17 +421,14 @@ export default function ReelsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setEngineTab("storyboard")}
+                onClick={() => setEngineTab("seedance")}
                 className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
-                  engineTab === "storyboard"
-                    ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+                  engineTab === "seedance"
+                    ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20"
                     : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
                 }`}
               >
-                <span className="inline-flex items-center gap-2">
-                  <LayoutGrid className="w-4 h-4 shrink-0" />
-                  Storyboard
-                </span>
+                Seedance
               </button>
             </div>
           </div>
