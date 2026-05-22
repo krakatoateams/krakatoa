@@ -1,38 +1,15 @@
 import Link from 'next/link';
-import { ArrowRight, Video, Camera, CalendarClock, Zap, Mountain, BarChart3, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Mountain, BarChart3, ShieldCheck, Zap } from 'lucide-react';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import ToolsGrid from './components/ToolsGrid';
 
-export default function Home() {
-  const tools = [
-    {
-      name: 'ReelsGen',
-      description: 'Generate faceless video reels with AI narration and captions automatically.',
-      href: '/tools/reels',
-      icon: <Video className="w-6 h-6 text-indigo-400" />,
-      color: 'from-blue-500 to-indigo-600'
-    },
-    {
-      name: 'Product Photo',
-      description: 'Transform any product image into a professional studio shot with AI lighting.',
-      href: '/tools/photo',
-      icon: <Camera className="w-6 h-6 text-purple-400" />,
-      color: 'from-purple-500 to-pink-600'
-    },
-    {
-      name: 'Scheduler',
-      description: 'Intelligent scheduling that knows when your audience is most active.',
-      href: '/tools/scheduler',
-      icon: <CalendarClock className="w-6 h-6 text-emerald-400" />,
-      color: 'from-emerald-500 to-teal-600'
-    },
-    {
-      name: 'IG Automation',
-      description: 'Auto-generate and post Instagram content on a schedule with smart engagement.',
-      href: '/tools/ig',
-      icon: <Zap className="w-6 h-6 text-amber-400" />,
-      color: 'from-amber-500 to-orange-600'
-    }
-  ];
-
+export default async function Home() {
+  // Server-side session check: returning visitors who are already
+  // signed in shouldn't be forced back through the auth flow.
+  const session = await getServerSession(authOptions);
+  const isLoggedIn = !!session?.user;
+  const ctaHref = isLoggedIn ? '/dashboard' : '/api/auth/signin';
   return (
     <div className="min-h-screen flex flex-col bg-[#030712] text-white font-sans selection:bg-indigo-500/30">
       {/* Background Glows */}
@@ -61,10 +38,10 @@ export default function Home() {
           </nav>
 
           <Link 
-            href="#tools" 
+            href={ctaHref}
             className="px-6 py-2.5 text-sm font-bold text-white bg-white/10 hover:bg-white/20 border border-white/10 rounded-full transition-all backdrop-blur-sm shadow-xl"
           >
-            Get Started
+            {isLoggedIn ? 'Open Dashboard' : 'Get Started'}
           </Link>
         </div>
       </header>
@@ -88,17 +65,17 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link 
-                href="#tools" 
+                href={ctaHref}
                 className="w-full sm:w-auto px-10 py-5 text-lg font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl hover:scale-105 transition-all shadow-[0_0_40px_-10px_rgba(79,70,229,0.5)] flex items-center justify-center group"
               >
-                Start Creating Free
+                {isLoggedIn ? 'Go to Dashboard' : 'Start Creating Free'}
                 <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
               </Link>
               <Link 
-                href="#" 
+                href="#tools"
                 className="w-full sm:w-auto px-10 py-5 text-lg font-bold text-white bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all flex items-center justify-center"
               >
-                Watch Demo
+                Our Tools
               </Link>
             </div>
           </div>
@@ -116,33 +93,7 @@ export default function Home() {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {tools.map((tool) => (
-                <div 
-                  key={tool.name} 
-                  className="group relative bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-10 hover:bg-white/[0.05] hover:border-white/20 transition-all duration-500 flex flex-col overflow-hidden"
-                >
-                  <div className={`absolute -top-24 -right-24 w-48 h-48 bg-gradient-to-br ${tool.color} opacity-0 group-hover:opacity-20 blur-[60px] transition-opacity duration-500`}></div>
-                  
-                  <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-500 border border-white/10">
-                    {tool.icon}
-                  </div>
-                  <h3 className="text-3xl font-bold mb-4 tracking-tight group-hover:text-indigo-400 transition-colors">{tool.name}</h3>
-                  <p className="text-slate-400 text-lg mb-12 flex-grow leading-relaxed">
-                    {tool.description}
-                  </p>
-                  <Link 
-                    href={tool.href} 
-                    className="inline-flex items-center gap-3 text-white font-bold group-hover:gap-5 transition-all w-fit"
-                  >
-                    Launch Tool
-                    <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
-                      <ArrowRight className="w-5 h-5" />
-                    </div>
-                  </Link>
-                </div>
-              ))}
-            </div>
+            <ToolsGrid isLoggedIn={isLoggedIn} />
           </div>
         </section>
 

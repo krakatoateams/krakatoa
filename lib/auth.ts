@@ -28,6 +28,25 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
+    // Smart redirect: send users to /dashboard after a fresh sign-in,
+    // but honour any explicit callbackUrl from elsewhere in the app
+    // (e.g. "Connect YouTube" deep-links inside the Scheduler).
+    async redirect({ url, baseUrl }) {
+      // Same-origin absolute URL
+      if (url.startsWith(baseUrl)) {
+        if (url === baseUrl || url === `${baseUrl}/`) {
+          return `${baseUrl}/dashboard`;
+        }
+        return url;
+      }
+      // Relative path
+      if (url.startsWith("/")) {
+        if (url === "/") return `${baseUrl}/dashboard`;
+        return `${baseUrl}${url}`;
+      }
+      return `${baseUrl}/dashboard`;
+    },
+
     async signIn({ user, account }) {
       if (!user.email) return false;
 
