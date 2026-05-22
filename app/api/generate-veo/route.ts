@@ -19,6 +19,8 @@
  */
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
+import { insertUserCreation } from "@/lib/creations-db";
+import { getSessionUserId } from "@/lib/resolve-user";
 import { supabase } from "@/lib/supabase";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from "@/lib/storage-buckets";
 import { extractJson, hexToAssColor, formatAssTime, runWithRetry } from "@/lib/reels-helpers";
@@ -178,6 +180,11 @@ function mapWhisperToPerSceneVideoTimeline(
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    }
+
     const body = await req.json();
     const theme = String(body.theme || "").trim();
     if (!theme) {
@@ -684,7 +691,28 @@ Return ONLY raw JSON array, nothing else.`;
     } catch {
       /* non-fatal */
     }
-    return NextResponse.json({ videoUrl: pub.publicUrl });
+    let historyItem;
+    try {
+      historyItem = await insertUserCreation({
+        userId,
+        tool: "reels_veo",
+        mediaType: "video",
+        mediaUrl: pub.publicUrl,
+        storagePath: finalFilename,
+        title: theme.slice(0, 200),
+        metadata: {
+          mode: isSingle ? "single" : "perScene",
+          duration,
+          resolution,
+          voiceId,
+          emotion,
+        },
+      });
+    } catch (historyErr) {
+      console.warn("[Reels Veo] History log failed (video still saved):", historyErr);
+    }
+
+    return NextResponse.json({ videoUrl: pub.publicUrl, historyItem });
   } catch (error: unknown) {
     console.error("[generate-veo]", error);
     const message = error instanceof Error ? error.message : String(error);

@@ -2,17 +2,18 @@ import { withAuth } from "next-auth/middleware";
 
 // next-auth's parseUrl() throws `TypeError: Invalid URL` when NEXTAUTH_URL is set
 // but empty (""). Normalize before withAuth runs so /tools/* and /dashboard/* work in dev.
-(() => {
-  const raw = process.env.NEXTAUTH_URL?.trim();
-  if (!raw) {
+function normalizeAuthUrl(raw: string | undefined): string {
+  if (!raw?.trim()) {
     const vercel = process.env.VERCEL_URL?.trim();
-    process.env.NEXTAUTH_URL = vercel
-      ? `https://${vercel}`
-      : "http://localhost:3000";
-    return;
+    return vercel ? `https://${vercel}` : "http://localhost:3000";
   }
-  process.env.NEXTAUTH_URL = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-})();
+  let url = raw.trim();
+  const markdown = url.match(/\[(https?:\/\/[^\]]+)\]\([^)]*\)/);
+  if (markdown) url = markdown[1];
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+process.env.NEXTAUTH_URL = normalizeAuthUrl(process.env.NEXTAUTH_URL);
 
 // Protect the dashboard (and any future routes under it).
 // Unauthenticated users are sent to the NextAuth sign-in page,

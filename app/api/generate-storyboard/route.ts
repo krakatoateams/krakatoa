@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
+import { insertUserCreation } from "@/lib/creations-db";
+import { getSessionUserId } from "@/lib/resolve-user";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -185,6 +187,11 @@ Layout requirements:
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    }
+
     const body = await req.json();
     const theme = typeof body.theme === "string" ? body.theme.trim() : "";
     const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
@@ -319,6 +326,7 @@ export async function POST(req: Request) {
         scene_breakdown,
         storyboard_style: storyboardStyle,
         status: "ready",
+        user_id: userId,
       })
       .select("id")
       .single();
@@ -331,10 +339,29 @@ export async function POST(req: Request) {
       );
     }
 
+    let historyItem;
+    try {
+      historyItem = await insertUserCreation({
+        userId,
+        tool: "storyboard",
+        mediaType: "image",
+        mediaUrl: storyboardUrl,
+        storagePath,
+        title: theme.slice(0, 200),
+        metadata: {
+          storyboardId: inserted.id,
+          storyboardStyle,
+        },
+      });
+    } catch (historyErr) {
+      console.warn("[Storyboard] History log failed:", historyErr);
+    }
+
     console.log("[Storyboard] Done:", storyboardUrl, "id:", inserted.id);
     return NextResponse.json({
       storyboardId: inserted.id,
       storyboardUrl,
+      historyItem,
     });
   } catch (error: unknown) {
     const message =

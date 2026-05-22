@@ -4,12 +4,11 @@ import {
   PHOTO_STYLES,
   ModelPoseId,
   PhotoStyleId,
-  ProductPhotoHistoryItem,
   buildGeneratedFilename,
   buildProductPhotoPrompt,
-  historyItemFromPath,
 } from "@/lib/product-photo";
-import { uploadGeneratedImage } from "@/lib/product-photo-storage";
+import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
+import { getSessionUserId } from "@/lib/resolve-user";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 
@@ -29,15 +28,15 @@ function isValidStyle(id: string): id is PhotoStyleId {
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    }
+
     const formData = await req.formData();
     const file = formData.get("image");
-    const clientId = String(formData.get("clientId") || "").trim();
     const poseId = String(formData.get("poseId") || "").trim();
     const styleId = String(formData.get("styleId") || "").trim();
-
-    if (!clientId || clientId.length > 64) {
-      return NextResponse.json({ error: "clientId is required" }, { status: 400 });
-    }
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
@@ -92,47 +91,20 @@ export async function POST(req: Request) {
     const imageBuffer = await imageResponse.arrayBuffer();
     const filename = buildGeneratedFilename(poseId, styleId);
 
-    let publicUrl = generatedImageUrl;
-    let historyItem = null;
+    const saved = await saveGeneratedProductPhoto({
+      userId,
+      filename,
+      imageBuffer,
+      poseId,
+      styleId,
+      contentType: "image/png",
+    });
 
-    try {
-      const saved = await uploadGeneratedImage(clientId, filename, imageBuffer, "image/png");
-      publicUrl = saved.publicUrl;
-      historyItem = saved.historyItem ?? historyItemFromPath(saved.storagePath, saved.publicUrl);
-      console.log("[Product Photo] Saved to Supabase:", saved.storagePath);
-    } catch (storageErr: unknown) {
-      const msg = storageErr instanceof Error ? storageErr.message : String(storageErr);
-      console.warn("[Product Photo] Supabase save failed (returning Replicate URL):", msg);
-
-      const pose = MODEL_POSES.find((p) => p.id === poseId)!;
-      const style = PHOTO_STYLES.find((s) => s.id === styleId)!;
-      const fallbackItem: ProductPhotoHistoryItem = {
-        id: `temp_${Date.now()}`,
-        imageUrl: generatedImageUrl,
-        poseId,
-        styleId,
-        poseLabel: pose.label,
-        styleLabel: style.label,
-        createdAt: new Date().toISOString(),
-        storagePath: "",
-      };
-
-      return NextResponse.json({
-        imageUrl: generatedImageUrl,
-        historyItem: fallbackItem,
-        savedToCloud: false,
-        warning:
-          "Image generated but not saved to Supabase history. Create the public bucket in .env (SUPABASE_STORAGE_BUCKET) or check your service role key.",
-      });
-    }
-
-    if (!historyItem) {
-      throw new Error("Failed to build history metadata");
-    }
+    console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
 
     return NextResponse.json({
-      imageUrl: publicUrl,
-      historyItem,
+      imageUrl: saved.publicUrl,
+      historyItem: saved.historyItem,
       savedToCloud: true,
     });
   } catch (error: unknown) {

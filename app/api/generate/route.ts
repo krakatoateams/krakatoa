@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
+import { insertUserCreation } from '@/lib/creations-db';
+import { getSessionUserId } from '@/lib/resolve-user';
 import { supabase } from '@/lib/supabase';
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
 
@@ -17,6 +19,11 @@ function formatAssTime(seconds: number) {
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { theme, numScenes, durationPerScene, resolution, captionStyle, voiceId, emotion } = body;
     const SCENE_COUNT = numScenes || 1;
@@ -678,7 +685,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     console.log('Pipeline complete! Video URL:', finalVideoUrl);
-    return NextResponse.json({ videoUrl: finalVideoUrl });
+
+    let historyItem;
+    try {
+      historyItem = await insertUserCreation({
+        userId,
+        tool: 'reels_seedance',
+        mediaType: 'video',
+        mediaUrl: finalVideoUrl,
+        storagePath: finalFilename,
+        title: String(theme).slice(0, 200),
+        metadata: {
+          numScenes: SCENE_COUNT,
+          durationPerScene: DURATION_PER_SCENE,
+          resolution: RESOLUTION,
+          voiceId: VOICE_ID,
+          emotion: USER_EMOTION,
+        },
+      });
+    } catch (historyErr) {
+      console.warn('[Reels Seedance] History log failed (video still saved):', historyErr);
+    }
+
+    return NextResponse.json({ videoUrl: finalVideoUrl, historyItem });
 
   } catch (error: any) {
     console.error('Generate pipeline error:', error);
