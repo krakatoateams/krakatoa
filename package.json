@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "db:setup": "node scripts/setup-db.mjs",
+    "db:setup-product-photo": "node scripts/setup-db.mjs",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {
@@ -17,7 +19,8 @@
     "next-auth": "^4.24.14",
     "react": "^18",
     "react-dom": "^18",
-    "replicate": "^1.4.0"
+    "replicate": "^1.4.0",
+    "shaders": "^2.5.126"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -26,6 +29,7 @@
     "autoprefixer": "^10.5.0",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "pg": "^8.21.0",
     "postcss": "^8",
     "postcss-import": "^16.1.1",
     "tailwindcss": "^3.4.1",

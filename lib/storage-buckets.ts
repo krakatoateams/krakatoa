@@ -1,10 +1,37 @@
 /**
  * Krakatoa uses one public Supabase Storage bucket with top-level folders per feature.
  * Product photos live under `photos/` — never inside `videos/`.
- * ReelsGen: final MP4s under `videos/`; transient caption files under `videos/temp/`.
+ * ReelsGen: final MP4s under `videos/`; transient caption files under `videos/temp/`; Storyboard tab under `videos/storyboard/`.
  *
  * Create the bucket in Supabase Dashboard → Storage, then add public folders as needed.
  * Override the bucket name with SUPABASE_STORAGE_BUCKET in .env.local if needed.
+ *
+ * ---------------------------------------------------------------------------
+ * Storyboard gallery DB (run in Supabase SQL Editor — not applied by this repo)
+ * ---------------------------------------------------------------------------
+ *
+ * create table storyboards (
+ *   id uuid default gen_random_uuid() primary key,
+ *   created_at timestamptz default now(),
+ *   theme text not null,
+ *   storyboard_url text not null,
+ *   seedance_prompt text not null,
+ *   scene_breakdown jsonb not null,
+ *   status text default 'ready',
+ *   video_url text
+ * );
+ *
+ * alter table storyboards enable row level security;
+ *
+ * -- Browser gallery (anon key): read-only
+ * create policy "storyboards_select_public" on storyboards for select using (true);
+ *
+ * -- Service role (API routes) bypasses RLS for insert/update.
+ *
+ * Creation history (run in Supabase SQL Editor):
+ *   supabase/migrations/002_user_creations.sql
+ *   (optional legacy) 001_product_photo_generations.sql
+ * ---------------------------------------------------------------------------
  */
 export const STORAGE_BUCKET =
   process.env.SUPABASE_STORAGE_BUCKET ?? "krakatoa";
@@ -14,6 +41,9 @@ export const VIDEOS_FOLDER = "videos";
 
 /** Ephemeral ReelsGen assets (e.g. .ass passed to Rendi, then deleted) */
 export const VIDEOS_TEMP_SEGMENT = "temp";
+
+/** Storyboard tab: GPT Image outputs + Seedance finals under `videos/storyboard/` */
+export const VIDEOS_STORYBOARD_SEGMENT = "storyboard";
 
 /** Top-level folder for Product Photo (uploads + generated images) */
 export const PHOTOS_FOLDER = "photos";
@@ -27,6 +57,20 @@ export function videosStoragePath(filename: string): string {
 export function videosTempStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/${filename}`;
 }
+
+/** Storyboard tab assets: `videos/storyboard/<filename>` */
+export function videosStoryboardPath(filename: string): string {
+  return `${VIDEOS_FOLDER}/${VIDEOS_STORYBOARD_SEGMENT}/${filename}`;
+}
+
+/** Postgres table for Storyboard metadata (public URLs only — never Replicate prediction URLs). */
+export const STORYBOARDS_TABLE = "storyboards";
+
+/** Postgres table for all tool outputs (one row per successful create, per user). */
+export const USER_CREATIONS_TABLE = "user_creations";
+
+/** @deprecated Use USER_CREATIONS_TABLE with tool=product_photo */
+export const PRODUCT_PHOTO_GENERATIONS_TABLE = "product_photo_generations";
 
 export function photosStoragePath(...segments: string[]): string {
   return [PHOTOS_FOLDER, ...segments].join("/");

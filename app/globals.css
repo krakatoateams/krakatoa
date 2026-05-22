@@ -3,18 +3,111 @@
 @tailwind utilities;
 
 :root {
-  --background: 3 7 18;
-  --foreground: 255 255 255;
+  --ink: #0a0a0a;
+  --muted: #737373;
+  --surface-dark: #0c0c0c;
+  --accent: #7c3aed;
 }
 
 @layer base {
   body {
-    @apply bg-[#030712] text-white;
+    @apply bg-white text-neutral-950 antialiased;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  .font-display {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .font-body {
+    font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .font-emoji {
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  }
+
+  /* WGMI-style dot grid */
+  .dot-grid-light {
+    background-color: #ffffff;
+    background-image: radial-gradient(circle, #d4d4d4 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  .dot-grid-dark {
+    background-color: var(--surface-dark);
+    background-image: radial-gradient(circle, #2a2a2a 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  .soft-shadow {
+    box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.15);
+  }
+
+  .soft-shadow-lg {
+    box-shadow: 0 28px 60px -24px rgba(0, 0, 0, 0.22);
+  }
+
+  .float-shadow {
+    box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.18);
+  }
+
+  @keyframes reveal-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-reveal-up {
+    animation: reveal-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .stagger-1 {
+    animation-delay: 0.06s;
+  }
+  .stagger-2 {
+    animation-delay: 0.12s;
+  }
+  .stagger-3 {
+    animation-delay: 0.18s;
+  }
+  .stagger-4 {
+    animation-delay: 0.24s;
+  }
+
+  @keyframes float-gentle {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+
+  .animate-float-gentle {
+    animation: float-gentle 6s ease-in-out infinite;
+  }
+
+  .liquid-glass {
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(4px);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  .liquid-glass-strong {
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(50px);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
 }

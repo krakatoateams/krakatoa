@@ -96,18 +96,24 @@ export function parseGeneratedFilename(name: string): {
   };
 }
 
-export function clientStoragePrefix(clientId: string): string {
-  const safe = clientId.replace(/[^a-zA-Z0-9_-]/g, "");
-  if (!safe) throw new Error("Invalid client id");
+/** Storage prefix per authenticated user: `photos/{userId}/` */
+export function userStoragePrefix(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) throw new Error("Invalid user id");
   return `${PRODUCT_PHOTO_ROOT}/${safe}`;
 }
 
-export function uploadsPath(clientId: string, filename: string): string {
-  return `${clientStoragePrefix(clientId)}/uploads/${filename}`;
+export function uploadsPath(userId: string, filename: string): string {
+  return `${userStoragePrefix(userId)}/uploads/${filename}`;
 }
 
-export function generatedPath(clientId: string, filename: string): string {
-  return `${clientStoragePrefix(clientId)}/generated/${filename}`;
+export function generatedPath(userId: string, filename: string): string {
+  return `${userStoragePrefix(userId)}/generated/${filename}`;
+}
+
+/** @deprecated Use userStoragePrefix — browser client id is no longer used for storage */
+export function clientStoragePrefix(clientId: string): string {
+  return userStoragePrefix(clientId);
 }
 
 export function historyItemFromPath(
