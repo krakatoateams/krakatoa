@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
 import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
-import { STORYBOARDS_TABLE } from "@/lib/storage-buckets";
+import CreationsHistory from "@/components/CreationsHistory";
 
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
@@ -135,21 +134,20 @@ export default function ReelsPage() {
   const [veoResolution, setVeoResolution] = useState<"720p" | "1080p">("720p");
   const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
   const [veoNumScenes, setVeoNumScenes] = useState(1);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   const fetchStoryboards = useCallback(async () => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-    if (!url || !anon) return;
-    const client = createClient(url, anon);
-    const { data, error } = await client
-      .from(STORYBOARDS_TABLE)
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) {
-      console.error("[Storyboard gallery]", error);
-      return;
+    try {
+      const res = await fetch("/api/storyboards");
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[Storyboard gallery]", data.error);
+        return;
+      }
+      setStoryboards((data.storyboards as StoryboardRow[]) ?? []);
+    } catch (err) {
+      console.error("[Storyboard gallery]", err);
     }
-    setStoryboards((data as StoryboardRow[]) ?? []);
   }, []);
 
   useEffect(() => {
@@ -212,6 +210,7 @@ export default function ReelsPage() {
       }
 
       setVideoUrl(data.videoUrl);
+      setHistoryRefreshKey((k) => k + 1);
       setLogs((prev) => [...prev, "Video generated successfully!"]);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -262,6 +261,7 @@ export default function ReelsPage() {
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
+      setHistoryRefreshKey((k) => k + 1);
       setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -307,6 +307,7 @@ export default function ReelsPage() {
       );
       setStoryboardId(typeof data.storyboardId === "string" ? data.storyboardId : null);
       setLogs((prev) => [...prev, "Storyboard saved — Create Video when ready."]);
+      setHistoryRefreshKey((k) => k + 1);
       await fetchStoryboards();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -340,6 +341,7 @@ export default function ReelsPage() {
       setVideoUrl(data.videoUrl);
       setResultIsStoryboardFormat(true);
       setLogs((prev) => [...prev, "Storyboard video saved — playback ready."]);
+      setHistoryRefreshKey((k) => k + 1);
       await fetchStoryboards();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -1179,14 +1181,9 @@ export default function ReelsPage() {
                 </div>
                 <h2 className="text-2xl font-black tracking-tight mb-2">Storyboard Gallery</h2>
                 <p className="text-sm text-slate-500 mb-6">
-                  Saved storyboards (newest first). Uses public Supabase URLs only.
+                  Your saved storyboards (newest first). Sign in to see only your work.
                 </p>
-                {!process.env.NEXT_PUBLIC_SUPABASE_URL ||
-                !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? (
-                  <p className="text-amber-500/90 text-sm">
-                    Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to load the gallery (plus RLS select policy on <code className="text-amber-200/90">storyboards</code>).
-                  </p>
-                ) : storyboards.length === 0 ? (
+                {storyboards.length === 0 ? (
                   <p className="text-slate-600 text-sm">No storyboards yet.</p>
                 ) : filteredStoryboardGalleryRows.length === 0 ? (
                   <p className="text-slate-600 text-sm">No storyboards match this filter.</p>
@@ -1322,6 +1319,20 @@ export default function ReelsPage() {
             )}
             </>
           )}
+
+          <CreationsHistory
+            title="Your video generations"
+            description="Reels (Seedance & Veo) and storyboard videos — saved to your account."
+            tools={["reels_seedance", "reels_veo", "storyboard_video"]}
+            mediaType="video"
+            refreshKey={historyRefreshKey}
+            selectedUrl={videoUrl}
+            onSelect={(item) => {
+              setVideoUrl(item.mediaUrl);
+              setResultIsStoryboardFormat(item.tool === "storyboard_video");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
         </div>
       </main>
     </div>

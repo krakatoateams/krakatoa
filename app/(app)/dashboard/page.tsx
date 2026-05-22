@@ -2,6 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { Video, Camera, Zap, CalendarClock } from "lucide-react";
+import RecentCreations from "./RecentCreations";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
 
@@ -50,6 +51,8 @@ export default function DashboardPage() {
           Here&apos;s a snapshot of your scheduled content and the tools you can use.
         </p>
       </div>
+
+      <RecentCreations />
 
       {/* Stats */}
       <section className="mb-10">

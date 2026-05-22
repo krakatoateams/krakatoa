@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Camera,
@@ -11,7 +11,6 @@ import {
   Wand2,
   Loader2,
   AlertCircle,
-  History,
   User,
   Check,
   X,
@@ -21,91 +20,21 @@ import {
   PHOTO_STYLES,
   ModelPoseId,
   PhotoStyleId,
-  ProductPhotoHistoryItem,
 } from "@/lib/product-photo";
-import { getOrCreateClientId } from "@/lib/product-photo-client";
-import {
-  getLocalHistory,
-  saveLocalHistoryItem,
-} from "@/lib/product-photo-history-local";
-
-function mergeHistory(
-  remote: ProductPhotoHistoryItem[],
-  local: ProductPhotoHistoryItem[]
-): ProductPhotoHistoryItem[] {
-  const seen = new Set<string>();
-  const merged: ProductPhotoHistoryItem[] = [];
-  for (const item of [...remote, ...local]) {
-    const key = item.imageUrl || item.storagePath || item.id;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(item);
-  }
-  return merged.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-}
-
-function buildHistoryItem(
-  imageUrl: string,
-  poseId: ModelPoseId,
-  styleId: PhotoStyleId,
-  id?: string
-): ProductPhotoHistoryItem {
-  const pose = MODEL_POSES.find((p) => p.id === poseId)!;
-  const style = PHOTO_STYLES.find((s) => s.id === styleId)!;
-  return {
-    id: id ?? `gen_${Date.now()}`,
-    imageUrl,
-    poseId,
-    styleId,
-    poseLabel: pose.label,
-    styleLabel: style.label,
-    createdAt: new Date().toISOString(),
-    storagePath: "",
-  };
-}
+import CreationsHistory from "@/components/CreationsHistory";
 
 export default function ProductPhotoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [clientId, setClientId] = useState("");
   const [productFile, setProductFile] = useState<File | null>(null);
   const [productPreview, setProductPreview] = useState<string | null>(null);
   const [poseId, setPoseId] = useState<ModelPoseId>("standing");
   const [styleId, setStyleId] = useState<PhotoStyleId>("minimalist-studio");
   const [loading, setLoading] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<ProductPhotoHistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
-
-  const loadHistory = useCallback(async (id: string) => {
-    if (!id) return;
-    setHistoryLoading(true);
-    setHistoryError(null);
-    const local = getLocalHistory(id);
-    try {
-      const res = await fetch(`/api/product-photo/history?clientId=${encodeURIComponent(id)}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load history");
-      setHistory(mergeHistory(data.items || [], local));
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to load history";
-      setHistoryError(message);
-      setHistory(local);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const id = getOrCreateClientId();
-    setClientId(id);
-    loadHistory(id);
-  }, [loadHistory]);
 
   useEffect(() => {
     return () => {
@@ -140,7 +69,7 @@ export default function ProductPhotoPage() {
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productFile || !clientId) return;
+    if (!productFile) return;
 
     setLoading(true);
     setError(null);
@@ -149,7 +78,6 @@ export default function ProductPhotoPage() {
     try {
       const formData = new FormData();
       formData.append("image", productFile);
-      formData.append("clientId", clientId);
       formData.append("poseId", poseId);
       formData.append("styleId", styleId);
 
@@ -166,12 +94,7 @@ export default function ProductPhotoPage() {
       setResultUrl(data.imageUrl);
       if (data.warning) setWarning(data.warning);
 
-      const item: ProductPhotoHistoryItem =
-        data.historyItem ?? buildHistoryItem(data.imageUrl, poseId, styleId);
-
-      saveLocalHistoryItem(clientId, item);
-      setHistory((prev) => mergeHistory([item], prev));
-      await loadHistory(clientId);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
@@ -404,81 +327,18 @@ export default function ProductPhotoPage() {
 
         </div>
 
-        {/* History — full width below generator */}
-        <section className="mt-16 pt-12 border-t border-white/10">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-            <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                <History className="w-6 h-6 text-purple-400" />
-                Your generations
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Every successful generation appears here. Click an image to preview it above.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => loadHistory(clientId)}
-              disabled={historyLoading || !clientId}
-              className="text-sm px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 transition-colors disabled:opacity-50 shrink-0"
-            >
-              {historyLoading ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
-
-          {historyError && (
-            <p className="text-sm text-amber-400/90 mb-6">
-              {historyError} Showing items saved in this browser.
-            </p>
-          )}
-
-          {historyLoading && history.length === 0 ? (
-            <div className="flex items-center justify-center py-20 text-gray-500">
-              <Loader2 className="w-8 h-8 animate-spin" />
-            </div>
-          ) : history.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
-              <ImageIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">No generations yet. Create your first shot above.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {history.map((item) => (
-                <button
-                  key={`${item.id}-${item.imageUrl}`}
-                  type="button"
-                  onClick={() => {
-                    setResultUrl(item.imageUrl);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  className={`text-left rounded-2xl overflow-hidden border transition-all hover:scale-[1.02] ${
-                    resultUrl === item.imageUrl
-                      ? "border-purple-400/60 ring-2 ring-purple-400/30"
-                      : "border-white/10 hover:border-white/25"
-                  }`}
-                >
-                  <div className="relative aspect-[4/5] w-full bg-black/40">
-                    <Image
-                      src={item.imageUrl}
-                      alt={`${item.poseLabel} - ${item.styleLabel}`}
-                      fill
-                      className="object-cover"
-                      unoptimized
-                    />
-                  </div>
-                  <div className="p-3 bg-white/[0.04]">
-                    <p className="text-xs font-medium text-white truncate">
-                      {item.poseLabel} · {item.styleLabel}
-                    </p>
-                    <p className="text-[10px] text-gray-500 mt-1">
-                      {new Date(item.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+        <CreationsHistory
+          title="Your generations"
+          description="Every successful product photo appears here. Click to preview above."
+          tools={["product_photo"]}
+          mediaType="image"
+          refreshKey={historyRefreshKey}
+          selectedUrl={resultUrl}
+          onSelect={(item) => {
+            setResultUrl(item.mediaUrl);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
       </div>
     </div>
   );

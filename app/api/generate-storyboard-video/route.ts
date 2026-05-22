@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
+import { insertUserCreation } from "@/lib/creations-db";
+import { getSessionUserId } from "@/lib/resolve-user";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -15,6 +17,11 @@ const UUID_RE =
 
 export async function POST(req: Request) {
   try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    }
+
     const body = await req.json();
     const storyboardId =
       typeof body.storyboardId === "string" ? body.storyboardId.trim() : "";
@@ -37,7 +44,7 @@ export async function POST(req: Request) {
 
     const { data: row, error: fetchError } = await supabase
       .from(STORYBOARDS_TABLE)
-      .select("id, storyboard_url, seedance_prompt")
+      .select("id, user_id, theme, storyboard_url, seedance_prompt")
       .eq("id", storyboardId)
       .single();
 
@@ -46,6 +53,10 @@ export async function POST(req: Request) {
         { error: fetchError?.message || "Storyboard not found." },
         { status: 404 }
       );
+    }
+
+    if (row.user_id && row.user_id !== userId) {
+      return NextResponse.json({ error: "Storyboard not found." }, { status: 404 });
     }
 
     const storyboardUrl = String(row.storyboard_url || "").trim();
@@ -156,7 +167,23 @@ export async function POST(req: Request) {
     }
 
     console.log("[Storyboard Video] Done:", videoUrl);
-    return NextResponse.json({ videoUrl });
+
+    let historyItem;
+    try {
+      historyItem = await insertUserCreation({
+        userId,
+        tool: "storyboard_video",
+        mediaType: "video",
+        mediaUrl: videoUrl,
+        storagePath,
+        title: String(row.theme || "Storyboard video").slice(0, 200),
+        metadata: { storyboardId },
+      });
+    } catch (historyErr) {
+      console.warn("[Storyboard Video] History log failed:", historyErr);
+    }
+
+    return NextResponse.json({ videoUrl, historyItem });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
