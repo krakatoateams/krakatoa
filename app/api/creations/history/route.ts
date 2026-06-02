@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseToolsQuery } from "@/lib/creations";
 import { listUserCreations } from "@/lib/creations-db";
+import { reconcileProductPhotosFromStorage } from "@/lib/product-photo-storage";
 import { getSessionUserId } from "@/lib/resolve-user";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,20 @@ export async function GET(req: NextRequest) {
       200,
       Math.max(1, parseInt(searchParams.get("limit") || "100", 10) || 100)
     );
+
+    // Best-effort self-heal: surface product photos that exist in Storage but
+    // lack a DB row (e.g. created before the dual-write). Never block history.
+    const wantsProductPhoto = !tools?.length || tools.includes("product_photo");
+    if (wantsProductPhoto) {
+      try {
+        await reconcileProductPhotosFromStorage(userId);
+      } catch (reconcileError) {
+        console.warn(
+          "[Creations History] product photo reconcile skipped:",
+          reconcileError
+        );
+      }
+    }
 
     const items = await listUserCreations(userId, {
       tools,
