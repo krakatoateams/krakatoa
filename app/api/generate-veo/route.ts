@@ -25,6 +25,10 @@ import { supabase } from "@/lib/supabase";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from "@/lib/storage-buckets";
 import { extractJson, hexToAssColor, formatAssTime, runWithRetry } from "@/lib/reels-helpers";
 import { extractMediaUrl } from "@/lib/replicate-utils";
+import { requireCurrentProfile } from "@/lib/profiles-db";
+import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 
 export const maxDuration = 600;
 
@@ -179,10 +183,79 @@ function mapWhisperToPerSceneVideoTimeline(
 }
 
 export async function POST(req: Request) {
+  // Platform-observability trackers — declared before the try so the catch block
+  // and any post-job-creation early-return path can finalize them.
+  let profileId: string | null = null;
+  let jobId: string | null = null;
+  let currentStepId: string | null = null;
+  let videoAssetId: string | null = null;
+
+  const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      console.warn(`[veo obs] ${label} failed:`, e);
+      return null;
+    }
+  };
+
+  // Best-effort fail-marking for early-return error paths after job creation.
+  const failPlatform = async (message: string) => {
+    const errJson = { message };
+    if (currentStepId && profileId) {
+      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
+      currentStepId = null;
+    }
+    if (videoAssetId && profileId) {
+      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
+    }
+    if (jobId && profileId) {
+      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    }
+  };
+
+  // Step-recording helpers (best-effort; manage currentStepId).
+  const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
+    if (!jobId || !profileId) return;
+    const row = await safe(`beginStep:${stepKey}`, () => createJobStep({
+      jobId: jobId!,
+      profileId: profileId!,
+      stepKey,
+      stepName,
+      status: "running",
+      input,
+    }));
+    currentStepId = row?.id ?? null;
+  };
+  const endStep = async (output?: Record<string, unknown>): Promise<void> => {
+    const id = currentStepId;
+    currentStepId = null;
+    if (id && profileId) {
+      await safe("finishStep", () => finishJobStep(profileId!, id, output));
+    }
+  };
+
   try {
-    const userId = await getSessionUserId();
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    // Normal path: identity from the NextAuth session via the profile.
+    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    //   profile.user_id -> legacy user_creations dual-write (= users.id)
+    let userId: string | null = null;
+    try {
+      const profile = await requireCurrentProfile();
+      profileId = profile.id;
+      userId = profile.user_id;
+    } catch (e) {
+      if (e instanceof Error && /not authenticated/i.test(e.message)) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
+      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
+      // non-auth infrastructure error, keep legacy generation working but SKIP all
+      // platform observability (profileId stays null -> guarded no-ops).
+      console.warn("[veo obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
+      userId = await getSessionUserId();
+      if (!userId) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
     }
 
     const body = await req.json();
@@ -298,7 +371,44 @@ export async function POST(req: Request) {
     };
     const fontUrl = fontUrls[style.fontname];
 
+    // ---- Platform job + processing video asset (best-effort observability) ----
+    // Created after all top-level validation so validation early-returns never
+    // leave a dangling job. Mode is already known here.
+    if (profileId) {
+      const job = await safe("createJob", () => createJob({
+        profileId: profileId!,
+        tool: "veo",
+        jobType: isSingle ? "veo_single" : "veo_perscene",
+        provider: "replicate",
+        model: VEO_MODEL,
+        input: {
+          theme: theme.slice(0, 500),
+          mode: isSingle ? "single" : "perScene",
+          duration,
+          resolution,
+          voiceId,
+          emotion,
+        },
+      }));
+      if (job) {
+        jobId = job.id;
+        await safe("startJob", () => startJob(profileId!, jobId!));
+        const asset = await safe("createAsset", () => createProcessingAsset({
+          profileId: profileId!,
+          jobId: jobId!,
+          tool: "veo",
+          assetType: "video",
+          role: "final_video",
+          provider: "replicate",
+          model: VEO_MODEL,
+          metadata: { theme: theme.slice(0, 200), mode: isSingle ? "single" : "perScene" },
+        }));
+        if (asset) videoAssetId = asset.id;
+      }
+    }
+
     // ----- Step 1: style anchor + negative (Gemini, thinking_budget 0) -----
+    await beginStep("style_anchor", "LLM style anchor + negative prompt");
     const styleSystemPrompt = `You are a cinematographer. Given a video theme, return a JSON object with exactly two fields:
 - style_anchor: comma-separated string of 6-8 visual descriptors (always include photorealistic and 9:16 vertical)
 - negative_prompt: comma-separated list of visual things to avoid
@@ -323,15 +433,18 @@ Return ONLY raw JSON, nothing else.`;
     } catch {
       console.warn("[Veo] Style JSON parse failed, using defaults");
     }
+    await endStep({ styleAnchor, negativePrompt });
 
     const { w: targetW, h: targetH } = dimsForResolution(resolution as "720p" | "1080p");
 
     if (isSingle) {
       const singlePromptScenes = Number(body.singlePromptScenes);
       if (![1, 2].includes(singlePromptScenes)) {
+        await failPlatform("singlePromptScenes must be 1 or 2 in single mode");
         return NextResponse.json({ error: "singlePromptScenes must be 1 or 2 in single mode" }, { status: 400 });
       }
 
+      await beginStep("veo_prompt", "LLM Veo prompt authoring", { singlePromptScenes });
       const voiceLabel = humanizeVoiceId(voiceId);
       const voiceTone = `${voiceLabel} voice character; ${emotion} emotional delivery for pacing, emphasis, and phrasing.`;
       const voBlock = `AUDIO / VOICEOVER (mandatory for Veo): The clip must have clear, intelligible English voiceover on the main soundtrack — not ambience-only, not music-only, and not sound-effects drowning the voice. In the Veo prompt you write, include (1) the exact narration as short quoted lines the voice must speak, sized to roughly ${duration} seconds of speech, (2) explicit mix direction: voiceover upfront and dry, ambience and SFX low under the voice, (3) forbid silent film, "no dialogue", or SFX-only mixes, and (4) explicit narrator casting matching the user's choices: voice preset "${voiceId}" (${voiceLabel}) and emotion "${emotion}" — describe how that voice sounds and how ${emotion} shows up in delivery (pace, warmth, intensity), woven into the Veo prompt so the generated speech reflects those settings.`;
@@ -379,7 +492,9 @@ ${promptInstruction}`,
       if (!veoPrompt.toLowerCase().includes(styleAnchor.toLowerCase().slice(0, 24))) {
         veoPrompt = `${veoPrompt.replace(/[.,\s]+$/, "")}, ${styleAnchor}`;
       }
+      await endStep({ promptChars: veoPrompt.length });
 
+      await beginStep("video_generation", "Veo single-clip generation");
       const veoRes = await runWithRetry(replicate, VEO_MODEL, {
         input: {
           prompt: veoPrompt,
@@ -392,7 +507,9 @@ ${promptInstruction}`,
       if (!veoVideoUrl.startsWith("http")) {
         throw new Error("Veo did not return a valid video URL.");
       }
+      await endStep({ veoVideoUrl });
 
+      await beginStep("audio_extraction", "Rendi extract audio track from Veo clip");
       let audioMp3Url: string;
       try {
         const extractResult = await runRendiSingle(
@@ -407,7 +524,9 @@ ${promptInstruction}`,
           `Could not extract audio from the generated Veo video (required for captions). ${msg} If the file has no audio track, try a different theme or prompt.`
         );
       }
+      await endStep({ audioMp3Url });
 
+      await beginStep("whisper_transcription", "Whisper word-level transcription");
       const wRes = (await runWithRetry(replicate, WHISPER_MODEL, {
         input: { audio: audioMp3Url, language: "english", timestamp: "word", batch_size: 64 },
       })) as any;
@@ -415,9 +534,11 @@ ${promptInstruction}`,
       if (whisperWords.length === 0) {
         throw new Error("Whisper returned no word timestamps.");
       }
+      await endStep({ wordCount: whisperWords.length });
 
       const audioSpeedFactor = 1;
       const finalDuration = duration;
+      await beginStep("subtitle_burn", "ASS subtitles + Rendi burn-in");
       const assContent = buildAssContent(style, targetW, targetH, whisperWords, audioSpeedFactor, finalDuration);
 
       const srtFilename = videosTempStoragePath(`captions_veo_${Date.now()}.ass`);
@@ -436,7 +557,9 @@ ${promptInstruction}`,
         { out_final: "final_video.mp4" }
       );
       const rendiFinalUrl = getRendiUrl(burnResult, "out_final");
+      await endStep({ rendiFinalUrl });
 
+      await beginStep("storage_upload", "Download final MP4 + upload to Supabase");
       const videoResponse = await fetch(rendiFinalUrl);
       if (!videoResponse.ok) throw new Error(`Failed to download final video: ${videoResponse.statusText}`);
       const buf = await videoResponse.arrayBuffer();
@@ -453,6 +576,27 @@ ${promptInstruction}`,
       } catch {
         /* non-fatal */
       }
+      await endStep({ storagePath: finalFilename, publicUrl: pub.publicUrl });
+
+      // Platform: mark asset ready + finish job. Single mode intentionally keeps
+      // its legacy behavior — NO user_creations write and response stays { videoUrl }.
+      if (videoAssetId && profileId) {
+        await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
+          storagePath: finalFilename,
+          publicUrl: pub.publicUrl,
+          mimeType: "video/mp4",
+          durationSec: finalDuration,
+          width: targetW,
+          height: targetH,
+          metadata: { mode: "single", duration, resolution, voiceId, emotion },
+        }));
+      }
+      if (jobId && profileId) {
+        await safe("finishJob", () => finishJob(profileId!, jobId!, {
+          output: { videoUrl: pub.publicUrl, storagePath: finalFilename, assetId: videoAssetId },
+        }));
+      }
+
       return NextResponse.json({ videoUrl: pub.publicUrl });
     }
 
@@ -480,6 +624,7 @@ Each scene object:
 
 Return ONLY raw JSON array, nothing else.`;
 
+    await beginStep("scene_breakdown", "LLM scene breakdown", { sceneCount: SCENE_COUNT, maxWordsPerScene: MAX_WORDS_PER_SCENE });
     let scenes: any[] = [];
     let lastRaw = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -526,6 +671,7 @@ Return ONLY raw JSON array, nothing else.`;
 
     const fullNarration = scenes.map((s) => String(s.narration || "").trim()).filter(Boolean).join(" ");
     if (!fullNarration) throw new Error("All scene narrations are empty.");
+    await endStep({ scenes: scenes.length });
 
     const generateTtsAndTranscribe = async (text: string, speed: number) => {
       const ttsRes = await runWithRetry(replicate, MINIMAX_MODEL, {
@@ -579,11 +725,22 @@ Return ONLY raw JSON array, nothing else.`;
         },
       })
     );
+    // Veo scene videos and the TTS+Whisper pipeline run concurrently. We wrap the
+    // wall-clock of the parallel block as a single video_generation step, then
+    // record tts_generation + whisper_transcription sequentially (post-hoc) for
+    // observability — without restructuring the generation pipeline.
+    await beginStep("video_generation", "Parallel Veo scene videos (with concurrent TTS pipeline)", { scenes: SCENE_COUNT, perSceneDuration: DURATION, resolution });
     const [videoResponses, ttsPack] = await Promise.all([Promise.all(videoPromises), runTtsPipeline()]);
     const fullAudioUrl = ttsPack.audioUrl;
     const whisperWords = ttsPack.words;
     const audioEndTotal = ttsPack.audioEndTotal;
     const audioSpeedFactor = ttsPack.audioSpeedFactor;
+    await endStep({ scenes: videoResponses.length });
+
+    await beginStep("tts_generation", "MiniMax TTS voiceover (ran concurrently with video)", { voiceId, emotion });
+    await endStep({ audioSpeedFactor });
+    await beginStep("whisper_transcription", "Whisper word-level transcription (ran concurrently with video)");
+    await endStep({ wordCount: whisperWords.length, measuredDuration: audioEndTotal });
 
     const finalDuration = TOTAL_DURATION;
     const perSceneDurStr = DURATION.toFixed(3);
@@ -608,6 +765,7 @@ Return ONLY raw JSON array, nothing else.`;
     );
     const assContent = buildAssContent(style, targetW, targetH, videoWords, 1, finalDuration);
 
+    await beginStep("rendi_render", "ASS subtitles + Rendi concat/merge/burn-in");
     const srtFilename = videosTempStoragePath(`captions_veo_${Date.now()}.ass`);
     const { error: uploadAssErr } = await supabase.storage.from(STORAGE_BUCKET).upload(srtFilename, assContent, {
       contentType: "text/plain",
@@ -674,7 +832,9 @@ Return ONLY raw JSON array, nothing else.`;
       { out_final: "final_video.mp4" }
     );
     const rendiFinalUrl = getRendiUrl(burnResult, "out_final");
+    await endStep({ combinedVideoUrl, mergedVideoUrl, rendiFinalUrl });
 
+    await beginStep("storage_upload", "Download final MP4 + upload to Supabase");
     const videoResponse = await fetch(rendiFinalUrl);
     if (!videoResponse.ok) throw new Error(`Failed to download final video: ${videoResponse.statusText}`);
     const buf = await videoResponse.arrayBuffer();
@@ -691,10 +851,30 @@ Return ONLY raw JSON array, nothing else.`;
     } catch {
       /* non-fatal */
     }
+    await endStep({ storagePath: finalFilename, publicUrl: pub.publicUrl });
+
+    // Platform: mark asset ready + finish job before the unchanged legacy write.
+    if (videoAssetId && profileId) {
+      await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
+        storagePath: finalFilename,
+        publicUrl: pub.publicUrl,
+        mimeType: "video/mp4",
+        durationSec: finalDuration,
+        width: targetW,
+        height: targetH,
+        metadata: { mode: "perScene", duration, resolution, voiceId, emotion },
+      }));
+    }
+    if (jobId && profileId) {
+      await safe("finishJob", () => finishJob(profileId!, jobId!, {
+        output: { videoUrl: pub.publicUrl, storagePath: finalFilename, assetId: videoAssetId },
+      }));
+    }
+
     let historyItem;
     try {
       historyItem = await insertUserCreation({
-        userId,
+        userId: userId as string,
         tool: "reels_veo",
         mediaType: "video",
         mediaUrl: pub.publicUrl,
@@ -716,6 +896,18 @@ Return ONLY raw JSON array, nothing else.`;
   } catch (error: unknown) {
     console.error("[generate-veo]", error);
     const message = error instanceof Error ? error.message : String(error);
+    // Best-effort failure marking — must not throw or mask the original error.
+    const errJson = { message };
+    if (currentStepId && profileId) {
+      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
+      currentStepId = null;
+    }
+    if (videoAssetId && profileId) {
+      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
+    }
+    if (jobId && profileId) {
+      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

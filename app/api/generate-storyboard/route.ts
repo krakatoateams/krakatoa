@@ -14,6 +14,10 @@ import {
   runReplicateWithRetry,
   stripMarkdownFences,
 } from "@/lib/replicate-server";
+import { requireCurrentProfile } from "@/lib/profiles-db";
+import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 
 export const maxDuration = 300;
 
@@ -186,10 +190,62 @@ Layout requirements:
 }
 
 export async function POST(req: Request) {
+  // Platform-observability trackers — declared before the try so the catch block
+  // and early-return error paths can finalize whatever was created. They stay
+  // null when observability is skipped, making every platform write a no-op.
+  let profileId: string | null = null;
+  let jobId: string | null = null;
+  let currentStepId: string | null = null;
+  let imageAssetId: string | null = null;
+
+  // Best-effort wrapper: platform writes must NEVER crash generation or mask the
+  // original error.
+  const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      console.warn(`[storyboard obs] ${label} failed:`, e);
+      return null;
+    }
+  };
+
+  // Shared best-effort fail-marking for early-return error paths that occur AFTER
+  // job creation (this route returns instead of throwing in several places).
+  const failPlatform = async (message: string) => {
+    const errJson = { message };
+    if (currentStepId && profileId) {
+      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
+      currentStepId = null;
+    }
+    if (imageAssetId && profileId) {
+      await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
+    }
+    if (jobId && profileId) {
+      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    }
+  };
+
   try {
-    const userId = await getSessionUserId();
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    // Normal path: derive identity from the NextAuth session via the profile.
+    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    //   profile.user_id -> legacy storyboards.user_id + user_creations (= users.id)
+    let userId: string | null = null;
+    try {
+      const profile = await requireCurrentProfile();
+      profileId = profile.id;
+      userId = profile.user_id;
+    } catch (e) {
+      if (e instanceof Error && /not authenticated/i.test(e.message)) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
+      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
+      // non-auth infrastructure error, keep legacy generation working but SKIP all
+      // platform observability (profileId stays null -> guarded no-ops).
+      console.warn("[storyboard obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
+      userId = await getSessionUserId();
+      if (!userId) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
     }
 
     const body = await req.json();
@@ -214,6 +270,55 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
+    // ---- Platform job + processing image asset (best-effort observability) ----
+    if (profileId) {
+      const job = await safe("createJob", () => createJob({
+        profileId: profileId!,
+        tool: "storyboard",
+        jobType: "storyboard_image",
+        provider: "replicate",
+        model: "openai/gpt-image-2",
+        input: { theme: theme.slice(0, 500), storyboardStyle },
+      }));
+      if (job) {
+        jobId = job.id;
+        await safe("startJob", () => startJob(profileId!, jobId!));
+        const asset = await safe("createAsset", () => createProcessingAsset({
+          profileId: profileId!,
+          jobId: jobId!,
+          tool: "storyboard",
+          assetType: "image",
+          role: "storyboard_image",
+          provider: "replicate",
+          model: "openai/gpt-image-2",
+          metadata: { storyboardStyle, theme: theme.slice(0, 200) },
+        }));
+        if (asset) imageAssetId = asset.id;
+      }
+    }
+
+    // Step-recording helpers (best-effort; manage currentStepId).
+    const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
+      if (!jobId || !profileId) return;
+      const row = await safe(`beginStep:${stepKey}`, () => createJobStep({
+        jobId: jobId!,
+        profileId: profileId!,
+        stepKey,
+        stepName,
+        status: "running",
+        input,
+      }));
+      currentStepId = row?.id ?? null;
+    };
+    const endStep = async (output?: Record<string, unknown>): Promise<void> => {
+      const id = currentStepId;
+      currentStepId = null;
+      if (id && profileId) {
+        await safe("finishStep", () => finishJobStep(profileId!, id, output));
+      }
+    };
+
+    await beginStep("scene_breakdown", "GPT-5 scene breakdown + seedance prompt");
     const MAX_JSON_ATTEMPTS = 3;
     let breakdown: { scenes: SceneBreakdown[]; seedancePrompt: string } | null =
       null;
@@ -245,6 +350,7 @@ export async function POST(req: Request) {
     if (!breakdown) {
       throw new Error("GPT-5 did not return a valid scene breakdown.");
     }
+    await endStep({ scenes: breakdown.scenes.length });
 
     const { scenes, seedancePrompt: rawSeedancePrompt } = breakdown;
     let seedancePrompt = rawSeedancePrompt;
@@ -254,6 +360,7 @@ export async function POST(req: Request) {
 
     const imagePrompt = buildStoryboardImagePrompt(theme, scenes, styleInstruction);
 
+    await beginStep("image_generation", "GPT Image storyboard sheet");
     console.log("[Storyboard] Calling openai/gpt-image-2 from scene breakdown...");
     const imageResult = await runReplicateWithRetry(
       replicate,
@@ -274,12 +381,15 @@ export async function POST(req: Request) {
     const rawUrl = extractMediaUrl(imageResult);
     if (!rawUrl || !rawUrl.startsWith("http")) {
       console.error("[Storyboard] Unexpected gpt-image-2 output:", imageResult);
+      await failPlatform("Failed to resolve storyboard image URL from model output.");
       return NextResponse.json(
         { error: "Failed to resolve storyboard image URL from model output." },
         { status: 500 }
       );
     }
+    await endStep({ imageUrl: rawUrl });
 
+    await beginStep("storage_upload", "Download storyboard image + upload to Supabase");
     console.log("[Storyboard] Downloading image from Replicate...");
     const imgRes = await fetch(rawUrl);
     if (!imgRes.ok) {
@@ -304,6 +414,7 @@ export async function POST(req: Request) {
 
     if (uploadError) {
       console.error("[Storyboard] Upload error:", uploadError);
+      await failPlatform(`Failed to upload storyboard: ${uploadError.message}`);
       return NextResponse.json(
         { error: `Failed to upload storyboard: ${uploadError.message}` },
         { status: 500 }
@@ -313,6 +424,7 @@ export async function POST(req: Request) {
     const {
       data: { publicUrl: storyboardUrl },
     } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
+    await endStep({ storagePath, publicUrl: storyboardUrl });
 
     const scene_breakdown = { scenes };
 
@@ -333,16 +445,33 @@ export async function POST(req: Request) {
 
     if (insertError || !inserted?.id) {
       console.error("[Storyboard] DB insert error:", insertError);
+      await failPlatform(insertError?.message || "Failed to save storyboard record.");
       return NextResponse.json(
         { error: insertError?.message || "Failed to save storyboard record." },
         { status: 500 }
       );
     }
 
+    // Attach storyboardId into the asset metadata only AFTER the legacy storyboards
+    // insert succeeds, then mark the image asset ready and finish the job.
+    if (imageAssetId && profileId) {
+      await safe("markAssetReady", () => markAssetReady(profileId!, imageAssetId!, {
+        storagePath,
+        publicUrl: storyboardUrl,
+        mimeType: "image/png",
+        metadata: { storyboardId: inserted.id, storyboardStyle, theme: theme.slice(0, 200) },
+      }));
+    }
+    if (jobId && profileId) {
+      await safe("finishJob", () => finishJob(profileId!, jobId!, {
+        output: { storyboardId: inserted.id, storyboardUrl, storagePath, assetId: imageAssetId },
+      }));
+    }
+
     let historyItem;
     try {
       historyItem = await insertUserCreation({
-        userId,
+        userId: userId as string,
         tool: "storyboard",
         mediaType: "image",
         mediaUrl: storyboardUrl,
@@ -367,6 +496,18 @@ export async function POST(req: Request) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error("[Storyboard] Error:", error);
+    // Best-effort failure marking — must not throw or mask the original error.
+    const errJson = { message };
+    if (currentStepId && profileId) {
+      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
+      currentStepId = null;
+    }
+    if (imageAssetId && profileId) {
+      await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
+    }
+    if (jobId && profileId) {
+      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -78,7 +78,7 @@ export function TextRollButton({
 
   if (href) {
     return (
-      <Link href={href} className={baseClass} {...rest}>
+      <Link href={href} className={baseClass} {...(rest as Omit<ComponentPropsWithoutRef<typeof Link>, "href">)}>
         {inner}
       </Link>
     );
