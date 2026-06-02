@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LogOut,
 } from "lucide-react";
+import CreditBadge from "@/components/CreditBadge";
 
 interface NavItem {
   label: string;
@@ -121,6 +122,9 @@ export default function Sidebar() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-white">{session.user.name}</p>
               <p className="truncate text-[10px] text-gray-500">{session.user.email}</p>
+              <div className="mt-1">
+                <CreditBadge />
+              </div>
             </div>
             <button
               type="button"

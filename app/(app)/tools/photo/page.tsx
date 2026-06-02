@@ -22,6 +22,8 @@ import {
   PhotoStyleId,
 } from "@/lib/product-photo";
 import CreationsHistory from "@/components/CreationsHistory";
+import { estimateProductPhotoCredits } from "@/lib/credit-costs";
+import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 
 export default function ProductPhotoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,6 +38,8 @@ export default function ProductPhotoPage() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const { refetch: refetchCredits } = useCreditBalance();
+  const photoCost = estimateProductPhotoCredits();
 
   useEffect(() => {
     return () => {
@@ -98,6 +102,11 @@ export default function ProductPhotoPage() {
 
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? photoCost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
         throw new Error(data.error || "Generation failed");
       }
 
@@ -105,6 +114,7 @@ export default function ProductPhotoPage() {
       if (data.warning) setWarning(data.warning);
 
       setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
@@ -298,7 +308,7 @@ export default function ProductPhotoPage() {
               ) : (
                 <>
                   <Wand2 className="w-5 h-5" />
-                  Generate with model
+                  Generate with model · {photoCost} credits
                 </>
               )}
             </button>

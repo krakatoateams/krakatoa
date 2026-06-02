@@ -25,6 +25,9 @@ export const STORYBOARD_IMAGE_CREDITS = 2;
 /** Fixed cost for one storyboard-to-video generation (Seedance 15s clip). */
 export const STORYBOARD_VIDEO_CREDITS = 30;
 
+/** Fixed cost for one Product Photo generation (Nano Banana). */
+export const PRODUCT_PHOTO_CREDITS = 5;
+
 /**
  * Convert a video duration in seconds to integer credits at
  * VIDEO_CREDITS_PER_SECOND.
@@ -64,4 +67,8 @@ export function estimateStoryboardImageCredits(): number {
 
 export function estimateStoryboardVideoCredits(): number {
   return STORYBOARD_VIDEO_CREDITS;
+}
+
+export function estimateProductPhotoCredits(): number {
+  return PRODUCT_PHOTO_CREDITS;
 }
