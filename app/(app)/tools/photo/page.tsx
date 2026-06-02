@@ -35,12 +35,22 @@ export default function ProductPhotoPage() {
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
       if (productPreview) URL.revokeObjectURL(productPreview);
     };
   }, [productPreview]);
+
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxUrl]);
 
   const setFile = (file: File | null) => {
     if (productPreview) URL.revokeObjectURL(productPreview);
@@ -329,17 +339,40 @@ export default function ProductPhotoPage() {
 
         <CreationsHistory
           title="Your generations"
-          description="Every successful product photo appears here. Click to preview above."
+          description="Every successful product photo appears here. Click any photo to view it full size."
           tools={["product_photo"]}
           mediaType="image"
           refreshKey={historyRefreshKey}
-          selectedUrl={resultUrl}
-          onSelect={(item) => {
-            setResultUrl(item.mediaUrl);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
+          onSelect={(item) => setLightboxUrl(item.mediaUrl)}
         />
       </div>
+
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4"
+          role="presentation"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            type="button"
+            className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white z-[201] border-0 cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxUrl(null);
+            }}
+            aria-label="Close"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="Product photo full size"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
