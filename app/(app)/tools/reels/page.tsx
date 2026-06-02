@@ -123,7 +123,6 @@ export default function ReelsPage() {
   const [storyboardId, setStoryboardId] = useState<string | null>(null);
   const [storyboards, setStoryboards] = useState<StoryboardRow[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [highlightedVideoId, setHighlightedVideoId] = useState<string | null>(null);
   const [videoJobStoryboardId, setVideoJobStoryboardId] = useState<string | null>(null);
   const [storyboardLoading, setStoryboardLoading] = useState(false);
   const [videoLoading, setVideoLoading] = useState(false);
@@ -166,14 +165,10 @@ export default function ReelsPage() {
     );
   }, [storyboards, storyboardStyleFilter]);
 
-  const scrollToVideoAndHighlight = (id: string) => {
-    setHighlightedVideoId(id);
-    window.requestAnimationFrame(() => {
-      document
-        .getElementById(`storyboard-video-${id}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    window.setTimeout(() => setHighlightedVideoId(null), 4500);
+  const playStoryboardVideo = (videoUrl: string) => {
+    setVideoUrl(videoUrl);
+    setResultIsStoryboardFormat(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const resolveEmotionForVeo = () => (emotion === "auto" ? "neutral" : emotion);
@@ -1236,7 +1231,7 @@ export default function ReelsPage() {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => scrollToVideoAndHighlight(row.id)}
+                                onClick={() => row.video_url && playStoryboardVideo(row.video_url)}
                                 className="w-full py-2.5 rounded-xl font-bold text-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
                               >
                                 View Video
@@ -1250,46 +1245,6 @@ export default function ReelsPage() {
                 )}
               </div>
 
-              <div>
-                <h2 className="text-2xl font-black tracking-tight mb-2">Video Gallery</h2>
-                <p className="text-sm text-slate-500 mb-6">Completed storyboard videos.</p>
-                {storyboards.filter((r) => r.video_url).length === 0 ? (
-                  <p className="text-slate-600 text-sm">No videos yet.</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {storyboards
-                      .filter((r) => r.video_url)
-                      .map((row) => (
-                        <div
-                          key={`vid-${row.id}`}
-                          id={`storyboard-video-${row.id}`}
-                          className={`bg-white/[0.03] border border-white/10 rounded-2xl p-4 space-y-3 transition-shadow ${
-                            highlightedVideoId === row.id
-                              ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[#030712]"
-                              : ""
-                          }`}
-                        >
-                          <div className="relative rounded-xl overflow-hidden bg-black">
-                            <video
-                              src={row.video_url!}
-                              controls
-                              playsInline
-                              className="w-full aspect-video object-contain relative z-0"
-                            />
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={row.storyboard_url}
-                              alt="Storyboard thumbnail — click to expand"
-                              className="absolute bottom-2 left-2 z-30 w-20 rounded-lg overflow-hidden border-2 border-white/20 shadow-lg bg-black/80 hover:border-emerald-400/60 transition-colors cursor-pointer pointer-events-auto"
-                              onClick={() => setLightboxUrl(row.storyboard_url)}
-                            />
-                          </div>
-                          <p className="text-sm text-slate-300 px-1">{row.theme}</p>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </div>
             </div>
             {lightboxUrl && (
               <div
