@@ -5,6 +5,10 @@ import { insertUserCreation } from '@/lib/creations-db';
 import { getSessionUserId } from '@/lib/resolve-user';
 import { supabase } from '@/lib/supabase';
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
+import { requireCurrentProfile } from '@/lib/profiles-db';
+import { createJob, startJob, finishJob, failJob } from '@/lib/jobs-db';
+import { createJobStep, finishJobStep, failJobStep } from '@/lib/job-steps-db';
+import { createProcessingAsset, markAssetReady, markAssetFailed } from '@/lib/assets-db';
 
 // Allow up to 10 minutes for this route (LLM + generation + whisper + rendi)
 export const maxDuration = 600;
@@ -18,10 +22,48 @@ function formatAssTime(seconds: number) {
 }
 
 export async function POST(req: Request) {
+  // Platform-observability trackers — declared before the try so the catch block
+  // can finalize whatever was created. They stay null when observability is
+  // skipped, which makes every platform write below a guarded no-op.
+  let profileId: string | null = null;
+  let jobId: string | null = null;
+  let currentStepId: string | null = null;
+  let finalAssetId: string | null = null;
+
+  // Best-effort wrapper for platform writes: observability must NEVER crash the
+  // generation pipeline or mask the real generation error.
+  const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      console.warn(`[reels obs] ${label} failed:`, e);
+      return null;
+    }
+  };
+
   try {
-    const userId = await getSessionUserId();
-    if (!userId) {
-      return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+    // Normal path: derive identity from the current NextAuth session via the profile.
+    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    //   profile.user_id -> legacy user_creations dual-write (= users.id)
+    let userId: string | null = null;
+    try {
+      const profile = await requireCurrentProfile();
+      profileId = profile.id;
+      userId = profile.user_id;
+    } catch (e) {
+      if (e instanceof Error && /not authenticated/i.test(e.message)) {
+        return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+      }
+      // TEMPORARY SAFETY FALLBACK ONLY — this must NOT become the normal path.
+      // If profile resolution fails for non-auth infrastructure reasons (e.g. the
+      // platform tables are unreachable), keep the legacy generation path working
+      // but SKIP all platform observability: profileId stays null so every
+      // job/job_step/asset write below is a guarded no-op. Always log loudly.
+      console.warn('[reels obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:', e);
+      userId = await getSessionUserId();
+      if (!userId) {
+        return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+      }
     }
 
     const body = await req.json();
@@ -88,6 +130,69 @@ export async function POST(req: Request) {
     const DURATION_PER_SCENE = durationPerScene || 5;
     const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
 
+    // ---- Platform job + processing asset (best-effort observability) ----
+    // Only runs when a profile was resolved (normal path). All writes go through
+    // `safe()` so an observability failure can never break generation.
+    if (profileId) {
+      const job = await safe('createJob', () => createJob({
+        profileId: profileId!,
+        tool: 'reels',
+        jobType: 'reels_seedance',
+        provider: 'replicate',
+        model: 'bytedance/seedance-2.0-fast',
+        input: {
+          theme: String(theme).slice(0, 500),
+          numScenes: SCENE_COUNT,
+          durationPerScene: DURATION_PER_SCENE,
+          totalDuration: TOTAL_DURATION,
+          resolution: RESOLUTION,
+          voiceId: VOICE_ID,
+          emotion: USER_EMOTION,
+        },
+      }));
+      if (job) {
+        jobId = job.id;
+        await safe('startJob', () => startJob(profileId!, jobId!));
+        const asset = await safe('createAsset', () => createProcessingAsset({
+          profileId: profileId!,
+          jobId: jobId!,
+          tool: 'reels',
+          assetType: 'video',
+          role: 'final_video',
+          provider: 'replicate',
+          model: 'bytedance/seedance-2.0-fast',
+          metadata: { theme: String(theme).slice(0, 200) },
+        }));
+        if (asset) finalAssetId = asset.id;
+      }
+    }
+
+    // Step-recording helpers (best-effort; manage currentStepId). A step is only
+    // recorded when both a profile and a job exist; otherwise these are no-ops.
+    const beginStep = async (
+      stepKey: string,
+      stepName: string,
+      input?: Record<string, unknown>
+    ): Promise<void> => {
+      if (!jobId || !profileId) return;
+      const row = await safe(`beginStep:${stepKey}`, () => createJobStep({
+        jobId: jobId!,
+        profileId: profileId!,
+        stepKey,
+        stepName,
+        status: 'running',
+        input,
+      }));
+      currentStepId = row?.id ?? null;
+    };
+    const endStep = async (output?: Record<string, unknown>): Promise<void> => {
+      const id = currentStepId;
+      currentStepId = null;
+      if (id && profileId) {
+        await safe('finishStep', () => finishJobStep(profileId!, id, output));
+      }
+    };
+
     // Use Gemini 2.5 Flash on Replicate — strong creative writing for cinematic
     // prompts and reliable structured JSON. Dynamic thinking is enabled on the
     // scene-breakdown step where hard constraints (exact scene count, word caps,
@@ -121,6 +226,7 @@ export async function POST(req: Request) {
       throw new Error('No valid JSON found in LLM response');
     };
 
+    await beginStep('style_anchor', 'LLM style anchor + negative prompt + narrator emotion');
     console.log(`[Step 1A] Generating Style Anchor, Negative Prompt, and Narrator Emotion for theme: "${theme}"...`);
     // Step 1A: LLM Style + Narrator Emotion Generation
     // narrator_emotion is one of MiniMax speech-02-turbo's supported emotions
@@ -170,6 +276,7 @@ Return ONLY raw JSON, nothing else.`;
     console.log(`[Negative Prompt]: ${negativePrompt}`);
     console.log(`[Narrator Voice]: ${VOICE_ID}`);
     console.log(`[Narrator Emotion]: ${narratorEmotion} (user="${USER_EMOTION}", llm="${llmSuggestedEmotion}")`);
+    await endStep({ styleAnchor, negativePrompt, narratorEmotion });
 
     // Per-scene word cap derived from user's DURATION_PER_SCENE. Empirically MiniMax
     // speech-02-turbo speaks at ~1.7 words/sec with sentence punctuation pauses, so
@@ -177,6 +284,7 @@ Return ONLY raw JSON, nothing else.`;
     // filter in the merge step (speed-fit safety net).
     const MAX_WORDS_PER_SCENE = Math.max(6, Math.floor(DURATION_PER_SCENE * 1.7));
 
+    await beginStep('scene_breakdown', 'LLM scene breakdown', { sceneCount: SCENE_COUNT, maxWordsPerScene: MAX_WORDS_PER_SCENE });
     console.log(`[Step 1B] Breaking down scenes (${SCENE_COUNT} x ${DURATION_PER_SCENE}s, max ${MAX_WORDS_PER_SCENE} words each) with LLM...`);
     // Step 1B: LLM Scene Breakdown — narrations written as ONE continuous monologue
     // split into scene-aligned chunks. When joined with spaces, they must read as a
@@ -261,6 +369,7 @@ Return ONLY raw JSON array, nothing else.`;
       console.log(`[Scene ${scene.scene_id} prompt]: ${p}`);
       console.log(`[Scene ${scene.scene_id} narration]: ${scene.narration}`);
     }
+    await endStep({ sceneCount: scenes.length });
 
     // Shared extractor for Replicate's many output shapes (FileOutput, string, array, etc.)
     const extractMediaUrl = (res: any): string => {
@@ -362,6 +471,7 @@ Return ONLY raw JSON array, nothing else.`;
     };
 
     // Pass 1: speed=1.0
+    await beginStep('tts_generation', 'MiniMax TTS voiceover (with speed-fit retry)', { voiceId: VOICE_ID, emotion: narratorEmotion });
     console.log('[Step 2/3] First TTS+Whisper pass at speed=1.0...');
     let { audioUrl: fullAudioUrl, words: whisperWords, duration: audioEndTotal } =
       await generateTtsAndTranscribe(fullNarration, 1.0);
@@ -399,9 +509,17 @@ Return ONLY raw JSON array, nothing else.`;
     const finalDuration = TOTAL_DURATION;
     const perSceneDuration = DURATION_PER_SCENE;
 
+    // TTS + Whisper are interleaved inside generateTtsAndTranscribe (Whisper measures
+    // each TTS pass). We record them as two sequential steps for observability without
+    // restructuring the pipeline: TTS finishes here, then Whisper is logged retroactively.
+    await endStep({ retried: firstRatio < RATIO_TOLERANCE_LOW || firstRatio > RATIO_TOLERANCE_HIGH, audioSpeedFactor });
+    await beginStep('whisper_transcription', 'Whisper word-level transcription', { measuredDuration: audioEndTotal });
+    await endStep({ wordCount: whisperWords.length, measuredDuration: audioEndTotal });
+
     // ---------- Step 5: Parallel Seedance video generation ----------
     // Each scene's video is exactly DURATION_PER_SCENE seconds (user's choice).
     // Total reel = SCENE_COUNT * DURATION_PER_SCENE.
+    await beginStep('video_generation', 'Parallel Seedance scene videos', { scenes: SCENE_COUNT, perSceneDuration: DURATION_PER_SCENE, resolution: RESOLUTION });
     console.log(`[Step 5] Parallel Seedance video generation (${DURATION_PER_SCENE}s per scene)...`);
     const videoPromises = scenes.map(scene => {
       console.log(`[Seedance] Scene ${scene.scene_id}: requesting ${DURATION_PER_SCENE}s`);
@@ -426,7 +544,11 @@ Return ONLY raw JSON array, nothing else.`;
       }
       return url;
     });
+    await endStep({ scenes: sceneVideoUrls.length });
 
+    // rendi_render covers ASS subtitle build, ASS upload, and all Rendi FFmpeg passes
+    // (per-scene normalize + concat, audio merge, subtitle burn-in).
+    await beginStep('rendi_render', 'ASS subtitles + Rendi concat/merge/burn-in');
     console.log('[Step 6] Build ASS subtitle file from continuous Whisper timeline...');
     // Subtitle timestamps come directly from the single Whisper pass — no per-scene
     // offset math because audio is now one continuous file, and the trimmed-and-concatenated
@@ -651,8 +773,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       { out_final: "final_video.mp4" }
     );
     const rendiVideoUrl = getRendiUrl(subtitleResult, 'out_final');
+    await endStep({ combinedVideoUrl, mergedVideoUrl, rendiVideoUrl });
 
     // Step 7: Download from Rendi and upload to Supabase
+    await beginStep('storage_upload', 'Download from Rendi + upload final MP4 to Supabase');
     console.log('[Step 7] Uploading final video to Supabase...');
     const videoResponse = await fetch(rendiVideoUrl);
     if (!videoResponse.ok) {
@@ -684,12 +808,37 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       console.warn('Cleanup warning (non-fatal):', cleanupErr);
     }
 
+    // (1) Finish the storage_upload step.
+    await endStep({ storagePath: finalFilename, publicUrl: finalVideoUrl });
+
     console.log('Pipeline complete! Video URL:', finalVideoUrl);
 
+    // (2) Mark the final video asset ready (the platform source of truth).
+    if (finalAssetId && profileId) {
+      await safe('markAssetReady', () => markAssetReady(profileId!, finalAssetId!, {
+        storagePath: finalFilename,
+        publicUrl: finalVideoUrl,
+        mimeType: 'video/mp4',
+        durationSec: finalDuration,
+        width: targetW,
+        height: targetH,
+        metadata: {
+          numScenes: SCENE_COUNT,
+          durationPerScene: DURATION_PER_SCENE,
+          resolution: RESOLUTION,
+          voiceId: VOICE_ID,
+          emotion: USER_EMOTION,
+          llmModel: LLM_MODEL,
+        },
+      }));
+    }
+
+    // (3) Legacy dual-write — UNCHANGED, success-only (user_creations requires a real
+    // media_url, so we never write pending/failed rows there).
     let historyItem;
     try {
       historyItem = await insertUserCreation({
-        userId,
+        userId: userId as string,
         tool: 'reels_seedance',
         mediaType: 'video',
         mediaUrl: finalVideoUrl,
@@ -707,10 +856,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       console.warn('[Reels Seedance] History log failed (video still saved):', historyErr);
     }
 
+    // (4) Finish the job.
+    if (jobId && profileId) {
+      await safe('finishJob', () => finishJob(profileId!, jobId!, {
+        output: { videoUrl: finalVideoUrl, storagePath: finalFilename, assetId: finalAssetId },
+      }));
+    }
+
+    // (5) Response shape unchanged.
     return NextResponse.json({ videoUrl: finalVideoUrl, historyItem });
 
   } catch (error: any) {
     console.error('Generate pipeline error:', error);
+
+    // Best-effort failure marking — must not throw or mask the original error.
+    const errJson = { message: error?.message || String(error) };
+    if (currentStepId && profileId) {
+      await safe('failStep', () => failJobStep(profileId!, currentStepId!, errJson));
+      currentStepId = null;
+    }
+    if (finalAssetId && profileId) {
+      await safe('failAsset', () => markAssetFailed(profileId!, finalAssetId!, errJson));
+    }
+    if (jobId && profileId) {
+      await safe('failJob', () => failJob(profileId!, jobId!, errJson));
+    }
+
     return NextResponse.json({ error: error.message || String(error) }, { status: 500 });
   }
 }
