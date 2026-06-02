@@ -249,3 +249,30 @@ export async function getAssetForProfile(
   handleError(error, "Failed to fetch asset.");
   return (data as Asset | null) ?? null;
 }
+
+/**
+ * Narrow, read-only lookup of the storyboard image asset that backs a given
+ * legacy `storyboards.id`. Used only to link a generated storyboard video back
+ * to its source image via asset_relations. Intentionally NOT a generic
+ * metadata search: it is hard-scoped to profile_id + tool='storyboard' +
+ * role='storyboard_image' + metadata.storyboardId. Returns null when there is
+ * no matching ready image asset (e.g. legacy storyboards created pre-Phase 4).
+ */
+export async function findStoryboardImageAsset(
+  profileId: string,
+  storyboardId: string
+): Promise<Asset | null> {
+  const { data, error } = await supabaseServer
+    .from(ASSETS_TABLE)
+    .select("*")
+    .eq("profile_id", profileId)
+    .eq("tool", "storyboard")
+    .eq("role", "storyboard_image")
+    .eq("metadata->>storyboardId", storyboardId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  handleError(error, "Failed to find storyboard image asset.");
+  return (data as Asset | null) ?? null;
+}
