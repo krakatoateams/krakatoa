@@ -4,6 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
+import {
+  estimateSeedanceCredits,
+  estimateVeoCredits,
+  estimateStoryboardImageCredits,
+  estimateStoryboardVideoCredits,
+} from "@/lib/credit-costs";
+import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
@@ -134,6 +141,30 @@ export default function ReelsPage() {
   const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const { refetch: refetchCredits } = useCreditBalance();
+
+  // Credit cost previews — derived from the shared estimators so the JSX never
+  // hardcodes a number. Inputs are coerced defensively (empty/invalid fields
+  // fall back to the same defaults the server applies) so the labels never show
+  // NaN or a misleading 0.
+  const seedanceCost = useMemo(
+    () =>
+      estimateSeedanceCredits({
+        sceneCount: Math.max(1, Number(numScenes) || 1),
+        durationPerScene: Math.max(1, Number(durationPerScene) || 5),
+      }),
+    [numScenes, durationPerScene]
+  );
+  const veoCost = useMemo(() => {
+    const dur = Math.max(1, Number(veoDuration) || 6);
+    const sceneCount =
+      veoMode === "single" ? 1 : Math.min(3, Math.max(1, Number(veoNumScenes) || 1));
+    // Mirror the route: single mode bills the clip duration; perScene multiplies
+    // by the (clamped) scene count.
+    return estimateVeoCredits({ durationSec: dur * sceneCount });
+  }, [veoMode, veoDuration, veoNumScenes]);
+  const storyboardImageCost = estimateStoryboardImageCredits();
+  const storyboardVideoCost = estimateStoryboardVideoCredits();
 
   const fetchStoryboards = useCallback(async () => {
     try {
@@ -201,11 +232,17 @@ export default function ReelsPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? seedanceCost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
         throw new Error(data.error || "Failed to generate video");
       }
 
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
       setLogs((prev) => [...prev, "Video generated successfully!"]);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -253,10 +290,16 @@ export default function ReelsPage() {
       });
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? veoCost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
       setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -295,6 +338,11 @@ export default function ReelsPage() {
       });
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? storyboardImageCost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
         throw new Error(data.error || "Failed to generate storyboard");
       }
       setStoryboardUrl(
@@ -303,6 +351,7 @@ export default function ReelsPage() {
       setStoryboardId(typeof data.storyboardId === "string" ? data.storyboardId : null);
       setLogs((prev) => [...prev, "Storyboard saved — Create Video when ready."]);
       setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
       await fetchStoryboards();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -331,12 +380,18 @@ export default function ReelsPage() {
       });
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? storyboardVideoCost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
       setResultIsStoryboardFormat(true);
       setLogs((prev) => [...prev, "Storyboard video saved — playback ready."]);
       setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
       await fetchStoryboards();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -501,7 +556,7 @@ export default function ReelsPage() {
                       ) : (
                         <>
                           <LayoutGrid className="w-6 h-6" />
-                          Generate Storyboard
+                          Generate Storyboard · {storyboardImageCost} credits
                         </>
                       )}
                     </button>
@@ -523,7 +578,7 @@ export default function ReelsPage() {
                             className="flex-1 py-4 rounded-xl font-bold border border-white/15 bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                           >
                             <RefreshCw className={`w-5 h-5 ${storyboardLoading ? "animate-spin" : ""}`} />
-                            Generate Again
+                            Generate Again · {storyboardImageCost} credits
                           </button>
                           <button
                             type="button"
@@ -539,7 +594,7 @@ export default function ReelsPage() {
                             ) : (
                               <>
                                 <Play className="w-5 h-5" />
-                                Create Video
+                                Create Video · {storyboardVideoCost} credits
                               </>
                             )}
                           </button>
@@ -902,7 +957,9 @@ export default function ReelsPage() {
                   ) : (
                     <>
                       <Play className="w-6 h-6" />
-                      {engineTab === "veo" ? "Generate with Veo" : "Generate Video"}
+                      {engineTab === "veo"
+                        ? `Generate with Veo · ${veoCost} credits`
+                        : `Generate Video · ${seedanceCost} credits`}
                     </>
                   )}
                 </button>
@@ -1224,7 +1281,7 @@ export default function ReelsPage() {
                                 ) : (
                                   <>
                                     <Play className="w-4 h-4" />
-                                    Create Video
+                                    Create Video · {storyboardVideoCost} credits
                                   </>
                                 )}
                               </button>

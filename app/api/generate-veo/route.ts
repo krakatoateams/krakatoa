@@ -20,7 +20,6 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
-import { getSessionUserId } from "@/lib/resolve-user";
 import { supabase } from "@/lib/supabase";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from "@/lib/storage-buckets";
 import { extractJson, hexToAssColor, formatAssTime, runWithRetry } from "@/lib/reels-helpers";
@@ -29,6 +28,14 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import {
+  spendCredits,
+  refundCredits,
+  getWallet,
+  InsufficientCreditsError,
+} from "@/lib/credits-db";
+import { estimateVeoCredits } from "@/lib/credit-costs";
+import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 600;
 
@@ -189,6 +196,10 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let videoAssetId: string | null = null;
+  // Credit-spend trackers — see app/api/generate/route.ts for the same pattern.
+  let creditsSpent = false;
+  let creditsAmount = 0;
+  let creditJobKind: "veo_single" | "veo_perscene" | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -196,21 +207,6 @@ export async function POST(req: Request) {
     } catch (e) {
       console.warn(`[veo obs] ${label} failed:`, e);
       return null;
-    }
-  };
-
-  // Best-effort fail-marking for early-return error paths after job creation.
-  const failPlatform = async (message: string) => {
-    const errJson = { message };
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (videoAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
     }
   };
 
@@ -236,8 +232,11 @@ export async function POST(req: Request) {
   };
 
   try {
-    // Normal path: identity from the NextAuth session via the profile.
-    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    // STRICT profile resolution — this route now charges credits. See
+    // app/api/generate/route.ts for the full rationale; in short, free
+    // generation is unacceptable for a route that costs credits, so any
+    // non-auth profile failure now becomes a 500 instead of a silent fallback.
+    //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy user_creations dual-write (= users.id)
     let userId: string | null = null;
     try {
@@ -248,14 +247,11 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
-      // non-auth infrastructure error, keep legacy generation working but SKIP all
-      // platform observability (profileId stays null -> guarded no-ops).
-      console.warn("[veo obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
-      userId = await getSessionUserId();
-      if (!userId) {
-        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-      }
+      console.error("[veo] profile resolution failed (non-auth):", e);
+      return NextResponse.json(
+        { error: "Profile resolution failed. Please try again." },
+        { status: 500 }
+      );
     }
 
     const body = await req.json();
@@ -371,41 +367,113 @@ export async function POST(req: Request) {
     };
     const fontUrl = fontUrls[style.fontname];
 
-    // ---- Platform job + processing video asset (best-effort observability) ----
-    // Created after all top-level validation so validation early-returns never
-    // leave a dangling job. Mode is already known here.
-    if (profileId) {
-      const job = await safe("createJob", () => createJob({
+    // ---- Hoisted mode-specific inputs ----
+    // Single mode: validate singlePromptScenes up front so an insufficient-
+    // credit return never goes through a half-validated request.
+    // PerScene mode: compute SCENE_COUNT up front so credit cost can be
+    // calculated before the job (and any provider call) is created.
+    let singlePromptScenes = 0;
+    let SCENE_COUNT = 0;
+    if (isSingle) {
+      singlePromptScenes = Number(body.singlePromptScenes);
+      if (![1, 2].includes(singlePromptScenes)) {
+        return NextResponse.json(
+          { error: "singlePromptScenes must be 1 or 2 in single mode" },
+          { status: 400 }
+        );
+      }
+    } else {
+      SCENE_COUNT = Math.min(3, Math.max(1, Number(body.numScenes) || 1));
+    }
+
+    creditJobKind = isSingle ? "veo_single" : "veo_perscene";
+    const totalCreditDurationSec = isSingle ? duration : SCENE_COUNT * duration;
+    const requiredCredits = estimateVeoCredits({ durationSec: totalCreditDurationSec });
+
+    // ---- Platform job (best-effort observability) ----
+    // Asset creation is intentionally deferred until AFTER the credit spend
+    // succeeds, so the assets table never carries a processing row for a
+    // request that was rejected for insufficient credits.
+    const job = await safe("createJob", () => createJob({
+      profileId: profileId!,
+      tool: "veo",
+      jobType: creditJobKind!,
+      provider: "replicate",
+      model: VEO_MODEL,
+      input: {
+        theme: theme.slice(0, 500),
+        mode: isSingle ? "single" : "perScene",
+        duration,
+        resolution,
+        voiceId,
+        emotion,
+        ...(isSingle ? { singlePromptScenes } : { numScenes: SCENE_COUNT }),
+      },
+    }));
+    if (job) {
+      jobId = job.id;
+      await safe("startJob", () => startJob(profileId!, jobId!));
+    }
+
+    // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
+    // Insufficient → 402, no provider call, no processing asset. Other infra
+    // failures bubble to the outer catch as a 500. jobId-based idempotency
+    // prevents in-flight retry double-charges; full HTTP retries with a fresh
+    // jobId remain an accepted limitation of this dummy phase.
+    try {
+      await spendCredits({
         profileId: profileId!,
-        tool: "veo",
-        jobType: isSingle ? "veo_single" : "veo_perscene",
-        provider: "replicate",
-        model: VEO_MODEL,
-        input: {
-          theme: theme.slice(0, 500),
+        amount: requiredCredits,
+        idempotencyKey: jobId
+          ? `spend:${creditJobKind}:${jobId}`
+          : `spend:${creditJobKind}:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: isSingle
+          ? "Veo single-clip generation"
+          : "Veo per-scene generation",
+        metadata: {
+          tool: "veo",
+          jobType: creditJobKind,
           mode: isSingle ? "single" : "perScene",
           duration,
-          resolution,
-          voiceId,
-          emotion,
+          ...(isSingle ? { singlePromptScenes } : { sceneCount: SCENE_COUNT }),
+          totalDuration: totalCreditDurationSec,
         },
-      }));
-      if (job) {
-        jobId = job.id;
-        await safe("startJob", () => startJob(profileId!, jobId!));
-        const asset = await safe("createAsset", () => createProcessingAsset({
-          profileId: profileId!,
-          jobId: jobId!,
-          tool: "veo",
-          assetType: "video",
-          role: "final_video",
-          provider: "replicate",
-          model: VEO_MODEL,
-          metadata: { theme: theme.slice(0, 200), mode: isSingle ? "single" : "perScene" },
-        }));
-        if (asset) videoAssetId = asset.id;
+      });
+      creditsSpent = true;
+      creditsAmount = requiredCredits;
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        const wallet = await getWallet(profileId!).catch(() => null);
+        const currentBalance = wallet?.balance ?? 0;
+        if (jobId) {
+          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
+            code: "INSUFFICIENT_CREDITS",
+            message: "Insufficient credits.",
+            requiredCredits,
+            currentBalance,
+          }));
+        }
+        return NextResponse.json(
+          { error: "Insufficient credits.", requiredCredits, currentBalance },
+          { status: 402 }
+        );
       }
+      throw e;
     }
+
+    // ---- Processing asset (created AFTER spend succeeds) ----
+    const asset = await safe("createAsset", () => createProcessingAsset({
+      profileId: profileId!,
+      jobId: jobId ?? undefined,
+      tool: "veo",
+      assetType: "video",
+      role: "final_video",
+      provider: "replicate",
+      model: VEO_MODEL,
+      metadata: { theme: theme.slice(0, 200), mode: isSingle ? "single" : "perScene" },
+    }));
+    if (asset) videoAssetId = asset.id;
 
     // ----- Step 1: style anchor + negative (Gemini, thinking_budget 0) -----
     await beginStep("style_anchor", "LLM style anchor + negative prompt");
@@ -438,12 +506,7 @@ Return ONLY raw JSON, nothing else.`;
     const { w: targetW, h: targetH } = dimsForResolution(resolution as "720p" | "1080p");
 
     if (isSingle) {
-      const singlePromptScenes = Number(body.singlePromptScenes);
-      if (![1, 2].includes(singlePromptScenes)) {
-        await failPlatform("singlePromptScenes must be 1 or 2 in single mode");
-        return NextResponse.json({ error: "singlePromptScenes must be 1 or 2 in single mode" }, { status: 400 });
-      }
-
+      // singlePromptScenes was validated up front (before credit spend).
       await beginStep("veo_prompt", "LLM Veo prompt authoring", { singlePromptScenes });
       const voiceLabel = humanizeVoiceId(voiceId);
       const voiceTone = `${voiceLabel} voice character; ${emotion} emotional delivery for pacing, emphasis, and phrasing.`;
@@ -580,6 +643,8 @@ ${promptInstruction}`,
 
       // Platform: mark asset ready + finish job. Single mode intentionally keeps
       // its legacy behavior — NO user_creations write and response stays { videoUrl }.
+      // `costCredits` on both calls is a display snapshot only — the ledger row
+      // created by spendCredits above is the billing source of truth.
       if (videoAssetId && profileId) {
         await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
           storagePath: finalFilename,
@@ -588,20 +653,38 @@ ${promptInstruction}`,
           durationSec: finalDuration,
           width: targetW,
           height: targetH,
+          costCredits: creditsAmount,
           metadata: { mode: "single", duration, resolution, voiceId, emotion },
         }));
       }
       if (jobId && profileId) {
         await safe("finishJob", () => finishJob(profileId!, jobId!, {
           output: { videoUrl: pub.publicUrl, storagePath: finalFilename, assetId: videoAssetId },
+          costCredits: creditsAmount,
         }));
       }
+
+      // Usage event — analytics only, NEVER affects billing/response.
+      await safe("recordUsage", () => recordUsageEvent({
+        profileId: profileId!,
+        jobId: jobId ?? null,
+        assetId: videoAssetId ?? null,
+        tool: "veo",
+        provider: "replicate",
+        model: VEO_MODEL,
+        unitType: "video_seconds",
+        units: finalDuration,
+        creditsCharged: creditsAmount,
+        metadata: { jobType: "veo_single", duration, resolution, singlePromptScenes },
+      }));
 
       return NextResponse.json({ videoUrl: pub.publicUrl });
     }
 
     // ----- Per Scene mode -----
-    const SCENE_COUNT = Math.min(3, Math.max(1, Number(body.numScenes) || 1));
+    // SCENE_COUNT was hoisted up so credit spend could happen before any
+    // provider call. Keep the local aliases below to avoid touching the rest
+    // of the per-scene pipeline.
     const DURATION = duration;
     const TOTAL_DURATION = SCENE_COUNT * DURATION;
     const MAX_WORDS_PER_SCENE = Math.max(6, Math.floor(DURATION * 1.7));
@@ -854,6 +937,7 @@ Return ONLY raw JSON array, nothing else.`;
     await endStep({ storagePath: finalFilename, publicUrl: pub.publicUrl });
 
     // Platform: mark asset ready + finish job before the unchanged legacy write.
+    // costCredits is a display snapshot — credit_transactions is the billing truth.
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath: finalFilename,
@@ -862,14 +946,30 @@ Return ONLY raw JSON array, nothing else.`;
         durationSec: finalDuration,
         width: targetW,
         height: targetH,
+        costCredits: creditsAmount,
         metadata: { mode: "perScene", duration, resolution, voiceId, emotion },
       }));
     }
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
         output: { videoUrl: pub.publicUrl, storagePath: finalFilename, assetId: videoAssetId },
+        costCredits: creditsAmount,
       }));
     }
+
+    // Usage event — analytics only, NEVER affects billing/response.
+    await safe("recordUsage", () => recordUsageEvent({
+      profileId: profileId!,
+      jobId: jobId ?? null,
+      assetId: videoAssetId ?? null,
+      tool: "veo",
+      provider: "replicate",
+      model: VEO_MODEL,
+      unitType: "video_seconds",
+      units: TOTAL_DURATION,
+      creditsCharged: creditsAmount,
+      metadata: { jobType: "veo_perscene", duration, resolution, sceneCount: SCENE_COUNT },
+    }));
 
     let historyItem;
     try {
@@ -908,6 +1008,23 @@ Return ONLY raw JSON array, nothing else.`;
     if (jobId && profileId) {
       await safe("failJob", () => failJob(profileId!, jobId!, errJson));
     }
+
+    // Best-effort refund. Only fires when spendCredits actually succeeded.
+    // The InsufficientCreditsError branch returns 402 directly and never
+    // reaches this catch, so creditsSpent is the right gate.
+    if (creditsSpent && profileId && creditsAmount > 0 && creditJobKind) {
+      await safe("refundCredits", () => refundCredits({
+        profileId: profileId!,
+        amount: creditsAmount,
+        idempotencyKey: jobId
+          ? `refund:${creditJobKind}:${jobId}`
+          : `refund:${creditJobKind}:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Best-effort refund after generation failure",
+        metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

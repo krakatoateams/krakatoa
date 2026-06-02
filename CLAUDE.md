@@ -3,6 +3,8 @@
 ## Project Overview
 Krakatoa is a premium AI-powered platform tailored for content creators. It features a modern, high-conversion landing page and hosts multiple AI tools under one monorepo. Flagship tools include **ReelsGen** (`app/(app)/tools/reels/page.tsx`, URL `/tools/reels`), an autonomous pipeline for vertical videos (Reels/TikToks) with burned-in styled captions; **Product Photo** (`app/(app)/tools/photo/page.tsx`); **Scheduler** (`app/(app)/tools/scheduler/`) with Google Calendar/YouTube integrations; and **IG** (`app/(app)/tools/ig/page.tsx`).
 
+The platform foundation (profiles, projects, jobs, job_steps, assets, asset_relations, posts platform linkage, credit_wallets, credit_transactions, usage_events) is complete (Phase 1–7). The Dummy Credit Integration is live for internal testing — every existing profile holds 500 dummy credits and the four credit-charged generation routes spend/refund through the ledger RPC before any provider call. No payment gateway/Xendit/subscription system is wired yet.
+
 ## Tech Stack
 - **Framework**: Next.js 14 (App Router)
 - **Styling**: Tailwind CSS
@@ -19,6 +21,7 @@ Krakatoa is a premium AI-powered platform tailored for content creators. It feat
 - **Run development server**: `npm run dev`
 - **Build for production**: `npm run build`
 - **Linting**: `npm run lint`
+- **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -36,7 +39,60 @@ Krakatoa is a premium AI-powered platform tailored for content creators. It feat
   - `tools/scheduler/`, `tools/scheduler/calendar/`: Scheduler UI.
   - `tools/ig/`: Instagram-related tool surface.
 - `lib/`: Shared utilities (`supabase.ts`, `supabase-server.ts`, `storage-buckets.ts`, `auth.ts`, `youtube.ts`, etc.).
+  - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
+- `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
 - `public/`: Static assets (images, fonts, icons).
+
+## Platform Foundation & Credits
+Krakatoa's product identity, observability, and billing primitives live in seven Postgres tables that all in-scope generation routes read/write through typed helpers in `lib/`. Ownership boundary is `profile_id`; server routes use the service role and enforce ownership in application code (RLS is enabled on every table as deny-by-default).
+
+### Tables (live)
+- **profiles** — Krakatoa product identity (1:1 with NextAuth `users` via `user_id`).
+- **projects** — generic container for user work.
+- **jobs** — every generation job (queued / running / succeeded / failed / cancelled), with `cost_credits` as a display snapshot.
+- **job_steps** — queryable pipeline-step diary attached to a job.
+- **assets** — long-term source of truth for generated files (image, video, audio, subtitle, ...). Carries `cost_credits` as a display snapshot.
+- **asset_relations** — flexible parent/child links (`derived_from`, `thumbnail_of`, `caption_for`, `audio_for`, `storyboard_for`, `source_for`, `variant_of`, `contains`).
+- **posts** — evolved with `profile_id`, `project_id`, `asset_id` platform columns; existing scheduler columns intact.
+- **credit_wallets** — fast-read balance cache per profile.
+- **credit_transactions** — append-mostly ledger (`purchase`/`spend`/`refund`/`bonus`/`adjustment`/`expiry`); idempotent via `idempotency_key`. **Billing source of truth.**
+- **usage_events** — analytics-only provider/model usage records. Never affects balance.
+
+### Migrations (in apply order)
+- `003_platform_foundation_nextauth_single_user.sql` — profiles, projects, jobs, job_steps, assets, asset_relations, posts evolution.
+- `004_credits.sql` — credit_wallets, credit_transactions, usage_events, and the transactional + idempotent RPC `krakatoa_apply_credit_transaction`.
+- `005_user_creations_unique_storage_path.sql` — unrelated dedupe index (kept here for completeness; not part of the credit pipeline).
+- `006_dummy_credits.sql` — backfills 500 dummy credits per existing profile via the ledger RPC (idempotency key `seed:initial_500:{profile_id}`), plus the after-insert trigger `profiles_seed_initial_credits` so future profiles auto-receive 500.
+
+### Credit pricing (current dummy values)
+Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode credit numbers in routes.
+
+| Tool / route | Cost rule |
+|---|---|
+| ReelsGen / Seedance (`api/generate`) | `estimateSeedanceCredits({ sceneCount, durationPerScene })` — 2 credits/sec of total video |
+| Veo single (`api/generate-veo`, mode `single`) | `estimateVeoCredits({ durationSec })` — 8 s = 16, 6 s = 12, 4 s = 8 |
+| Veo per-scene (`api/generate-veo`, mode `perScene`) | `estimateVeoCredits({ durationSec: sceneCount × durationPerScene })` |
+| Storyboard image (`api/generate-storyboard`) | fixed 2 credits |
+| Storyboard video (`api/generate-storyboard-video`) | fixed 30 credits |
+| Photo Studio (`api/generate-photo`) | **not wired yet** — Photo Studio remains free during dummy phase by design |
+
+### Spend / refund contract (applies to every charged route)
+1. Validate input → strictly resolve profile (no free fallback; non-auth failure = 500).
+2. `createJob` + `startJob`.
+3. **`spendCredits` BEFORE any provider call.** Idempotency key `spend:{jobType}:{jobId}` (e.g. `spend:reels_seedance:{jobId}`, `spend:veo_single:{jobId}`, `spend:veo_perscene:{jobId}`, `spend:storyboard_image:{jobId}`, `spend:storyboard_video:{jobId}`).
+4. On `InsufficientCreditsError`: mark the job `failed` with `error.code='INSUFFICIENT_CREDITS'` and return **HTTP 402** with `{ error, requiredCredits, currentBalance }`. No processing asset, no provider call.
+5. On any other spend exception: bubble to outer catch as 500; `creditsSpent` stays `false` → no refund.
+6. On success: `createProcessingAsset`, then provider calls, then `markAssetReady` / `finishJob` with `costCredits` snapshot, then safe-wrapped `recordUsageEvent`.
+7. On post-spend failure: best-effort `refundCredits` (safe-wrapped, with idempotency key `refund:{jobType}:{jobId}`). A refund failure must never mask the original generation error.
+
+`credit_transactions` is the billing source of truth. `jobs.cost_credits` and `assets.cost_credits` are display snapshots only. `usage_events` is analytics-only and must never affect billing/response.
+
+### Known limitations (intentional)
+- No Xendit / payment gateway / subscription plans yet.
+- No credit-balance UI yet.
+- Photo Studio is not metered yet.
+- Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
+- `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
 
 ## ReelsGen AI Pipeline Architecture
 The pipeline in `app/api/generate/route.ts` orchestrates LLM scripting, one continuous voiceover, transcription, parallel scene video generation, ASS subtitles, Rendi stitching, and Supabase upload of the final MP4.

@@ -12,6 +12,7 @@ A premium AI-powered platform for content creators. Krakatoa hosts multiple AI t
   - Final MP4 stored in Supabase Storage and returned to the client.
 - **Live caption styler** with WYSIWYG preview (font, size, primary/highlight/outline colors, vertical margin).
 - **Premium dark-mode UI** with glassmorphism, built on Tailwind CSS.
+- **Platform foundation & dummy credits** — Phase 1–7 platform tables (`profiles`, `projects`, `jobs`, `job_steps`, `assets`, `asset_relations`, `credit_wallets`, `credit_transactions`, `usage_events`) plus a ledger-backed credit system. Existing profiles each hold 500 dummy credits; new profiles auto-receive 500 via an after-insert trigger. The four credit-charged routes (`generate`, `generate-veo`, `generate-storyboard`, `generate-storyboard-video`) spend credits **before** any provider call and best-effort refund on post-spend failure. See [`CLAUDE.md`](./CLAUDE.md) for the full contract.
 
 ## Tech Stack
 
@@ -52,7 +53,15 @@ Create one **public** Supabase Storage bucket (default name: `krakatoa`, or set 
 | `videos/` | ReelsGen — `.ass` captions and final `.mp4` files |
 | `photos/` | Product Photo — uploads and generated images (separate from `videos/`) |
 
-### 3. Run the dev server
+### 3. Apply database migrations
+
+```bash
+npm run db:setup
+```
+
+This applies every file in `supabase/migrations/` (currently up to `006_dummy_credits.sql`) — idempotent and safe to re-run. It creates the platform foundation tables, the credit ledger and RPC, and grants 500 dummy credits to every existing profile (and any future profile via an after-insert trigger). Requires `SUPABASE_ACCESS_TOKEN` or `DATABASE_URL` in `.env.local` — see [`scripts/setup-db.mjs`](scripts/setup-db.mjs) for details.
+
+### 4. Run the dev server
 
 ```bash
 npm run dev
@@ -68,6 +77,7 @@ Open [http://localhost:3000](http://localhost:3000) for the landing page, or [ht
 | `npm run build` | Production build |
 | `npm run start` | Run the production build |
 | `npm run lint` | Lint the codebase |
+| `npm run db:setup` | Apply every migration in `supabase/migrations/` (idempotent) |
 
 ## Project Structure
 

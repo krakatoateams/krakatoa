@@ -9,13 +9,20 @@ import {
   buildProductPhotoPrompt,
 } from "@/lib/product-photo";
 import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
-import { getSessionUserId } from "@/lib/resolve-user";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import {
+  spendCredits,
+  refundCredits,
+  getWallet,
+  InsufficientCreditsError,
+} from "@/lib/credits-db";
+import { estimateProductPhotoCredits } from "@/lib/credit-costs";
+import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -39,6 +46,11 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let photoAssetId: string | null = null;
+  // Credit-spend trackers — used by the catch block to issue a best-effort
+  // refund when generation fails after a successful spend. `creditsSpent` is
+  // the gate; without it the catch block must NOT refund (no spend = no debt).
+  let creditsSpent = false;
+  let creditsAmount = 0;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -73,8 +85,12 @@ export async function POST(req: Request) {
   };
 
   try {
-    // Normal path: identity from the NextAuth session via the profile.
-    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    // STRICT profile resolution — this route now charges credits, so we MUST
+    // have a profileId. The previous "continue legacy-only on infra failure"
+    // fallback has been removed: free generation is unacceptable for a route
+    // that costs credits. Unauthenticated still returns 401; anything else is
+    // a 500 so the client/operator can see the real failure.
+    //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy storage path + user_creations (= users.id)
     let userId: string | null = null;
     try {
@@ -85,14 +101,11 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
-      // non-auth infrastructure error, keep legacy generation working but SKIP all
-      // platform observability (profileId stays null -> guarded no-ops).
-      console.warn("[photo obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
-      userId = await getSessionUserId();
-      if (!userId) {
-        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-      }
+      console.error("[photo] profile resolution failed (non-auth):", e);
+      return NextResponse.json(
+        { error: "Profile resolution failed. Please try again." },
+        { status: 500 }
+      );
     }
 
     const formData = await req.formData();
@@ -123,38 +136,87 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid photo style" }, { status: 400 });
     }
 
-    const replicate = createReplicateClient();
-
-    // ---- Platform job + processing image asset (best-effort observability) ----
+    // ---- Platform job (best-effort observability) ----
     // Created after all input validation so validation early-returns never leave
-    // a dangling job. The whole route below is throw-based, so failures are
-    // finalized in the catch block.
-    if (profileId) {
-      const job = await safe("createJob", () => createJob({
-        profileId: profileId!,
-        tool: "photo",
-        jobType: "product_photo",
-        provider: "replicate",
-        model: "google/nano-banana",
-        input: { poseId, styleId },
-      }));
-      if (job) {
-        jobId = job.id;
-        await safe("startJob", () => startJob(profileId!, jobId!));
-        const asset = await safe("createAsset", () => createProcessingAsset({
-          profileId: profileId!,
-          jobId: jobId!,
-          tool: "photo",
-          assetType: "image",
-          role: "product_photo",
-          bucket: PRODUCT_PHOTO_BUCKET,
-          provider: "replicate",
-          model: "google/nano-banana",
-          metadata: { poseId, styleId },
-        }));
-        if (asset) photoAssetId = asset.id;
-      }
+    // a dangling job. The processing asset is intentionally deferred until AFTER
+    // the credit spend succeeds, so the assets table never carries a processing
+    // row for a request that was rejected for insufficient credits.
+    const job = await safe("createJob", () => createJob({
+      profileId: profileId!,
+      tool: "photo",
+      jobType: "product_photo",
+      provider: "replicate",
+      model: "google/nano-banana",
+      input: { poseId, styleId },
+    }));
+    if (job) {
+      jobId = job.id;
+      await safe("startJob", () => startJob(profileId!, jobId!));
     }
+
+    // ---- Credit spend (BUSINESS LOGIC — must not be safe-wrapped) ----
+    // Product Photo is a flat 5 credits. The debit MUST happen before any
+    // provider work below (createReplicateClient / uploadProductImageToReplicate
+    // / runWithRetry / Nano Banana). If the wallet is short we fail the job (if
+    // it exists) and return 402 — no processing asset, no provider call. A
+    // non-balance infra failure rethrows into the outer catch as a 500 (and
+    // `creditsSpent` stays false, so no refund is attempted).
+    //
+    // jobId-based idempotency prevents double-charges on retries WITHIN this
+    // request. A full HTTP retry by the client produces a NEW jobId and a NEW
+    // spend key — that double-charge risk is an accepted limitation of this
+    // dummy phase (future fix: client/request-level idempotency key).
+    const requiredCredits = estimateProductPhotoCredits();
+    try {
+      await spendCredits({
+        profileId: profileId!,
+        amount: requiredCredits,
+        idempotencyKey: jobId
+          ? `spend:product_photo:${jobId}`
+          : `spend:product_photo:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Product Photo generation",
+        metadata: { tool: "photo", jobType: "product_photo", poseId, styleId },
+      });
+      creditsSpent = true;
+      creditsAmount = requiredCredits;
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        const wallet = await getWallet(profileId!).catch(() => null);
+        const currentBalance = wallet?.balance ?? 0;
+        if (jobId) {
+          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
+            code: "INSUFFICIENT_CREDITS",
+            message: "Insufficient credits.",
+            requiredCredits,
+            currentBalance,
+          }));
+        }
+        return NextResponse.json(
+          { error: "Insufficient credits.", requiredCredits, currentBalance },
+          { status: 402 }
+        );
+      }
+      // Non-balance infra failure: bubble up to the outer catch as a 500.
+      throw e;
+    }
+
+    // ---- Processing asset (created AFTER spend succeeds) ----
+    const asset = await safe("createAsset", () => createProcessingAsset({
+      profileId: profileId!,
+      jobId: jobId ?? undefined,
+      tool: "photo",
+      assetType: "image",
+      role: "product_photo",
+      bucket: PRODUCT_PHOTO_BUCKET,
+      provider: "replicate",
+      model: "google/nano-banana",
+      metadata: { poseId, styleId },
+    }));
+    if (asset) photoAssetId = asset.id;
+
+    // Provider client is created only after the spend has succeeded.
+    const replicate = createReplicateClient();
 
     await beginStep("reference_upload", "Upload product reference image to Replicate");
     console.log("[Product Photo] Uploading product image to Replicate...");
@@ -205,20 +267,39 @@ export async function POST(req: Request) {
 
     console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
 
-    // Platform: mark the asset ready, then finish the job.
+    // Platform: mark the asset ready, then finish the job. `costCredits` is a
+    // display snapshot only — the ledger row created by spendCredits above is
+    // the billing source of truth.
     if (photoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, photoAssetId!, {
         storagePath: saved.storagePath,
         publicUrl: saved.publicUrl,
         mimeType,
+        costCredits: creditsAmount,
         metadata: { poseId, styleId },
       }));
     }
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
         output: { imageUrl: saved.publicUrl, storagePath: saved.storagePath, assetId: photoAssetId },
+        costCredits: creditsAmount,
       }));
     }
+
+    // Usage event — analytics only, NEVER affects billing/response. Wrapped in
+    // safe() so a failure here cannot fail the request.
+    await safe("recordUsage", () => recordUsageEvent({
+      profileId: profileId!,
+      jobId: jobId ?? null,
+      assetId: photoAssetId ?? null,
+      tool: "photo",
+      provider: "replicate",
+      model: "google/nano-banana",
+      unitType: "image_count",
+      units: 1,
+      creditsCharged: creditsAmount,
+      metadata: { jobType: "product_photo", poseId, styleId },
+    }));
 
     return NextResponse.json({
       imageUrl: saved.publicUrl,
@@ -240,6 +321,25 @@ export async function POST(req: Request) {
     if (jobId && profileId) {
       await safe("failJob", () => failJob(profileId!, jobId!, errJson));
     }
+
+    // Best-effort refund. Only fires when a spend actually succeeded (the
+    // InsufficientCreditsError path never sets creditsSpent=true, and a 500
+    // before the spend block also leaves it false). Wrapped in safe() so a
+    // refund failure cannot mask the original generation error — the spend
+    // ledger row stays in the DB and can be reconciled manually.
+    if (creditsSpent && profileId && creditsAmount > 0) {
+      await safe("refundCredits", () => refundCredits({
+        profileId: profileId!,
+        amount: creditsAmount,
+        idempotencyKey: jobId
+          ? `refund:product_photo:${jobId}`
+          : `refund:product_photo:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Best-effort refund after generation failure",
+        metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
