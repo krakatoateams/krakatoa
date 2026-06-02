@@ -15,8 +15,13 @@
 create extension if not exists pgcrypto;
 
 -- Project-specific updated_at trigger helper (named to avoid global collisions).
+-- search_path is pinned to '' to satisfy the Supabase security linter
+-- (now() resolves from pg_catalog, which is always implicitly available).
 create or replace function krakatoa_set_updated_at()
-returns trigger language plpgsql as $$
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
 begin
   new.updated_at = now();
   return new;
