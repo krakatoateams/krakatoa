@@ -2,13 +2,20 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { insertUserCreation } from '@/lib/creations-db';
-import { getSessionUserId } from '@/lib/resolve-user';
 import { supabase } from '@/lib/supabase';
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
 import { requireCurrentProfile } from '@/lib/profiles-db';
 import { createJob, startJob, finishJob, failJob } from '@/lib/jobs-db';
 import { createJobStep, finishJobStep, failJobStep } from '@/lib/job-steps-db';
 import { createProcessingAsset, markAssetReady, markAssetFailed } from '@/lib/assets-db';
+import {
+  spendCredits,
+  refundCredits,
+  getWallet,
+  InsufficientCreditsError,
+} from '@/lib/credits-db';
+import { estimateSeedanceCredits } from '@/lib/credit-costs';
+import { recordUsageEvent } from '@/lib/usage-events-db';
 
 // Allow up to 10 minutes for this route (LLM + generation + whisper + rendi)
 export const maxDuration = 600;
@@ -29,6 +36,11 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let finalAssetId: string | null = null;
+  // Credit-spend trackers — used by the catch block to issue a best-effort
+  // refund when generation fails after a successful spend. `creditsSpent` is
+  // the gate; without it the catch block must NOT refund (no spend = no debt).
+  let creditsSpent = false;
+  let creditsAmount = 0;
 
   // Best-effort wrapper for platform writes: observability must NEVER crash the
   // generation pipeline or mask the real generation error.
@@ -42,8 +54,12 @@ export async function POST(req: Request) {
   };
 
   try {
-    // Normal path: derive identity from the current NextAuth session via the profile.
-    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    // STRICT profile resolution — this route now charges credits, so we MUST
+    // have a profileId. The previous "continue legacy-only on infra failure"
+    // fallback has been removed: free generation is unacceptable for a route
+    // that costs credits. Unauthenticated still returns 401; anything else is
+    // a 500 so the client/operator can see the real failure.
+    //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy user_creations dual-write (= users.id)
     let userId: string | null = null;
     try {
@@ -54,16 +70,11 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
       }
-      // TEMPORARY SAFETY FALLBACK ONLY — this must NOT become the normal path.
-      // If profile resolution fails for non-auth infrastructure reasons (e.g. the
-      // platform tables are unreachable), keep the legacy generation path working
-      // but SKIP all platform observability: profileId stays null so every
-      // job/job_step/asset write below is a guarded no-op. Always log loudly.
-      console.warn('[reels obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:', e);
-      userId = await getSessionUserId();
-      if (!userId) {
-        return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
-      }
+      console.error('[reels] profile resolution failed (non-auth):', e);
+      return NextResponse.json(
+        { error: 'Profile resolution failed. Please try again.' },
+        { status: 500 }
+      );
     }
 
     const body = await req.json();
@@ -130,42 +141,101 @@ export async function POST(req: Request) {
     const DURATION_PER_SCENE = durationPerScene || 5;
     const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
 
-    // ---- Platform job + processing asset (best-effort observability) ----
-    // Only runs when a profile was resolved (normal path). All writes go through
-    // `safe()` so an observability failure can never break generation.
-    if (profileId) {
-      const job = await safe('createJob', () => createJob({
+    // ---- Platform job (best-effort observability) ----
+    // Asset creation is intentionally deferred until AFTER the credit spend
+    // succeeds, so the assets table never carries a processing row for a
+    // request that was rejected for insufficient credits.
+    const job = await safe('createJob', () => createJob({
+      profileId: profileId!,
+      tool: 'reels',
+      jobType: 'reels_seedance',
+      provider: 'replicate',
+      model: 'bytedance/seedance-2.0-fast',
+      input: {
+        theme: String(theme).slice(0, 500),
+        numScenes: SCENE_COUNT,
+        durationPerScene: DURATION_PER_SCENE,
+        totalDuration: TOTAL_DURATION,
+        resolution: RESOLUTION,
+        voiceId: VOICE_ID,
+        emotion: USER_EMOTION,
+      },
+    }));
+    if (job) {
+      jobId = job.id;
+      await safe('startJob', () => startJob(profileId!, jobId!));
+    }
+
+    // ---- Credit spend (BUSINESS LOGIC — must not be safe-wrapped) ----
+    // Compute the cost from the central config and debit the wallet BEFORE any
+    // provider/Replicate/Rendi call below. If the wallet is short, we fail the
+    // job (if it exists) and return 402 — no processing asset, no provider
+    // call. If the spend itself crashes for a non-balance reason, the request
+    // fails with a normal 500 via the outer catch (which also won't refund,
+    // because `creditsSpent` is still false).
+    //
+    // jobId-based idempotency prevents double-charges on retries WITHIN this
+    // request. Note: a full HTTP retry by the client produces a NEW jobId and
+    // therefore a NEW spend key — that double-charge risk is an accepted
+    // limitation of this dummy phase. A future client/request-level
+    // idempotency key (e.g. forwarded from the browser) is the planned fix.
+    const requiredCredits = estimateSeedanceCredits({
+      sceneCount: SCENE_COUNT,
+      durationPerScene: DURATION_PER_SCENE,
+    });
+    try {
+      await spendCredits({
         profileId: profileId!,
-        tool: 'reels',
-        jobType: 'reels_seedance',
-        provider: 'replicate',
-        model: 'bytedance/seedance-2.0-fast',
-        input: {
-          theme: String(theme).slice(0, 500),
-          numScenes: SCENE_COUNT,
+        amount: requiredCredits,
+        idempotencyKey: jobId
+          ? `spend:reels_seedance:${jobId}`
+          : `spend:reels_seedance:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: 'ReelsGen (Seedance) generation',
+        metadata: {
+          tool: 'reels',
+          jobType: 'reels_seedance',
+          sceneCount: SCENE_COUNT,
           durationPerScene: DURATION_PER_SCENE,
           totalDuration: TOTAL_DURATION,
-          resolution: RESOLUTION,
-          voiceId: VOICE_ID,
-          emotion: USER_EMOTION,
         },
-      }));
-      if (job) {
-        jobId = job.id;
-        await safe('startJob', () => startJob(profileId!, jobId!));
-        const asset = await safe('createAsset', () => createProcessingAsset({
-          profileId: profileId!,
-          jobId: jobId!,
-          tool: 'reels',
-          assetType: 'video',
-          role: 'final_video',
-          provider: 'replicate',
-          model: 'bytedance/seedance-2.0-fast',
-          metadata: { theme: String(theme).slice(0, 200) },
-        }));
-        if (asset) finalAssetId = asset.id;
+      });
+      creditsSpent = true;
+      creditsAmount = requiredCredits;
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        const wallet = await getWallet(profileId!).catch(() => null);
+        const currentBalance = wallet?.balance ?? 0;
+        if (jobId) {
+          await safe('failJobInsufficient', () => failJob(profileId!, jobId!, {
+            code: 'INSUFFICIENT_CREDITS',
+            message: 'Insufficient credits.',
+            requiredCredits,
+            currentBalance,
+          }));
+        }
+        return NextResponse.json(
+          { error: 'Insufficient credits.', requiredCredits, currentBalance },
+          { status: 402 }
+        );
       }
+      // Non-balance infra failure: bubble up to the outer catch as a 500.
+      // creditsSpent stays false so no refund is attempted.
+      throw e;
     }
+
+    // ---- Processing asset (created AFTER spend succeeds) ----
+    const asset = await safe('createAsset', () => createProcessingAsset({
+      profileId: profileId!,
+      jobId: jobId ?? undefined,
+      tool: 'reels',
+      assetType: 'video',
+      role: 'final_video',
+      provider: 'replicate',
+      model: 'bytedance/seedance-2.0-fast',
+      metadata: { theme: String(theme).slice(0, 200) },
+    }));
+    if (asset) finalAssetId = asset.id;
 
     // Step-recording helpers (best-effort; manage currentStepId). A step is only
     // recorded when both a profile and a job exist; otherwise these are no-ops.
@@ -814,6 +884,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     console.log('Pipeline complete! Video URL:', finalVideoUrl);
 
     // (2) Mark the final video asset ready (the platform source of truth).
+    //     `costCredits` is a display snapshot only — the ledger row created by
+    //     spendCredits above is the billing source of truth.
     if (finalAssetId && profileId) {
       await safe('markAssetReady', () => markAssetReady(profileId!, finalAssetId!, {
         storagePath: finalFilename,
@@ -822,6 +894,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         durationSec: finalDuration,
         width: targetW,
         height: targetH,
+        costCredits: creditsAmount,
         metadata: {
           numScenes: SCENE_COUNT,
           durationPerScene: DURATION_PER_SCENE,
@@ -856,14 +929,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       console.warn('[Reels Seedance] History log failed (video still saved):', historyErr);
     }
 
-    // (4) Finish the job.
+    // (4) Finish the job. costCredits is a display snapshot — see (2).
     if (jobId && profileId) {
       await safe('finishJob', () => finishJob(profileId!, jobId!, {
         output: { videoUrl: finalVideoUrl, storagePath: finalFilename, assetId: finalAssetId },
+        costCredits: creditsAmount,
       }));
     }
 
-    // (5) Response shape unchanged.
+    // (5) Usage event — analytics only, NEVER affects billing/response.
+    //     Wrapped in safe() so a failure here cannot fail the request.
+    await safe('recordUsage', () => recordUsageEvent({
+      profileId: profileId!,
+      jobId: jobId ?? null,
+      assetId: finalAssetId ?? null,
+      tool: 'reels',
+      provider: 'replicate',
+      model: 'bytedance/seedance-2.0-fast',
+      unitType: 'video_seconds',
+      units: TOTAL_DURATION,
+      creditsCharged: creditsAmount,
+      metadata: {
+        jobType: 'reels_seedance',
+        sceneCount: SCENE_COUNT,
+        durationPerScene: DURATION_PER_SCENE,
+        resolution: RESOLUTION,
+      },
+    }));
+
+    // (6) Response shape unchanged.
     return NextResponse.json({ videoUrl: finalVideoUrl, historyItem });
 
   } catch (error: any) {
@@ -880,6 +974,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
     if (jobId && profileId) {
       await safe('failJob', () => failJob(profileId!, jobId!, errJson));
+    }
+
+    // Best-effort refund. Only fires when a spend actually succeeded (the
+    // InsufficientCreditsError path never sets creditsSpent=true, and a 500
+    // before the spend block also leaves it false). Wrapped in safe() so a
+    // refund failure cannot mask the original generation error — the spend
+    // ledger row stays in the DB and can be reconciled manually.
+    if (creditsSpent && profileId && creditsAmount > 0) {
+      await safe('refundCredits', () => refundCredits({
+        profileId: profileId!,
+        amount: creditsAmount,
+        idempotencyKey: jobId
+          ? `refund:reels_seedance:${jobId}`
+          : `refund:reels_seedance:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: 'Best-effort refund after generation failure',
+        metadata: { reason: 'generation_failed', originalError: errJson },
+      }));
     }
 
     return NextResponse.json({ error: error.message || String(error) }, { status: 500 });

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
-import { getSessionUserId } from "@/lib/resolve-user";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -18,6 +17,14 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import {
+  spendCredits,
+  refundCredits,
+  getWallet,
+  InsufficientCreditsError,
+} from "@/lib/credits-db";
+import { estimateStoryboardImageCredits } from "@/lib/credit-costs";
+import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 300;
 
@@ -197,6 +204,9 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let imageAssetId: string | null = null;
+  // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
+  let creditsSpent = false;
+  let creditsAmount = 0;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -209,25 +219,11 @@ export async function POST(req: Request) {
     }
   };
 
-  // Shared best-effort fail-marking for early-return error paths that occur AFTER
-  // job creation (this route returns instead of throwing in several places).
-  const failPlatform = async (message: string) => {
-    const errJson = { message };
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (imageAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
-    }
-  };
-
   try {
-    // Normal path: derive identity from the NextAuth session via the profile.
-    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    // STRICT profile resolution — this route now charges credits. See
+    // app/api/generate/route.ts for the rationale; non-auth failures now
+    // surface as 500 rather than silently allowing free generation.
+    //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy storyboards.user_id + user_creations (= users.id)
     let userId: string | null = null;
     try {
@@ -238,14 +234,11 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
-      // non-auth infrastructure error, keep legacy generation working but SKIP all
-      // platform observability (profileId stays null -> guarded no-ops).
-      console.warn("[storyboard obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
-      userId = await getSessionUserId();
-      if (!userId) {
-        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-      }
+      console.error("[storyboard] profile resolution failed (non-auth):", e);
+      return NextResponse.json(
+        { error: "Profile resolution failed. Please try again." },
+        { status: 500 }
+      );
     }
 
     const body = await req.json();
@@ -270,32 +263,74 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // ---- Platform job + processing image asset (best-effort observability) ----
-    if (profileId) {
-      const job = await safe("createJob", () => createJob({
-        profileId: profileId!,
-        tool: "storyboard",
-        jobType: "storyboard_image",
-        provider: "replicate",
-        model: "openai/gpt-image-2",
-        input: { theme: theme.slice(0, 500), storyboardStyle },
-      }));
-      if (job) {
-        jobId = job.id;
-        await safe("startJob", () => startJob(profileId!, jobId!));
-        const asset = await safe("createAsset", () => createProcessingAsset({
-          profileId: profileId!,
-          jobId: jobId!,
-          tool: "storyboard",
-          assetType: "image",
-          role: "storyboard_image",
-          provider: "replicate",
-          model: "openai/gpt-image-2",
-          metadata: { storyboardStyle, theme: theme.slice(0, 200) },
-        }));
-        if (asset) imageAssetId = asset.id;
-      }
+    // ---- Platform job (best-effort observability) ----
+    // Asset creation is deferred until after the credit spend succeeds.
+    const job = await safe("createJob", () => createJob({
+      profileId: profileId!,
+      tool: "storyboard",
+      jobType: "storyboard_image",
+      provider: "replicate",
+      model: "openai/gpt-image-2",
+      input: { theme: theme.slice(0, 500), storyboardStyle },
+    }));
+    if (job) {
+      jobId = job.id;
+      await safe("startJob", () => startJob(profileId!, jobId!));
     }
+
+    // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
+    // Storyboard image is a flat 2 credits. Insufficient → 402 with no
+    // provider call; other infra failures bubble to outer catch as 500.
+    const requiredCredits = estimateStoryboardImageCredits();
+    try {
+      await spendCredits({
+        profileId: profileId!,
+        amount: requiredCredits,
+        idempotencyKey: jobId
+          ? `spend:storyboard_image:${jobId}`
+          : `spend:storyboard_image:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Storyboard image generation",
+        metadata: {
+          tool: "storyboard",
+          jobType: "storyboard_image",
+          storyboardStyle,
+        },
+      });
+      creditsSpent = true;
+      creditsAmount = requiredCredits;
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        const wallet = await getWallet(profileId!).catch(() => null);
+        const currentBalance = wallet?.balance ?? 0;
+        if (jobId) {
+          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
+            code: "INSUFFICIENT_CREDITS",
+            message: "Insufficient credits.",
+            requiredCredits,
+            currentBalance,
+          }));
+        }
+        return NextResponse.json(
+          { error: "Insufficient credits.", requiredCredits, currentBalance },
+          { status: 402 }
+        );
+      }
+      throw e;
+    }
+
+    // ---- Processing asset (created AFTER spend succeeds) ----
+    const asset = await safe("createAsset", () => createProcessingAsset({
+      profileId: profileId!,
+      jobId: jobId ?? undefined,
+      tool: "storyboard",
+      assetType: "image",
+      role: "storyboard_image",
+      provider: "replicate",
+      model: "openai/gpt-image-2",
+      metadata: { storyboardStyle, theme: theme.slice(0, 200) },
+    }));
+    if (asset) imageAssetId = asset.id;
 
     // Step-recording helpers (best-effort; manage currentStepId).
     const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
@@ -381,11 +416,7 @@ export async function POST(req: Request) {
     const rawUrl = extractMediaUrl(imageResult);
     if (!rawUrl || !rawUrl.startsWith("http")) {
       console.error("[Storyboard] Unexpected gpt-image-2 output:", imageResult);
-      await failPlatform("Failed to resolve storyboard image URL from model output.");
-      return NextResponse.json(
-        { error: "Failed to resolve storyboard image URL from model output." },
-        { status: 500 }
-      );
+      throw new Error("Failed to resolve storyboard image URL from model output.");
     }
     await endStep({ imageUrl: rawUrl });
 
@@ -414,11 +445,7 @@ export async function POST(req: Request) {
 
     if (uploadError) {
       console.error("[Storyboard] Upload error:", uploadError);
-      await failPlatform(`Failed to upload storyboard: ${uploadError.message}`);
-      return NextResponse.json(
-        { error: `Failed to upload storyboard: ${uploadError.message}` },
-        { status: 500 }
-      );
+      throw new Error(`Failed to upload storyboard: ${uploadError.message}`);
     }
 
     const {
@@ -445,28 +472,41 @@ export async function POST(req: Request) {
 
     if (insertError || !inserted?.id) {
       console.error("[Storyboard] DB insert error:", insertError);
-      await failPlatform(insertError?.message || "Failed to save storyboard record.");
-      return NextResponse.json(
-        { error: insertError?.message || "Failed to save storyboard record." },
-        { status: 500 }
-      );
+      throw new Error(insertError?.message || "Failed to save storyboard record.");
     }
 
     // Attach storyboardId into the asset metadata only AFTER the legacy storyboards
     // insert succeeds, then mark the image asset ready and finish the job.
+    // costCredits on both is a display snapshot — credit_transactions is the truth.
     if (imageAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, imageAssetId!, {
         storagePath,
         publicUrl: storyboardUrl,
         mimeType: "image/png",
+        costCredits: creditsAmount,
         metadata: { storyboardId: inserted.id, storyboardStyle, theme: theme.slice(0, 200) },
       }));
     }
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
         output: { storyboardId: inserted.id, storyboardUrl, storagePath, assetId: imageAssetId },
+        costCredits: creditsAmount,
       }));
     }
+
+    // Usage event — analytics only, NEVER affects billing/response.
+    await safe("recordUsage", () => recordUsageEvent({
+      profileId: profileId!,
+      jobId: jobId ?? null,
+      assetId: imageAssetId ?? null,
+      tool: "storyboard",
+      provider: "replicate",
+      model: "openai/gpt-image-2",
+      unitType: "images",
+      units: 1,
+      creditsCharged: creditsAmount,
+      metadata: { jobType: "storyboard_image", storyboardStyle, storyboardId: inserted.id },
+    }));
 
     let historyItem;
     try {
@@ -508,6 +548,21 @@ export async function POST(req: Request) {
     if (jobId && profileId) {
       await safe("failJob", () => failJob(profileId!, jobId!, errJson));
     }
+
+    // Best-effort refund. Only fires when spendCredits actually succeeded.
+    if (creditsSpent && profileId && creditsAmount > 0) {
+      await safe("refundCredits", () => refundCredits({
+        profileId: profileId!,
+        amount: creditsAmount,
+        idempotencyKey: jobId
+          ? `refund:storyboard_image:${jobId}`
+          : `refund:storyboard_image:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Best-effort refund after generation failure",
+        metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

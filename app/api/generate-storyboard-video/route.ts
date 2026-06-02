@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
-import { getSessionUserId } from "@/lib/resolve-user";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -14,6 +13,14 @@ import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed, findStoryboardImageAsset } from "@/lib/assets-db";
 import { createAssetRelation } from "@/lib/asset-relations-db";
+import {
+  spendCredits,
+  refundCredits,
+  getWallet,
+  InsufficientCreditsError,
+} from "@/lib/credits-db";
+import { estimateStoryboardVideoCredits } from "@/lib/credit-costs";
+import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 600;
 
@@ -27,6 +34,9 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let videoAssetId: string | null = null;
+  // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
+  let creditsSpent = false;
+  let creditsAmount = 0;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -37,24 +47,9 @@ export async function POST(req: Request) {
     }
   };
 
-  // Best-effort fail-marking for early-return error paths after job creation.
-  const failPlatform = async (message: string) => {
-    const errJson = { message };
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (videoAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
-    }
-  };
-
   try {
-    // Normal path: identity from the NextAuth session via the profile.
-    //   profile.id      -> platform tables (jobs / job_steps / assets)
+    // STRICT profile resolution — this route now charges credits.
+    //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy storyboards ownership + user_creations (= users.id)
     let userId: string | null = null;
     try {
@@ -65,14 +60,11 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      // TEMPORARY SAFETY FALLBACK ONLY — must NOT become the normal path. On a
-      // non-auth infrastructure error, keep legacy generation working but SKIP all
-      // platform observability (profileId stays null -> guarded no-ops).
-      console.warn("[storyboard-video obs] profile resolution failed for non-auth reasons — continuing legacy-only, platform observability skipped:", e);
-      userId = await getSessionUserId();
-      if (!userId) {
-        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-      }
+      console.error("[storyboard-video] profile resolution failed (non-auth):", e);
+      return NextResponse.json(
+        { error: "Profile resolution failed. Please try again." },
+        { status: 500 }
+      );
     }
 
     const body = await req.json();
@@ -128,18 +120,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error: statusErr } = await supabase
-      .from(STORYBOARDS_TABLE)
-      .update({ status: "video_generating" })
-      .eq("id", storyboardId);
-
-    if (statusErr) {
-      console.error("[Storyboard Video] status update:", statusErr);
-      return NextResponse.json(
-        { error: statusErr.message || "Failed to update status." },
-        { status: 500 }
-      );
-    }
+    // NOTE: storyboards.status update moved to AFTER the credit spend so an
+    // insufficient-credits return cannot leave the storyboard stuck in
+    // 'video_generating'. The status remains whatever it was on the
+    // insufficient-credits / pre-spend infra-failure paths.
 
     if (!/\[Image1\]/i.test(seedancePrompt)) {
       seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
@@ -149,34 +133,83 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
-    // ---- Platform job + processing video asset (best-effort observability) ----
-    // Created after all validation + ownership + status update so validation
-    // early-returns never leave a dangling job.
-    if (profileId) {
-      const job = await safe("createJob", () => createJob({
-        profileId: profileId!,
-        tool: "storyboard",
-        jobType: "storyboard_video",
-        provider: "replicate",
-        model: "bytedance/seedance-2.0-fast",
-        input: { storyboardId },
-      }));
-      if (job) {
-        jobId = job.id;
-        await safe("startJob", () => startJob(profileId!, jobId!));
-        const asset = await safe("createAsset", () => createProcessingAsset({
-          profileId: profileId!,
-          jobId: jobId!,
-          tool: "storyboard",
-          assetType: "video",
-          role: "final_video",
-          provider: "replicate",
-          model: "bytedance/seedance-2.0-fast",
-          metadata: { storyboardId },
-        }));
-        if (asset) videoAssetId = asset.id;
-      }
+    // ---- Platform job (best-effort observability) ----
+    // Asset creation is deferred until after the credit spend succeeds.
+    const job = await safe("createJob", () => createJob({
+      profileId: profileId!,
+      tool: "storyboard",
+      jobType: "storyboard_video",
+      provider: "replicate",
+      model: "bytedance/seedance-2.0-fast",
+      input: { storyboardId },
+    }));
+    if (job) {
+      jobId = job.id;
+      await safe("startJob", () => startJob(profileId!, jobId!));
     }
+
+    // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
+    // Storyboard video is a flat 30 credits. Insufficient → 402 with no
+    // provider call, no storyboards.status mutation, no processing asset.
+    const requiredCredits = estimateStoryboardVideoCredits();
+    try {
+      await spendCredits({
+        profileId: profileId!,
+        amount: requiredCredits,
+        idempotencyKey: jobId
+          ? `spend:storyboard_video:${jobId}`
+          : `spend:storyboard_video:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Storyboard video generation",
+        metadata: {
+          tool: "storyboard",
+          jobType: "storyboard_video",
+          storyboardId,
+        },
+      });
+      creditsSpent = true;
+      creditsAmount = requiredCredits;
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        const wallet = await getWallet(profileId!).catch(() => null);
+        const currentBalance = wallet?.balance ?? 0;
+        if (jobId) {
+          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
+            code: "INSUFFICIENT_CREDITS",
+            message: "Insufficient credits.",
+            requiredCredits,
+            currentBalance,
+          }));
+        }
+        return NextResponse.json(
+          { error: "Insufficient credits.", requiredCredits, currentBalance },
+          { status: 402 }
+        );
+      }
+      throw e;
+    }
+
+    // ---- Storyboard status + processing asset (created AFTER spend succeeds) ----
+    const { error: statusErr } = await supabase
+      .from(STORYBOARDS_TABLE)
+      .update({ status: "video_generating" })
+      .eq("id", storyboardId);
+    if (statusErr) {
+      console.error("[Storyboard Video] status update:", statusErr);
+      throw new Error(statusErr.message || "Failed to update status.");
+    }
+
+    const asset = await safe("createAsset", () => createProcessingAsset({
+      profileId: profileId!,
+      jobId: jobId ?? undefined,
+      tool: "storyboard",
+      assetType: "video",
+      role: "final_video",
+      provider: "replicate",
+      model: "bytedance/seedance-2.0-fast",
+      metadata: { storyboardId },
+    }));
+    if (asset) videoAssetId = asset.id;
 
     const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
       if (!jobId || !profileId) return;
@@ -218,11 +251,7 @@ export async function POST(req: Request) {
     const videoRemoteUrl = extractMediaUrl(videoResult);
     if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
       console.error("[Storyboard Video] Bad Seedance output:", videoResult);
-      await failPlatform("Failed to resolve video URL from Seedance output.");
-      return NextResponse.json(
-        { error: "Failed to resolve video URL from Seedance output." },
-        { status: 500 }
-      );
+      throw new Error("Failed to resolve video URL from Seedance output.");
     }
     await endStep({ videoRemoteUrl });
 
@@ -249,11 +278,7 @@ export async function POST(req: Request) {
 
     if (uploadError) {
       console.error("[Storyboard Video] Upload error:", uploadError);
-      await failPlatform(`Failed to upload video: ${uploadError.message}`);
-      return NextResponse.json(
-        { error: `Failed to upload video: ${uploadError.message}` },
-        { status: 500 }
-      );
+      throw new Error(`Failed to upload video: ${uploadError.message}`);
     }
 
     const {
@@ -268,17 +293,15 @@ export async function POST(req: Request) {
 
     if (finalErr) {
       console.error("[Storyboard Video] Final DB update:", finalErr);
-      await failPlatform(finalErr.message || "Video uploaded but failed to update record.");
-      return NextResponse.json(
-        { error: finalErr.message || "Video uploaded but failed to update record." },
-        { status: 500 }
-      );
+      throw new Error(finalErr.message || "Video uploaded but failed to update record.");
     }
 
     console.log("[Storyboard Video] Done:", videoUrl);
 
     // Mark the final video asset ready, then best-effort link it back to its
     // source storyboard image via asset_relations (storyboard_for).
+    // costCredits on both markAssetReady and finishJob is a display snapshot —
+    // credit_transactions is the billing source of truth.
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath,
@@ -287,6 +310,7 @@ export async function POST(req: Request) {
         durationSec: 15,
         width: 1280,
         height: 720,
+        costCredits: creditsAmount,
         metadata: { storyboardId },
       }));
 
@@ -307,8 +331,23 @@ export async function POST(req: Request) {
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
         output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId },
+        costCredits: creditsAmount,
       }));
     }
+
+    // Usage event — analytics only, NEVER affects billing/response.
+    await safe("recordUsage", () => recordUsageEvent({
+      profileId: profileId!,
+      jobId: jobId ?? null,
+      assetId: videoAssetId ?? null,
+      tool: "storyboard",
+      provider: "replicate",
+      model: "bytedance/seedance-2.0-fast",
+      unitType: "video_seconds",
+      units: 15,
+      creditsCharged: creditsAmount,
+      metadata: { jobType: "storyboard_video", storyboardId },
+    }));
 
     let historyItem;
     try {
@@ -342,6 +381,21 @@ export async function POST(req: Request) {
     if (jobId && profileId) {
       await safe("failJob", () => failJob(profileId!, jobId!, errJson));
     }
+
+    // Best-effort refund. Only fires when spendCredits actually succeeded.
+    if (creditsSpent && profileId && creditsAmount > 0) {
+      await safe("refundCredits", () => refundCredits({
+        profileId: profileId!,
+        amount: creditsAmount,
+        idempotencyKey: jobId
+          ? `refund:storyboard_video:${jobId}`
+          : `refund:storyboard_video:profile:${profileId}:${Date.now()}`,
+        jobId: jobId ?? null,
+        description: "Best-effort refund after generation failure",
+        metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
