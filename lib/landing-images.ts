@@ -14,4 +14,5 @@ export const landingImages = {
     "https://images.unsplash.com/photo-1611262588024-d12430b98920?auto=format&fit=crop&w=1200&q=80",
   trust:
     "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1400&q=80",
+  footerCharacters: "/landing/footer-characters.png",
 } as const;

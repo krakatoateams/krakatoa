@@ -21,8 +21,19 @@ create index if not exists user_creations_user_tool_idx
 
 alter table user_creations enable row level security;
 
--- Storyboards: scope gallery to signed-in user
-alter table storyboards add column if not exists user_id uuid references users (id) on delete set null;
+-- Storyboards: scope gallery to signed-in user (skip if table not created yet)
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'storyboards'
+  ) then
+    alter table storyboards
+      add column if not exists user_id uuid references users (id) on delete set null;
 
-create index if not exists storyboards_user_created_idx
-  on storyboards (user_id, created_at desc);
+    create index if not exists storyboards_user_created_idx
+      on storyboards (user_id, created_at desc);
+  end if;
+end $$;
