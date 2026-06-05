@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosStoragePath } from "@/lib/storage-buckets";
 
-const MAX_BYTES = 200 * 1024 * 1024; // 200 MB ceiling
+const MAX_BYTES = 50 * 1024 * 1024; // 50 MB ceiling (matches client-side limit)
 
 const ACCEPTED_MIME_TYPES = new Set([
   "video/mp4",
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     if (file.size > MAX_BYTES) {
       return NextResponse.json(
-        { error: "File exceeds the 200 MB limit." },
+        { error: "File exceeds the 50 MB limit." },
         { status: 413 },
       );
     }

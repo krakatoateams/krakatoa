@@ -36,8 +36,6 @@ function YoutubeIcon({ className = "" }: { className?: string }) {
 type UploadStatus = "idle" | "uploading" | "done" | "error";
 
 interface ScheduleForm {
-  title: string;
-  tags: string;
   date: string;
   time: string;
 }
@@ -55,6 +53,41 @@ interface Post {
   scheduled_time: string;
   youtube_video_id?: string | null;
   platform: string;
+}
+
+// Bulk scheduling: one record per video (single mode = one item)
+interface VideoItem {
+  id: string;
+  file: File | null;
+  videoUrl: string | null;
+  uploadStatus: UploadStatus;
+  uploadError: string | null;
+  duration: number | null;
+  title: string;
+  tags: string;
+  caption: string;
+  date: string;
+  time: string;
+}
+
+const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEOS = 5;
+
+function makeDraft(date: string, time = "18:00"): VideoItem {
+  return {
+    id: crypto.randomUUID(),
+    file: null,
+    videoUrl: null,
+    uploadStatus: "idle",
+    uploadError: null,
+    duration: null,
+    title: "",
+    tags: "",
+    caption: "",
+    date,
+    time,
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -164,12 +197,14 @@ interface UploadCardProps {
   videoUrl: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
-  onFileSelect: (file: File | null) => void;
+  // Bulk: report one or more selected files to the parent
+  onFilesAdded: (files: File[]) => void;
+  onRemove: () => void;
   // Task 1.3: callback to report video duration to parent
   onDurationChange: (duration: number | null) => void;
 }
 
-function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect, onDurationChange }: UploadCardProps) {
+function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onDurationChange }: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   // Task 2.1: local object URL for instant preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -195,20 +230,23 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect, o
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(false);
-      const dropped = e.dataTransfer.files[0];
-      if (dropped && ACCEPTED_TYPES.includes(dropped.type)) onFileSelect(dropped);
+      const dropped = Array.from(e.dataTransfer.files).filter((f) =>
+        ACCEPTED_TYPES.includes(f.type),
+      );
+      if (dropped.length > 0) onFilesAdded(dropped);
     },
-    [onFileSelect],
+    [onFilesAdded],
   );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (selected) onFileSelect(selected);
+    const selected = e.target.files ? Array.from(e.target.files) : [];
+    if (selected.length > 0) onFilesAdded(selected);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   const handleRemove = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onFileSelect(null);
+    onRemove();
     if (inputRef.current) inputRef.current.value = "";
   };
 
@@ -311,8 +349,8 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect, o
           </div>
         )}
 
-        <input ref={inputRef} type="file" accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/avi,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
-        <p className="mt-3 text-center text-xs text-gray-600">Max 60 seconds · MP4, MOV, AVI · Max 50MB</p>
+        <input ref={inputRef} type="file" multiple accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/avi,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
+        <p className="mt-3 text-center text-xs text-gray-600">Up to 5 videos · Max 60s each · MP4, MOV, AVI · Max 50MB</p>
       </div>
     </Card>
   );
@@ -323,60 +361,160 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFileSelect, o
 interface DescriptionCardProps {
   caption: string;
   onCaptionChange: (caption: string) => void;
+  title: string;
+  tags: string;
+  videoUrl: string | null;
 }
 
-function DescriptionCard({ caption, onCaptionChange }: DescriptionCardProps) {
-  const [description, setDescription] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: DescriptionCardProps) {
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"generate" | "polish" | null>(null);
+  // null = nothing to show; true/false = result of the last Generate
+  const [lastUsedTranscript, setLastUsedTranscript] = useState<boolean | null>(null);
 
-  const callAPI = async (): Promise<string> => {
-    const res = await fetch("/api/generate-caption", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ description }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-    return data.caption as string;
-  };
+  const hasVideo = !!videoUrl;
+  const hasContent = !!caption.trim();
+  const isBusy = busy !== null;
+
+  // Clear the transcript warning whenever the video changes (removed or replaced)
+  useEffect(() => {
+    setLastUsedTranscript(null);
+  }, [videoUrl]);
 
   const runGenerate = async () => {
-    setIsGenerating(true);
+    setBusy("generate");
     setError(null);
-    try { onCaptionChange(await callAPI()); }
-    catch (err) { setError(err instanceof Error ? err.message : "Something went wrong."); }
-    finally { setIsGenerating(false); }
+    setLastUsedTranscript(null);
+    try {
+      const res = await fetch("/api/generate-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Generate from scratch — do not feed the current caption back in.
+          description: "",
+          title,
+          tags,
+          videoUrl: videoUrl ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      console.log("[DescriptionCard] usedTranscript:", data.usedTranscript);
+      onCaptionChange(data.caption as string);
+      setLastUsedTranscript(data.usedTranscript === true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runPolish = async () => {
+    setBusy("polish");
+    setError(null);
+    setLastUsedTranscript(null);
+    try {
+      const res = await fetch("/api/generate-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "polish",
+          existingCaption: caption,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      onCaptionChange(data.caption as string);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleCaptionEdit = (next: string) => {
+    onCaptionChange(next);
+    if (error) setError(null);
   };
 
   return (
     <Card>
-      <CardHeader title="Video Description" icon={<Sparkles className="h-4 w-4" />} />
+      <CardHeader title="Caption" icon={<Sparkles className="h-4 w-4" />} />
       <div className="space-y-4 p-5">
         <div>
-          <label htmlFor="video-description" className="mb-1.5 block text-xs font-medium text-gray-400">
-            Describe your video
+          <label htmlFor="video-caption" className="mb-1.5 block text-xs font-medium text-gray-400">
+            Caption
           </label>
           <textarea
-            id="video-description"
-            value={description}
-            onChange={(e) => { setDescription(e.target.value); if (error) setError(null); }}
-            placeholder="e.g. Tutorial on how to schedule 30 days of social media content using automation tools..."
-            rows={4}
+            id="video-caption"
+            value={caption}
+            onChange={(e) => handleCaptionEdit(e.target.value)}
+            placeholder="Write your caption here, or generate one with AI below..."
+            rows={5}
+            aria-label="Caption (editable)"
             className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
           />
+          <p className="mt-1 text-right text-xs text-gray-600">
+            {caption.length} / 300 chars
+          </p>
         </div>
 
-        <button
-          type="button"
-          onClick={runGenerate}
-          disabled={isGenerating || !description.trim()}
-          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isGenerating
-            ? <><RefreshCw className="h-4 w-4 animate-spin" />Generating…</>
-            : <><Sparkles className="h-4 w-4" />Generate Caption with AI</>}
-        </button>
+        {hasContent && lastUsedTranscript === false && (
+          title.trim() ? (
+            <p className="text-slate-400 text-xs mt-1">
+              🎵 No audio detected — caption was generated from your title and tags.
+            </p>
+          ) : (
+            <p className="text-amber-400 text-xs mt-1">
+              ⚠️ No audio detected and no title added. Your caption may not be relevant —
+              try adding a title and tags, then regenerate.
+            </p>
+          )
+        )}
+
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={runGenerate}
+              disabled={isBusy || !hasVideo}
+              className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy === "generate"
+                ? <><RefreshCw className="h-4 w-4 animate-spin" />Generating…</>
+                : <><Sparkles className="h-4 w-4" />Generate Caption</>}
+            </button>
+
+            {hasContent && (
+              <button
+                type="button"
+                onClick={runPolish}
+                disabled={isBusy}
+                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-300 transition-all duration-200 hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy === "polish"
+                  ? <><RefreshCw className="h-4 w-4 animate-spin" />Polishing…</>
+                  : <>✍️ Polish my caption</>}
+              </button>
+            )}
+          </div>
+
+          {busy && (
+            <p className="text-center text-xs text-gray-500">
+              {busy === "generate"
+                ? "🎙️ Transcribing & writing…"
+                : "✍️ Polishing your caption…"}
+            </p>
+          )}
+
+          {!busy && !hasContent && (
+            <p className="text-center text-xs text-gray-600">
+              {hasVideo
+                ? "Generate a caption from your video's audio"
+                : "Upload a video first to generate an AI caption"}
+            </p>
+          )}
+        </div>
 
         {error && (
           <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-3">
@@ -386,33 +524,6 @@ function DescriptionCard({ caption, onCaptionChange }: DescriptionCardProps) {
               <p className="mt-0.5 text-xs text-red-400/80">{error}</p>
             </div>
             <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="cursor-pointer text-red-400/60 hover:text-red-400">✕</button>
-          </div>
-        )}
-
-        {(caption || isGenerating) && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-400">Generated Caption</span>
-              <button
-                type="button"
-                onClick={runGenerate}
-                disabled={isGenerating}
-                aria-label="Refresh caption"
-                className="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-800 hover:text-white disabled:opacity-40"
-              >
-                <RefreshCw className={`h-3 w-3 ${isGenerating ? "animate-spin" : ""}`} />
-                Refresh
-              </button>
-            </div>
-            <textarea
-              value={caption}
-              onChange={(e) => onCaptionChange(e.target.value)}
-              rows={4}
-              placeholder={isGenerating ? "AI is writing your caption…" : ""}
-              aria-label="Generated caption (editable)"
-              className="w-full resize-none rounded-lg border border-violet-500/30 bg-violet-500/5 px-3.5 py-3 text-sm text-gray-200 placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-            />
-            <p className="text-right text-xs text-gray-600">{caption.length} / 200 chars · editable</p>
           </div>
         )}
       </div>
@@ -429,12 +540,28 @@ interface ScheduleCardProps {
   onToast: (toast: ToastState) => void;
   // Task 3.1: duration from parent for guard
   videoDuration: number | null;
+  // Lifted to page so DescriptionCard can read them for AI prompts
+  title: string;
+  tags: string;
+  onTitleChange: (title: string) => void;
+  onTagsChange: (tags: string) => void;
 }
 
-function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: ScheduleCardProps) {
+function ScheduleCard({
+  videoUrl,
+  caption,
+  onSuccess,
+  onToast,
+  videoDuration,
+  title,
+  tags,
+  onTitleChange,
+  onTagsChange,
+}: ScheduleCardProps) {
   const today = new Date().toISOString().split("T")[0];
-  const [form, setForm] = useState<ScheduleForm>({ title: "", tags: "", date: today, time: "18:00" });
+  const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
   const [submitting, setSubmitting] = useState(false);
+  const [confirmEmptyCaption, setConfirmEmptyCaption] = useState(false);
 
   const set = (key: keyof ScheduleForm) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -442,10 +569,22 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
 
   const handleBestTime = () => setForm((prev) => ({ ...prev, date: today, time: "18:00" }));
 
-  const resetForm = () => setForm({ title: "", tags: "", date: today, time: "18:00" });
+  const resetForm = () => {
+    setForm({ date: today, time: "18:00" });
+    onTitleChange("");
+    onTagsChange("");
+    setConfirmEmptyCaption(false);
+  };
 
   const handleSubmit = async () => {
-    if (!videoUrl || !form.title.trim() || !form.date || !form.time) return;
+    if (!videoUrl || !title.trim() || !form.date || !form.time) return;
+
+    // Soft, non-blocking warning: empty caption requires one confirming click
+    if (!caption.trim() && !confirmEmptyCaption) {
+      setConfirmEmptyCaption(true);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -456,9 +595,9 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           video_url: videoUrl,
-          title: form.title.trim(),
+          title: title.trim(),
           description: caption,
-          tags: form.tags,
+          tags,
           scheduled_time,
           platform: "youtube",
         }),
@@ -482,7 +621,7 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
 
   // Task 3.3: duration guard included in isReady
   const durationOk = videoDuration === null || videoDuration <= 60;
-  const isReady = !!videoUrl && !!form.title.trim() && !!form.date && !!form.time && durationOk;
+  const isReady = !!videoUrl && !!title.trim() && !!form.date && !!form.time && durationOk;
 
   return (
     <Card className="sticky top-20">
@@ -519,8 +658,8 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
           <input
             id="post-title"
             type="text"
-            value={form.title}
-            onChange={set("title")}
+            value={title}
+            onChange={(e) => onTitleChange(e.target.value)}
             placeholder="My awesome video title"
             className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
           />
@@ -534,8 +673,8 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
             <input
               id="post-tags"
               type="text"
-              value={form.tags}
-              onChange={set("tags")}
+              value={tags}
+              onChange={(e) => onTagsChange(e.target.value)}
               placeholder="tutorial, automation, content"
               className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2.5 pl-9 pr-3.5 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
@@ -572,6 +711,17 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
 
         <div className="border-t border-gray-800 pt-1" />
 
+        {/* Soft warning: empty caption — does not block, just confirms */}
+        {confirmEmptyCaption && !caption.trim() && (
+          <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
+            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+            <p className="text-xs text-amber-400">
+              ⚠️ No caption added. Click “Schedule Post” again to publish without one,
+              or write a caption above.
+            </p>
+          </div>
+        )}
+
         {/* Submit */}
         <button
           type="button"
@@ -587,7 +737,7 @@ function ScheduleCard({ videoUrl, caption, onSuccess, onToast, videoDuration }: 
         <p className="text-center text-xs text-gray-600">
           {!videoUrl ? "Upload a video to enable scheduling"
             : videoDuration !== null && videoDuration > 60 ? "Shorten video to under 60s to schedule"
-            : !form.title.trim() ? "Add a title to schedule"
+            : !title.trim() ? "Add a title to schedule"
             : ""}
         </p>
       </div>
@@ -684,23 +834,483 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
   );
 }
 
+// ─── Caption AI (shared logic) ────────────────────────────────────────────────
+
+// Prompt 2 (Option A): reusable caption generation for bulk cards + the shared
+// "same for all" box. Returns the caption so the caller decides where to store
+// it (single item vs broadcast to all). DescriptionCard intentionally keeps its
+// own copy of this logic untouched — reconciling the two is a deferred cleanup.
+function useCaptionAI() {
+  const [busy, setBusy] = useState<"generate" | "polish" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // null = nothing to show; true/false = result of the last Generate
+  const [lastUsedTranscript, setLastUsedTranscript] = useState<boolean | null>(null);
+
+  const resetWarning = useCallback(() => setLastUsedTranscript(null), []);
+  const clearError = useCallback(() => setError(null), []);
+
+  const generate = useCallback(
+    async (input: { title: string; tags: string; videoUrl: string | null }): Promise<string> => {
+      setBusy("generate");
+      setError(null);
+      setLastUsedTranscript(null);
+      try {
+        const res = await fetch("/api/generate-caption", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description: "",
+            title: input.title,
+            tags: input.tags,
+            videoUrl: input.videoUrl ?? undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+        setLastUsedTranscript(data.usedTranscript === true);
+        return data.caption as string;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+        throw err;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [],
+  );
+
+  const polish = useCallback(async (existingCaption: string): Promise<string> => {
+    setBusy("polish");
+    setError(null);
+    setLastUsedTranscript(null);
+    try {
+      const res = await fetch("/api/generate-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "polish", existingCaption }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      return data.caption as string;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      throw err;
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
+  return { busy, error, lastUsedTranscript, resetWarning, clearError, generate, polish };
+}
+
+// Buttons + status + transcript warning + error, driven by a useCaptionAI() instance.
+// The textarea lives in the parent (per-card or shared box).
+interface CaptionControlsProps {
+  ai: ReturnType<typeof useCaptionAI>;
+  hasVideo: boolean;
+  hasContent: boolean;
+  hasTitle: boolean;
+  generateLabel: string;
+  onGenerate: () => void;
+  onPolish: () => void;
+}
+
+function CaptionControls({
+  ai,
+  hasVideo,
+  hasContent,
+  hasTitle,
+  generateLabel,
+  onGenerate,
+  onPolish,
+}: CaptionControlsProps) {
+  const isBusy = ai.busy !== null;
+
+  return (
+    <div className="space-y-2">
+      {hasContent &&
+        ai.lastUsedTranscript === false &&
+        (hasTitle ? (
+          <p className="mt-1 text-xs text-slate-400">
+            🎵 No audio detected — caption was generated from your title and tags.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-amber-400">
+            ⚠️ No audio detected and no title added. Your caption may not be relevant — try adding a
+            title and tags, then regenerate.
+          </p>
+        ))}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={isBusy || !hasVideo}
+          className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {ai.busy === "generate" ? (
+            <>
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Generating…
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-4 w-4" />
+              {generateLabel}
+            </>
+          )}
+        </button>
+
+        {hasContent && (
+          <button
+            type="button"
+            onClick={onPolish}
+            disabled={isBusy}
+            className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-300 transition-all duration-200 hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {ai.busy === "polish" ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Polishing…
+              </>
+            ) : (
+              <>✍️ Polish my caption</>
+            )}
+          </button>
+        )}
+      </div>
+
+      {ai.busy && (
+        <p className="text-center text-xs text-gray-500">
+          {ai.busy === "generate" ? "🎙️ Transcribing & writing…" : "✍️ Polishing your caption…"}
+        </p>
+      )}
+
+      {!ai.busy && !hasContent && !hasVideo && (
+        <p className="text-center text-xs text-gray-600">
+          Upload a video first to generate an AI caption
+        </p>
+      )}
+
+      {ai.error && (
+        <div
+          role="alert"
+          className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-3"
+        >
+          <AlertCircle className="mt-px h-4 w-4 shrink-0 text-red-400" />
+          <div className="flex-1">
+            <p className="text-xs font-medium text-red-400">Generation failed</p>
+            <p className="mt-0.5 text-xs text-red-400/80">{ai.error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={ai.clearError}
+            aria-label="Dismiss"
+            className="cursor-pointer text-red-400/60 hover:text-red-400"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Bulk Video Card ──────────────────────────────────────────────────────────
+
+interface BulkVideoCardProps {
+  item: VideoItem;
+  index: number;
+  captionMode: "individual" | "same";
+  onUpdate: (patch: Partial<VideoItem>) => void;
+  onRemove: () => void;
+}
+
+function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVideoCardProps) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const today = new Date().toISOString().split("T")[0];
+  const ai = useCaptionAI();
+
+  useEffect(() => {
+    if (!item.file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(item.file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [item.file]);
+
+  // Clear the transcript warning when this card's video changes
+  useEffect(() => {
+    ai.resetWarning();
+  }, [item.videoUrl, ai.resetWarning]);
+
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const d = e.currentTarget.duration;
+    onUpdate({ duration: isFinite(d) ? d : null });
+  };
+
+  const handleGenerate = async () => {
+    try {
+      const caption = await ai.generate({
+        title: item.title,
+        tags: item.tags,
+        videoUrl: item.videoUrl,
+      });
+      onUpdate({ caption });
+    } catch {
+      // error surfaced by the hook
+    }
+  };
+
+  const handlePolish = async () => {
+    try {
+      const caption = await ai.polish(item.caption);
+      onUpdate({ caption });
+    } catch {
+      // error surfaced by the hook
+    }
+  };
+
+  const overLimit = item.duration !== null && item.duration > 60;
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+        <div className="flex items-center gap-2.5">
+          <span className="text-violet-400">
+            <FileVideo className="h-4 w-4" />
+          </span>
+          <h2 className="text-sm font-semibold text-white">Video {index + 1}</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          {item.uploadStatus === "uploading" && (
+            <RefreshCw className="h-3.5 w-3.5 animate-spin text-violet-400" />
+          )}
+          {item.uploadStatus === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />}
+          {item.uploadStatus === "error" && <AlertCircle className="h-3.5 w-3.5 text-red-400" />}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove video ${index + 1}`}
+            className="cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-4 p-5">
+        {previewUrl && (
+          <div className="space-y-2">
+            <video
+              src={previewUrl}
+              controls
+              onLoadedMetadata={handleLoadedMetadata}
+              className="max-h-[180px] w-full rounded-lg border border-gray-700 bg-black"
+            />
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span className="truncate">{item.file?.name}</span>
+              {item.duration !== null && <span className="shrink-0">{fmtDuration(item.duration)}</span>}
+            </div>
+          </div>
+        )}
+
+        {item.uploadStatus === "error" && (
+          <p className="text-xs text-red-400">{item.uploadError ?? "Upload failed."}</p>
+        )}
+
+        {overLimit && (
+          <div
+            role="alert"
+            className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5"
+          >
+            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+            <p className="text-xs text-amber-400">
+              {Math.round(item.duration as number)}s — YouTube Shorts must be under 60 seconds.
+            </p>
+          </div>
+        )}
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-400">
+            Title <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={item.title}
+            onChange={(e) => onUpdate({ title: e.target.value })}
+            placeholder="My awesome video title"
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-400">Tags</label>
+          <input
+            type="text"
+            value={item.tags}
+            onChange={(e) => onUpdate({ tags: e.target.value })}
+            placeholder="tutorial, automation, content"
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-gray-400">
+              <Calendar className="mr-1 inline h-3 w-3" />
+              Date <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="date"
+              value={item.date}
+              min={today}
+              onChange={(e) => onUpdate({ date: e.target.value })}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-gray-400">
+              <Clock className="mr-1 inline h-3 w-3" />
+              Time <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="time"
+              value={item.time}
+              onChange={(e) => onUpdate({ time: e.target.value })}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-400">Caption</label>
+          <textarea
+            value={item.caption}
+            onChange={(e) => onUpdate({ caption: e.target.value })}
+            placeholder={
+              captionMode === "individual"
+                ? "Write a caption here, or generate one with AI below…"
+                : "Set in the shared caption above — edit here to override this video…"
+            }
+            rows={3}
+            className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          />
+          <p className="mt-1 text-right text-xs text-gray-600">{item.caption.length} / 300 chars</p>
+        </div>
+
+        {captionMode === "individual" && (
+          <CaptionControls
+            ai={ai}
+            hasVideo={!!item.videoUrl}
+            hasContent={!!item.caption.trim()}
+            hasTitle={!!item.title.trim()}
+            generateLabel="Generate Caption"
+            onGenerate={handleGenerate}
+            onPolish={handlePolish}
+          />
+        )}
+      </div>
+    </Card>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SchedulerDashboardPage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [caption, setCaption] = useState("");
+  const today = new Date().toISOString().split("T")[0];
+  // Unified state: single mode = one item, bulk mode = 2..5 items.
+  // Always holds at least one (empty) draft so the form is editable pre-upload.
+  const [items, setItems] = useState<VideoItem[]>(() => [makeDraft(today)]);
   const [toast, setToast] = useState<ToastState | null>(null);
-  // Task 1.2: video duration state at page level
-  const [videoDuration, setVideoDuration] = useState<number | null>(null);
   // Task 5.1: posts state
   const [posts, setPosts] = useState<Post[]>([]);
   const [totalPostCount, setTotalPostCount] = useState(0);
   const [postsLoading, setPostsLoading] = useState(false);
 
-  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  const single = items.length <= 1;
+  const item0 = items[0];
+  const item0Id = item0.id;
+
+  const updateItem = useCallback((id: string, patch: Partial<VideoItem>) => {
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  }, []);
+
+  const removeItem = useCallback(
+    (id: string) => {
+      setItems((prev) => {
+        const next = prev.filter((i) => i.id !== id);
+        return next.length === 0 ? [makeDraft(today)] : next;
+      });
+    },
+    [today],
+  );
+
+  // Stable callbacks for the single-mode item. Stable identity matters because
+  // onDurationChange lives in UploadCard's effect deps — an inline arrow would
+  // re-run that effect every render and can loop.
+  const handleItem0Remove = useCallback(() => removeItem(item0Id), [removeItem, item0Id]);
+  const handleItem0Duration = useCallback(
+    (d: number | null) => updateItem(item0Id, { duration: d }),
+    [updateItem, item0Id],
+  );
+  const handleItem0Caption = useCallback(
+    (c: string) => updateItem(item0Id, { caption: c }),
+    [updateItem, item0Id],
+  );
+  const handleItem0Title = useCallback(
+    (t: string) => updateItem(item0Id, { title: t }),
+    [updateItem, item0Id],
+  );
+  const handleItem0Tags = useCallback(
+    (t: string) => updateItem(item0Id, { tags: t }),
+    [updateItem, item0Id],
+  );
+  const noop = useCallback(() => {}, []);
+
+  // ── Bulk caption state (Prompt 2) ──
+  const [captionMode, setCaptionMode] = useState<"individual" | "same">("individual");
+  const [sharedCaption, setSharedCaption] = useState("");
+  const sharedAi = useCaptionAI();
+
+  const applyCaptionToAll = useCallback((text: string) => {
+    setItems((prev) => prev.map((i) => ({ ...i, caption: text })));
+  }, []);
+
+  const firstWithVideoIndex = items.findIndex((i) => i.videoUrl);
+  const firstWithVideo = firstWithVideoIndex >= 0 ? items[firstWithVideoIndex] : null;
+
+  const handleSharedChange = (text: string) => {
+    setSharedCaption(text);
+    applyCaptionToAll(text);
+  };
+
+  const handleSharedGenerate = async () => {
+    if (!firstWithVideo) return;
+    try {
+      const caption = await sharedAi.generate({
+        title: firstWithVideo.title,
+        tags: firstWithVideo.tags,
+        videoUrl: firstWithVideo.videoUrl,
+      });
+      setSharedCaption(caption);
+      applyCaptionToAll(caption);
+    } catch {
+      // error surfaced by the hook
+    }
+  };
+
+  const handleSharedPolish = async () => {
+    try {
+      const caption = await sharedAi.polish(sharedCaption);
+      setSharedCaption(caption);
+      applyCaptionToAll(caption);
+    } catch {
+      // error surfaced by the hook
+    }
+  };
 
   // Task 5.1: fetch posts
   const fetchPosts = useCallback(async () => {
@@ -727,44 +1337,66 @@ export default function SchedulerDashboardPage() {
     return () => clearInterval(interval);
   }, [fetchPosts]);
 
-  const handleFileSelect = useCallback(async (selected: File | null) => {
-    setFile(selected);
-    setVideoUrl(null);
-    setUploadError(null);
-    setVideoDuration(null);
+  // Accept 1..N files. 1 valid file → single mode; 2..5 → bulk mode.
+  // Existing real videos are kept; the empty draft is dropped once real ones exist.
+  const handleFilesAdded = useCallback(
+    async (files: File[]) => {
+      const valid: File[] = [];
+      for (const f of files) {
+        if (!ACCEPTED_VIDEO_TYPES.includes(f.type)) {
+          setToast({ type: "error", message: `"${f.name}" skipped — only MP4, MOV, AVI.` });
+          continue;
+        }
+        if (f.size > MAX_FILE_BYTES) {
+          setToast({ type: "error", message: `"${f.name}" skipped — over 50MB.` });
+          continue;
+        }
+        valid.push(f);
+      }
+      if (valid.length === 0) return;
 
-    if (!selected) { setUploadStatus("idle"); return; }
+      const existingReal = items.filter((i) => i.file);
+      const slots = MAX_VIDEOS - existingReal.length;
+      if (slots <= 0) {
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos reached.` });
+        return;
+      }
+      const accepted = valid.slice(0, slots);
+      if (valid.length > slots) {
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos — extra files were skipped.` });
+      }
 
-    if (selected.size > MAX_FILE_BYTES) {
-      setUploadStatus("error");
-      setUploadError("File too large. Maximum size is 50MB.");
-      return;
-    }
+      const newItems: VideoItem[] = accepted.map((f) => ({
+        ...makeDraft(today),
+        file: f,
+        uploadStatus: "uploading",
+      }));
+      setItems([...existingReal, ...newItems]);
 
-    setUploadStatus("uploading");
-    try {
-      const formData = new FormData();
-      formData.append("file", selected);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Upload failed.");
-      setVideoUrl(data.url as string);
-      setUploadStatus("done");
-    } catch (err) {
-      setUploadStatus("error");
-      setUploadError(err instanceof Error ? err.message : "Upload failed.");
-    }
-  }, []);
+      // Sequential uploads — one at a time, updating each item as it resolves.
+      for (const it of newItems) {
+        try {
+          const formData = new FormData();
+          formData.append("file", it.file as File);
+          const res = await fetch("/api/upload", { method: "POST", body: formData });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? "Upload failed.");
+          updateItem(it.id, { videoUrl: data.url as string, uploadStatus: "done" });
+        } catch (err) {
+          updateItem(it.id, {
+            uploadStatus: "error",
+            uploadError: err instanceof Error ? err.message : "Upload failed.",
+          });
+        }
+      }
+    },
+    [items, today, updateItem],
+  );
 
   const handleSuccess = useCallback(() => {
-    setFile(null);
-    setVideoUrl(null);
-    setUploadStatus("idle");
-    setUploadError(null);
-    setCaption("");
-    setVideoDuration(null);
+    setItems([makeDraft(today)]);
     fetchPosts();
-  }, [fetchPosts]);
+  }, [fetchPosts, today]);
 
   // Task 5.6: retry a failed post
   const handleRetry = useCallback(async (postId: string) => {
@@ -793,29 +1425,150 @@ export default function SchedulerDashboardPage() {
           <YouTubeStatusBadge />
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+        {single ? (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+            <div className="space-y-6">
+              <UploadCard
+                file={item0.file}
+                videoUrl={item0.videoUrl}
+                uploadStatus={item0.uploadStatus}
+                uploadError={item0.uploadError}
+                onFilesAdded={handleFilesAdded}
+                onRemove={handleItem0Remove}
+                onDurationChange={handleItem0Duration}
+              />
+              <DescriptionCard
+                caption={item0.caption}
+                onCaptionChange={handleItem0Caption}
+                title={item0.title}
+                tags={item0.tags}
+                videoUrl={item0.videoUrl}
+              />
+            </div>
+
+            <div>
+              <ScheduleCard
+                videoUrl={item0.videoUrl}
+                caption={item0.caption}
+                onSuccess={handleSuccess}
+                onToast={setToast}
+                videoDuration={item0.duration}
+                title={item0.title}
+                tags={item0.tags}
+                onTitleChange={handleItem0Title}
+                onTagsChange={handleItem0Tags}
+              />
+            </div>
+          </div>
+        ) : (
           <div className="space-y-6">
             <UploadCard
-              file={file}
-              videoUrl={videoUrl}
-              uploadStatus={uploadStatus}
-              uploadError={uploadError}
-              onFileSelect={handleFileSelect}
-              onDurationChange={setVideoDuration}
+              file={null}
+              videoUrl={null}
+              uploadStatus="idle"
+              uploadError={null}
+              onFilesAdded={handleFilesAdded}
+              onRemove={noop}
+              onDurationChange={noop}
             />
-            <DescriptionCard caption={caption} onCaptionChange={setCaption} />
-          </div>
 
-          <div>
-            <ScheduleCard
-              videoUrl={videoUrl}
-              caption={caption}
-              onSuccess={handleSuccess}
-              onToast={setToast}
-              videoDuration={videoDuration}
-            />
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-400">Caption</span>
+              <div className="inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCaptionMode("individual")}
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    captionMode === "individual"
+                      ? "bg-violet-600 text-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Individual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCaptionMode("same")}
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    captionMode === "same"
+                      ? "bg-violet-600 text-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Same for all
+                </button>
+              </div>
+            </div>
+
+            {captionMode === "same" && (
+              <Card>
+                <CardHeader title="Caption — same for all" icon={<Sparkles className="h-4 w-4" />} />
+                <div className="space-y-4 p-5">
+                  <div>
+                    <textarea
+                      value={sharedCaption}
+                      onChange={(e) => handleSharedChange(e.target.value)}
+                      placeholder="Write one caption for every video, or generate from your first video below…"
+                      rows={4}
+                      aria-label="Shared caption for all videos"
+                      className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                    />
+                    <p className="mt-1 text-right text-xs text-gray-600">
+                      {sharedCaption.length} / 300 chars
+                    </p>
+                  </div>
+
+                  <CaptionControls
+                    ai={sharedAi}
+                    hasVideo={!!firstWithVideo}
+                    hasContent={!!sharedCaption.trim()}
+                    hasTitle={!!firstWithVideo?.title.trim()}
+                    generateLabel={
+                      firstWithVideo
+                        ? `Generate from Video ${firstWithVideoIndex + 1}`
+                        : "Generate Caption"
+                    }
+                    onGenerate={handleSharedGenerate}
+                    onPolish={handleSharedPolish}
+                  />
+
+                  <p className="text-xs text-gray-600">
+                    {firstWithVideo
+                      ? `Generated from Video ${firstWithVideoIndex + 1}'s audio — applies to all videos. Edit any card below to override.`
+                      : "Upload at least one video to generate a shared caption."}
+                  </p>
+                </div>
+              </Card>
+            )}
+
+            <div className="space-y-4">
+              {items.map((it, idx) => (
+                <BulkVideoCard
+                  key={it.id}
+                  item={it}
+                  index={idx}
+                  captionMode={captionMode}
+                  onUpdate={(patch) => updateItem(it.id, patch)}
+                  onRemove={() => removeItem(it.id)}
+                />
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled
+                className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white opacity-40"
+              >
+                <Calendar className="h-4 w-4" />
+                Schedule All ({items.length})
+              </button>
+              <p className="text-center text-xs text-gray-600">
+                Bulk scheduling is wired up in a later step.
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Task 5.9: Recent posts — full width below the grid */}
         <div className="mt-6">
