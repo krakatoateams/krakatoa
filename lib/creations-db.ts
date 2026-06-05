@@ -24,7 +24,7 @@ function tableMissingMessage(msg: string): boolean {
 
 function missingTableError(): Error {
   return new Error(
-    "Database table user_creations is missing. Run: npm run db:setup — or paste supabase/migrations/002_user_creations.sql in Supabase SQL Editor."
+    "Database table user_creations is missing. Run npm run db:setup (needs SUPABASE_ACCESS_TOKEN in .env.local), call GET /api/dev/setup-db with x-setup-key, connect Supabase MCP in Cursor (.cursor/mcp.json), or paste supabase/migrations/002_user_creations.sql in the Supabase SQL Editor."
   );
 }
 

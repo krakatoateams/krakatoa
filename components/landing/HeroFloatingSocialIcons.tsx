@@ -99,10 +99,10 @@ function SocialIconRail({
 /** Wraps hero copy so floating social placeholders sit beside the text in a scattered layout. */
 export function HeroFloatingSocialIcons({ children }: { children: ReactNode }) {
   return (
-    <div className="relative w-full max-w-6xl mx-auto">
+    <div className="relative w-full max-w-[1440px] mx-auto">
       <div className="flex w-full items-stretch justify-center gap-2 xl:gap-6">
         <SocialIconRail icons={LEFT_ICONS} side="left" />
-        <div className="min-w-0 flex-1 max-w-5xl flex flex-col items-center justify-center">
+        <div className="min-w-0 flex-1 max-w-6xl flex flex-col items-center justify-center">
           {children}
         </div>
         <SocialIconRail icons={RIGHT_ICONS} side="right" />

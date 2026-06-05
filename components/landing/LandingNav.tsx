@@ -1,29 +1,50 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Menu, X, ArrowRight } from "lucide-react";
 import { LondonClock } from "./LondonClock";
 import { TextRollButton } from "./TextRollButton";
 
 const navLinks = [
-  { label: "Tools", href: "#tools" },
-  { label: "Features", href: "#about" },
-  { label: "Pricing", href: "#" },
+  { label: "Features", href: "#features" },
+  { label: "Pricing", href: "#pricing" },
   { label: "Connect", href: "#" },
 ];
 
 export function LandingNav() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <>
-      <div className="relative z-20 max-w-[1440px] mx-auto px-1 py-2 sm:py-3">
-        <nav className="flex items-center justify-between gap-4 bg-white rounded-full p-[5px] pl-2 sm:pl-3">
-          <div className="flex items-center gap-4 sm:gap-6 min-w-0">
-            <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <span className="flex w-9 h-9 sm:w-10 sm:h-10 items-center justify-center rounded-full bg-gray-900 text-white text-[10px] sm:text-[11px] font-bold tracking-tight">
-                KR
+      <div className="pointer-events-none fixed left-0 right-0 top-0 z-40 mx-auto max-w-[1440px] px-3 py-2 sm:px-1 sm:py-3">
+        <nav
+          className={`pointer-events-auto mx-auto flex w-full items-center justify-between gap-4 rounded-full bg-white p-[5px] pl-2 sm:pl-3 transition-[max-width,transform,box-shadow] duration-500 ease-out will-change-[max-width,transform] ${
+            scrolled
+              ? "max-w-[210px] sm:max-w-[640px] lg:max-w-[680px] translate-y-[6px] sm:translate-y-[10px] shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+              : "max-w-[1440px] translate-y-[8px] sm:translate-y-[38px]"
+          }`}
+        >
+          <div
+            className={`flex items-center gap-4 sm:gap-6 min-w-0 transition-[padding] duration-500 ease-out ${
+              scrolled ? "pl-1" : "pl-5"
+            }`}
+          >
+            <Link
+              href="/"
+              aria-label="Krakatoa home"
+              className="flex items-center shrink-0"
+            >
+              <span className="text-gray-900 text-[18px] sm:text-xl font-black tracking-[-1.9px]">
+                KRAKATOA.
               </span>
             </Link>
             <div className="hidden md:flex items-center gap-6">
@@ -42,7 +63,7 @@ export function LandingNav() {
           <div className="hidden md:flex items-center gap-4 lg:gap-5">
             <LondonClock className="text-[13px] text-gray-600" />
             <TextRollButton
-              href="#growth"
+              href="/dashboard"
               className="inline-flex items-center gap-2 bg-gray-900 text-white text-[13px] font-medium rounded-full pl-5 pr-2 py-2 hover:bg-gray-800 transition-colors"
               iconVariant="dark"
             >
