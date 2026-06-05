@@ -12,6 +12,7 @@ import {
   CalendarClock,
   CalendarDays,
   LayoutDashboard,
+  Settings,
   LogOut,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
@@ -42,6 +43,12 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" /> },
       { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Account",
+    items: [
+      { label: "Settings", href: "/dashboard/settings", icon: <Settings className="h-4 w-4" /> },
     ],
   },
 ];
@@ -105,32 +112,38 @@ export default function Sidebar() {
       {/* User profile */}
       <div className="border-t border-gray-800 p-3">
         {session?.user ? (
-          <div className="flex items-center gap-2.5 rounded-lg bg-gray-900 px-2.5 py-2">
-            {session.user.image ? (
-              <Image
-                src={session.user.image}
-                alt={session.user.name ?? "Profile"}
-                width={32}
-                height={32}
-                className="h-8 w-8 shrink-0 rounded-full"
-              />
-            ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-semibold text-violet-300">
-                {session.user.name?.[0]?.toUpperCase() ?? "?"}
+          <div className="flex items-center gap-1 rounded-lg bg-gray-900 px-1 py-1">
+            <Link
+              href="/dashboard/settings"
+              aria-label="Open profile settings"
+              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 transition-colors hover:bg-gray-800"
+            >
+              {session.user.image ? (
+                <Image
+                  src={session.user.image}
+                  alt={session.user.name ?? "Profile"}
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 shrink-0 rounded-full"
+                />
+              ) : (
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-semibold text-violet-300">
+                  {session.user.name?.[0]?.toUpperCase() ?? "?"}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-white">{session.user.name}</p>
+                <p className="truncate text-[10px] text-gray-500">{session.user.email}</p>
+                <div className="mt-1">
+                  <CreditBadge />
+                </div>
               </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-white">{session.user.name}</p>
-              <p className="truncate text-[10px] text-gray-500">{session.user.email}</p>
-              <div className="mt-1">
-                <CreditBadge />
-              </div>
-            </div>
+            </Link>
             <button
               type="button"
               onClick={() => signOut({ callbackUrl: "/" })}
               aria-label="Sign out"
-              className="shrink-0 cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
+              className="shrink-0 cursor-pointer self-start rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
