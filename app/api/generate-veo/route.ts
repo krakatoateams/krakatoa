@@ -37,7 +37,8 @@ import {
 import { estimateVeoCredits } from "@/lib/credit-costs";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 
-export const maxDuration = 600;
+// Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
+export const maxDuration = 300;
 
 const LLM_MODEL = "google/gemini-2.5-flash";
 const VEO_MODEL = "google/veo-3.1-lite";

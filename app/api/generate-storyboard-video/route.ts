@@ -22,7 +22,8 @@ import {
 import { estimateStoryboardVideoCredits } from "@/lib/credit-costs";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 
-export const maxDuration = 600;
+// Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
+export const maxDuration = 300;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
