@@ -1,9 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { Sparkles, Users, Zap } from "lucide-react";
+import { Sparkles, Users, Zap, type LucideIcon } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
-import type { ComponentType } from "react";
 
 const ABOUT_PHOTO =
   "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260516_090133_c157d30b-a99a-4477-bec1-a446149ec3f2.png&w=1280&q=85";
@@ -17,7 +16,7 @@ function StatCard({
 }: {
   value: string;
   label: string;
-  icon: ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   tone: "light" | "dark";
   className?: string;
 }) {
