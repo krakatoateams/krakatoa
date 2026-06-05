@@ -27,7 +27,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - `app/`: Next.js App Router root.
   - `page.tsx`: Main Krakatoa landing page.
   - `dashboard/`: Authenticated hub (uses NextAuth + Supabase patterns as implemented).
-  - `api/generate/route.ts`: Core ReelsGen AI video generation pipeline (`maxDuration = 600`).
+  - `api/generate/route.ts`: Core ReelsGen AI video generation pipeline (`maxDuration = 300`).
   - `api/test-stitch/route.ts`: Developer utility to test Whisper → Rendi stitching from existing Replicate prediction IDs (`maxDuration = 300`).
   - `api/generate-photo/route.ts`: Product Photo generation.
   - `api/generate-caption/route.ts`: Short-form caption helper (Llama 3 8B on Replicate).
@@ -134,7 +134,7 @@ The pipeline in `app/api/generate/route.ts` orchestrates LLM scripting, one cont
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
 2. **ReelsGen UI:** Keep Live Caption Preview math aligned with the ASS `maxMarginV` / margin logic in `app/api/generate/route.ts`.
-3. **Long-running routes:** `maxDuration` is set on `generate` and `test-stitch`; handle Rendi polling timeouts gracefully.
+3. **Long-running routes & Vercel plan limits:** `maxDuration` is set on the heavy routes; handle Rendi polling timeouts gracefully. **Vercel's Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds** (deployment fails outright with `Builder returned invalid maxDuration value ... must have a maxDuration between 1 and 300 for plan hobby` if a route exceeds it). All heavy routes (`api/generate`, `api/generate-veo`, `api/generate-storyboard-video`) are therefore pinned to `300`. **Trade-off:** real generations that run longer than 5 minutes will be killed by Vercel's function timeout at runtime. The Pro plan raises the ceiling to 800s — if/when upgraded, these routes can be raised back to `600` (search the codebase for the `Vercel Hobby plan caps` comments). Never set a route above `300` while the project is on Hobby.
 4. **LLM prompts:** Always interpolate concrete strings (e.g. `style_anchor`) into prompts; never rely on “the provided X” placeholders — add post-parse safety nets.
 5. **FFmpeg concat:** Always normalize fps/scale/SAR/pixel format before `concat` when inputs come from generative video models.
 6. **Environment variables (common):**

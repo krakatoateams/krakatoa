@@ -107,4 +107,17 @@ See [`CLAUDE.md`](./CLAUDE.md) for an in-depth architecture description and the 
 
 ## Deployment
 
-Deployable to [Vercel](https://vercel.com) out of the box. Make sure to set the environment variables above in your Vercel project settings. The `/api/generate` route declares `maxDuration = 600` to accommodate the full pipeline.
+Deployable to [Vercel](https://vercel.com) out of the box. Make sure to set the environment variables above in your Vercel project settings.
+
+### Vercel plan limits (`maxDuration`)
+
+Vercel's **Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds**. If any route declares a higher value the deploy fails at the function-validation step with:
+
+```
+Builder returned invalid maxDuration value for Serverless Function "api/generate".
+Serverless Functions must have a maxDuration between 1 and 300 for plan hobby.
+```
+
+Because of this, the heavy generation routes — `/api/generate`, `/api/generate-veo`, and `/api/generate-storyboard-video` — are pinned to `maxDuration = 300` (look for the `Vercel Hobby plan caps` comment in each `route.ts`).
+
+**Runtime trade-off:** generations that take longer than 5 minutes will be terminated by the function timeout. Upgrading to the Vercel **Pro** plan raises the ceiling to 800s, at which point these routes can be raised back to `600`. Do not set any route above `300` while the project is on the Hobby plan.
