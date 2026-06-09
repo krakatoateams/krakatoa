@@ -31,6 +31,10 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  resolveStoryboardStyle,
+  storyboardVideoStyleDirective,
+} from "@/lib/storyboard-style";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -145,7 +149,7 @@ export async function POST(req: Request) {
 
     const { data: row, error: fetchError } = await supabase
       .from(STORYBOARDS_TABLE)
-      .select("id, user_id, theme, storyboard_url, seedance_prompt")
+      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style")
       .eq("id", storyboardId)
       .single();
 
@@ -184,6 +188,14 @@ export async function POST(req: Request) {
     if (!/\[Image1\]/i.test(seedancePrompt)) {
       seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
     }
+
+    // Honor the storyboard's chosen visual style in the VIDEO, not just the sheet.
+    // Prepending here (rather than only relying on the stored seedance_prompt) makes
+    // existing storyboards — whose prompt predates style-aware generation — still
+    // render in the picked aesthetic. The storyboard image stays the primary
+    // composition reference; this directive sets the rendering style.
+    const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
+    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n\n${seedancePrompt}`;
 
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,
@@ -241,7 +253,7 @@ export async function POST(req: Request) {
       jobType: "storyboard_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      input: { storyboardId, resolution, durationSec },
+      input: { storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
     if (job) {
       jobId = job.id;
@@ -269,6 +281,7 @@ export async function POST(req: Request) {
           storyboardId,
           resolution,
           durationSec,
+          style: storyboardStyle,
         },
       });
       creditsSpent = true;
@@ -323,7 +336,7 @@ export async function POST(req: Request) {
       role: "final_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      metadata: { storyboardId, resolution, durationSec },
+      metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -427,7 +440,7 @@ export async function POST(req: Request) {
         width: STORYBOARD_VIDEO_DIMENSIONS[resolution].width,
         height: STORYBOARD_VIDEO_DIMENSIONS[resolution].height,
         costCredits: creditsAmount,
-        metadata: { storyboardId, resolution, durationSec },
+        metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -446,7 +459,7 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec },
+        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, style: storyboardStyle },
         costCredits: creditsAmount,
       }));
     }
@@ -462,7 +475,7 @@ export async function POST(req: Request) {
       unitType: "video_seconds",
       units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec },
+      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
 
     let historyItem;

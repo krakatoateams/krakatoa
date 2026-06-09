@@ -35,6 +35,11 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  resolveStoryboardStyle,
+  STORYBOARD_STYLE_INSTRUCTIONS,
+  storyboardVideoStyleDirective,
+} from "@/lib/storyboard-style";
 
 export const maxDuration = 300;
 
@@ -150,37 +155,6 @@ function parseScenePayload(raw: string): {
   return { scenes, seedancePrompt: seedRaw.trim() };
 }
 
-const STORYBOARD_STYLE_KEYS = [
-  "cinematic_sketch",
-  "painterly_color",
-  "comic_book",
-  "photorealistic",
-  "anime_manga",
-] as const;
-
-type StoryboardStyleKey = (typeof STORYBOARD_STYLE_KEYS)[number];
-
-const STORYBOARD_STYLE_INSTRUCTIONS: Record<StoryboardStyleKey, string> = {
-  cinematic_sketch:
-    "Style: cinematic storyboard sketch — pencil/ink linework, light shading, optional camera arrows, readable at a glance.",
-  painterly_color:
-    "Style: full color painterly storyboard — watercolor and gouache technique, warm cinematic color palette, soft edges.",
-  comic_book:
-    "Style: comic book storyboard — bold thick ink outlines, high contrast, flat color fills, dynamic panel composition.",
-  photorealistic:
-    "Style: photorealistic storyboard — rendered like film production stills, detailed lighting, realistic textures and faces.",
-  anime_manga:
-    "Style: anime and manga storyboard — Japanese animation linework, expressive character faces, clean ink, minimal shading.",
-};
-
-function resolveStoryboardStyle(raw: unknown): StoryboardStyleKey {
-  const s = typeof raw === "string" ? raw.trim() : "";
-  if (STORYBOARD_STYLE_KEYS.includes(s as StoryboardStyleKey)) {
-    return s as StoryboardStyleKey;
-  }
-  return "cinematic_sketch";
-}
-
 function buildStoryboardImagePrompt(
   theme: string,
   scenes: SceneBreakdown[],
@@ -272,6 +246,9 @@ export async function POST(req: Request) {
     const theme = typeof body.theme === "string" ? body.theme.trim() : "";
     const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
     const styleInstruction = STORYBOARD_STYLE_INSTRUCTIONS[storyboardStyle];
+    // Same chosen style, phrased for the eventual Seedance VIDEO so the
+    // seedance_prompt GPT-5 writes is rendered in that aesthetic (not just the sheet).
+    const videoStyleDirective = storyboardVideoStyleDirective(storyboardStyle);
     if (!theme) {
       return NextResponse.json(
         { error: "Theme is required and cannot be empty." },
@@ -450,7 +427,7 @@ export async function POST(req: Request) {
       const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
         input: {
           system_prompt: GPT5_SCENE_SYSTEM,
-          prompt: `Video theme: ${theme}\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
+          prompt: `Video theme: ${theme}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
           reasoning_effort: "low",
           verbosity: "high",
           max_completion_tokens: 8192,
