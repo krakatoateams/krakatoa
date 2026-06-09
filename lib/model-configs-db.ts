@@ -7,9 +7,10 @@ import { supabaseServer } from "@/lib/supabase-server";
  * store API keys/secrets here — they stay in environment variables. The admin UI
  * may edit model IDs and safe parameters, but cannot read or write secrets.
  *
- * PHASE ADMIN 1: generation routes DO NOT read these values yet — they still use
- * their hardcoded model IDs. Phase Admin 2 will add a model resolver that reads
- * this table WITH a fallback to those literals.
+ * Phase Admin 2 wired lib/model-resolver.ts, so generation routes now read these
+ * values at runtime WITH a fallback to the hardcoded model IDs (and a ~60s TTL
+ * cache). Reset-to-default values live in lib/admin-config-defaults.ts — keep SQL
+ * seed, resolver fallback, and reset defaults aligned.
  */
 
 export type ModelConfig = {
@@ -53,6 +54,18 @@ export async function listModelConfigs(): Promise<ModelConfig[]> {
 
   handleError(error, "Failed to list model configs.");
   return (data as ModelConfig[] | null) ?? [];
+}
+
+/** Fetch a single model config by id (used by the reset endpoint to map id -> key). */
+export async function getModelConfigById(id: string): Promise<ModelConfig | null> {
+  const { data, error } = await supabaseServer
+    .from(MODEL_CONFIGS_TABLE)
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  handleError(error, "Failed to fetch model config.");
+  return (data as ModelConfig | null) ?? null;
 }
 
 export type ModelConfigPatch = {

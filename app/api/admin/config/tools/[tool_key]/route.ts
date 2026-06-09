@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updateToolConfig, type ToolConfigPatch } from "@/lib/tool-configs-db";
+import { updateToolConfig } from "@/lib/tool-configs-db";
+import { validateToolPatch } from "@/lib/admin-config-validation";
 
-// Update a tool config by tool_key (admin only). Controls sidebar visibility +
-// enable flag. In Phase Admin 1 this affects the sidebar only (cosmetic).
+// Update a tool config by tool_key (admin only). `enabled=false` now blocks the
+// mapped generation API routes at runtime (Phase Admin 2); `visible_in_sidebar`
+// only shows/hides the sidebar link. Validation is shared with the reset endpoint
+// via lib/admin-config-validation.ts. Runtime changes may take up to ~60s (cache).
 export const dynamic = "force-dynamic";
 
 export async function PATCH(
@@ -18,23 +21,18 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
     }
 
-    const patch: ToolConfigPatch = {};
-    if (typeof body.display_name === "string") patch.display_name = body.display_name;
-    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
-    if (typeof body.visible_in_sidebar === "boolean")
-      patch.visible_in_sidebar = body.visible_in_sidebar;
-    if (typeof body.sort_order === "number") patch.sort_order = body.sort_order;
-    if (body.metadata && typeof body.metadata === "object")
-      patch.metadata = body.metadata as Record<string, unknown>;
-
-    if (Object.keys(patch).length === 0) {
+    const result = validateToolPatch(body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    if (Object.keys(result.patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
     }
 
-    const tool = await updateToolConfig(params.tool_key, patch, ctx.profile.id);
+    const tool = await updateToolConfig(params.tool_key, result.patch, ctx.profile.id);
     if (!tool) {
       return NextResponse.json({ error: "Tool config not found." }, { status: 404 });
     }
-    return NextResponse.json({ tool });
+    return NextResponse.json({ tool, warnings: result.warnings });
   });
 }

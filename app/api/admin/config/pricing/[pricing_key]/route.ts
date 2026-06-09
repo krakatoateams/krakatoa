@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import {
-  updatePricingConfig,
-  type PricingConfigPatch,
-  type PricingType,
-} from "@/lib/pricing-configs-db";
+import { updatePricingConfig } from "@/lib/pricing-configs-db";
+import { validatePricingPatch } from "@/lib/admin-config-validation";
 
-// Update a pricing config by pricing_key (admin only).
-// PHASE ADMIN 1: editing here updates the DB row for display/config purposes
-// only. Generation routes still use lib/credit-costs.ts constants and will NOT
-// read this value until Phase Admin 2 wires a pricing resolver (with fallback).
+// Update a pricing config by pricing_key (admin only). Phase Admin 2 wired the
+// pricing resolver, so these values now affect new generations (with fallback to
+// lib/credit-costs.ts). Validation is shared with the reset endpoint via
+// lib/admin-config-validation.ts. Runtime changes may take up to ~60s (TTL cache).
 export const dynamic = "force-dynamic";
-
-const PRICING_TYPES: PricingType[] = ["fixed", "per_second", "per_image"];
 
 export async function PATCH(
   req: Request,
@@ -26,35 +21,18 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
     }
 
-    const patch: PricingConfigPatch = {};
-    if (typeof body.display_name === "string") patch.display_name = body.display_name;
-    if (
-      typeof body.pricing_type === "string" &&
-      PRICING_TYPES.includes(body.pricing_type as PricingType)
-    ) {
-      patch.pricing_type = body.pricing_type as PricingType;
+    const result = validatePricingPatch(body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
-    if (typeof body.credit_amount === "number") {
-      if (!Number.isInteger(body.credit_amount) || body.credit_amount < 0) {
-        return NextResponse.json(
-          { error: "credit_amount must be a non-negative integer." },
-          { status: 400 }
-        );
-      }
-      patch.credit_amount = body.credit_amount;
-    }
-    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
-    if (body.metadata && typeof body.metadata === "object")
-      patch.metadata = body.metadata as Record<string, unknown>;
-
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(result.patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
     }
 
-    const pricing = await updatePricingConfig(params.pricing_key, patch, ctx.profile.id);
+    const pricing = await updatePricingConfig(params.pricing_key, result.patch, ctx.profile.id);
     if (!pricing) {
       return NextResponse.json({ error: "Pricing config not found." }, { status: 404 });
     }
-    return NextResponse.json({ pricing });
+    return NextResponse.json({ pricing, warnings: result.warnings });
   });
 }

@@ -4,9 +4,11 @@ import { supabaseServer } from "@/lib/supabase-server";
  * Pricing configs data access (service-role).
  *
  * Mirrors lib/credit-costs.ts so admins can view/edit credit pricing from the
- * panel. PHASE ADMIN 1: generation routes DO NOT read these values yet — they
- * still use the constants in lib/credit-costs.ts. Phase Admin 2 will add a
- * pricing resolver that reads this table WITH a fallback to those constants.
+ * panel. Phase Admin 2 wired lib/pricing-resolver.ts, so generation routes now
+ * read these values at runtime WITH a fallback to the lib/credit-costs.ts
+ * constants (and a ~60s TTL cache). Reset-to-default values live in
+ * lib/admin-config-defaults.ts — keep SQL seed, resolver fallback, and reset
+ * defaults aligned.
  */
 
 export type PricingType = "fixed" | "per_second" | "per_image";

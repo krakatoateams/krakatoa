@@ -1,22 +1,19 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updateModelConfig, type ModelConfigPatch } from "@/lib/model-configs-db";
+import { updateModelConfig } from "@/lib/model-configs-db";
+import { validateModelPatch } from "@/lib/admin-config-validation";
 
 // Update a model config by id (admin only). Only safe fields are accepted
 // (provider, model, enabled, is_default, parameters, metadata). There is no
-// secret/API-key field, so this can never expose or mutate credentials.
+// secret/API-key field, so this can never expose or mutate credentials, and
+// secret-like parameter keys are rejected by the shared validator.
 //
-// PHASE ADMIN 1: editing here updates the DB row only. Generation routes still
-// use their hardcoded model IDs and will NOT read this until Phase Admin 2 wires
-// a model resolver (with fallback).
+// Phase Admin 2 wired the model resolver, so these values now affect new
+// generations (with fallback to the hardcoded model IDs). A typo in a non-empty
+// model id is treated as intentional and can fail at generation time. Validation
+// is shared with the reset endpoint via lib/admin-config-validation.ts. Runtime
+// changes may take up to ~60s (TTL cache). No external model validation is done.
 export const dynamic = "force-dynamic";
-
-// Defense-in-depth: reject anything that smells like a secret in parameters.
-const SECRET_KEY_RE = /(secret|token|api[_-]?key|password|credential|authorization)/i;
-
-function containsSecretKey(obj: Record<string, unknown>): boolean {
-  return Object.keys(obj).some((k) => SECRET_KEY_RE.test(k));
-}
 
 export async function PATCH(
   req: Request,
@@ -30,32 +27,18 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
     }
 
-    const patch: ModelConfigPatch = {};
-    if (typeof body.provider === "string") patch.provider = body.provider;
-    if (typeof body.model === "string") patch.model = body.model;
-    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
-    if (typeof body.is_default === "boolean") patch.is_default = body.is_default;
-    if (body.parameters && typeof body.parameters === "object") {
-      const parameters = body.parameters as Record<string, unknown>;
-      if (containsSecretKey(parameters)) {
-        return NextResponse.json(
-          { error: "Secrets/API keys are not allowed in model parameters." },
-          { status: 400 }
-        );
-      }
-      patch.parameters = parameters;
+    const result = validateModelPatch(body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
-    if (body.metadata && typeof body.metadata === "object")
-      patch.metadata = body.metadata as Record<string, unknown>;
-
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(result.patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
     }
 
-    const model = await updateModelConfig(params.id, patch, ctx.profile.id);
+    const model = await updateModelConfig(params.id, result.patch, ctx.profile.id);
     if (!model) {
       return NextResponse.json({ error: "Model config not found." }, { status: 404 });
     }
-    return NextResponse.json({ model });
+    return NextResponse.json({ model, warnings: result.warnings });
   });
 }

@@ -3,9 +3,10 @@ import { supabaseServer } from "@/lib/supabase-server";
 /**
  * Tool configs data access (service-role).
  *
- * Controls which tools are enabled / visible in the dashboard sidebar. In Phase
- * Admin 1 this drives sidebar visibility only (cosmetic). Direct route access to
- * a disabled tool is NOT blocked yet — that is a later, deliberate step.
+ * Controls which tools are enabled / visible in the dashboard sidebar.
+ * `visible_in_sidebar` drives the sidebar link (cosmetic); `enabled=false` now
+ * blocks the mapped generation API routes at runtime via lib/tool-access.ts
+ * (Phase Admin 2). Reset-to-default values live in lib/admin-config-defaults.ts.
  */
 
 export type ToolConfig = {
