@@ -4,13 +4,34 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
-import {
-  estimateSeedanceCredits,
-  estimateVeoCredits,
-  estimateStoryboardImageCredits,
-  estimateStoryboardVideoCredits,
-} from "@/lib/credit-costs";
+import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
+import { usePricing } from "@/app/(app)/pricing-context";
+
+// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
+// attempt, sent as the Idempotency-Key header. Not persisted anywhere — a browser/
+// network retry of the SAME in-flight request reuses it; a new submit gets a new key.
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+// Translate the idempotency status codes into a user-facing message. Returns null
+// when the response is not an idempotency signal (so callers fall through).
+function describeIdempotencyError(
+  status: number,
+  data: { code?: string; error?: string }
+): string | null {
+  if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
+    return "Generation already in progress, please wait.";
+  }
+  if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
+    return data?.error || "This request conflicts with a previous one.";
+  }
+  if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
+    return data?.error || "Missing idempotency key. Please retry.";
+  }
+  return null;
+}
 
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
@@ -142,18 +163,33 @@ export default function ReelsPage() {
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
+  // Effective pricing (Pricing Config v2.2): the resolver-backed billing settings
+  // and per-tier provider costs are fetched once on mount. Labels compute through
+  // the SAME shared pricing math the server bills with (videoCredits/imageCredits),
+  // so the on-screen cost matches the charge within the ~60s cache window. For any
+  // key not yet fetched the context falls back to the built-in v2 defaults.
+  const { videoCredits, imageCredits } = usePricing();
 
-  // Credit cost previews — derived from the shared estimators so the JSX never
-  // hardcodes a number. Inputs are coerced defensively (empty/invalid fields
-  // fall back to the same defaults the server applies) so the labels never show
-  // NaN or a misleading 0.
+  // Storyboard-to-video resolution (Pricing Config v2.2). Drives the Seedance
+  // per-second pricing tier for the fixed 15s clip. Default 480p (lower cost).
+  // This one is for the ACTIVE storyboard preview (single, just-generated board).
+  const [storyboardVideoResolution, setStoryboardVideoResolution] = useState<"480p" | "720p">("480p");
+  // Per-card resolution for the Storyboard GALLERY (each saved card chooses its
+  // own 480p/720p independently). Keyed by storyboard id; missing = default 480p.
+  const [galleryVideoResolution, setGalleryVideoResolution] = useState<
+    Record<string, "480p" | "720p">
+  >({});
+
+  // Credit cost previews — provider-cost based. Video totals the duration first,
+  // then converts to credits with a single final ceil (no per-second rounding).
+  // Inputs are coerced defensively so labels never show NaN or a misleading 0.
   const seedanceCost = useMemo(
     () =>
-      estimateSeedanceCredits({
-        sceneCount: Math.max(1, Number(numScenes) || 1),
-        durationPerScene: Math.max(1, Number(durationPerScene) || 5),
-      }),
-    [numScenes, durationPerScene]
+      videoCredits(
+        seedancePricingKey(resolution),
+        Math.max(1, Number(numScenes) || 1) * Math.max(1, Number(durationPerScene) || 5)
+      ),
+    [numScenes, durationPerScene, resolution, videoCredits]
   );
   const veoCost = useMemo(() => {
     const dur = Math.max(1, Number(veoDuration) || 6);
@@ -161,10 +197,14 @@ export default function ReelsPage() {
       veoMode === "single" ? 1 : Math.min(3, Math.max(1, Number(veoNumScenes) || 1));
     // Mirror the route: single mode bills the clip duration; perScene multiplies
     // by the (clamped) scene count.
-    return estimateVeoCredits({ durationSec: dur * sceneCount });
-  }, [veoMode, veoDuration, veoNumScenes]);
-  const storyboardImageCost = estimateStoryboardImageCredits();
-  const storyboardVideoCost = estimateStoryboardVideoCredits();
+    return videoCredits(veoPricingKey(veoResolution), dur * sceneCount);
+  }, [veoMode, veoDuration, veoNumScenes, veoResolution, videoCredits]);
+  const storyboardImageCost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
+  // 15s fixed clip priced via the Seedance tier for the selected resolution.
+  const storyboardVideoCost = videoCredits(
+    seedancePricingKey(storyboardVideoResolution),
+    15
+  );
 
   const fetchStoryboards = useCallback(async () => {
     try {
@@ -207,6 +247,7 @@ export default function ReelsPage() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
+    if (loading) return;
 
     setLoading(true);
     setError(null);
@@ -217,7 +258,10 @@ export default function ReelsPage() {
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify({
           theme,
           numScenes: Number(numScenes),
@@ -237,6 +281,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? seedanceCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
 
@@ -256,6 +302,7 @@ export default function ReelsPage() {
   const handleVeoGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
+    if (loading) return;
 
     setLoading(true);
     setError(null);
@@ -285,7 +332,10 @@ export default function ReelsPage() {
 
       const response = await fetch("/api/generate-veo", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify(payload),
       });
       const data = await response.json();
@@ -295,6 +345,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? veoCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
@@ -324,6 +376,7 @@ export default function ReelsPage() {
 
   const handleGenerateStoryboard = async () => {
     if (!storyboardTheme.trim()) return;
+    if (storyboardLoading || videoLoading) return;
     setStoryboardLoading(true);
     setError(null);
     setVideoUrl(null);
@@ -333,7 +386,10 @@ export default function ReelsPage() {
     try {
       const response = await fetch("/api/generate-storyboard", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify({ theme: storyboardTheme, storyboardStyle }),
       });
       const data = await response.json();
@@ -343,6 +399,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? storyboardImageCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate storyboard");
       }
       setStoryboardUrl(
@@ -362,7 +420,8 @@ export default function ReelsPage() {
     }
   };
 
-  const runStoryboardVideoJob = async (id: string) => {
+  const runStoryboardVideoJob = async (id: string, resolution: "480p" | "720p") => {
+    if (videoLoading) return;
     setVideoLoading(true);
     setVideoJobStoryboardId(id);
     setError(null);
@@ -370,21 +429,28 @@ export default function ReelsPage() {
     setResultIsStoryboardFormat(false);
     setLogs((prev) => [
       ...prev,
-      `Starting Seedance for storyboard ${id.slice(0, 8)}…`,
+      `Starting Seedance (${resolution}) for storyboard ${id.slice(0, 8)}…`,
     ]);
+    // Cost preview for THIS job's resolution — used only in the 402 fallback msg.
+    const requiredFallback = videoCredits(seedancePricingKey(resolution), 15);
     try {
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyboardId: id }),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
+        body: JSON.stringify({ storyboardId: id, resolution }),
       });
       const data = await response.json();
       if (!response.ok) {
         if (response.status === 402) {
           throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? storyboardVideoCost}, current: ${data.currentBalance ?? 0}.`
+            `Insufficient credits. Required: ${data.requiredCredits ?? requiredFallback}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
@@ -405,11 +471,11 @@ export default function ReelsPage() {
 
   const handleCreateStoryboardVideo = async () => {
     if (!storyboardId) return;
-    await runStoryboardVideoJob(storyboardId);
+    await runStoryboardVideoJob(storyboardId, storyboardVideoResolution);
   };
 
   const handleGalleryCreateVideo = (id: string) => {
-    void runStoryboardVideoJob(id);
+    void runStoryboardVideoJob(id, galleryVideoResolution[id] ?? "480p");
   };
 
   return (
@@ -570,6 +636,29 @@ export default function ReelsPage() {
                             className="w-full h-auto object-contain max-h-[480px] mx-auto"
                           />
                         </div>
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                          <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
+                            <Monitor className="w-4 h-4 text-emerald-400" />
+                            Video quality
+                          </div>
+                          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+                            {(["480p", "720p"] as const).map((res) => (
+                              <button
+                                key={res}
+                                type="button"
+                                onClick={() => setStoryboardVideoResolution(res)}
+                                disabled={videoLoading}
+                                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all disabled:opacity-40 ${
+                                  storyboardVideoResolution === res
+                                    ? "bg-emerald-600 text-white"
+                                    : "text-slate-400 hover:text-white"
+                                }`}
+                              >
+                                {res}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <div className="flex flex-col sm:flex-row gap-3">
                           <button
                             type="button"
@@ -594,7 +683,7 @@ export default function ReelsPage() {
                             ) : (
                               <>
                                 <Play className="w-5 h-5" />
-                                Create Video · {storyboardVideoCost} credits
+                                Create Video {storyboardVideoResolution} · {storyboardVideoCost} credits
                               </>
                             )}
                           </button>
@@ -1241,7 +1330,12 @@ export default function ReelsPage() {
                   <p className="text-slate-600 text-sm">No storyboards match this filter.</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredStoryboardGalleryRows.map((row) => (
+                    {filteredStoryboardGalleryRows.map((row) => {
+                      const cardRes = galleryVideoResolution[row.id] ?? "480p";
+                      const cardCost = videoCredits(seedancePricingKey(cardRes), 15);
+                      const cardProcessing =
+                        videoLoading && videoJobStoryboardId === row.id;
+                      return (
                       <div
                         key={row.id}
                         className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden flex flex-col"
@@ -1267,24 +1361,58 @@ export default function ReelsPage() {
                           </div>
                           <div className="mt-auto pt-2">
                             {!row.video_url ? (
-                              <button
-                                type="button"
-                                onClick={() => handleGalleryCreateVideo(row.id)}
-                                disabled={videoLoading}
-                                className="w-full py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 flex items-center justify-center gap-2"
-                              >
-                                {videoLoading && videoJobStoryboardId === row.id ? (
-                                  <>
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Generating…
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="w-4 h-4" />
-                                    Create Video · {storyboardVideoCost} credits
-                                  </>
-                                )}
-                              </button>
+                              <div className="flex flex-col gap-2">
+                                {/* Per-card resolution selector — drives the Seedance
+                                    pricing tier + provider resolution for this board. */}
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                                    Video resolution
+                                  </span>
+                                  <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+                                    {(["480p", "720p"] as const).map((res) => {
+                                      const resCost = videoCredits(seedancePricingKey(res), 15);
+                                      return (
+                                        <button
+                                          key={res}
+                                          type="button"
+                                          onClick={() =>
+                                            setGalleryVideoResolution((prev) => ({
+                                              ...prev,
+                                              [row.id]: res,
+                                            }))
+                                          }
+                                          disabled={videoLoading}
+                                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all disabled:opacity-40 ${
+                                            cardRes === res
+                                              ? "bg-emerald-600 text-white"
+                                              : "text-slate-400 hover:text-white"
+                                          }`}
+                                        >
+                                          {res} · {resCost} cr
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleGalleryCreateVideo(row.id)}
+                                  disabled={videoLoading}
+                                  className="w-full py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 flex items-center justify-center gap-2"
+                                >
+                                  {cardProcessing ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      Generating…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Play className="w-4 h-4" />
+                                      Create Video {cardRes} · {cardCost} credits
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 type="button"
@@ -1297,7 +1425,8 @@ export default function ReelsPage() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -14,8 +14,18 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from '@/lib/credits-db';
-import { estimateSeedanceCredits } from '@/lib/credit-costs';
+import { getSeedanceCredits, PricingConfigError } from '@/lib/pricing-resolver';
+import { getReelsModels, replicateRef } from '@/lib/model-resolver';
+import { assertToolEnabled, ToolDisabledError } from '@/lib/tool-access';
 import { recordUsageEvent } from '@/lib/usage-events-db';
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from '@/lib/generation-idempotency';
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -36,6 +46,9 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let finalAssetId: string | null = null;
+  // Request-level idempotency row id (Double-Charge Protection v1). Set once the
+  // idempotency gate decides this request may proceed; used to finalize the row.
+  let generationRequestId: string | null = null;
   // Credit-spend trackers — used by the catch block to issue a best-effort
   // refund when generation fails after a successful spend. `creditsSpent` is
   // the gate; without it the catch block must NOT refund (no spend = no debt).
@@ -75,6 +88,21 @@ export async function POST(req: Request) {
         { error: 'Profile resolution failed. Please try again.' },
         { status: 500 }
       );
+    }
+
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Returns 403 only when an admin disabled the Reels tool; missing config /
+    // DB errors fail open so a config problem can never cause an outage.
+    try {
+      await assertToolEnabled('reels');
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: 'TOOL_DISABLED' },
+          { status: 403 }
+        );
+      }
+      console.warn('[reels] tool guard unexpected error (failing open):', e);
     }
 
     const body = await req.json();
@@ -141,6 +169,71 @@ export async function POST(req: Request) {
     const DURATION_PER_SCENE = durationPerScene || 5;
     const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
 
+    // ---- Resolve runtime models (Admin Phase 2) ----
+    // DB-backed config with fallback to the hardcoded model IDs. The SAME video
+    // model is reused for createJob, createProcessingAsset, the Seedance provider
+    // call, and recordUsageEvent so observability matches the actual run. The
+    // LLM, TTS, and Whisper refs are reused at each provider call site below;
+    // replicateRef() re-applies the Whisper version pin.
+    const reelsModels = await getReelsModels();
+    const llmModel = reelsModels.llm;
+    const videoModel = reelsModels.video;
+    const ttsModel = reelsModels.tts;
+    const whisperModel = reelsModels.whisper;
+    const llmRef = replicateRef(llmModel);
+    const videoRef = replicateRef(videoModel);
+    const ttsRef = replicateRef(ttsModel);
+    const whisperRef = replicateRef(whisperModel);
+
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. A duplicate
+    // submit/retry carrying the same Idempotency-Key replays the stored response
+    // (or is rejected as in-progress/conflict) without a second job/spend/provider
+    // call. The hash is computed from normalized client inputs only — never the
+    // key, resolved pricing, or resolved model config.
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: 'Idempotency-Key header is required.', code: 'IDEMPOTENCY_KEY_REQUIRED' },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({
+      theme,
+      numScenes: SCENE_COUNT,
+      durationPerScene: DURATION_PER_SCENE,
+      resolution: RESOLUTION,
+      voiceId: VOICE_ID,
+      emotion: USER_EMOTION,
+      captionStyle: style,
+    });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: 'generate',
+      toolKey: 'reels',
+      requestHash,
+    });
+    if (begin.action === 'conflict') {
+      return NextResponse.json(
+        {
+          error: 'This idempotency key was already used with a different request.',
+          code: 'IDEMPOTENCY_CONFLICT',
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === 'in_progress') {
+      return NextResponse.json(
+        { error: 'Generation already in progress, please wait.', code: 'GENERATION_IN_PROGRESS' },
+        { status: 409 }
+      );
+    }
+    if (begin.action === 'replay') {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is intentionally deferred until AFTER the credit spend
     // succeeds, so the assets table never carries a processing row for a
@@ -149,8 +242,8 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: 'reels',
       jobType: 'reels_seedance',
-      provider: 'replicate',
-      model: 'bytedance/seedance-2.0-fast',
+      provider: videoModel.provider,
+      model: videoModel.model,
       input: {
         theme: String(theme).slice(0, 500),
         numScenes: SCENE_COUNT,
@@ -179,9 +272,13 @@ export async function POST(req: Request) {
     // therefore a NEW spend key — that double-charge risk is an accepted
     // limitation of this dummy phase. A future client/request-level
     // idempotency key (e.g. forwarded from the browser) is the planned fix.
-    const requiredCredits = estimateSeedanceCredits({
-      sceneCount: SCENE_COUNT,
-      durationPerScene: DURATION_PER_SCENE,
+    // Pricing Config v2.1: charge from the per-second provider cost of the chosen
+    // resolution (seedance_480p / seedance_720p), computed over the TOTAL duration
+    // with a single final ceil. Falls back to legacy per-second credit_amount, then
+    // the lib/credit-costs.ts constant.
+    const requiredCredits = await getSeedanceCredits({
+      resolution: RESOLUTION,
+      durationSec: TOTAL_DURATION,
     });
     try {
       await spendCredits({
@@ -214,6 +311,20 @@ export async function POST(req: Request) {
             currentBalance,
           }));
         }
+        // Mark the idempotency row failed so a later same-key retry (e.g. after a
+        // top-up) can take over instead of being blocked as in-progress.
+        if (generationRequestId) {
+          await safe('idemFailInsufficient', () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: 'INSUFFICIENT_CREDITS',
+              message: 'Insufficient credits.',
+              requiredCredits,
+              currentBalance,
+            },
+          }));
+        }
         return NextResponse.json(
           { error: 'Insufficient credits.', requiredCredits, currentBalance },
           { status: 402 }
@@ -231,8 +342,8 @@ export async function POST(req: Request) {
       tool: 'reels',
       assetType: 'video',
       role: 'final_video',
-      provider: 'replicate',
-      model: 'bytedance/seedance-2.0-fast',
+      provider: videoModel.provider,
+      model: videoModel.model,
       metadata: { theme: String(theme).slice(0, 200) },
     }));
     if (asset) finalAssetId = asset.id;
@@ -263,11 +374,10 @@ export async function POST(req: Request) {
       }
     };
 
-    // Use Gemini 2.5 Flash on Replicate — strong creative writing for cinematic
-    // prompts and reliable structured JSON. Dynamic thinking is enabled on the
-    // scene-breakdown step where hard constraints (exact scene count, word caps,
-    // verbatim style-anchor copy) benefit from a touch of reasoning.
-    const LLM_MODEL = 'google/gemini-2.5-flash';
+    // The scripting LLM is resolved above (llmRef / llmModel) from model_configs
+    // with fallback to google/gemini-2.5-flash. Dynamic thinking is enabled on
+    // the scene-breakdown step where hard constraints (exact scene count, word
+    // caps, verbatim style-anchor copy) benefit from a touch of reasoning.
 
     // Robust JSON extractor: strips markdown fences, finds the first balanced
     // JSON object/array in the response, and parses it.
@@ -308,7 +418,7 @@ export async function POST(req: Request) {
 - narrator_emotion: ONE of these exact values describing the storytelling voice mood — "auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "neutral". Use "auto" only when no specific mood fits.
 Return ONLY raw JSON, nothing else.`;
 
-    const styleLlmOutput = await runWithRetry(LLM_MODEL, {
+    const styleLlmOutput = await runWithRetry(llmRef, {
       input: {
         prompt: theme,
         system_instruction: styleSystemPrompt,
@@ -385,7 +495,7 @@ Return ONLY raw JSON array, nothing else.`;
     let scenes: any[] = [];
     let lastRaw = '';
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const llmOutput = await runWithRetry(LLM_MODEL, {
+      const llmOutput = await runWithRetry(llmRef, {
         input: {
           prompt: theme,
           system_instruction: systemPrompt,
@@ -489,7 +599,7 @@ Return ONLY raw JSON array, nothing else.`;
 
     const generateTtsAndTranscribe = async (text: string, speed: number): Promise<{ audioUrl: string; words: WordChunk[]; duration: number }> => {
       console.log(`[TTS] Generating at speed=${speed.toFixed(3)}, emotion="${narratorEmotion}", voice="${VOICE_ID}"...`);
-      const ttsRes = await runWithRetry("minimax/speech-02-turbo", {
+      const ttsRes = await runWithRetry(ttsRef, {
         input: {
           text,
           voice_id: VOICE_ID,
@@ -510,7 +620,7 @@ Return ONLY raw JSON array, nothing else.`;
 
       console.log('[Whisper] Transcribing audio...');
       const wRes = await runWithRetry(
-        "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c",
+        whisperRef,
         {
           input: { audio: url, language: "english", timestamp: "word", batch_size: 64 }
         }
@@ -593,7 +703,7 @@ Return ONLY raw JSON array, nothing else.`;
     console.log(`[Step 5] Parallel Seedance video generation (${DURATION_PER_SCENE}s per scene)...`);
     const videoPromises = scenes.map(scene => {
       console.log(`[Seedance] Scene ${scene.scene_id}: requesting ${DURATION_PER_SCENE}s`);
-      return runWithRetry("bytedance/seedance-2.0-fast", {
+      return runWithRetry(videoRef, {
         input: {
           prompt: scene.video_prompt,
           aspect_ratio: "9:16",
@@ -901,7 +1011,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           resolution: RESOLUTION,
           voiceId: VOICE_ID,
           emotion: USER_EMOTION,
-          llmModel: LLM_MODEL,
+          llmModel: llmModel.model,
         },
       }));
     }
@@ -944,8 +1054,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       jobId: jobId ?? null,
       assetId: finalAssetId ?? null,
       tool: 'reels',
-      provider: 'replicate',
-      model: 'bytedance/seedance-2.0-fast',
+      provider: videoModel.provider,
+      model: videoModel.model,
       unitType: 'video_seconds',
       units: TOTAL_DURATION,
       creditsCharged: creditsAmount,
@@ -957,14 +1067,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       },
     }));
 
-    // (6) Response shape unchanged.
-    return NextResponse.json({ videoUrl: finalVideoUrl, historyItem });
+    // (6) Response shape unchanged. Persist it on the idempotency row so a
+    // duplicate same-key request replays this exact body without re-generating.
+    const successResponse = { videoUrl: finalVideoUrl, historyItem };
+    if (generationRequestId) {
+      await safe('idemSuccess', () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: finalAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
 
   } catch (error: any) {
     console.error('Generate pipeline error:', error);
 
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message: error?.message || String(error) };
+    const errJson = pricingMissing
+      ? { message: error?.message || String(error), code: 'PRICING_CONFIG_MISSING' }
+      : { message: error?.message || String(error) };
     if (currentStepId && profileId) {
       await safe('failStep', () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -994,7 +1119,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       }));
     }
 
-    return NextResponse.json({ error: error.message || String(error) }, { status: 500 });
+    // Mark the idempotency row failed (best-effort) so a same-key retry can take
+    // over. Must never mask the original error — hence safe-wrapped.
+    if (generationRequestId) {
+      await safe('idemFailure', () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
+      }));
+    }
+
+    return NextResponse.json(
+      pricingMissing
+        ? { error: error.message || String(error), code: 'PRICING_CONFIG_MISSING' }
+        : { error: error.message || String(error) },
+      { status: 500 }
+    );
   }
 }
 

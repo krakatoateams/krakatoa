@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -13,6 +14,7 @@ import {
   CalendarDays,
   LayoutDashboard,
   Settings,
+  Shield,
   LogOut,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
@@ -21,28 +23,31 @@ interface NavItem {
   label: string;
   href: string;
   icon: React.ReactNode;
+  // Maps to tool_configs.tool_key. When set, the item is hidden if the tool is
+  // disabled or not visible_in_sidebar. Items without a toolKey always show.
+  toolKey?: string;
 }
 
 const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Overview",
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
+      { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="h-4 w-4" />, toolKey: "dashboard" },
     ],
   },
   {
     title: "Create",
     items: [
-      { label: "ReelsGen", href: "/tools/reels", icon: <Video className="h-4 w-4" /> },
-      { label: "Product Photo", href: "/tools/photo", icon: <Camera className="h-4 w-4" /> },
-      { label: "IG Automation", href: "/tools/ig", icon: <Zap className="h-4 w-4" /> },
+      { label: "ReelsGen", href: "/tools/reels", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
+      { label: "Product Photo", href: "/tools/photo", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
+      { label: "IG Automation", href: "/tools/ig", icon: <Zap className="h-4 w-4" />, toolKey: "ig" },
     ],
   },
   {
     title: "Post",
     items: [
-      { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" /> },
-      { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" /> },
+      { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" />, toolKey: "schedule" },
+      { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" />, toolKey: "calendar" },
     ],
   },
   {
@@ -53,9 +58,69 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
+type ToolVisibility = {
+  tool_key: string;
+  enabled: boolean;
+  visible_in_sidebar: boolean;
+};
+
 export default function Sidebar() {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [toolVisibility, setToolVisibility] = useState<Record<string, ToolVisibility> | null>(
+    null
+  );
+
+  // Admin link visibility (cosmetic only — the real gate is the server-side
+  // requireAdmin() guard on /admin pages and APIs).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/admin/me")
+      .then((res) => (res.ok ? res.json() : { isAdmin: false }))
+      .then((d: { isAdmin?: boolean }) => setIsAdmin(Boolean(d.isAdmin)))
+      .catch(() => setIsAdmin(false));
+  }, [status]);
+
+  // Tool visibility from tool_configs. Fails open: if the fetch fails the
+  // sidebar shows everything (never hides a tool due to a transient error).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/tools/config")
+      .then((res) => (res.ok ? res.json() : { tools: [] }))
+      .then((d: { tools?: ToolVisibility[] }) => {
+        const map: Record<string, ToolVisibility> = {};
+        for (const t of d.tools ?? []) map[t.tool_key] = t;
+        setToolVisibility(map);
+      })
+      .catch(() => setToolVisibility(null));
+  }, [status]);
+
+  // An item shows unless its tool config explicitly hides/disables it. Items
+  // without a toolKey (e.g. Settings) always show.
+  const isItemVisible = (item: NavItem): boolean => {
+    if (!item.toolKey || !toolVisibility) return true;
+    const cfg = toolVisibility[item.toolKey];
+    if (!cfg) return true;
+    return cfg.enabled && cfg.visible_in_sidebar;
+  };
+
+  const visibleSections = SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter(isItemVisible),
+  })).filter((section) => section.items.length > 0);
+
+  const sectionsToRender = isAdmin
+    ? [
+        ...visibleSections,
+        {
+          title: "Admin",
+          items: [
+            { label: "Admin Panel", href: "/admin", icon: <Shield className="h-4 w-4" /> },
+          ],
+        },
+      ]
+    : visibleSections;
 
   const isActive = (href: string) => {
     // Routes whose subpaths are owned by another menu item must match exactly,
@@ -78,7 +143,7 @@ export default function Sidebar() {
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-3 py-5">
-        {SECTIONS.map((section) => (
+        {sectionsToRender.map((section) => (
           <div key={section.title} className="mb-6">
             <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
               {section.title}

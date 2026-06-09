@@ -23,8 +23,23 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateStoryboardImageCredits } from "@/lib/credit-costs";
+import { getStoryboardImageCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
+import {
+  resolveStoryboardStyle,
+  STORYBOARD_STYLE_INSTRUCTIONS,
+  storyboardVideoStyleDirective,
+} from "@/lib/storyboard-style";
 
 export const maxDuration = 300;
 
@@ -140,37 +155,6 @@ function parseScenePayload(raw: string): {
   return { scenes, seedancePrompt: seedRaw.trim() };
 }
 
-const STORYBOARD_STYLE_KEYS = [
-  "cinematic_sketch",
-  "painterly_color",
-  "comic_book",
-  "photorealistic",
-  "anime_manga",
-] as const;
-
-type StoryboardStyleKey = (typeof STORYBOARD_STYLE_KEYS)[number];
-
-const STORYBOARD_STYLE_INSTRUCTIONS: Record<StoryboardStyleKey, string> = {
-  cinematic_sketch:
-    "Style: cinematic storyboard sketch — pencil/ink linework, light shading, optional camera arrows, readable at a glance.",
-  painterly_color:
-    "Style: full color painterly storyboard — watercolor and gouache technique, warm cinematic color palette, soft edges.",
-  comic_book:
-    "Style: comic book storyboard — bold thick ink outlines, high contrast, flat color fills, dynamic panel composition.",
-  photorealistic:
-    "Style: photorealistic storyboard — rendered like film production stills, detailed lighting, realistic textures and faces.",
-  anime_manga:
-    "Style: anime and manga storyboard — Japanese animation linework, expressive character faces, clean ink, minimal shading.",
-};
-
-function resolveStoryboardStyle(raw: unknown): StoryboardStyleKey {
-  const s = typeof raw === "string" ? raw.trim() : "";
-  if (STORYBOARD_STYLE_KEYS.includes(s as StoryboardStyleKey)) {
-    return s as StoryboardStyleKey;
-  }
-  return "cinematic_sketch";
-}
-
 function buildStoryboardImagePrompt(
   theme: string,
   scenes: SceneBreakdown[],
@@ -207,6 +191,8 @@ export async function POST(req: Request) {
   // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
   let creditsSpent = false;
   let creditsAmount = 0;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -241,10 +227,28 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Storyboard is an engine inside the Reels tool, so it maps to tool_key 'reels'.
+    // Returns 403 only when an admin disabled it; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("reels");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[storyboard] tool guard unexpected error (failing open):", e);
+    }
+
     const body = await req.json();
     const theme = typeof body.theme === "string" ? body.theme.trim() : "";
     const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
     const styleInstruction = STORYBOARD_STYLE_INSTRUCTIONS[storyboardStyle];
+    // Same chosen style, phrased for the eventual Seedance VIDEO so the
+    // seedance_prompt GPT-5 writes is rendered in that aesthetic (not just the sheet).
+    const videoStyleDirective = storyboardVideoStyleDirective(storyboardStyle);
     if (!theme) {
       return NextResponse.json(
         { error: "Theme is required and cannot be empty." },
@@ -263,14 +267,61 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
+    // ---- Resolve runtime models (Admin Phase 2) ----
+    // DB-backed config with fallback. The image model is the billed/recorded
+    // model and is reused across createJob, createProcessingAsset, the image
+    // provider call, and recordUsageEvent. The scene LLM is resolved separately
+    // for the breakdown call.
+    const { sceneLlm: sceneLlmModel, image: imageModel } = await getStoryboardModels();
+    const sceneLlmRef = replicateRef(sceneLlmModel);
+    const imageModelRef = replicateRef(imageModel);
+
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. Hash uses
+    // normalized client inputs only (never the key, pricing, or model config).
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({ theme, storyboardStyle });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_storyboard",
+      toolKey: "reels",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is deferred until after the credit spend succeeds.
     const job = await safe("createJob", () => createJob({
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_image",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       input: { theme: theme.slice(0, 500), storyboardStyle },
     }));
     if (job) {
@@ -279,9 +330,10 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard image is a flat 2 credits. Insufficient → 402 with no
-    // provider call; other infra failures bubble to outer catch as 500.
-    const requiredCredits = estimateStoryboardImageCredits();
+    // Storyboard image is priced from the GPT Image 2 `auto` tier provider cost
+    // (v2.2 default 12 credits). Insufficient → 402 with no provider call; other
+    // infra failures bubble to outer catch as 500.
+    const requiredCredits = await getStoryboardImageCredits();
     try {
       await spendCredits({
         profileId: profileId!,
@@ -311,6 +363,18 @@ export async function POST(req: Request) {
             currentBalance,
           }));
         }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
+          }));
+        }
         return NextResponse.json(
           { error: "Insufficient credits.", requiredCredits, currentBalance },
           { status: 402 }
@@ -326,8 +390,8 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "image",
       role: "storyboard_image",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       metadata: { storyboardStyle, theme: theme.slice(0, 200) },
     }));
     if (asset) imageAssetId = asset.id;
@@ -359,11 +423,11 @@ export async function POST(req: Request) {
       null;
 
     for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt++) {
-      console.log(`[Storyboard] GPT-5 scene breakdown (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
-      const gptOut = await runReplicateWithRetry(replicate, "openai/gpt-5", {
+      console.log(`[Storyboard] Scene breakdown via ${sceneLlmRef} (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
+      const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
         input: {
           system_prompt: GPT5_SCENE_SYSTEM,
-          prompt: `Video theme: ${theme}\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
+          prompt: `Video theme: ${theme}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
           reasoning_effort: "low",
           verbosity: "high",
           max_completion_tokens: 8192,
@@ -396,10 +460,10 @@ export async function POST(req: Request) {
     const imagePrompt = buildStoryboardImagePrompt(theme, scenes, styleInstruction);
 
     await beginStep("image_generation", "GPT Image storyboard sheet");
-    console.log("[Storyboard] Calling openai/gpt-image-2 from scene breakdown...");
+    console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
     const imageResult = await runReplicateWithRetry(
       replicate,
-      "openai/gpt-image-2",
+      imageModelRef,
       {
         input: {
           prompt: imagePrompt,
@@ -500,8 +564,8 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: imageAssetId ?? null,
       tool: "storyboard",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       unitType: "images",
       units: 1,
       creditsCharged: creditsAmount,
@@ -527,17 +591,31 @@ export async function POST(req: Request) {
     }
 
     console.log("[Storyboard] Done:", storyboardUrl, "id:", inserted.id);
-    return NextResponse.json({
+    const successResponse = {
       storyboardId: inserted.id,
       storyboardUrl,
       historyItem,
-    });
+    };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: imageAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error("[Storyboard] Error:", error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -563,6 +641,17 @@ export async function POST(req: Request) {
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
+      }));
+    }
+
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

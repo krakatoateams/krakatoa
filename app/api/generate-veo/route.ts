@@ -34,17 +34,21 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateVeoCredits } from "@/lib/credit-costs";
+import { getVeoCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { getVeoModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
-
-const LLM_MODEL = "google/gemini-2.5-flash";
-const VEO_MODEL = "google/veo-3.1-lite";
-const WHISPER_MODEL =
-  "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c";
-const MINIMAX_MODEL = "minimax/speech-02-turbo";
 
 const MINIMAX_EMOTIONS = [
   "happy",
@@ -201,6 +205,8 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let creditJobKind: "veo_single" | "veo_perscene" | null = null;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -253,6 +259,21 @@ export async function POST(req: Request) {
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
       );
+    }
+
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Veo is an engine inside the Reels tool, so it maps to tool_key 'reels'.
+    // Returns 403 only when an admin disabled it; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("reels");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[veo] tool guard unexpected error (failing open):", e);
     }
 
     const body = await req.json();
@@ -389,7 +410,77 @@ export async function POST(req: Request) {
 
     creditJobKind = isSingle ? "veo_single" : "veo_perscene";
     const totalCreditDurationSec = isSingle ? duration : SCENE_COUNT * duration;
-    const requiredCredits = estimateVeoCredits({ durationSec: totalCreditDurationSec });
+    // Pricing Config v2.1: charge from the per-second provider cost of the chosen
+    // resolution (veo_720p / veo_1080p), computed over the TOTAL duration with a
+    // single final ceil. Falls back to legacy per-second credit_amount, then the
+    // lib/credit-costs.ts constant.
+    const requiredCredits = await getVeoCredits({
+      resolution,
+      durationSec: totalCreditDurationSec,
+    });
+
+    // ---- Resolve runtime models (Admin Phase 2) ----
+    // DB-backed config with fallback to the hardcoded model IDs. The SAME video
+    // model is reused for createJob, createProcessingAsset, the Veo provider
+    // call(s), and recordUsageEvent so observability matches the actual run.
+    // The LLM, TTS, and Whisper refs are resolved here too and reused at each
+    // provider call site below. replicateRef() re-applies the Whisper version pin.
+    const veoModels = await getVeoModels();
+    const llmModel = veoModels.llm;
+    const videoModel = veoModels.video;
+    const ttsModel = veoModels.tts;
+    const whisperModel = veoModels.whisper;
+    const llmRef = replicateRef(llmModel);
+    const videoRef = replicateRef(videoModel);
+    const ttsRef = replicateRef(ttsModel);
+    const whisperRef = replicateRef(whisperModel);
+
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. Hash uses
+    // normalized client inputs only (never the key, pricing, or model config).
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({
+      theme,
+      captionStyle: style,
+      voiceId,
+      emotion,
+      duration,
+      resolution,
+      mode: isSingle ? "single" : "perScene",
+      ...(isSingle ? { singlePromptScenes } : { numScenes: SCENE_COUNT }),
+    });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_veo",
+      toolKey: "reels",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
 
     // ---- Platform job (best-effort observability) ----
     // Asset creation is intentionally deferred until AFTER the credit spend
@@ -399,8 +490,8 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: "veo",
       jobType: creditJobKind!,
-      provider: "replicate",
-      model: VEO_MODEL,
+      provider: videoModel.provider,
+      model: videoModel.model,
       input: {
         theme: theme.slice(0, 500),
         mode: isSingle ? "single" : "perScene",
@@ -455,6 +546,18 @@ export async function POST(req: Request) {
             currentBalance,
           }));
         }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
+          }));
+        }
         return NextResponse.json(
           { error: "Insufficient credits.", requiredCredits, currentBalance },
           { status: 402 }
@@ -470,8 +573,8 @@ export async function POST(req: Request) {
       tool: "veo",
       assetType: "video",
       role: "final_video",
-      provider: "replicate",
-      model: VEO_MODEL,
+      provider: videoModel.provider,
+      model: videoModel.model,
       metadata: { theme: theme.slice(0, 200), mode: isSingle ? "single" : "perScene" },
     }));
     if (asset) videoAssetId = asset.id;
@@ -483,7 +586,7 @@ export async function POST(req: Request) {
 - negative_prompt: comma-separated list of visual things to avoid
 Return ONLY raw JSON, nothing else.`;
 
-    const styleLlmOutput = await runWithRetry(replicate, LLM_MODEL, {
+    const styleLlmOutput = await runWithRetry(replicate, llmRef, {
       input: {
         prompt: theme,
         system_instruction: styleSystemPrompt,
@@ -537,7 +640,7 @@ Split quoted narration across the two scenes; voiceover must remain clear throug
           ? "You write prompts for Google's Veo video model. When the user chose two scenes in one prompt, your plain-text output MUST include the literal labels **Scene 1 —** and **Scene 2 —** and fully develop both; never return only Scene 1 or an implied second half without a labeled Scene 2 section. Force clear foreground English voiceover (quoted lines + mix notes); the narrator must reflect the user's voice preset and emotion. Never imply SFX-only or silent video. Output plain text only — no JSON, no markdown fences."
           : "You write prompts for Google's Veo video model. Single-mode outputs must always force clear foreground English voiceover (quoted lines + mix notes); the narrator must reflect the user's voice preset and emotion settings given in the prompt. Never imply SFX-only or silent video. Output plain text only — no JSON, no markdown fences.";
 
-      const veoPromptOut = await runWithRetry(replicate, LLM_MODEL, {
+      const veoPromptOut = await runWithRetry(replicate, llmRef, {
         input: {
           prompt: `Theme: ${theme}
 
@@ -559,7 +662,7 @@ ${promptInstruction}`,
       await endStep({ promptChars: veoPrompt.length });
 
       await beginStep("video_generation", "Veo single-clip generation");
-      const veoRes = await runWithRetry(replicate, VEO_MODEL, {
+      const veoRes = await runWithRetry(replicate, videoRef, {
         input: {
           prompt: veoPrompt,
           aspect_ratio: "9:16",
@@ -591,7 +694,7 @@ ${promptInstruction}`,
       await endStep({ audioMp3Url });
 
       await beginStep("whisper_transcription", "Whisper word-level transcription");
-      const wRes = (await runWithRetry(replicate, WHISPER_MODEL, {
+      const wRes = (await runWithRetry(replicate, whisperRef, {
         input: { audio: audioMp3Url, language: "english", timestamp: "word", batch_size: 64 },
       })) as any;
       const whisperWords = parseWhisperWords(wRes);
@@ -671,15 +774,24 @@ ${promptInstruction}`,
         jobId: jobId ?? null,
         assetId: videoAssetId ?? null,
         tool: "veo",
-        provider: "replicate",
-        model: VEO_MODEL,
+        provider: videoModel.provider,
+        model: videoModel.model,
         unitType: "video_seconds",
         units: finalDuration,
         creditsCharged: creditsAmount,
         metadata: { jobType: "veo_single", duration, resolution, singlePromptScenes },
       }));
 
-      return NextResponse.json({ videoUrl: pub.publicUrl });
+      const successResponse = { videoUrl: pub.publicUrl };
+      if (generationRequestId) {
+        await safe("idemSuccess", () => finishGenerationRequestSuccess({
+          id: generationRequestId!,
+          jobId: jobId ?? null,
+          assetId: videoAssetId ?? null,
+          responseJson: successResponse,
+        }));
+      }
+      return NextResponse.json(successResponse);
     }
 
     // ----- Per Scene mode -----
@@ -712,7 +824,7 @@ Return ONLY raw JSON array, nothing else.`;
     let scenes: any[] = [];
     let lastRaw = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const llmOutput = await runWithRetry(replicate, LLM_MODEL, {
+      const llmOutput = await runWithRetry(replicate, llmRef, {
         input: {
           prompt: theme,
           system_instruction: systemPrompt,
@@ -758,7 +870,7 @@ Return ONLY raw JSON array, nothing else.`;
     await endStep({ scenes: scenes.length });
 
     const generateTtsAndTranscribe = async (text: string, speed: number) => {
-      const ttsRes = await runWithRetry(replicate, MINIMAX_MODEL, {
+      const ttsRes = await runWithRetry(replicate, ttsRef, {
         input: {
           text,
           voice_id: voiceId,
@@ -772,7 +884,7 @@ Return ONLY raw JSON array, nothing else.`;
       });
       const url = extractMediaUrl(ttsRes);
       if (!url.startsWith("http")) throw new Error("Failed to generate TTS audio.");
-      const wRes = (await runWithRetry(replicate, WHISPER_MODEL, {
+      const wRes = (await runWithRetry(replicate, whisperRef, {
         input: { audio: url, language: "english", timestamp: "word", batch_size: 64 },
       })) as any;
       const words = parseWhisperWords(wRes);
@@ -800,7 +912,7 @@ Return ONLY raw JSON array, nothing else.`;
     };
 
     const videoPromises = scenes.map((scene: any) =>
-      runWithRetry(replicate, VEO_MODEL, {
+      runWithRetry(replicate, videoRef, {
         input: {
           prompt: scene.video_prompt,
           aspect_ratio: "9:16",
@@ -964,8 +1076,8 @@ Return ONLY raw JSON array, nothing else.`;
       jobId: jobId ?? null,
       assetId: videoAssetId ?? null,
       tool: "veo",
-      provider: "replicate",
-      model: VEO_MODEL,
+      provider: videoModel.provider,
+      model: videoModel.model,
       unitType: "video_seconds",
       units: TOTAL_DURATION,
       creditsCharged: creditsAmount,
@@ -993,12 +1105,26 @@ Return ONLY raw JSON array, nothing else.`;
       console.warn("[Reels Veo] History log failed (video still saved):", historyErr);
     }
 
-    return NextResponse.json({ videoUrl: pub.publicUrl, historyItem });
+    const successResponse = { videoUrl: pub.publicUrl, historyItem };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: videoAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     console.error("[generate-veo]", error);
     const message = error instanceof Error ? error.message : String(error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -1026,6 +1152,17 @@ Return ONLY raw JSON array, nothing else.`;
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
+      }));
+    }
+
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

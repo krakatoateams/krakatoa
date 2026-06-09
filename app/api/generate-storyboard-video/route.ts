@@ -19,14 +19,41 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateStoryboardVideoCredits } from "@/lib/credit-costs";
+import { getSeedanceCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
+import {
+  resolveStoryboardStyle,
+  storyboardVideoStyleDirective,
+} from "@/lib/storyboard-style";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Pricing Config v2.2: the storyboard-to-video clip is a fixed 15s Seedance run,
+// priced via the Seedance per-second provider cost of the chosen resolution
+// (480p → ~95 cr, 720p → ~203 cr). Default 480p keeps internal-testing cost low.
+const STORYBOARD_VIDEO_DURATION_SEC = 15;
+type StoryboardVideoResolution = "480p" | "720p";
+const STORYBOARD_VIDEO_DIMENSIONS: Record<
+  StoryboardVideoResolution,
+  { width: number; height: number }
+> = {
+  "480p": { width: 854, height: 480 },
+  "720p": { width: 1280, height: 720 },
+};
 
 export async function POST(req: Request) {
   // Platform-observability trackers — declared before the try so the catch block
@@ -38,6 +65,8 @@ export async function POST(req: Request) {
   // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
   let creditsSpent = false;
   let creditsAmount = 0;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -68,6 +97,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Storyboard is an engine inside the Reels tool, so it maps to tool_key 'reels'.
+    // Returns 403 only when an admin disabled it; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("reels");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[storyboard-video] tool guard unexpected error (failing open):", e);
+    }
+
     const body = await req.json();
     const storyboardId =
       typeof body.storyboardId === "string" ? body.storyboardId.trim() : "";
@@ -78,6 +122,21 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // Resolution drives the Seedance per-second pricing tier. Validate strictly
+    // (only 480p/720p); default 480p when omitted. Duration is fixed at 15s.
+    const resolutionRaw = body.resolution;
+    let resolution: StoryboardVideoResolution = "480p";
+    if (resolutionRaw !== undefined && resolutionRaw !== null && resolutionRaw !== "") {
+      if (resolutionRaw !== "480p" && resolutionRaw !== "720p") {
+        return NextResponse.json(
+          { error: "resolution must be '480p' or '720p'." },
+          { status: 400 }
+        );
+      }
+      resolution = resolutionRaw;
+    }
+    const durationSec = STORYBOARD_VIDEO_DURATION_SEC;
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
@@ -90,7 +149,7 @@ export async function POST(req: Request) {
 
     const { data: row, error: fetchError } = await supabase
       .from(STORYBOARDS_TABLE)
-      .select("id, user_id, theme, storyboard_url, seedance_prompt")
+      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style")
       .eq("id", storyboardId)
       .single();
 
@@ -130,9 +189,61 @@ export async function POST(req: Request) {
       seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
     }
 
+    // Honor the storyboard's chosen visual style in the VIDEO, not just the sheet.
+    // Prepending here (rather than only relying on the stored seedance_prompt) makes
+    // existing storyboards — whose prompt predates style-aware generation — still
+    // render in the picked aesthetic. The storyboard image stays the primary
+    // composition reference; this directive sets the rendering style.
+    const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
+    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n\n${seedancePrompt}`;
+
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,
     });
+
+    // ---- Resolve runtime model (Admin Phase 2) ----
+    // DB-backed config with fallback. The SAME resolved model is reused for
+    // createJob, createProcessingAsset, the provider call, and recordUsageEvent.
+    const { video: videoModel } = await getStoryboardModels();
+    const videoModelRef = replicateRef(videoModel);
+
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, the storyboards.status mutation,
+    // or any provider call. Hash uses normalized client inputs only.
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_storyboard_video",
+      toolKey: "reels",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
 
     // ---- Platform job (best-effort observability) ----
     // Asset creation is deferred until after the credit spend succeeds.
@@ -140,9 +251,9 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_video",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
-      input: { storyboardId },
+      provider: videoModel.provider,
+      model: videoModel.model,
+      input: { storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
     if (job) {
       jobId = job.id;
@@ -150,9 +261,11 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard video is a flat 30 credits. Insufficient → 402 with no
-    // provider call, no storyboards.status mutation, no processing asset.
-    const requiredCredits = estimateStoryboardVideoCredits();
+    // Storyboard video is priced via the Seedance per-second provider cost for the
+    // chosen resolution over the fixed 15s clip (v2.2: 480p → ~95, 720p → ~203).
+    // The legacy flat-30 path is gone. Insufficient → 402 with no provider call,
+    // no storyboards.status mutation, no processing asset.
+    const requiredCredits = await getSeedanceCredits({ resolution, durationSec });
     try {
       await spendCredits({
         profileId: profileId!,
@@ -166,6 +279,9 @@ export async function POST(req: Request) {
           tool: "storyboard",
           jobType: "storyboard_video",
           storyboardId,
+          resolution,
+          durationSec,
+          style: storyboardStyle,
         },
       });
       creditsSpent = true;
@@ -180,6 +296,18 @@ export async function POST(req: Request) {
             message: "Insufficient credits.",
             requiredCredits,
             currentBalance,
+          }));
+        }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
           }));
         }
         return NextResponse.json(
@@ -206,9 +334,9 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "video",
       role: "final_video",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
-      metadata: { storyboardId },
+      provider: videoModel.provider,
+      model: videoModel.model,
+      metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -233,17 +361,17 @@ export async function POST(req: Request) {
     };
 
     await beginStep("video_generation", "Seedance video from storyboard reference");
-    console.log("[Storyboard Video] Calling Seedance (15s, 16:9, audio, reference)...");
+    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, 16:9, audio, reference)...`);
     const videoResult = await runReplicateWithRetry(
       replicate,
-      "bytedance/seedance-2.0-fast",
+      videoModelRef,
       {
         input: {
           prompt: seedancePrompt,
           reference_images: [storyboardUrl],
-          duration: 15,
+          duration: durationSec,
           generate_audio: true,
-          resolution: "720p",
+          resolution,
           aspect_ratio: "16:9",
         },
       }
@@ -308,11 +436,11 @@ export async function POST(req: Request) {
         storagePath,
         publicUrl: videoUrl,
         mimeType: "video/mp4",
-        durationSec: 15,
-        width: 1280,
-        height: 720,
+        durationSec,
+        width: STORYBOARD_VIDEO_DIMENSIONS[resolution].width,
+        height: STORYBOARD_VIDEO_DIMENSIONS[resolution].height,
         costCredits: creditsAmount,
-        metadata: { storyboardId },
+        metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -331,7 +459,7 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId },
+        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, style: storyboardStyle },
         costCredits: creditsAmount,
       }));
     }
@@ -342,12 +470,12 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: videoAssetId ?? null,
       tool: "storyboard",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
+      provider: videoModel.provider,
+      model: videoModel.model,
       unitType: "video_seconds",
-      units: 15,
+      units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId },
+      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, style: storyboardStyle },
     }));
 
     let historyItem;
@@ -365,13 +493,27 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    return NextResponse.json({ videoUrl, historyItem });
+    const successResponse = { videoUrl, historyItem };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: videoAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error("[Storyboard Video] Error:", error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -397,6 +539,17 @@ export async function POST(req: Request) {
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
+      }));
+    }
+
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }
