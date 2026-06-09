@@ -19,7 +19,9 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateStoryboardVideoCredits } from "@/lib/credit-costs";
+import { getStoryboardVideoCredits } from "@/lib/pricing-resolver";
+import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
@@ -66,6 +68,21 @@ export async function POST(req: Request) {
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
       );
+    }
+
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Storyboard is an engine inside the Reels tool, so it maps to tool_key 'reels'.
+    // Returns 403 only when an admin disabled it; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("reels");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[storyboard-video] tool guard unexpected error (failing open):", e);
     }
 
     const body = await req.json();
@@ -134,14 +151,20 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
+    // ---- Resolve runtime model (Admin Phase 2) ----
+    // DB-backed config with fallback. The SAME resolved model is reused for
+    // createJob, createProcessingAsset, the provider call, and recordUsageEvent.
+    const { video: videoModel } = await getStoryboardModels();
+    const videoModelRef = replicateRef(videoModel);
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is deferred until after the credit spend succeeds.
     const job = await safe("createJob", () => createJob({
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_video",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
+      provider: videoModel.provider,
+      model: videoModel.model,
       input: { storyboardId },
     }));
     if (job) {
@@ -152,7 +175,7 @@ export async function POST(req: Request) {
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
     // Storyboard video is a flat 30 credits. Insufficient → 402 with no
     // provider call, no storyboards.status mutation, no processing asset.
-    const requiredCredits = estimateStoryboardVideoCredits();
+    const requiredCredits = await getStoryboardVideoCredits();
     try {
       await spendCredits({
         profileId: profileId!,
@@ -206,8 +229,8 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "video",
       role: "final_video",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
+      provider: videoModel.provider,
+      model: videoModel.model,
       metadata: { storyboardId },
     }));
     if (asset) videoAssetId = asset.id;
@@ -236,7 +259,7 @@ export async function POST(req: Request) {
     console.log("[Storyboard Video] Calling Seedance (15s, 16:9, audio, reference)...");
     const videoResult = await runReplicateWithRetry(
       replicate,
-      "bytedance/seedance-2.0-fast",
+      videoModelRef,
       {
         input: {
           prompt: seedancePrompt,
@@ -342,8 +365,8 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: videoAssetId ?? null,
       tool: "storyboard",
-      provider: "replicate",
-      model: "bytedance/seedance-2.0-fast",
+      provider: videoModel.provider,
+      model: videoModel.model,
       unitType: "video_seconds",
       units: 15,
       creditsCharged: creditsAmount,

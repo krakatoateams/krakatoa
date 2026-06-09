@@ -29,19 +29,25 @@ export const STORYBOARD_VIDEO_CREDITS = 30;
 export const PRODUCT_PHOTO_CREDITS = 5;
 
 /**
- * Convert a video duration in seconds to integer credits at
- * VIDEO_CREDITS_PER_SECOND.
+ * Round a video duration to integer credits at an arbitrary per-second rate.
  *
- * - `Math.ceil` so a request never rounds down to a free generation.
- * - Floor of 1 credit so a real video can never cost zero credits even if a
- *   tiny/malformed duration slips through validation.
- * - NaN / negative inputs collapse to the 1-credit floor (defensive only —
- *   route-level validation should already reject these).
+ * Shared by the DB-backed pricing resolver (server) and the pricing context
+ * (client) so on-screen labels and billing use identical math. Same rounding
+ * rules as the historical `estimateVideoCredits`:
+ *   - `Math.ceil` so a request never rounds down to a free generation.
+ *   - Floor of 1 credit so video is never zero-cost (even if rate is 0 or a
+ *     tiny/malformed duration slips through).
+ *   - NaN / negative inputs collapse to the 1-credit floor.
  */
-export function estimateVideoCredits(durationSec: number): number {
-  const safe = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
-  const credits = Math.ceil(safe * VIDEO_CREDITS_PER_SECOND);
+export function roundVideoCredits(durationSec: number, ratePerSecond: number): number {
+  const safeDuration = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+  const safeRate = Number.isFinite(ratePerSecond) ? Math.max(0, ratePerSecond) : 0;
+  const credits = Math.ceil(safeDuration * safeRate);
   return Math.max(1, credits);
+}
+
+export function estimateVideoCredits(durationSec: number): number {
+  return roundVideoCredits(durationSec, VIDEO_CREDITS_PER_SECOND);
 }
 
 /** ReelsGen/Seedance cost: total video duration × VIDEO_CREDITS_PER_SECOND. */

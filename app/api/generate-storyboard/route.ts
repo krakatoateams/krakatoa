@@ -23,7 +23,9 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateStoryboardImageCredits } from "@/lib/credit-costs";
+import { getStoryboardImageCredits } from "@/lib/pricing-resolver";
+import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 300;
@@ -241,6 +243,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Storyboard is an engine inside the Reels tool, so it maps to tool_key 'reels'.
+    // Returns 403 only when an admin disabled it; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("reels");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[storyboard] tool guard unexpected error (failing open):", e);
+    }
+
     const body = await req.json();
     const theme = typeof body.theme === "string" ? body.theme.trim() : "";
     const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
@@ -263,14 +280,23 @@ export async function POST(req: Request) {
       auth: process.env.REPLICATE_API_TOKEN,
     });
 
+    // ---- Resolve runtime models (Admin Phase 2) ----
+    // DB-backed config with fallback. The image model is the billed/recorded
+    // model and is reused across createJob, createProcessingAsset, the image
+    // provider call, and recordUsageEvent. The scene LLM is resolved separately
+    // for the breakdown call.
+    const { sceneLlm: sceneLlmModel, image: imageModel } = await getStoryboardModels();
+    const sceneLlmRef = replicateRef(sceneLlmModel);
+    const imageModelRef = replicateRef(imageModel);
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is deferred until after the credit spend succeeds.
     const job = await safe("createJob", () => createJob({
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_image",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       input: { theme: theme.slice(0, 500), storyboardStyle },
     }));
     if (job) {
@@ -281,7 +307,7 @@ export async function POST(req: Request) {
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
     // Storyboard image is a flat 2 credits. Insufficient → 402 with no
     // provider call; other infra failures bubble to outer catch as 500.
-    const requiredCredits = estimateStoryboardImageCredits();
+    const requiredCredits = await getStoryboardImageCredits();
     try {
       await spendCredits({
         profileId: profileId!,
@@ -326,8 +352,8 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "image",
       role: "storyboard_image",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       metadata: { storyboardStyle, theme: theme.slice(0, 200) },
     }));
     if (asset) imageAssetId = asset.id;
@@ -359,8 +385,8 @@ export async function POST(req: Request) {
       null;
 
     for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt++) {
-      console.log(`[Storyboard] GPT-5 scene breakdown (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
-      const gptOut = await runReplicateWithRetry(replicate, "openai/gpt-5", {
+      console.log(`[Storyboard] Scene breakdown via ${sceneLlmRef} (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
+      const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
         input: {
           system_prompt: GPT5_SCENE_SYSTEM,
           prompt: `Video theme: ${theme}\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
@@ -396,10 +422,10 @@ export async function POST(req: Request) {
     const imagePrompt = buildStoryboardImagePrompt(theme, scenes, styleInstruction);
 
     await beginStep("image_generation", "GPT Image storyboard sheet");
-    console.log("[Storyboard] Calling openai/gpt-image-2 from scene breakdown...");
+    console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
     const imageResult = await runReplicateWithRetry(
       replicate,
-      "openai/gpt-image-2",
+      imageModelRef,
       {
         input: {
           prompt: imagePrompt,
@@ -500,8 +526,8 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: imageAssetId ?? null,
       tool: "storyboard",
-      provider: "replicate",
-      model: "openai/gpt-image-2",
+      provider: imageModel.provider,
+      model: imageModel.model,
       unitType: "images",
       units: 1,
       creditsCharged: creditsAmount,

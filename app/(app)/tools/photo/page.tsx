@@ -22,8 +22,8 @@ import {
   PhotoStyleId,
 } from "@/lib/product-photo";
 import CreationsHistory from "@/components/CreationsHistory";
-import { estimateProductPhotoCredits } from "@/lib/credit-costs";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
+import { usePricing } from "@/app/(app)/pricing-context";
 
 export default function ProductPhotoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -39,7 +39,11 @@ export default function ProductPhotoPage() {
   const [dragOver, setDragOver] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const { refetch: refetchCredits } = useCreditBalance();
-  const photoCost = estimateProductPhotoCredits();
+  // Effective Product Photo price (Admin Phase 2): resolver-backed value with the
+  // PRODUCT_PHOTO_CREDITS constant as the built-in fallback (the provider returns
+  // the constant while loading / on auth failure / on error).
+  const { pricing } = usePricing();
+  const photoCost = pricing.productPhoto;
 
   useEffect(() => {
     return () => {

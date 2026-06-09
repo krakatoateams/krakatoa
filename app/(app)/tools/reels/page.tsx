@@ -4,13 +4,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
-import {
-  estimateSeedanceCredits,
-  estimateVeoCredits,
-  estimateStoryboardImageCredits,
-  estimateStoryboardVideoCredits,
-} from "@/lib/credit-costs";
+import { roundVideoCredits } from "@/lib/credit-costs";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
+import { usePricing } from "@/app/(app)/pricing-context";
 
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
@@ -142,18 +138,24 @@ export default function ReelsPage() {
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
+  // Effective pricing (Admin Phase 2): resolver-backed values fetched once on
+  // mount, with the canonical credit-costs constants as the built-in fallback
+  // (the provider returns constants while loading / on auth failure / on error).
+  const { pricing } = usePricing();
 
-  // Credit cost previews — derived from the shared estimators so the JSX never
-  // hardcodes a number. Inputs are coerced defensively (empty/invalid fields
-  // fall back to the same defaults the server applies) so the labels never show
-  // NaN or a misleading 0.
+  // Credit cost previews — derived from the resolved per-second rates / fixed
+  // values via the shared roundVideoCredits helper so the label math matches the
+  // backend. Inputs are coerced defensively (empty/invalid fields fall back to
+  // the same defaults the server applies) and roundVideoCredits floors at 1, so
+  // labels never show NaN or a misleading 0.
   const seedanceCost = useMemo(
     () =>
-      estimateSeedanceCredits({
-        sceneCount: Math.max(1, Number(numScenes) || 1),
-        durationPerScene: Math.max(1, Number(durationPerScene) || 5),
-      }),
-    [numScenes, durationPerScene]
+      roundVideoCredits(
+        Math.max(1, Number(numScenes) || 1) *
+          Math.max(1, Number(durationPerScene) || 5),
+        pricing.seedanceRatePerSecond
+      ),
+    [numScenes, durationPerScene, pricing.seedanceRatePerSecond]
   );
   const veoCost = useMemo(() => {
     const dur = Math.max(1, Number(veoDuration) || 6);
@@ -161,10 +163,10 @@ export default function ReelsPage() {
       veoMode === "single" ? 1 : Math.min(3, Math.max(1, Number(veoNumScenes) || 1));
     // Mirror the route: single mode bills the clip duration; perScene multiplies
     // by the (clamped) scene count.
-    return estimateVeoCredits({ durationSec: dur * sceneCount });
-  }, [veoMode, veoDuration, veoNumScenes]);
-  const storyboardImageCost = estimateStoryboardImageCredits();
-  const storyboardVideoCost = estimateStoryboardVideoCredits();
+    return roundVideoCredits(dur * sceneCount, pricing.veoRatePerSecond);
+  }, [veoMode, veoDuration, veoNumScenes, pricing.veoRatePerSecond]);
+  const storyboardImageCost = pricing.storyboardImage;
+  const storyboardVideoCost = pricing.storyboardVideo;
 
   const fetchStoryboards = useCallback(async () => {
     try {

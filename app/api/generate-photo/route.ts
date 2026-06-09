@@ -21,7 +21,9 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { estimateProductPhotoCredits } from "@/lib/credit-costs";
+import { getProductPhotoCredits } from "@/lib/pricing-resolver";
+import { getPhotoModels, replicateRef } from "@/lib/model-resolver";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 
 export const maxDuration = 300;
@@ -108,6 +110,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---- Tool-access guard (Admin Phase 2) ----
+    // Runs before any job/credit/provider work. Returns 403 only when an admin
+    // has explicitly disabled this tool; missing config / DB errors fail open.
+    try {
+      await assertToolEnabled("photo");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json(
+          { error: e.message, code: "TOOL_DISABLED" },
+          { status: 403 }
+        );
+      }
+      console.warn("[photo] tool guard unexpected error (failing open):", e);
+    }
+
     const formData = await req.formData();
     const file = formData.get("image");
     const poseId = String(formData.get("poseId") || "").trim();
@@ -136,6 +153,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid photo style" }, { status: 400 });
     }
 
+    // ---- Resolve runtime model + pricing (Admin Phase 2) ----
+    // DB-backed config with fallback to the hardcoded defaults. The SAME resolved
+    // model is reused for createJob, createProcessingAsset, the provider call, and
+    // recordUsageEvent so observability never disagrees with what actually ran.
+    const { image: photoModel } = await getPhotoModels();
+    const photoModelRef = replicateRef(photoModel);
+
     // ---- Platform job (best-effort observability) ----
     // Created after all input validation so validation early-returns never leave
     // a dangling job. The processing asset is intentionally deferred until AFTER
@@ -145,8 +169,8 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: "photo",
       jobType: "product_photo",
-      provider: "replicate",
-      model: "google/nano-banana",
+      provider: photoModel.provider,
+      model: photoModel.model,
       input: { poseId, styleId },
     }));
     if (job) {
@@ -166,7 +190,7 @@ export async function POST(req: Request) {
     // request. A full HTTP retry by the client produces a NEW jobId and a NEW
     // spend key — that double-charge risk is an accepted limitation of this
     // dummy phase (future fix: client/request-level idempotency key).
-    const requiredCredits = estimateProductPhotoCredits();
+    const requiredCredits = await getProductPhotoCredits();
     try {
       await spendCredits({
         profileId: profileId!,
@@ -209,8 +233,8 @@ export async function POST(req: Request) {
       assetType: "image",
       role: "product_photo",
       bucket: PRODUCT_PHOTO_BUCKET,
-      provider: "replicate",
-      model: "google/nano-banana",
+      provider: photoModel.provider,
+      model: photoModel.model,
       metadata: { poseId, styleId },
     }));
     if (asset) photoAssetId = asset.id;
@@ -226,8 +250,8 @@ export async function POST(req: Request) {
     const prompt = buildProductPhotoPrompt(poseId, styleId);
 
     await beginStep("image_generation", "Nano Banana product photo generation");
-    console.log("[Product Photo] Running google/nano-banana...");
-    const output = await runWithRetry(replicate, "google/nano-banana", {
+    console.log(`[Product Photo] Running ${photoModelRef}...`);
+    const output = await runWithRetry(replicate, photoModelRef, {
       input: {
         prompt,
         image_input: [productImageUrl],
@@ -293,8 +317,8 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: photoAssetId ?? null,
       tool: "photo",
-      provider: "replicate",
-      model: "google/nano-banana",
+      provider: photoModel.provider,
+      model: photoModel.model,
       unitType: "image_count",
       units: 1,
       creditsCharged: creditsAmount,
