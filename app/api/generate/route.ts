@@ -18,6 +18,14 @@ import { getSeedanceCredits } from '@/lib/pricing-resolver';
 import { getReelsModels, replicateRef } from '@/lib/model-resolver';
 import { assertToolEnabled, ToolDisabledError } from '@/lib/tool-access';
 import { recordUsageEvent } from '@/lib/usage-events-db';
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from '@/lib/generation-idempotency';
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -38,6 +46,9 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let finalAssetId: string | null = null;
+  // Request-level idempotency row id (Double-Charge Protection v1). Set once the
+  // idempotency gate decides this request may proceed; used to finalize the row.
+  let generationRequestId: string | null = null;
   // Credit-spend trackers — used by the catch block to issue a best-effort
   // refund when generation fails after a successful spend. `creditsSpent` is
   // the gate; without it the catch block must NOT refund (no spend = no debt).
@@ -174,6 +185,55 @@ export async function POST(req: Request) {
     const ttsRef = replicateRef(ttsModel);
     const whisperRef = replicateRef(whisperModel);
 
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. A duplicate
+    // submit/retry carrying the same Idempotency-Key replays the stored response
+    // (or is rejected as in-progress/conflict) without a second job/spend/provider
+    // call. The hash is computed from normalized client inputs only — never the
+    // key, resolved pricing, or resolved model config.
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: 'Idempotency-Key header is required.', code: 'IDEMPOTENCY_KEY_REQUIRED' },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({
+      theme,
+      numScenes: SCENE_COUNT,
+      durationPerScene: DURATION_PER_SCENE,
+      resolution: RESOLUTION,
+      voiceId: VOICE_ID,
+      emotion: USER_EMOTION,
+      captionStyle: style,
+    });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: 'generate',
+      toolKey: 'reels',
+      requestHash,
+    });
+    if (begin.action === 'conflict') {
+      return NextResponse.json(
+        {
+          error: 'This idempotency key was already used with a different request.',
+          code: 'IDEMPOTENCY_CONFLICT',
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === 'in_progress') {
+      return NextResponse.json(
+        { error: 'Generation already in progress, please wait.', code: 'GENERATION_IN_PROGRESS' },
+        { status: 409 }
+      );
+    }
+    if (begin.action === 'replay') {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is intentionally deferred until AFTER the credit spend
     // succeeds, so the assets table never carries a processing row for a
@@ -245,6 +305,20 @@ export async function POST(req: Request) {
             message: 'Insufficient credits.',
             requiredCredits,
             currentBalance,
+          }));
+        }
+        // Mark the idempotency row failed so a later same-key retry (e.g. after a
+        // top-up) can take over instead of being blocked as in-progress.
+        if (generationRequestId) {
+          await safe('idemFailInsufficient', () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: 'INSUFFICIENT_CREDITS',
+              message: 'Insufficient credits.',
+              requiredCredits,
+              currentBalance,
+            },
           }));
         }
         return NextResponse.json(
@@ -989,8 +1063,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       },
     }));
 
-    // (6) Response shape unchanged.
-    return NextResponse.json({ videoUrl: finalVideoUrl, historyItem });
+    // (6) Response shape unchanged. Persist it on the idempotency row so a
+    // duplicate same-key request replays this exact body without re-generating.
+    const successResponse = { videoUrl: finalVideoUrl, historyItem };
+    if (generationRequestId) {
+      await safe('idemSuccess', () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: finalAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
 
   } catch (error: any) {
     console.error('Generate pipeline error:', error);
@@ -1023,6 +1107,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         jobId: jobId ?? null,
         description: 'Best-effort refund after generation failure',
         metadata: { reason: 'generation_failed', originalError: errJson },
+      }));
+    }
+
+    // Mark the idempotency row failed (best-effort) so a same-key retry can take
+    // over. Must never mask the original error — hence safe-wrapped.
+    if (generationRequestId) {
+      await safe('idemFailure', () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
       }));
     }
 

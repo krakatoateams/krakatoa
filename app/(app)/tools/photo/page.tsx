@@ -25,6 +25,29 @@ import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 
+// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
+// attempt, sent as the Idempotency-Key header (never inside FormData). Not persisted.
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+// Translate the idempotency status codes into a user-facing message; null otherwise.
+function describeIdempotencyError(
+  status: number,
+  data: { code?: string; error?: string }
+): string | null {
+  if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
+    return "Generation already in progress, please wait.";
+  }
+  if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
+    return data?.error || "This request conflicts with a previous one.";
+  }
+  if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
+    return data?.error || "Missing idempotency key. Please retry.";
+  }
+  return null;
+}
+
 export default function ProductPhotoPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [productFile, setProductFile] = useState<File | null>(null);
@@ -88,6 +111,7 @@ export default function ProductPhotoPage() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productFile) return;
+    if (loading) return;
 
     setLoading(true);
     setError(null);
@@ -101,6 +125,7 @@ export default function ProductPhotoPage() {
 
       const response = await fetch("/api/generate-photo", {
         method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
         body: formData,
       });
 
@@ -111,6 +136,8 @@ export default function ProductPhotoPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? photoCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Generation failed");
       }
 

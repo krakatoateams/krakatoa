@@ -23,6 +23,14 @@ import { getStoryboardVideoCredits } from "@/lib/pricing-resolver";
 import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -40,6 +48,8 @@ export async function POST(req: Request) {
   // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
   let creditsSpent = false;
   let creditsAmount = 0;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -157,6 +167,44 @@ export async function POST(req: Request) {
     const { video: videoModel } = await getStoryboardModels();
     const videoModelRef = replicateRef(videoModel);
 
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, the storyboards.status mutation,
+    // or any provider call. Hash uses normalized client inputs only.
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({ storyboardId });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_storyboard_video",
+      toolKey: "reels",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is deferred until after the credit spend succeeds.
     const job = await safe("createJob", () => createJob({
@@ -203,6 +251,18 @@ export async function POST(req: Request) {
             message: "Insufficient credits.",
             requiredCredits,
             currentBalance,
+          }));
+        }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
           }));
         }
         return NextResponse.json(
@@ -388,7 +448,16 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    return NextResponse.json({ videoUrl, historyItem });
+    const successResponse = { videoUrl, historyItem };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: videoAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
@@ -417,6 +486,14 @@ export async function POST(req: Request) {
         jobId: jobId ?? null,
         description: "Best-effort refund after generation failure",
         metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
       }));
     }
 

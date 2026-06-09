@@ -25,6 +25,14 @@ import { getProductPhotoCredits } from "@/lib/pricing-resolver";
 import { getPhotoModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -53,6 +61,8 @@ export async function POST(req: Request) {
   // the gate; without it the catch block must NOT refund (no spend = no debt).
   let creditsSpent = false;
   let creditsAmount = 0;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -160,6 +170,47 @@ export async function POST(req: Request) {
     const { image: photoModel } = await getPhotoModels();
     const photoModelRef = replicateRef(photoModel);
 
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. The key is
+    // read from the `Idempotency-Key` HTTP header (works with multipart/form-data;
+    // we never put the key inside FormData). v1 hashes metadata only — NOT the
+    // uploaded file bytes — to avoid a second heavy read; the key is the primary
+    // dedupe mechanism.
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({ poseId, styleId });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_photo",
+      toolKey: "photo",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Created after all input validation so validation early-returns never leave
     // a dangling job. The processing asset is intentionally deferred until AFTER
@@ -214,6 +265,18 @@ export async function POST(req: Request) {
             message: "Insufficient credits.",
             requiredCredits,
             currentBalance,
+          }));
+        }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
           }));
         }
         return NextResponse.json(
@@ -325,11 +388,20 @@ export async function POST(req: Request) {
       metadata: { jobType: "product_photo", poseId, styleId },
     }));
 
-    return NextResponse.json({
+    const successResponse = {
       imageUrl: saved.publicUrl,
       historyItem: saved.historyItem,
       savedToCloud: true,
-    });
+    };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: photoAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     console.error("[Product Photo] Error:", error);
     const message = error instanceof Error ? error.message : String(error);
@@ -361,6 +433,14 @@ export async function POST(req: Request) {
         jobId: jobId ?? null,
         description: "Best-effort refund after generation failure",
         metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
       }));
     }
 

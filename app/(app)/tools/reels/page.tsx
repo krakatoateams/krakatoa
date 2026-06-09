@@ -8,6 +8,31 @@ import { roundVideoCredits } from "@/lib/credit-costs";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 
+// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
+// attempt, sent as the Idempotency-Key header. Not persisted anywhere — a browser/
+// network retry of the SAME in-flight request reuses it; a new submit gets a new key.
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+// Translate the idempotency status codes into a user-facing message. Returns null
+// when the response is not an idempotency signal (so callers fall through).
+function describeIdempotencyError(
+  status: number,
+  data: { code?: string; error?: string }
+): string | null {
+  if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
+    return "Generation already in progress, please wait.";
+  }
+  if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
+    return data?.error || "This request conflicts with a previous one.";
+  }
+  if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
+    return data?.error || "Missing idempotency key. Please retry.";
+  }
+  return null;
+}
+
 // MiniMax speech-02-turbo: English voice catalogue. Keep the most useful for
 // narration first so the default lands on a strong storytelling voice.
 const ENGLISH_VOICES = [
@@ -209,6 +234,7 @@ export default function ReelsPage() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
+    if (loading) return;
 
     setLoading(true);
     setError(null);
@@ -219,7 +245,10 @@ export default function ReelsPage() {
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify({
           theme,
           numScenes: Number(numScenes),
@@ -239,6 +268,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? seedanceCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
 
@@ -258,6 +289,7 @@ export default function ReelsPage() {
   const handleVeoGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!theme.trim()) return;
+    if (loading) return;
 
     setLoading(true);
     setError(null);
@@ -287,7 +319,10 @@ export default function ReelsPage() {
 
       const response = await fetch("/api/generate-veo", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify(payload),
       });
       const data = await response.json();
@@ -297,6 +332,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? veoCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);
@@ -326,6 +363,7 @@ export default function ReelsPage() {
 
   const handleGenerateStoryboard = async () => {
     if (!storyboardTheme.trim()) return;
+    if (storyboardLoading || videoLoading) return;
     setStoryboardLoading(true);
     setError(null);
     setVideoUrl(null);
@@ -335,7 +373,10 @@ export default function ReelsPage() {
     try {
       const response = await fetch("/api/generate-storyboard", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify({ theme: storyboardTheme, storyboardStyle }),
       });
       const data = await response.json();
@@ -345,6 +386,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? storyboardImageCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate storyboard");
       }
       setStoryboardUrl(
@@ -365,6 +408,7 @@ export default function ReelsPage() {
   };
 
   const runStoryboardVideoJob = async (id: string) => {
+    if (videoLoading) return;
     setVideoLoading(true);
     setVideoJobStoryboardId(id);
     setError(null);
@@ -377,7 +421,10 @@ export default function ReelsPage() {
     try {
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
         body: JSON.stringify({ storyboardId: id }),
       });
       const data = await response.json();
@@ -387,6 +434,8 @@ export default function ReelsPage() {
             `Insufficient credits. Required: ${data.requiredCredits ?? storyboardVideoCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
       setVideoUrl(data.videoUrl);

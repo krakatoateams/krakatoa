@@ -38,6 +38,14 @@ import { getVeoCredits } from "@/lib/pricing-resolver";
 import { getVeoModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import {
+  readIdempotencyKey,
+  isValidIdempotencyKey,
+  computeRequestHash,
+  beginGenerationRequest,
+  finishGenerationRequestSuccess,
+  finishGenerationRequestFailure,
+} from "@/lib/generation-idempotency";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -197,6 +205,8 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let creditJobKind: "veo_single" | "veo_perscene" | null = null;
+  // Request-level idempotency row id (Double-Charge Protection v1).
+  let generationRequestId: string | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -418,6 +428,53 @@ export async function POST(req: Request) {
     const ttsRef = replicateRef(ttsModel);
     const whisperRef = replicateRef(whisperModel);
 
+    // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
+    // MUST run before createJob, spendCredits, or any provider call. Hash uses
+    // normalized client inputs only (never the key, pricing, or model config).
+    const idemKey = readIdempotencyKey(req);
+    if (!isValidIdempotencyKey(idemKey)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key header is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 }
+      );
+    }
+    const requestHash = computeRequestHash({
+      theme,
+      captionStyle: style,
+      voiceId,
+      emotion,
+      duration,
+      resolution,
+      mode: isSingle ? "single" : "perScene",
+      ...(isSingle ? { singlePromptScenes } : { numScenes: SCENE_COUNT }),
+    });
+    const begin = await beginGenerationRequest({
+      profileId: profileId!,
+      idempotencyKey: idemKey,
+      routeKey: "generate_veo",
+      toolKey: "reels",
+      requestHash,
+    });
+    if (begin.action === "conflict") {
+      return NextResponse.json(
+        {
+          error: "This idempotency key was already used with a different request.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "in_progress") {
+      return NextResponse.json(
+        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
+        { status: 409 }
+      );
+    }
+    if (begin.action === "replay") {
+      return NextResponse.json(begin.response);
+    }
+    generationRequestId = begin.id;
+
     // ---- Platform job (best-effort observability) ----
     // Asset creation is intentionally deferred until AFTER the credit spend
     // succeeds, so the assets table never carries a processing row for a
@@ -480,6 +537,18 @@ export async function POST(req: Request) {
             message: "Insufficient credits.",
             requiredCredits,
             currentBalance,
+          }));
+        }
+        if (generationRequestId) {
+          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: {
+              code: "INSUFFICIENT_CREDITS",
+              message: "Insufficient credits.",
+              requiredCredits,
+              currentBalance,
+            },
           }));
         }
         return NextResponse.json(
@@ -706,7 +775,16 @@ ${promptInstruction}`,
         metadata: { jobType: "veo_single", duration, resolution, singlePromptScenes },
       }));
 
-      return NextResponse.json({ videoUrl: pub.publicUrl });
+      const successResponse = { videoUrl: pub.publicUrl };
+      if (generationRequestId) {
+        await safe("idemSuccess", () => finishGenerationRequestSuccess({
+          id: generationRequestId!,
+          jobId: jobId ?? null,
+          assetId: videoAssetId ?? null,
+          responseJson: successResponse,
+        }));
+      }
+      return NextResponse.json(successResponse);
     }
 
     // ----- Per Scene mode -----
@@ -1020,7 +1098,16 @@ Return ONLY raw JSON array, nothing else.`;
       console.warn("[Reels Veo] History log failed (video still saved):", historyErr);
     }
 
-    return NextResponse.json({ videoUrl: pub.publicUrl, historyItem });
+    const successResponse = { videoUrl: pub.publicUrl, historyItem };
+    if (generationRequestId) {
+      await safe("idemSuccess", () => finishGenerationRequestSuccess({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        assetId: videoAssetId ?? null,
+        responseJson: successResponse,
+      }));
+    }
+    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     console.error("[generate-veo]", error);
     const message = error instanceof Error ? error.message : String(error);
@@ -1050,6 +1137,14 @@ Return ONLY raw JSON array, nothing else.`;
         jobId: jobId ?? null,
         description: "Best-effort refund after generation failure",
         metadata: { reason: "generation_failed", originalError: errJson },
+      }));
+    }
+
+    if (generationRequestId) {
+      await safe("idemFailure", () => finishGenerationRequestFailure({
+        id: generationRequestId!,
+        jobId: jobId ?? null,
+        errorJson: errJson,
       }));
     }
 
