@@ -9,7 +9,7 @@ The scheduler today handles exactly one video at a time: upload → caption → 
 - Uploads run **sequentially** with per-video progress; per-card duration guard (≤ 60s).
 - Caption "same for all" toggle: generate once from the first video that has a `videoUrl`, copy to all cards, still per-card editable.
 - "Schedule All" saves via a client-side loop of the existing `POST /api/posts` (no new endpoint). Per-card status badges (Scheduled ✅ / Failed ❌ kept for retry) and a batch toast ("X/N scheduled").
-- Auto-space suggestion banner (+1h between videos, from the first card's time) when 2+ videos share a time. Suggestion only — not automatic.
+- Auto-spacing across days: when 2+ videos are uploaded, new cards are automatically laid into 2 slots/day (12:00 & 18:00), rolling to the next day, anchored to the first card's date. An informational banner explains the layout; users can adjust any card. _(Revised from the original "+1h suggestion" CTA — see design.md.)_
 - Align the upload size limit: both the page and `app/api/upload/route.ts` cap at 50MB.
 
 ## Capabilities

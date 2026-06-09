@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useSession, signIn } from "next-auth/react";
+import CreationsHistory from "@/components/CreationsHistory";
 import {
   Upload,
   Zap,
@@ -19,6 +20,7 @@ import {
   CalendarDays,
   ExternalLink,
   ArrowRight,
+  Info,
 } from "lucide-react";
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -56,6 +58,9 @@ interface Post {
 }
 
 // Bulk scheduling: one record per video (single mode = one item)
+// Per-card scheduling lifecycle for bulk "Schedule All" (Prompt 3)
+type ScheduleStatus = "idle" | "scheduling" | "scheduled" | "failed";
+
 interface VideoItem {
   id: string;
   file: File | null;
@@ -68,6 +73,8 @@ interface VideoItem {
   caption: string;
   date: string;
   time: string;
+  scheduleStatus: ScheduleStatus;
+  scheduleError: string | null;
 }
 
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
@@ -87,6 +94,8 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     caption: "",
     date,
     time,
+    scheduleStatus: "idle",
+    scheduleError: null,
   };
 }
 
@@ -96,6 +105,22 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// <input type="date"> expects a local "YYYY-MM-DD" string.
+function toDateInput(d: Date): string {
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// Auto-spacing (Prompt 4): max 2 videos per day at these slots, rolling to the
+// next day once both are taken. `index` is the card's position in the batch.
+const SCHEDULE_SLOTS = ["12:00", "18:00"];
+
+function spacedSlot(anchorDate: string, index: number): { date: string; time: string } {
+  const d = new Date(`${anchorDate}T00:00:00`);
+  d.setDate(d.getDate() + Math.floor(index / SCHEDULE_SLOTS.length));
+  return { date: toDateInput(d), time: SCHEDULE_SLOTS[index % SCHEDULE_SLOTS.length] };
 }
 
 function fmtScheduledTime(iso: string): string {
@@ -190,6 +215,31 @@ function CardHeader({ title, icon }: { title: string; icon: React.ReactNode }) {
   );
 }
 
+// ─── Info tooltip ─────────────────────────────────────────────────────────────
+
+const TAGS_TOOLTIP =
+  "Tags are YouTube metadata keywords (not visible to viewers). They help the algorithm categorize your video and improve AI caption generation.";
+
+function InfoTooltip({ text, label = "More information" }: { text: string; label?: string }) {
+  return (
+    <span className="group relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label={label}
+        className="cursor-help text-gray-500 transition-colors hover:text-gray-300 focus:outline-none focus-visible:text-gray-300"
+      >
+        <Info className="h-3 w-3" aria-hidden />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-60 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-[11px] font-normal leading-relaxed text-gray-300 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ─── Upload Card ──────────────────────────────────────────────────────────────
 
 interface UploadCardProps {
@@ -202,10 +252,13 @@ interface UploadCardProps {
   onRemove: () => void;
   // Task 1.3: callback to report video duration to parent
   onDurationChange: (duration: number | null) => void;
+  // Asset source: report a picked creation's hosted URL to the parent
+  onAssetSelected: (mediaUrl: string) => void;
 }
 
-function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onDurationChange }: UploadCardProps) {
+function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onDurationChange, onAssetSelected }: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [tab, setTab] = useState<"upload" | "assets">("upload");
   // Task 2.1: local object URL for instant preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
@@ -213,18 +266,23 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
 
   const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
 
-  // Task 2.1: create / revoke object URL when file changes
+  // Preview source: a device File's object URL, or — for an asset-backed item
+  // with no File — the hosted videoUrl directly. Duration is captured the same
+  // way (<video onLoadedMetadata>) in both cases.
   useEffect(() => {
-    if (!file) {
-      setPreviewUrl(null);
-      setDuration(null);
-      onDurationChange(null);
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    if (videoUrl) {
+      setPreviewUrl(videoUrl);
       return;
     }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file, onDurationChange]);
+    setPreviewUrl(null);
+    setDuration(null);
+    onDurationChange(null);
+  }, [file, videoUrl, onDurationChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -269,6 +327,28 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
     <Card>
       <CardHeader title="Upload Video" icon={<FileVideo className="h-4 w-4" />} />
       <div className="p-5">
+        <div className="mb-4 inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+          <button
+            type="button"
+            onClick={() => setTab("upload")}
+            className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "upload" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            📁 Upload from device
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("assets")}
+            className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "assets" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            🎬 My Assets
+          </button>
+        </div>
+
+        {tab === "upload" && (
         <div
           role="button"
           tabIndex={uploadStatus === "uploading" ? -1 : 0}
@@ -331,6 +411,20 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
             </>
           )}
         </div>
+        )}
+
+        {tab === "assets" && (
+          <CreationsHistory
+            title="Your video assets"
+            description="Pick a generated video to schedule — no re-upload needed."
+            tools={["reels_seedance", "reels_veo", "storyboard_video"]}
+            mediaType="video"
+            limit={24}
+            selectedUrl={videoUrl}
+            onSelect={(item) => onAssetSelected(item.mediaUrl)}
+            className="!mt-0 !border-t-0 !pt-0"
+          />
+        )}
 
         {/* Task 2.2 & 2.4: video preview + duration */}
         {previewUrl && uploadStatus === "done" && (
@@ -367,74 +461,33 @@ interface DescriptionCardProps {
 }
 
 function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: DescriptionCardProps) {
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"generate" | "polish" | null>(null);
-  // null = nothing to show; true/false = result of the last Generate
-  const [lastUsedTranscript, setLastUsedTranscript] = useState<boolean | null>(null);
-
-  const hasVideo = !!videoUrl;
-  const hasContent = !!caption.trim();
-  const isBusy = busy !== null;
+  // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
+  // removing the duplicated fetch logic. Behavior is preserved: Generate requires
+  // a video (Whisper), Polish appears once there's content, and the two-branch
+  // usedTranscript warning is rendered by CaptionControls.
+  const ai = useCaptionAI();
 
   // Clear the transcript warning whenever the video changes (removed or replaced)
   useEffect(() => {
-    setLastUsedTranscript(null);
-  }, [videoUrl]);
+    ai.resetWarning();
+  }, [videoUrl, ai.resetWarning]);
 
-  const runGenerate = async () => {
-    setBusy("generate");
-    setError(null);
-    setLastUsedTranscript(null);
+  const handleGenerate = async () => {
     try {
-      const res = await fetch("/api/generate-caption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // Generate from scratch — do not feed the current caption back in.
-          description: "",
-          title,
-          tags,
-          videoUrl: videoUrl ?? undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-      console.log("[DescriptionCard] usedTranscript:", data.usedTranscript);
-      onCaptionChange(data.caption as string);
-      setLastUsedTranscript(data.usedTranscript === true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setBusy(null);
+      const next = await ai.generate({ title, tags, videoUrl });
+      onCaptionChange(next);
+    } catch {
+      // error surfaced by the hook
     }
   };
 
-  const runPolish = async () => {
-    setBusy("polish");
-    setError(null);
-    setLastUsedTranscript(null);
+  const handlePolish = async () => {
     try {
-      const res = await fetch("/api/generate-caption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "polish",
-          existingCaption: caption,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-      onCaptionChange(data.caption as string);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setBusy(null);
+      const next = await ai.polish(caption);
+      onCaptionChange(next);
+    } catch {
+      // error surfaced by the hook
     }
-  };
-
-  const handleCaptionEdit = (next: string) => {
-    onCaptionChange(next);
-    if (error) setError(null);
   };
 
   return (
@@ -448,7 +501,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: De
           <textarea
             id="video-caption"
             value={caption}
-            onChange={(e) => handleCaptionEdit(e.target.value)}
+            onChange={(e) => onCaptionChange(e.target.value)}
             placeholder="Write your caption here, or generate one with AI below..."
             rows={5}
             aria-label="Caption (editable)"
@@ -459,73 +512,15 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: De
           </p>
         </div>
 
-        {hasContent && lastUsedTranscript === false && (
-          title.trim() ? (
-            <p className="text-slate-400 text-xs mt-1">
-              🎵 No audio detected — caption was generated from your title and tags.
-            </p>
-          ) : (
-            <p className="text-amber-400 text-xs mt-1">
-              ⚠️ No audio detected and no title added. Your caption may not be relevant —
-              try adding a title and tags, then regenerate.
-            </p>
-          )
-        )}
-
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={runGenerate}
-              disabled={isBusy || !hasVideo}
-              className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {busy === "generate"
-                ? <><RefreshCw className="h-4 w-4 animate-spin" />Generating…</>
-                : <><Sparkles className="h-4 w-4" />Generate Caption</>}
-            </button>
-
-            {hasContent && (
-              <button
-                type="button"
-                onClick={runPolish}
-                disabled={isBusy}
-                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-300 transition-all duration-200 hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {busy === "polish"
-                  ? <><RefreshCw className="h-4 w-4 animate-spin" />Polishing…</>
-                  : <>✍️ Polish my caption</>}
-              </button>
-            )}
-          </div>
-
-          {busy && (
-            <p className="text-center text-xs text-gray-500">
-              {busy === "generate"
-                ? "🎙️ Transcribing & writing…"
-                : "✍️ Polishing your caption…"}
-            </p>
-          )}
-
-          {!busy && !hasContent && (
-            <p className="text-center text-xs text-gray-600">
-              {hasVideo
-                ? "Generate a caption from your video's audio"
-                : "Upload a video first to generate an AI caption"}
-            </p>
-          )}
-        </div>
-
-        {error && (
-          <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-3">
-            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-red-400" />
-            <div className="flex-1">
-              <p className="text-xs font-medium text-red-400">Generation failed</p>
-              <p className="mt-0.5 text-xs text-red-400/80">{error}</p>
-            </div>
-            <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="cursor-pointer text-red-400/60 hover:text-red-400">✕</button>
-          </div>
-        )}
+        <CaptionControls
+          ai={ai}
+          hasVideo={!!videoUrl}
+          hasContent={!!caption.trim()}
+          hasTitle={!!title.trim()}
+          generateLabel="Generate Caption"
+          onGenerate={handleGenerate}
+          onPolish={handlePolish}
+        />
       </div>
     </Card>
   );
@@ -667,7 +662,10 @@ function ScheduleCard({
 
         {/* Tags */}
         <div>
-          <label htmlFor="post-tags" className="mb-1.5 block text-xs font-medium text-gray-400">Tags</label>
+          <label htmlFor="post-tags" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-gray-400">
+            Tags
+            <InfoTooltip text={TAGS_TOOLTIP} />
+          </label>
           <div className="relative">
             <Tag className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
             <input
@@ -879,6 +877,33 @@ function useCaptionAI() {
     [],
   );
 
+  // General mode: one shared caption from all cards' title+tags, no audio.
+  // Intentionally leaves `lastUsedTranscript` at null so the "no audio detected"
+  // warning never shows — there is no transcript in this flow by design.
+  const generateGeneral = useCallback(
+    async (videos: { title: string; tags: string }[]): Promise<string> => {
+      setBusy("generate");
+      setError(null);
+      setLastUsedTranscript(null);
+      try {
+        const res = await fetch("/api/generate-caption", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "general", videos }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+        return data.caption as string;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+        throw err;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [],
+  );
+
   const polish = useCallback(async (existingCaption: string): Promise<string> => {
     setBusy("polish");
     setError(null);
@@ -900,7 +925,7 @@ function useCaptionAI() {
     }
   }, []);
 
-  return { busy, error, lastUsedTranscript, resetWarning, clearError, generate, polish };
+  return { busy, error, lastUsedTranscript, resetWarning, clearError, generate, generateGeneral, polish };
 }
 
 // Buttons + status + transcript warning + error, driven by a useCaptionAI() instance.
@@ -913,6 +938,9 @@ interface CaptionControlsProps {
   generateLabel: string;
   onGenerate: () => void;
   onPolish: () => void;
+  // Hint shown when there's nothing to generate from yet. `null` hides it
+  // (e.g. the shared box renders its own helper text instead).
+  emptyHint?: string | null;
 }
 
 function CaptionControls({
@@ -923,6 +951,7 @@ function CaptionControls({
   generateLabel,
   onGenerate,
   onPolish,
+  emptyHint = "Upload a video first to generate an AI caption",
 }: CaptionControlsProps) {
   const isBusy = ai.busy !== null;
 
@@ -986,10 +1015,8 @@ function CaptionControls({
         </p>
       )}
 
-      {!ai.busy && !hasContent && !hasVideo && (
-        <p className="text-center text-xs text-gray-600">
-          Upload a video first to generate an AI caption
-        </p>
+      {!ai.busy && !hasContent && !hasVideo && emptyHint && (
+        <p className="text-center text-xs text-gray-600">{emptyHint}</p>
       )}
 
       {ai.error && (
@@ -1032,14 +1059,14 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
   const ai = useCaptionAI();
 
   useEffect(() => {
-    if (!item.file) {
-      setPreviewUrl(null);
-      return;
+    if (item.file) {
+      const url = URL.createObjectURL(item.file);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
     }
-    const url = URL.createObjectURL(item.file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [item.file]);
+    // Asset-backed card: preview straight from the hosted URL.
+    setPreviewUrl(item.videoUrl);
+  }, [item.file, item.videoUrl]);
 
   // Clear the transcript warning when this card's video changes
   useEffect(() => {
@@ -1076,142 +1103,178 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
   const overLimit = item.duration !== null && item.duration > 60;
 
   return (
-    <Card>
-      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
-        <div className="flex items-center gap-2.5">
-          <span className="text-violet-400">
-            <FileVideo className="h-4 w-4" />
-          </span>
-          <h2 className="text-sm font-semibold text-white">Video {index + 1}</h2>
-        </div>
-        <div className="flex items-center gap-2">
-          {item.uploadStatus === "uploading" && (
-            <RefreshCw className="h-3.5 w-3.5 animate-spin text-violet-400" />
-          )}
-          {item.uploadStatus === "done" && <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />}
-          {item.uploadStatus === "error" && <AlertCircle className="h-3.5 w-3.5 text-red-400" />}
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`Remove video ${index + 1}`}
-            className="cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-4 p-5">
-        {previewUrl && (
-          <div className="space-y-2">
+    <Card className="p-4">
+      <div className="flex flex-col gap-4 sm:flex-row">
+        {/* Left: compact thumbnail + meta */}
+        <div className="w-full shrink-0 space-y-1.5 sm:w-36">
+          {previewUrl ? (
             <video
               src={previewUrl}
               controls
               onLoadedMetadata={handleLoadedMetadata}
-              className="max-h-[180px] w-full rounded-lg border border-gray-700 bg-black"
+              className="max-h-[220px] w-full rounded-lg border border-gray-700 bg-black object-contain sm:max-h-[200px]"
             />
-            <div className="flex items-center justify-between text-xs text-gray-500">
-              <span className="truncate">{item.file?.name}</span>
-              {item.duration !== null && <span className="shrink-0">{fmtDuration(item.duration)}</span>}
+          ) : (
+            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 sm:max-h-[200px]">
+              <FileVideo className="h-6 w-6 text-gray-600" />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
+            <span className="truncate">{item.file?.name ?? `Video ${index + 1}`}</span>
+            {item.duration !== null && (
+              <span className={`shrink-0 ${overLimit ? "text-amber-400" : ""}`}>
+                {fmtDuration(item.duration)}
+              </span>
+            )}
+          </div>
+
+          {overLimit && (
+            <p className="flex items-center gap-1 text-[11px] text-amber-400">
+              <AlertCircle className="h-3 w-3 shrink-0" />
+              Over 60s — Shorts must be shorter
+            </p>
+          )}
+
+          {item.uploadStatus === "error" && (
+            <p className="text-[11px] text-red-400">{item.uploadError ?? "Upload failed."}</p>
+          )}
+        </div>
+
+        {/* Right: fields */}
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-white">Video {index + 1}</h2>
+            <div className="flex items-center gap-2">
+              {item.scheduleStatus === "scheduling" ? (
+                <span className="flex items-center gap-1 text-xs text-violet-400">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  Scheduling…
+                </span>
+              ) : item.scheduleStatus === "scheduled" ? (
+                <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[11px] font-medium text-green-400">
+                  Scheduled ✅
+                </span>
+              ) : item.scheduleStatus === "failed" ? (
+                <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400">
+                  Failed ❌
+                </span>
+              ) : (
+                <>
+                  {item.uploadStatus === "uploading" && (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-violet-400" />
+                  )}
+                  {item.uploadStatus === "done" && (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                  )}
+                  {item.uploadStatus === "error" && (
+                    <AlertCircle className="h-3.5 w-3.5 text-red-400" />
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                onClick={onRemove}
+                aria-label={`Remove video ${index + 1}`}
+                className="cursor-pointer rounded-md p-1 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
-        )}
 
-        {item.uploadStatus === "error" && (
-          <p className="text-xs text-red-400">{item.uploadError ?? "Upload failed."}</p>
-        )}
+          {item.scheduleStatus === "failed" && item.scheduleError && (
+            <p className="flex items-start gap-1 text-xs text-red-400">
+              <AlertCircle className="mt-px h-3 w-3 shrink-0" />
+              {item.scheduleError}
+            </p>
+          )}
 
-        {overLimit && (
-          <div
-            role="alert"
-            className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5"
-          >
-            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
-            <p className="text-xs text-amber-400">
-              {Math.round(item.duration as number)}s — YouTube Shorts must be under 60 seconds.
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-400">
+                Title <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={item.title}
+                onChange={(e) => onUpdate({ title: e.target.value })}
+                placeholder="My awesome video title"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-400">
+                Tags
+                <InfoTooltip text={TAGS_TOOLTIP} />
+              </label>
+              <input
+                type="text"
+                value={item.tags}
+                onChange={(e) => onUpdate({ tags: e.target.value })}
+                placeholder="tutorial, automation"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-400">
+                <Calendar className="mr-1 inline h-3 w-3" />
+                Date <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="date"
+                value={item.date}
+                min={today}
+                onChange={(e) => onUpdate({ date: e.target.value })}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-400">
+                <Clock className="mr-1 inline h-3 w-3" />
+                Time <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="time"
+                value={item.time}
+                onChange={(e) => onUpdate({ time: e.target.value })}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <textarea
+              value={item.caption}
+              onChange={(e) => onUpdate({ caption: e.target.value })}
+              placeholder={
+                captionMode === "individual"
+                  ? "Caption — write here, or generate with AI below…"
+                  : "Set by the shared caption above — edit to override this video…"
+              }
+              rows={2}
+              className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+            <p className="mt-0.5 text-right text-[11px] text-gray-600">
+              {item.caption.length} / 300 chars
             </p>
           </div>
-        )}
 
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-gray-400">
-            Title <span className="text-red-400">*</span>
-          </label>
-          <input
-            type="text"
-            value={item.title}
-            onChange={(e) => onUpdate({ title: e.target.value })}
-            placeholder="My awesome video title"
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-gray-400">Tags</label>
-          <input
-            type="text"
-            value={item.tags}
-            onChange={(e) => onUpdate({ tags: e.target.value })}
-            placeholder="tutorial, automation, content"
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-400">
-              <Calendar className="mr-1 inline h-3 w-3" />
-              Date <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="date"
-              value={item.date}
-              min={today}
-              onChange={(e) => onUpdate({ date: e.target.value })}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          {captionMode === "individual" && (
+            <CaptionControls
+              ai={ai}
+              hasVideo={!!item.videoUrl}
+              hasContent={!!item.caption.trim()}
+              hasTitle={!!item.title.trim()}
+              generateLabel="Generate Caption"
+              onGenerate={handleGenerate}
+              onPolish={handlePolish}
             />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-400">
-              <Clock className="mr-1 inline h-3 w-3" />
-              Time <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="time"
-              value={item.time}
-              onChange={(e) => onUpdate({ time: e.target.value })}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-            />
-          </div>
+          )}
         </div>
-
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-gray-400">Caption</label>
-          <textarea
-            value={item.caption}
-            onChange={(e) => onUpdate({ caption: e.target.value })}
-            placeholder={
-              captionMode === "individual"
-                ? "Write a caption here, or generate one with AI below…"
-                : "Set in the shared caption above — edit here to override this video…"
-            }
-            rows={3}
-            className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-          />
-          <p className="mt-1 text-right text-xs text-gray-600">{item.caption.length} / 300 chars</p>
-        </div>
-
-        {captionMode === "individual" && (
-          <CaptionControls
-            ai={ai}
-            hasVideo={!!item.videoUrl}
-            hasContent={!!item.caption.trim()}
-            hasTitle={!!item.title.trim()}
-            generateLabel="Generate Caption"
-            onGenerate={handleGenerate}
-            onPolish={handlePolish}
-          />
-        )}
       </div>
     </Card>
   );
@@ -1279,8 +1342,12 @@ export default function SchedulerDashboardPage() {
     setItems((prev) => prev.map((i) => ({ ...i, caption: text })));
   }, []);
 
-  const firstWithVideoIndex = items.findIndex((i) => i.videoUrl);
-  const firstWithVideo = firstWithVideoIndex >= 0 ? items[firstWithVideoIndex] : null;
+  // General caption is built purely from the title + tags creators typed on each
+  // card (no audio). Send only the cards that actually have something filled in.
+  const captionContexts = items
+    .map((i) => ({ title: i.title.trim(), tags: i.tags.trim() }))
+    .filter((c) => c.title || c.tags);
+  const hasCaptionContext = captionContexts.length > 0;
 
   const handleSharedChange = (text: string) => {
     setSharedCaption(text);
@@ -1288,13 +1355,9 @@ export default function SchedulerDashboardPage() {
   };
 
   const handleSharedGenerate = async () => {
-    if (!firstWithVideo) return;
+    if (!hasCaptionContext) return;
     try {
-      const caption = await sharedAi.generate({
-        title: firstWithVideo.title,
-        tags: firstWithVideo.tags,
-        videoUrl: firstWithVideo.videoUrl,
-      });
+      const caption = await sharedAi.generateGeneral(captionContexts);
       setSharedCaption(caption);
       applyCaptionToAll(caption);
     } catch {
@@ -1371,7 +1434,20 @@ export default function SchedulerDashboardPage() {
         file: f,
         uploadStatus: "uploading",
       }));
-      setItems([...existingReal, ...newItems]);
+
+      // Auto-space (Prompt 4): once the batch reaches 2+ videos, lay the NEW
+      // cards into 2-per-day slots (12:00 / 18:00), continuing from the existing
+      // count and anchored to the first card's date. Existing cards keep their
+      // date/time so any manual edits are preserved.
+      const willBeBulk = existingReal.length + newItems.length >= 2;
+      const anchorDate = (existingReal[0] ?? newItems[0]).date;
+      const spacedNew = willBeBulk
+        ? newItems.map((it, k) => ({
+            ...it,
+            ...spacedSlot(anchorDate, existingReal.length + k),
+          }))
+        : newItems;
+      setItems([...existingReal, ...spacedNew]);
 
       // Sequential uploads — one at a time, updating each item as it resolves.
       for (const it of newItems) {
@@ -1393,10 +1469,149 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
+  // Pick an existing video creation as a schedulable item — no /api/upload.
+  // Fills the first empty draft in place (keeps single mode single); otherwise
+  // appends a new card (auto-spaced like uploads) up to MAX_VIDEOS.
+  const handleAssetSelected = useCallback(
+    (mediaUrl: string) => {
+      const assetPatch: Partial<VideoItem> = {
+        videoUrl: mediaUrl,
+        uploadStatus: "done",
+        uploadError: null,
+        file: null,
+        duration: null,
+        scheduleStatus: "idle",
+        scheduleError: null,
+      };
+
+      const emptyIdx = items.findIndex((i) => !i.file && !i.videoUrl);
+      if (emptyIdx !== -1) {
+        updateItem(items[emptyIdx].id, assetPatch);
+        return;
+      }
+
+      if (items.length >= MAX_VIDEOS) {
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos reached.` });
+        return;
+      }
+
+      const newItem: VideoItem = { ...makeDraft(today), ...assetPatch };
+      if (items.length + 1 >= 2) {
+        const anchorDate = items[0]?.date ?? today;
+        const slot = spacedSlot(anchorDate, items.length);
+        newItem.date = slot.date;
+        newItem.time = slot.time;
+      }
+      setItems((prev) => [...prev, newItem]);
+    },
+    [items, today, updateItem],
+  );
+
   const handleSuccess = useCallback(() => {
     setItems([makeDraft(today)]);
     fetchPosts();
   }, [fetchPosts, today]);
+
+  // ── Schedule All (Prompt 3) ──
+  const [schedulingAll, setSchedulingAll] = useState(false);
+  // Empty caption is confirmed once for the whole batch, not per card.
+  const [confirmEmptyBatch, setConfirmEmptyBatch] = useState(false);
+
+  // A card is schedulable when it has a hosted video, a title, a date/time, and
+  // (if known) a ≤60s duration — mirrors single-mode ScheduleCard.isReady.
+  const itemReady = useCallback(
+    (i: VideoItem) =>
+      !!i.videoUrl &&
+      !!i.title.trim() &&
+      !!i.date &&
+      !!i.time &&
+      (i.duration === null || i.duration <= 60),
+    [],
+  );
+
+  // Targets = ready cards not already scheduled (so a re-run retries failures too).
+  const scheduleTargets = items.filter(
+    (i) => itemReady(i) && i.scheduleStatus !== "scheduled",
+  );
+  const hasScheduled = items.some((i) => i.scheduleStatus === "scheduled");
+  const canScheduleAll = scheduleTargets.length > 0 && !schedulingAll;
+
+  // Reset the batch confirm if the set of empty-caption targets changes underneath.
+  useEffect(() => {
+    if (confirmEmptyBatch && scheduleTargets.every((i) => i.caption.trim())) {
+      setConfirmEmptyBatch(false);
+    }
+  }, [confirmEmptyBatch, scheduleTargets]);
+
+  const handleScheduleAll = async () => {
+    const targets = items.filter(
+      (i) => itemReady(i) && i.scheduleStatus !== "scheduled",
+    );
+    if (targets.length === 0 || schedulingAll) return;
+
+    // One confirming click for the whole batch when any target has no caption.
+    const anyEmptyCaption = targets.some((i) => !i.caption.trim());
+    if (anyEmptyCaption && !confirmEmptyBatch) {
+      setConfirmEmptyBatch(true);
+      return;
+    }
+
+    setConfirmEmptyBatch(false);
+    setSchedulingAll(true);
+
+    const targetIds = new Set(targets.map((t) => t.id));
+    setItems((prev) =>
+      prev.map((i) =>
+        targetIds.has(i.id)
+          ? { ...i, scheduleStatus: "scheduling", scheduleError: null }
+          : i,
+      ),
+    );
+
+    let success = 0;
+    for (const it of targets) {
+      try {
+        const scheduled_time = new Date(`${it.date}T${it.time}:00`).toISOString();
+        const res = await fetch("/api/posts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            video_url: it.videoUrl,
+            title: it.title.trim(),
+            description: it.caption,
+            tags: it.tags,
+            scheduled_time,
+            platform: "youtube",
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to schedule post.");
+        success += 1;
+        updateItem(it.id, { scheduleStatus: "scheduled", scheduleError: null });
+      } catch (err) {
+        updateItem(it.id, {
+          scheduleStatus: "failed",
+          scheduleError: err instanceof Error ? err.message : "Failed to schedule post.",
+        });
+      }
+    }
+
+    setSchedulingAll(false);
+    setToast({
+      type: success === targets.length ? "success" : "error",
+      message: `${success}/${targets.length} posts scheduled successfully`,
+    });
+    fetchPosts();
+  };
+
+  // Dismiss saved cards once the user is done with them; failed/idle cards stay
+  // (failed ones remain for retry). Falls back to a fresh draft if nothing's left.
+  const clearScheduledItems = useCallback(() => {
+    setItems((prev) => {
+      const next = prev.filter((i) => i.scheduleStatus !== "scheduled");
+      return next.length === 0 ? [makeDraft(today)] : next;
+    });
+  }, [today]);
 
   // Task 5.6: retry a failed post
   const handleRetry = useCallback(async (postId: string) => {
@@ -1436,6 +1651,7 @@ export default function SchedulerDashboardPage() {
                 onFilesAdded={handleFilesAdded}
                 onRemove={handleItem0Remove}
                 onDurationChange={handleItem0Duration}
+                onAssetSelected={handleAssetSelected}
               />
               <DescriptionCard
                 caption={item0.caption}
@@ -1470,6 +1686,7 @@ export default function SchedulerDashboardPage() {
               onFilesAdded={handleFilesAdded}
               onRemove={noop}
               onDurationChange={noop}
+              onAssetSelected={handleAssetSelected}
             />
 
             <div className="flex items-center gap-3">
@@ -1508,7 +1725,7 @@ export default function SchedulerDashboardPage() {
                     <textarea
                       value={sharedCaption}
                       onChange={(e) => handleSharedChange(e.target.value)}
-                      placeholder="Write one caption for every video, or generate from your first video below…"
+                      placeholder="Write one caption for every video, or generate a general one from your titles & tags below…"
                       rows={4}
                       aria-label="Shared caption for all videos"
                       className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
@@ -1520,26 +1737,34 @@ export default function SchedulerDashboardPage() {
 
                   <CaptionControls
                     ai={sharedAi}
-                    hasVideo={!!firstWithVideo}
+                    hasVideo={hasCaptionContext}
                     hasContent={!!sharedCaption.trim()}
-                    hasTitle={!!firstWithVideo?.title.trim()}
-                    generateLabel={
-                      firstWithVideo
-                        ? `Generate from Video ${firstWithVideoIndex + 1}`
-                        : "Generate Caption"
-                    }
+                    hasTitle
+                    generateLabel="✨ Generate General Caption"
                     onGenerate={handleSharedGenerate}
                     onPolish={handleSharedPolish}
+                    emptyHint={null}
                   />
 
                   <p className="text-xs text-gray-600">
-                    {firstWithVideo
-                      ? `Generated from Video ${firstWithVideoIndex + 1}'s audio — applies to all videos. Edit any card below to override.`
-                      : "Upload at least one video to generate a shared caption."}
+                    {hasCaptionContext
+                      ? "Generated from the titles & tags of all your videos (no audio) — one caption that broadly fits the whole batch. Applies to all videos; edit any card below to override."
+                      : "Add a title or tags to at least one video to generate a shared caption."}
                   </p>
                 </div>
               </Card>
             )}
+
+            <div
+              role="status"
+              className="flex items-start gap-2.5 rounded-lg border border-sky-500/25 bg-sky-500/10 px-4 py-3"
+            >
+              <Info className="mt-px h-4 w-4 shrink-0 text-sky-400" />
+              <p className="text-xs text-sky-300">
+                Videos are spread across days for optimal reach (max 2/day at 12:00 &amp; 18:00).
+                Adjust per card if needed.
+              </p>
+            </div>
 
             <div className="space-y-4">
               {items.map((it, idx) => (
@@ -1555,16 +1780,54 @@ export default function SchedulerDashboardPage() {
             </div>
 
             <div className="space-y-2">
+              {confirmEmptyBatch && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3"
+                >
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+                  <p className="text-xs text-amber-400">
+                    ⚠️ Some videos have no caption. Click “Schedule All” again to publish them
+                    without a caption, or add captions above.
+                  </p>
+                </div>
+              )}
+
               <button
                 type="button"
-                disabled
-                className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white opacity-40"
+                onClick={handleScheduleAll}
+                disabled={!canScheduleAll}
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
-                <Calendar className="h-4 w-4" />
-                Schedule All ({items.length})
+                {schedulingAll ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Scheduling…
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="h-4 w-4" />
+                    Schedule All ({scheduleTargets.length})
+                  </>
+                )}
               </button>
+
+              {hasScheduled && !schedulingAll && (
+                <button
+                  type="button"
+                  onClick={clearScheduledItems}
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 px-4 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+                >
+                  Clear scheduled & keep editing
+                </button>
+              )}
+
               <p className="text-center text-xs text-gray-600">
-                Bulk scheduling is wired up in a later step.
+                {scheduleTargets.length > 0
+                  ? "Schedules every ready video to YouTube. Failed cards stay for retry."
+                  : hasScheduled
+                    ? "Scheduled videos are saved — see them below. Clear them to start a new batch."
+                    : "Add a title, date & time to each video to enable scheduling."}
               </p>
             </div>
           </div>
