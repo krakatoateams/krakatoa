@@ -10,7 +10,29 @@ type UsageAggregate = {
   units: number;
   creditsCharged: number;
   estimatedCostUsd: number;
+  estimatedCostIdr: number;
 };
+
+/** Format a USD money value. Tiny values keep up to 3 decimals so cents are visible. */
+function fmtUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 3,
+  });
+}
+
+/** Format an IDR money value (no decimals; Indonesian thousands grouping). */
+function fmtIdr(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  return value.toLocaleString("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  });
+}
 
 type RecentJob = {
   id: string;
@@ -100,6 +122,7 @@ export default function AdminUsagePage() {
                   <th className={TH}>Units</th>
                   <th className={TH}>Credits</th>
                   <th className={TH}>Est. USD</th>
+                  <th className={TH}>Est. Rupiah</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -111,7 +134,8 @@ export default function AdminUsagePage() {
                     <td className="px-3 py-2">{u.events}</td>
                     <td className="px-3 py-2">{u.units}</td>
                     <td className="px-3 py-2">{u.creditsCharged}</td>
-                    <td className="px-3 py-2">{u.estimatedCostUsd || "—"}</td>
+                    <td className="px-3 py-2 tabular-nums">{fmtUsd(u.estimatedCostUsd)}</td>
+                    <td className="px-3 py-2 tabular-nums">{fmtIdr(u.estimatedCostIdr)}</td>
                   </tr>
                 ))}
               </tbody>

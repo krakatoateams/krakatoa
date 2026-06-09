@@ -1,4 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { getBillingSettings } from "@/lib/billing-settings-db";
+import type { BillingSettings } from "@/lib/pricing-math";
 
 /**
  * Read-only admin metrics (service-role, cross-profile).
@@ -212,16 +214,33 @@ export type UsageAggregate = {
   events: number;
   units: number;
   creditsCharged: number;
+  /** Real money value of the consumed credits in USD (credits × IDR/credit ÷ USD→IDR). */
   estimatedCostUsd: number;
+  /** Real money value of the consumed credits in IDR (credits × credit_value_idr). */
+  estimatedCostIdr: number;
 };
 
-/** Usage events aggregated by tool/provider/model. */
+/**
+ * Usage events aggregated by tool/provider/model.
+ *
+ * Est. USD / Est. IDR are derived from the REAL credits charged and the live
+ * billing settings (credit_value_idr, usd_to_idr) — i.e. the actual money value
+ * of the credits consumed at the current provider-cost-based rates:
+ *   est_idr = credits × credit_value_idr
+ *   est_usd = est_idr ÷ usd_to_idr
+ * (The legacy usage_events.estimated_cost_usd column is never populated, so we
+ * compute from credits, which are themselves derived from real provider USD cost.)
+ */
 export async function getAdminUsage(): Promise<{
   aggregates: UsageAggregate[];
   totalEvents: number;
   capped: boolean;
+  billingSettings: BillingSettings;
 }> {
-  const totalEvents = await countRows("usage_events");
+  const [totalEvents, billingSettings] = await Promise.all([
+    countRows("usage_events"),
+    getBillingSettings(),
+  ]);
 
   const { data, error } = await supabaseServer
     .from("usage_events")
@@ -248,16 +267,24 @@ export async function getAdminUsage(): Promise<{
       units: 0,
       creditsCharged: 0,
       estimatedCostUsd: 0,
+      estimatedCostIdr: 0,
     };
     agg.events += 1;
     agg.units += r.units ?? 0;
     agg.creditsCharged += r.credits_charged ?? 0;
-    agg.estimatedCostUsd += r.estimated_cost_usd ?? 0;
     map.set(key, agg);
   }
 
-  const aggregates = Array.from(map.values()).sort((a, b) => b.events - a.events);
-  return { aggregates, totalEvents, capped: totalEvents > ROW_CAP };
+  // Derive money values from the summed credits using the live billing settings.
+  const aggregates = Array.from(map.values())
+    .map((agg) => {
+      const estimatedCostIdr = agg.creditsCharged * billingSettings.creditValueIdr;
+      const estimatedCostUsd =
+        billingSettings.usdToIdr > 0 ? estimatedCostIdr / billingSettings.usdToIdr : 0;
+      return { ...agg, estimatedCostIdr, estimatedCostUsd };
+    })
+    .sort((a, b) => b.events - a.events);
+  return { aggregates, totalEvents, capped: totalEvents > ROW_CAP, billingSettings };
 }
 
 /** Recent jobs (optionally filtered), newest first. */
