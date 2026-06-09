@@ -272,9 +272,13 @@ export async function POST(req: Request) {
     // therefore a NEW spend key — that double-charge risk is an accepted
     // limitation of this dummy phase. A future client/request-level
     // idempotency key (e.g. forwarded from the browser) is the planned fix.
+    // Pricing Config v2.1: charge from the per-second provider cost of the chosen
+    // resolution (seedance_480p / seedance_720p), computed over the TOTAL duration
+    // with a single final ceil. Falls back to legacy per-second credit_amount, then
+    // the lib/credit-costs.ts constant.
     const requiredCredits = await getSeedanceCredits({
-      sceneCount: SCENE_COUNT,
-      durationPerScene: DURATION_PER_SCENE,
+      resolution: RESOLUTION,
+      durationSec: TOTAL_DURATION,
     });
     try {
       await spendCredits({

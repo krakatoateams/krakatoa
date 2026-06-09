@@ -23,10 +23,18 @@ export async function POST(
       );
     }
 
+    // Build the reset body, including Pricing Config v2.1 fields when the default
+    // is a v2 row. provider_cost_usd === undefined on legacy rows means we reset
+    // it back to null (the default for a non-v2 row).
     const result = validatePricingPatch({
       pricing_type: def.pricing_type,
       credit_amount: def.credit_amount,
       enabled: def.enabled,
+      provider_cost_usd: def.provider_cost_usd ?? null,
+      cost_unit: def.cost_unit ?? null,
+      pricing_group: def.pricing_group ?? null,
+      variant_key: def.variant_key ?? null,
+      currency: def.currency ?? "USD",
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });

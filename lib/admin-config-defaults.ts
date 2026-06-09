@@ -5,7 +5,7 @@ import {
   STORYBOARD_VIDEO_CREDITS,
   VIDEO_CREDITS_PER_SECOND,
 } from "@/lib/credit-costs";
-import type { PricingType } from "@/lib/pricing-configs-db";
+import type { CostUnit, PricingType } from "@/lib/pricing-configs-db";
 
 /**
  * Canonical reset-to-default values for the Admin Config panel (Admin Phase 2.5).
@@ -14,7 +14,8 @@ import type { PricingType } from "@/lib/pricing-configs-db";
  * row to its shipped default. It intentionally does NOT change runtime behavior:
  *
  *   THREE DEFINITIONS MUST STAY ALIGNED whenever a default changes:
- *     1. SQL seed         — supabase/migrations/007_admin_panel.sql (sections 6b-6d)
+ *     1. SQL seed         — supabase/migrations/007_admin_panel.sql (6b-6d) +
+ *                           supabase/migrations/009_pricing_config_v2.sql (v2 rows)
  *     2. Runtime fallback — lib/credit-costs.ts (pricing) + lib/model-resolver.ts FALLBACKS (models)
  *     3. Reset defaults   — this file
  *
@@ -28,6 +29,12 @@ export type PricingDefault = {
   pricing_type: PricingType;
   credit_amount: number;
   enabled: boolean;
+  // Pricing Config v2.1 (present only on v2 rows; legacy rows omit these).
+  provider_cost_usd?: number | null;
+  cost_unit?: CostUnit | null;
+  pricing_group?: string | null;
+  variant_key?: string | null;
+  currency?: string;
 };
 
 export type ModelDefault = {
@@ -48,8 +55,13 @@ export type ToolDefault = {
 const WHISPER_VERSION =
   "3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c";
 
-/** Reset defaults keyed by pricing_key (mirrors seed 6c; amounts from credit-costs). */
+/**
+ * Reset defaults keyed by pricing_key. Legacy rows (seed 007 6c) take amounts from
+ * lib/credit-costs.ts; v2 rows (migration 009) carry provider_cost_usd + cost_unit
+ * and a legacy credit_amount fallback, mirroring the 009 seed verbatim.
+ */
 export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
+  // ---- Legacy rows (007) ----
   initial_dummy_credits: {
     pricing_type: "fixed",
     credit_amount: INITIAL_DUMMY_CREDITS,
@@ -79,6 +91,51 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second",
     credit_amount: VIDEO_CREDITS_PER_SECOND,
     enabled: true,
+  },
+  // ---- v2 provider-cost rows (009). credit_amount is fallback only. ----
+  seedance_480p_per_second: {
+    pricing_type: "per_second", credit_amount: 7, enabled: true,
+    provider_cost_usd: 0.07, cost_unit: "per_second", pricing_group: "seedance", variant_key: "480p", currency: "USD",
+  },
+  seedance_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p", currency: "USD",
+  },
+  veo_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
+  },
+  veo_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "veo", variant_key: "1080p", currency: "USD",
+  },
+  storyboard_gpt_image_2_low_per_image: {
+    pricing_type: "per_image", credit_amount: 2, enabled: true,
+    provider_cost_usd: 0.012, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "low", currency: "USD",
+  },
+  storyboard_gpt_image_2_medium_per_image: {
+    pricing_type: "per_image", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.047, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "medium", currency: "USD",
+  },
+  storyboard_gpt_image_2_auto_per_image: {
+    pricing_type: "per_image", credit_amount: 12, enabled: true,
+    provider_cost_usd: 0.128, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "auto", currency: "USD",
+  },
+  product_photo_fallback_per_image: {
+    pricing_type: "per_image", credit_amount: 4, enabled: true,
+    provider_cost_usd: 0.035, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "fallback", currency: "USD",
+  },
+  product_photo_1k_per_image: {
+    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "1k", currency: "USD",
+  },
+  product_photo_2k_per_image: {
+    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "2k", currency: "USD",
+  },
+  product_photo_4k_per_image: {
+    pricing_type: "per_image", credit_amount: 27, enabled: true,
+    provider_cost_usd: 0.30, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "4k", currency: "USD",
   },
 };
 

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
-import { roundVideoCredits } from "@/lib/credit-costs";
+import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 
@@ -163,24 +163,24 @@ export default function ReelsPage() {
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
-  // Effective pricing (Admin Phase 2): resolver-backed values fetched once on
-  // mount, with the canonical credit-costs constants as the built-in fallback
-  // (the provider returns constants while loading / on auth failure / on error).
-  const { pricing } = usePricing();
+  // Effective pricing (Pricing Config v2.1): the resolver-backed billing settings
+  // and per-tier provider costs are fetched once on mount. Labels compute through
+  // the SAME shared pricing math the server bills with (videoCredits/imageCredits),
+  // so the on-screen cost matches the charge within the ~60s cache window. The
+  // legacy snapshot (pricing.*) is the built-in fallback while loading / on error.
+  const { pricing, videoCredits, imageCredits } = usePricing();
 
-  // Credit cost previews — derived from the resolved per-second rates / fixed
-  // values via the shared roundVideoCredits helper so the label math matches the
-  // backend. Inputs are coerced defensively (empty/invalid fields fall back to
-  // the same defaults the server applies) and roundVideoCredits floors at 1, so
-  // labels never show NaN or a misleading 0.
+  // Credit cost previews — provider-cost based. Video totals the duration first,
+  // then converts to credits with a single final ceil (no per-second rounding).
+  // Inputs are coerced defensively so labels never show NaN or a misleading 0.
   const seedanceCost = useMemo(
     () =>
-      roundVideoCredits(
-        Math.max(1, Number(numScenes) || 1) *
-          Math.max(1, Number(durationPerScene) || 5),
+      videoCredits(
+        seedancePricingKey(resolution),
+        Math.max(1, Number(numScenes) || 1) * Math.max(1, Number(durationPerScene) || 5),
         pricing.seedanceRatePerSecond
       ),
-    [numScenes, durationPerScene, pricing.seedanceRatePerSecond]
+    [numScenes, durationPerScene, resolution, videoCredits, pricing.seedanceRatePerSecond]
   );
   const veoCost = useMemo(() => {
     const dur = Math.max(1, Number(veoDuration) || 6);
@@ -188,9 +188,13 @@ export default function ReelsPage() {
       veoMode === "single" ? 1 : Math.min(3, Math.max(1, Number(veoNumScenes) || 1));
     // Mirror the route: single mode bills the clip duration; perScene multiplies
     // by the (clamped) scene count.
-    return roundVideoCredits(dur * sceneCount, pricing.veoRatePerSecond);
-  }, [veoMode, veoDuration, veoNumScenes, pricing.veoRatePerSecond]);
-  const storyboardImageCost = pricing.storyboardImage;
+    return videoCredits(veoPricingKey(veoResolution), dur * sceneCount, pricing.veoRatePerSecond);
+  }, [veoMode, veoDuration, veoNumScenes, veoResolution, videoCredits, pricing.veoRatePerSecond]);
+  const storyboardImageCost = imageCredits(
+    "storyboard_gpt_image_2_auto_per_image",
+    1,
+    pricing.storyboardImage
+  );
   const storyboardVideoCost = pricing.storyboardVideo;
 
   const fetchStoryboards = useCallback(async () => {

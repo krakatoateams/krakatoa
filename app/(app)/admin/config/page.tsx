@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  type BillingSettings,
+  type CostUnit,
+  DEFAULT_BILLING_SETTINGS,
+  calculateCredits,
+  normalizeBillingSettings,
+} from "@/lib/pricing-math";
 
 type ToolConfig = {
   tool_key: string;
@@ -16,6 +23,12 @@ type PricingConfig = {
   pricing_type: "fixed" | "per_second" | "per_image";
   credit_amount: number;
   enabled: boolean;
+  // Pricing Config v2.1.
+  provider_cost_usd: number | null;
+  cost_unit: CostUnit | null;
+  pricing_group: string | null;
+  variant_key: string | null;
+  currency: string;
 };
 
 type ModelConfig = {
@@ -65,20 +78,54 @@ function isValidCreditAmount(amount: number): boolean {
   return Number.isInteger(amount) && amount >= 0 && amount <= CREDIT_AMOUNT_MAX;
 }
 
+/** A v2 row prices from the provider cost when it has a numeric cost + a cost unit. */
+function isV2Row(p: PricingConfig): boolean {
+  return typeof p.provider_cost_usd === "number" && p.cost_unit !== null;
+}
+
 function pricingStatus(p: PricingConfig): { tone: BadgeTone; label: string } {
   if (!p.enabled) return { tone: "disabled", label: "Disabled — fallback/default used" };
+  if (isV2Row(p)) {
+    if (typeof p.provider_cost_usd !== "number" || p.provider_cost_usd < 0)
+      return { tone: "invalid", label: "Invalid cost — fallback/default used" };
+    return { tone: "active", label: "Runtime active (provider cost)" };
+  }
   if (!isValidCreditAmount(p.credit_amount))
     return { tone: "invalid", label: "Invalid — fallback/default used" };
-  return { tone: "active", label: "Runtime active" };
+  return { tone: "active", label: "Runtime active (legacy amount)" };
 }
 
 function pricingWarning(p: PricingConfig): string | null {
-  if (p.credit_amount === 0) {
+  if (isV2Row(p) && p.provider_cost_usd === 0) {
+    return "Provider cost 0 — this tier computes to 0 credits (free).";
+  }
+  if (!isV2Row(p) && p.credit_amount === 0) {
     return p.pricing_type === "per_second"
       ? "0 per second — video still floors to 1 credit."
       : "0 credits — this makes generation free.";
   }
   return null;
+}
+
+const COST_UNIT_LABEL: Record<CostUnit, string> = {
+  per_image: "image",
+  per_second: "sec",
+  per_run: "run",
+  per_1k_tokens: "1k tokens",
+};
+
+/**
+ * Computed-credits preview for a single unit using the current billing settings.
+ * Mirrors lib/pricing-math.ts. For per_second this is the per-second equivalent;
+ * the real charge totals the duration first, then ceils once.
+ */
+function computedPreview(p: PricingConfig, settings: BillingSettings): string {
+  if (!isV2Row(p) || typeof p.provider_cost_usd !== "number") {
+    return `legacy · ${p.credit_amount} cr`;
+  }
+  const credits = calculateCredits({ providerCostUsd: p.provider_cost_usd, unitCount: 1, settings });
+  const unit = p.cost_unit ? COST_UNIT_LABEL[p.cost_unit] : "unit";
+  return `${credits} cr / ${unit}`;
 }
 
 function modelStatus(m: ModelConfig): { tone: BadgeTone; label: string } {
@@ -146,6 +193,7 @@ export default function AdminConfigPage() {
   const [tools, setTools] = useState<ToolConfig[]>([]);
   const [pricing, setPricing] = useState<PricingConfig[]>([]);
   const [models, setModels] = useState<ModelConfig[]>([]);
+  const [billingSettings, setBillingSettings] = useState<BillingSettings>(DEFAULT_BILLING_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,11 +206,27 @@ export default function AdminConfigPage() {
       fetch("/api/admin/config/tools").then((r) => r.json()),
       fetch("/api/admin/config/pricing").then((r) => r.json()),
       fetch("/api/admin/config/models").then((r) => r.json()),
+      // Billing settings are read-only here; sourced from the shared pricing API
+      // (any authenticated user, incl. admins, may read it). Editing billing
+      // settings is a tracked follow-up (no admin write endpoint yet).
+      fetch("/api/credits/pricing")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
     ])
-      .then(([t, p, m]) => {
+      .then(([t, p, m, pr]) => {
         setTools(t.tools ?? []);
-        setPricing(p.pricing ?? []);
+        // Coerce provider_cost_usd: PostgREST may serialize `numeric` as a string.
+        setPricing(
+          ((p.pricing ?? []) as PricingConfig[]).map((row) => ({
+            ...row,
+            provider_cost_usd:
+              row.provider_cost_usd === null || row.provider_cost_usd === undefined
+                ? null
+                : Number(row.provider_cost_usd),
+          }))
+        );
         setModels(m.models ?? []);
+        setBillingSettings(normalizeBillingSettings(pr?.billingSettings));
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load."))
       .finally(() => setLoading(false));
@@ -357,18 +421,52 @@ export default function AdminConfigPage() {
 
       {!loading && tab === "pricing" ? (
         <div className="space-y-3">
+          {/* Billing settings — read-only (Pricing Config v2.1). Editing is a
+              tracked follow-up: there is no admin write endpoint yet. */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Billing settings</h3>
+              <Badge tone="active">Read-only</Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-gray-500">USD → IDR</div>
+                <div className="font-mono text-sm text-white">{billingSettings.usdToIdr}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-gray-500">Credit value (IDR)</div>
+                <div className="font-mono text-sm text-white">{billingSettings.creditValueIdr}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-gray-500">Margin multiplier</div>
+                <div className="font-mono text-sm text-white">{billingSettings.marginMultiplier}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-gray-500">Rounding</div>
+                <div className="font-mono text-sm text-white">{billingSettings.roundingMode}</div>
+              </div>
+            </div>
+            <div className="mt-3 space-y-0.5 text-[11px] text-amber-300">
+              <p>⚠ Margin {billingSettings.marginMultiplier} = internal testing (provider cost 1:1, no profit).</p>
+              <p>⚠ Changing USD→IDR / credit value / margin affects all future generation costs.</p>
+              <p>Rounding happens only at the final charge (single ceil; no per-second rounding).</p>
+              <p>No payment / top-up UI here — this is pricing config only.</p>
+            </div>
+          </div>
+
           <NoteBox>
             <ul className="ml-4 list-disc space-y-0.5">
               <li>
-                <span className="font-mono text-gray-300">per_second</span> means credits per second
-                of video.
+                <span className="font-mono text-gray-300">Provider USD</span> drives the credit
+                charge via the billing settings above. Leave it blank to use the legacy{" "}
+                <span className="font-mono text-gray-300">credit amount</span> instead.
               </li>
-              <li>Video always costs at least 1 credit, even at a 0 per-second rate.</li>
               <li>
-                Setting a <span className="font-mono text-gray-300">fixed</span> /{" "}
-                <span className="font-mono text-gray-300">per_image</span> amount to 0 makes that
-                generation free.
+                <span className="font-mono text-gray-300">Computed</span> previews credits for one
+                unit. Video totals the full duration first, then rounds once (so the per-second
+                preview is not multiplied yet).
               </li>
+              <li>Video always costs at least 1 credit. A 0 provider cost / amount makes a generation free.</li>
             </ul>
           </NoteBox>
           <div className="overflow-x-auto rounded-xl border border-gray-800">
@@ -377,8 +475,10 @@ export default function AdminConfigPage() {
                 <tr>
                   <th className={TH}>Pricing key</th>
                   <th className={TH}>Status</th>
-                  <th className={TH}>Type</th>
-                  <th className={TH}>Credit amount</th>
+                  <th className={TH}>Provider USD</th>
+                  <th className={TH}>Unit</th>
+                  <th className={TH}>Computed</th>
+                  <th className={TH}>Legacy amount</th>
                   <th className={TH}>Enabled</th>
                   <th className={TH}></th>
                 </tr>
@@ -392,24 +492,41 @@ export default function AdminConfigPage() {
                       <td className="px-3 py-2">
                         <div className="font-medium text-white">{p.display_name}</div>
                         <div className="text-xs text-gray-500">{p.pricing_key}</div>
+                        {p.pricing_group || p.variant_key ? (
+                          <div className="text-[10px] text-gray-600">
+                            {p.pricing_group ?? "—"}
+                            {p.variant_key ? ` · ${p.variant_key}` : ""}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2">
                         <Badge tone={status.tone}>{status.label}</Badge>
                       </td>
-                      <td className="px-3 py-2 w-36">
-                        <select
-                          value={p.pricing_type}
+                      <td className="px-3 py-2 w-28">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.001}
+                          value={p.provider_cost_usd ?? ""}
+                          placeholder="—"
                           onChange={(e) =>
-                            setPricingField(p.pricing_key, "pricing_type", e.target.value)
+                            setPricingField(
+                              p.pricing_key,
+                              "provider_cost_usd",
+                              e.target.value === "" ? null : Number(e.target.value)
+                            )
                           }
                           className={INPUT}
-                        >
-                          <option value="fixed">fixed</option>
-                          <option value="per_second">per_second</option>
-                          <option value="per_image">per_image</option>
-                        </select>
+                        />
+                        {warn ? (
+                          <div className="mt-1 text-[11px] text-amber-300">⚠ {warn}</div>
+                        ) : null}
                       </td>
-                      <td className="px-3 py-2 w-32">
+                      <td className="px-3 py-2 text-xs text-gray-400">{p.cost_unit ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs font-mono text-emerald-300">
+                        {computedPreview(p, billingSettings)}
+                      </td>
+                      <td className="px-3 py-2 w-28">
                         <input
                           type="number"
                           min={0}
@@ -424,9 +541,6 @@ export default function AdminConfigPage() {
                           }
                           className={INPUT}
                         />
-                        {warn ? (
-                          <div className="mt-1 text-[11px] text-amber-300">⚠ {warn}</div>
-                        ) : null}
                       </td>
                       <td className="px-3 py-2">
                         <input
@@ -442,8 +556,8 @@ export default function AdminConfigPage() {
                           busy={busy}
                           onSave={() =>
                             patch(`/api/admin/config/pricing/${p.pricing_key}`, {
-                              pricing_type: p.pricing_type,
                               credit_amount: p.credit_amount,
+                              provider_cost_usd: p.provider_cost_usd,
                               enabled: p.enabled,
                             })
                           }

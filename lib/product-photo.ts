@@ -38,6 +38,56 @@ export const PHOTO_STYLES = [
 export type ModelPoseId = (typeof MODEL_POSES)[number]["id"];
 export type PhotoStyleId = (typeof PHOTO_STYLES)[number]["id"];
 
+/**
+ * Product Photo quality tiers (Pricing Config v2.1). Each tier maps to a v2
+ * pricing key whose provider_cost_usd drives the credit charge. `fallbackCredits`
+ * is the client/UI fallback used only when the pricing API is unavailable (so
+ * labels never show NaN); the backend always charges via the resolver.
+ *
+ * NOTE: quality currently affects PRICING only. The Nano Banana call does not yet
+ * take a 1K/4K size/quality parameter — wiring the actual provider output size to
+ * the selected tier is a tracked follow-up (see the v2 plan, open items).
+ */
+export const PRODUCT_PHOTO_QUALITIES = [
+  {
+    id: "standard",
+    label: "Standard",
+    description: "1K resolution",
+    pricingKey: "product_photo_1k_per_image",
+    fallbackCredits: 14,
+  },
+  {
+    id: "ultra_4k",
+    label: "Ultra 4K",
+    description: "4K resolution",
+    pricingKey: "product_photo_4k_per_image",
+    fallbackCredits: 27,
+  },
+] as const;
+
+export type ProductPhotoQuality = (typeof PRODUCT_PHOTO_QUALITIES)[number]["id"];
+
+export const DEFAULT_PRODUCT_PHOTO_QUALITY: ProductPhotoQuality = "standard";
+
+/**
+ * Quality -> v2 pricing key. Includes the internal-only "low" tier (not shown in
+ * the UI) so the backend can still accept and price it if ever requested.
+ */
+export const PRODUCT_PHOTO_QUALITY_KEYS: Record<string, string> = {
+  standard: "product_photo_1k_per_image",
+  ultra_4k: "product_photo_4k_per_image",
+  low: "product_photo_fallback_per_image",
+};
+
+/** Server-side allow-list for the `quality` form field. */
+export function isValidProductPhotoQuality(id: string): boolean {
+  return id in PRODUCT_PHOTO_QUALITY_KEYS;
+}
+
+export function productPhotoPricingKey(quality: string): string {
+  return PRODUCT_PHOTO_QUALITY_KEYS[quality] ?? PRODUCT_PHOTO_QUALITY_KEYS.standard;
+}
+
 export type ProductPhotoHistoryItem = {
   id: string;
   imageUrl: string;

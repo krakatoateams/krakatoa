@@ -9,9 +9,15 @@ import { supabaseServer } from "@/lib/supabase-server";
  * constants (and a ~60s TTL cache). Reset-to-default values live in
  * lib/admin-config-defaults.ts — keep SQL seed, resolver fallback, and reset
  * defaults aligned.
+ *
+ * Pricing Config v2.1 added provider-cost columns (provider_cost_usd, cost_unit,
+ * pricing_group, variant_key, currency). When provider_cost_usd is set the
+ * resolver computes credits from the provider USD cost (via lib/pricing-math.ts);
+ * credit_amount stays as the legacy fallback. See migration 009.
  */
 
 export type PricingType = "fixed" | "per_second" | "per_image";
+export type CostUnit = "per_image" | "per_second" | "per_run" | "per_1k_tokens";
 
 export type PricingConfig = {
   id: string;
@@ -24,6 +30,12 @@ export type PricingConfig = {
   updated_by_profile_id: string | null;
   created_at: string;
   updated_at: string;
+  // Pricing Config v2.1 (nullable until a row is migrated/seeded with v2 data).
+  provider_cost_usd: number | null;
+  cost_unit: CostUnit | null;
+  pricing_group: string | null;
+  variant_key: string | null;
+  currency: string;
 };
 
 const PRICING_CONFIGS_TABLE = "pricing_configs";
@@ -59,6 +71,12 @@ export type PricingConfigPatch = {
   credit_amount?: number;
   enabled?: boolean;
   metadata?: Record<string, unknown>;
+  // Pricing Config v2.1.
+  provider_cost_usd?: number | null;
+  cost_unit?: CostUnit | null;
+  pricing_group?: string | null;
+  variant_key?: string | null;
+  currency?: string;
 };
 
 /** Update a single pricing config by pricing_key. Returns the row or null. */
@@ -73,6 +91,11 @@ export async function updatePricingConfig(
   if (patch.credit_amount !== undefined) update.credit_amount = patch.credit_amount;
   if (patch.enabled !== undefined) update.enabled = patch.enabled;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
+  if (patch.provider_cost_usd !== undefined) update.provider_cost_usd = patch.provider_cost_usd;
+  if (patch.cost_unit !== undefined) update.cost_unit = patch.cost_unit;
+  if (patch.pricing_group !== undefined) update.pricing_group = patch.pricing_group;
+  if (patch.variant_key !== undefined) update.variant_key = patch.variant_key;
+  if (patch.currency !== undefined) update.currency = patch.currency;
 
   const { data, error } = await supabaseServer
     .from(PRICING_CONFIGS_TABLE)

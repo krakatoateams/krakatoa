@@ -410,7 +410,14 @@ export async function POST(req: Request) {
 
     creditJobKind = isSingle ? "veo_single" : "veo_perscene";
     const totalCreditDurationSec = isSingle ? duration : SCENE_COUNT * duration;
-    const requiredCredits = await getVeoCredits({ durationSec: totalCreditDurationSec });
+    // Pricing Config v2.1: charge from the per-second provider cost of the chosen
+    // resolution (veo_720p / veo_1080p), computed over the TOTAL duration with a
+    // single final ceil. Falls back to legacy per-second credit_amount, then the
+    // lib/credit-costs.ts constant.
+    const requiredCredits = await getVeoCredits({
+      resolution,
+      durationSec: totalCreditDurationSec,
+    });
 
     // ---- Resolve runtime models (Admin Phase 2) ----
     // DB-backed config with fallback to the hardcoded model IDs. The SAME video

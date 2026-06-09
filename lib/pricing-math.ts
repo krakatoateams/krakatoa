@@ -1,0 +1,213 @@
+import { VIDEO_CREDITS_PER_SECOND, roundVideoCredits } from "@/lib/credit-costs";
+
+/**
+ * Shared pricing math (Pricing Config v2.1).
+ *
+ * Pure, dependency-free (except the pure constants in lib/credit-costs.ts) module
+ * imported by BOTH the server resolver (lib/pricing-resolver.ts) and the client
+ * pricing context (app/(app)/pricing-context.tsx) so the credit formula has a
+ * SINGLE source of truth and labels never drift from billing.
+ *
+ * Core formula:
+ *   credits = ceil(provider_cost_usd * unit_count * usd_to_idr
+ *                  * margin_multiplier / credit_value_idr)
+ *
+ * With the current internal-testing knobs (usd_to_idr=18000, credit_value_idr=200,
+ * margin_multiplier=1.0) this is exactly `ceil(cost_usd * units * 90)`.
+ *
+ * Rounding rule: round ONCE, at the end. For duration-based pricing the caller
+ * passes the TOTAL units (e.g. total seconds), never the per-second amount — so we
+ * never round per-second first (that would inflate the charge, e.g. 203 -> 210).
+ *
+ * Guarantees: never throws, never returns NaN/Infinity. Invalid inputs collapse to
+ * 0 (or, for video helpers, the 1-credit floor).
+ */
+
+export type CostUnit = "per_image" | "per_second" | "per_run" | "per_1k_tokens";
+
+export type BillingSettings = {
+  usdToIdr: number;
+  creditValueIdr: number;
+  marginMultiplier: number;
+  roundingMode: "ceil_final";
+};
+
+export const DEFAULT_BILLING_SETTINGS: BillingSettings = {
+  usdToIdr: 18000,
+  creditValueIdr: 200,
+  marginMultiplier: 1.0,
+  roundingMode: "ceil_final",
+};
+
+// Float-noise guard so e.g. 0.30 * 90 = 27.0000000004 does not ceil to 28. Real
+// fractional costs (>= 1e-9 above an integer) still round up correctly.
+const CEIL_EPSILON = 1e-9;
+
+type CalculateCreditsParams = {
+  providerCostUsd: number;
+  unitCount: number;
+  settings?: BillingSettings;
+};
+
+function isFinitePositive(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n > 0;
+}
+
+function isFiniteNonNegative(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
+
+/** Coerce possibly-malformed settings to a fully valid object (defaults per field). */
+export function normalizeBillingSettings(
+  raw: Partial<BillingSettings> | null | undefined
+): BillingSettings {
+  if (!raw) return DEFAULT_BILLING_SETTINGS;
+  return {
+    usdToIdr: isFinitePositive(raw.usdToIdr) ? raw.usdToIdr : DEFAULT_BILLING_SETTINGS.usdToIdr,
+    creditValueIdr: isFinitePositive(raw.creditValueIdr)
+      ? raw.creditValueIdr
+      : DEFAULT_BILLING_SETTINGS.creditValueIdr,
+    marginMultiplier: isFiniteNonNegative(raw.marginMultiplier)
+      ? raw.marginMultiplier
+      : DEFAULT_BILLING_SETTINGS.marginMultiplier,
+    roundingMode: "ceil_final",
+  };
+}
+
+/**
+ * Core credit calculation. Accepts either the object form
+ * `calculateCredits({ providerCostUsd, unitCount, settings })` or the positional
+ * form `calculateCredits(providerCostUsd, unitCount, settings?)`.
+ *
+ * Returns an integer >= 0 (single final ceil). Returns 0 when cost or units are 0.
+ */
+export function calculateCredits(
+  arg1: number | CalculateCreditsParams,
+  unitCount?: number,
+  settings?: BillingSettings
+): number {
+  let providerCostUsd: number;
+  let units: number;
+  let rawSettings: BillingSettings | undefined;
+
+  if (typeof arg1 === "object" && arg1 !== null) {
+    providerCostUsd = arg1.providerCostUsd;
+    units = arg1.unitCount;
+    rawSettings = arg1.settings;
+  } else {
+    providerCostUsd = arg1;
+    units = unitCount ?? 0;
+    rawSettings = settings;
+  }
+
+  const s = normalizeBillingSettings(rawSettings);
+
+  if (!isFiniteNonNegative(providerCostUsd) || !isFiniteNonNegative(units)) return 0;
+  if (providerCostUsd === 0 || units === 0) return 0;
+
+  const idr = providerCostUsd * units * s.usdToIdr * s.marginMultiplier;
+  const credits = idr / s.creditValueIdr;
+  if (!Number.isFinite(credits) || credits <= 0) return 0;
+
+  return Math.ceil(credits - CEIL_EPSILON);
+}
+
+// ---------------------------------------------------------------------------
+// Row-level helpers (shared fallback chain).
+//
+// Both server and client operate on this normalized, camelCase row shape so the
+// fallback chain (v2 provider cost -> legacy credit_amount -> constant) is
+// identical everywhere.
+// ---------------------------------------------------------------------------
+
+export type PricingRow = {
+  providerCostUsd: number | null;
+  costUnit: CostUnit | null;
+  creditAmount: number | null;
+  enabled: boolean;
+};
+
+function usableCreditAmount(n: number | null | undefined): n is number {
+  return typeof n === "number" && Number.isInteger(n) && n >= 0;
+}
+
+/**
+ * Video (per-second) credits with the v2 -> legacy -> constant fallback chain.
+ * Always floors at 1 credit (video is never zero-cost). `durationSec` is the TOTAL
+ * duration; the single final ceil happens inside calculateCredits.
+ */
+export function videoCreditsFromRow(
+  row: PricingRow | null | undefined,
+  durationSec: number,
+  settings: BillingSettings,
+  fallbackRatePerSecond: number = VIDEO_CREDITS_PER_SECOND
+): number {
+  const dur = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+  if (row && row.enabled) {
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_second") {
+      return Math.max(1, calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: dur, settings }));
+    }
+    if (usableCreditAmount(row.creditAmount)) {
+      return roundVideoCredits(dur, row.creditAmount);
+    }
+  }
+  return roundVideoCredits(dur, fallbackRatePerSecond);
+}
+
+/**
+ * Image (per-image) credits with the v2 -> legacy -> constant fallback chain.
+ * No 1-credit floor: an admin-set 0 (free) is honored.
+ */
+export function imageCreditsFromRow(
+  row: PricingRow | null | undefined,
+  imageCount: number,
+  settings: BillingSettings,
+  fallbackPerImage: number
+): number {
+  const count = Number.isFinite(imageCount) ? Math.max(0, imageCount) : 0;
+  if (row && row.enabled) {
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_image") {
+      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: count, settings });
+    }
+    if (usableCreditAmount(row.creditAmount)) {
+      return Math.max(0, Math.ceil(row.creditAmount * count - CEIL_EPSILON));
+    }
+  }
+  const safeFallback = isFiniteNonNegative(fallbackPerImage) ? fallbackPerImage : 0;
+  return Math.max(0, Math.ceil(safeFallback * count - CEIL_EPSILON));
+}
+
+/**
+ * Run (per-run) credits with the v2 -> legacy -> constant fallback chain.
+ * One run = unit_count 1.
+ */
+export function runCreditsFromRow(
+  row: PricingRow | null | undefined,
+  settings: BillingSettings,
+  fallbackCredits: number
+): number {
+  if (row && row.enabled) {
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_run") {
+      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: 1, settings });
+    }
+    if (usableCreditAmount(row.creditAmount)) {
+      return row.creditAmount;
+    }
+  }
+  return isFiniteNonNegative(fallbackCredits) ? Math.ceil(fallbackCredits) : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Pricing-key mappings (shared by client + server so resolution/quality always
+// resolve to the same key on both sides).
+// ---------------------------------------------------------------------------
+
+/** Seedance resolution -> v2 pricing key. Anything not 720p maps to 480p. */
+export function seedancePricingKey(resolution: string | null | undefined): string {
+  return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
+}
+
+/** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
+export function veoPricingKey(resolution: string | null | undefined): string {
+  return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";
+}

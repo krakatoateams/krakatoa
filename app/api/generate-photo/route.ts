@@ -5,6 +5,8 @@ import {
   ModelPoseId,
   PhotoStyleId,
   PRODUCT_PHOTO_BUCKET,
+  DEFAULT_PRODUCT_PHOTO_QUALITY,
+  isValidProductPhotoQuality,
   buildGeneratedFilename,
   buildProductPhotoPrompt,
 } from "@/lib/product-photo";
@@ -139,6 +141,12 @@ export async function POST(req: Request) {
     const file = formData.get("image");
     const poseId = String(formData.get("poseId") || "").trim();
     const styleId = String(formData.get("styleId") || "").trim();
+    // Pricing Config v2.1: optional quality tier (defaults to Standard). Drives the
+    // pricing key only — the Nano Banana call does not yet take a size/quality
+    // parameter (tracked follow-up), so quality currently affects credits, not
+    // the provider output resolution.
+    const qualityRaw = String(formData.get("quality") || "").trim();
+    const quality = qualityRaw === "" ? DEFAULT_PRODUCT_PHOTO_QUALITY : qualityRaw;
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
@@ -163,6 +171,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid photo style" }, { status: 400 });
     }
 
+    if (!isValidProductPhotoQuality(quality)) {
+      return NextResponse.json({ error: "Invalid photo quality" }, { status: 400 });
+    }
+
     // ---- Resolve runtime model + pricing (Admin Phase 2) ----
     // DB-backed config with fallback to the hardcoded defaults. The SAME resolved
     // model is reused for createJob, createProcessingAsset, the provider call, and
@@ -183,7 +195,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ poseId, styleId });
+    const requestHash = computeRequestHash({ poseId, styleId, quality });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -222,7 +234,7 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId },
+      input: { poseId, styleId, quality },
     }));
     if (job) {
       jobId = job.id;
@@ -241,7 +253,7 @@ export async function POST(req: Request) {
     // request. A full HTTP retry by the client produces a NEW jobId and a NEW
     // spend key — that double-charge risk is an accepted limitation of this
     // dummy phase (future fix: client/request-level idempotency key).
-    const requiredCredits = await getProductPhotoCredits();
+    const requiredCredits = await getProductPhotoCredits({ quality });
     try {
       await spendCredits({
         profileId: profileId!,
@@ -251,7 +263,7 @@ export async function POST(req: Request) {
           : `spend:product_photo:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
         description: "Product Photo generation",
-        metadata: { tool: "photo", jobType: "product_photo", poseId, styleId },
+        metadata: { tool: "photo", jobType: "product_photo", poseId, styleId, quality },
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
@@ -298,7 +310,7 @@ export async function POST(req: Request) {
       bucket: PRODUCT_PHOTO_BUCKET,
       provider: photoModel.provider,
       model: photoModel.model,
-      metadata: { poseId, styleId },
+      metadata: { poseId, styleId, quality },
     }));
     if (asset) photoAssetId = asset.id;
 
@@ -363,7 +375,7 @@ export async function POST(req: Request) {
         publicUrl: saved.publicUrl,
         mimeType,
         costCredits: creditsAmount,
-        metadata: { poseId, styleId },
+        metadata: { poseId, styleId, quality },
       }));
     }
     if (jobId && profileId) {
@@ -385,7 +397,7 @@ export async function POST(req: Request) {
       unitType: "image_count",
       units: 1,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "product_photo", poseId, styleId },
+      metadata: { jobType: "product_photo", poseId, styleId, quality },
     }));
 
     const successResponse = {

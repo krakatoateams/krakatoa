@@ -1,4 +1,4 @@
-import type { PricingConfigPatch, PricingType } from "@/lib/pricing-configs-db";
+import type { CostUnit, PricingConfigPatch, PricingType } from "@/lib/pricing-configs-db";
 import type { ModelConfigPatch } from "@/lib/model-configs-db";
 import type { ToolConfigPatch } from "@/lib/tool-configs-db";
 
@@ -16,7 +16,12 @@ export type Validated<T> =
   | { ok: false; error: string };
 
 const PRICING_TYPES: PricingType[] = ["fixed", "per_second", "per_image"];
+const COST_UNITS: CostUnit[] = ["per_image", "per_second", "per_run", "per_1k_tokens"];
 const CREDIT_AMOUNT_MAX = 100_000;
+// Provider USD cost guard — generous upper bound; values are dollars per unit.
+const PROVIDER_COST_USD_MAX = 1_000;
+// Currency is locked to USD for Pricing Config v2.1 (provider prices are in USD).
+const ALLOWED_CURRENCIES = new Set(["USD"]);
 
 /** Providers we currently expect. Used for a WARNING only — never a hard reject. */
 const KNOWN_PROVIDERS = new Set(["replicate", "rendi", "openai"]);
@@ -94,6 +99,89 @@ export function validatePricingPatch(
       return { ok: false, error: "metadata must be a JSON object." };
     }
     patch.metadata = body.metadata;
+  }
+
+  // ---- Pricing Config v2.1 fields ----
+  if (body.provider_cost_usd !== undefined) {
+    if (body.provider_cost_usd === null) {
+      patch.provider_cost_usd = null;
+    } else if (
+      typeof body.provider_cost_usd !== "number" ||
+      !Number.isFinite(body.provider_cost_usd) ||
+      body.provider_cost_usd < 0 ||
+      body.provider_cost_usd > PROVIDER_COST_USD_MAX
+    ) {
+      return {
+        ok: false,
+        error: `provider_cost_usd must be null or a number between 0 and ${PROVIDER_COST_USD_MAX}.`,
+      };
+    } else {
+      patch.provider_cost_usd = body.provider_cost_usd;
+      if (body.provider_cost_usd === 0) {
+        warnings.push("provider_cost_usd is 0; this tier computes to 0 credits (free) on the v2 path.");
+      }
+    }
+  }
+
+  if (body.cost_unit !== undefined) {
+    if (body.cost_unit === null) {
+      patch.cost_unit = null;
+    } else if (
+      typeof body.cost_unit !== "string" ||
+      !COST_UNITS.includes(body.cost_unit as CostUnit)
+    ) {
+      return {
+        ok: false,
+        error: "cost_unit must be null or one of per_image, per_second, per_run, per_1k_tokens.",
+      };
+    } else {
+      patch.cost_unit = body.cost_unit as CostUnit;
+    }
+  }
+
+  if (body.pricing_group !== undefined) {
+    if (body.pricing_group === null) {
+      patch.pricing_group = null;
+    } else if (typeof body.pricing_group !== "string") {
+      return { ok: false, error: "pricing_group must be null or a string." };
+    } else {
+      const trimmed = body.pricing_group.trim();
+      patch.pricing_group = trimmed === "" ? null : trimmed;
+    }
+  }
+
+  if (body.variant_key !== undefined) {
+    if (body.variant_key === null) {
+      patch.variant_key = null;
+    } else if (typeof body.variant_key !== "string") {
+      return { ok: false, error: "variant_key must be null or a string." };
+    } else {
+      const trimmed = body.variant_key.trim();
+      patch.variant_key = trimmed === "" ? null : trimmed;
+    }
+  }
+
+  if (body.currency !== undefined) {
+    if (typeof body.currency !== "string" || !ALLOWED_CURRENCIES.has(body.currency.trim().toUpperCase())) {
+      return { ok: false, error: "currency must be USD (only USD is supported in v2.1)." };
+    }
+    patch.currency = body.currency.trim().toUpperCase();
+  }
+
+  // Advisory: if provider_cost_usd is set, cost_unit should be present so the v2
+  // path can engage. Never a hard reject (the resolver falls back to legacy).
+  const resolvedCostUnit =
+    patch.cost_unit !== undefined
+      ? patch.cost_unit
+      : typeof body.cost_unit === "string"
+        ? (body.cost_unit as CostUnit)
+        : undefined;
+  if (
+    patch.provider_cost_usd !== undefined &&
+    patch.provider_cost_usd !== null &&
+    !resolvedCostUnit
+  ) {
+    warnings.push("provider_cost_usd is set but cost_unit is empty; the legacy credit_amount will be used until cost_unit is set.");
   }
 
   return { ok: true, patch, warnings };

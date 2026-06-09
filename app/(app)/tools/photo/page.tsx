@@ -18,8 +18,11 @@ import {
 import {
   MODEL_POSES,
   PHOTO_STYLES,
+  PRODUCT_PHOTO_QUALITIES,
+  DEFAULT_PRODUCT_PHOTO_QUALITY,
   ModelPoseId,
   PhotoStyleId,
+  ProductPhotoQuality,
 } from "@/lib/product-photo";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -54,6 +57,7 @@ export default function ProductPhotoPage() {
   const [productPreview, setProductPreview] = useState<string | null>(null);
   const [poseId, setPoseId] = useState<ModelPoseId>("standing");
   const [styleId, setStyleId] = useState<PhotoStyleId>("minimalist-studio");
+  const [quality, setQuality] = useState<ProductPhotoQuality>(DEFAULT_PRODUCT_PHOTO_QUALITY);
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,11 +66,14 @@ export default function ProductPhotoPage() {
   const [dragOver, setDragOver] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const { refetch: refetchCredits } = useCreditBalance();
-  // Effective Product Photo price (Admin Phase 2): resolver-backed value with the
-  // PRODUCT_PHOTO_CREDITS constant as the built-in fallback (the provider returns
-  // the constant while loading / on auth failure / on error).
-  const { pricing } = usePricing();
-  const photoCost = pricing.productPhoto;
+  // Effective Product Photo price (Pricing Config v2.1): computed from the selected
+  // quality tier's provider cost via the shared pricing math, so the label always
+  // matches backend billing within the resolver cache window. The quality tier's
+  // fallbackCredits is used only while loading / on auth failure / on error.
+  const { imageCredits } = usePricing();
+  const qualityDef =
+    PRODUCT_PHOTO_QUALITIES.find((q) => q.id === quality) ?? PRODUCT_PHOTO_QUALITIES[0];
+  const photoCost = imageCredits(qualityDef.pricingKey, 1, qualityDef.fallbackCredits);
 
   useEffect(() => {
     return () => {
@@ -122,6 +129,7 @@ export default function ProductPhotoPage() {
       formData.append("image", productFile);
       formData.append("poseId", poseId);
       formData.append("styleId", styleId);
+      formData.append("quality", quality);
 
       const response = await fetch("/api/generate-photo", {
         method: "POST",
@@ -306,6 +314,39 @@ export default function ProductPhotoPage() {
                         {icon}
                       </div>
                       <span className="text-sm font-medium">{style.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-purple-400 mb-3">
+                <Sparkles className="w-4 h-4" />
+                Quality
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {PRODUCT_PHOTO_QUALITIES.map((q) => {
+                  const active = quality === q.id;
+                  const cost = imageCredits(q.pricingKey, 1, q.fallbackCredits);
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => setQuality(q.id)}
+                      disabled={loading}
+                      className={`flex flex-col gap-1 p-4 rounded-2xl border text-left transition-all ${
+                        active
+                          ? "bg-purple-500/20 border-purple-400/50"
+                          : "bg-white/5 border-white/10 hover:border-white/20"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-white">{q.label}</span>
+                        {active && <Check className="w-4 h-4 text-purple-400 shrink-0" />}
+                      </span>
+                      <span className="text-xs text-gray-400">{q.description}</span>
+                      <span className="text-xs font-medium text-purple-300">{cost} credits</span>
                     </button>
                   );
                 })}
