@@ -27,6 +27,8 @@ export default withAuth({
 
 export const config = {
   // All routes that live under the (app) route group share the
-  // sidebar shell and require an authenticated user.
-  matcher: ["/dashboard/:path*", "/tools/:path*"],
+  // sidebar shell and require an authenticated user. /admin additionally
+  // enforces an active-admin check server-side in app/(app)/admin/layout.tsx
+  // (withAuth here only guarantees the user is signed in).
+  matcher: ["/dashboard/:path*", "/tools/:path*", "/admin/:path*"],
 };
