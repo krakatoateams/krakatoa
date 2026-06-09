@@ -1,10 +1,18 @@
 /**
- * Krakatoa credit cost configuration.
+ * Krakatoa credit cost constants.
  *
- * Single source of truth for every credit price used by the generation routes.
- * Pricing is rough/dummy values for the internal testing phase and is expected
- * to change once real provider economics are measured — when that happens the
- * constants here are the only thing to edit.
+ * Pricing Config v2.2 NOTE: generation pricing is NO LONGER driven by these
+ * constants. The runtime resolver (lib/pricing-resolver.ts) prices every
+ * generation from provider USD cost via the v2 `pricing_configs` rows, falling
+ * back to the typed built-in v2 defaults in lib/pricing-defaults.ts. The legacy
+ * generation constants below (VIDEO_CREDITS_PER_SECOND, STORYBOARD_IMAGE_CREDITS,
+ * STORYBOARD_VIDEO_CREDITS, PRODUCT_PHOTO_CREDITS) are retained ONLY for:
+ *   - the shared video rounding helper (roundVideoCredits) default rate, and
+ *   - the admin reset-to-default values of the soft-deprecated legacy rows.
+ * They are NOT a runtime pricing fallback anymore (no undercharging 2 cr/sec).
+ *
+ * INITIAL_DUMMY_CREDITS is different: it is a platform credit GRANT (not a
+ * generation provider-cost price) and remains authoritative for the dummy phase.
  *
  * Billing-truth model (unchanged):
  *   - credit_transactions = billing source of truth (ledger).
@@ -16,16 +24,16 @@
 /** Initial dummy bonus granted to every existing/future profile. */
 export const INITIAL_DUMMY_CREDITS = 500;
 
-/** Per-second rate for any text-to-video generation in scope (Seedance, Veo). */
+/** @deprecated v2.2 — legacy fallback rate only; runtime uses provider-cost v2 defaults. */
 export const VIDEO_CREDITS_PER_SECOND = 2;
 
-/** Fixed cost for one storyboard image generation (gpt-image-2). */
+/** @deprecated v2.2 — reset-default for the deprecated `storyboard_image` legacy row only. */
 export const STORYBOARD_IMAGE_CREDITS = 2;
 
-/** Fixed cost for one storyboard-to-video generation (Seedance 15s clip). */
+/** @deprecated v2.2 — reset-default for the deprecated `storyboard_video` legacy row only. */
 export const STORYBOARD_VIDEO_CREDITS = 30;
 
-/** Fixed cost for one Product Photo generation (Nano Banana). */
+/** @deprecated v2.2 — reset-default for the deprecated `product_photo` legacy row only. */
 export const PRODUCT_PHOTO_CREDITS = 5;
 
 /**

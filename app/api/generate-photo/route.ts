@@ -5,8 +5,10 @@ import {
   ModelPoseId,
   PhotoStyleId,
   PRODUCT_PHOTO_BUCKET,
-  DEFAULT_PRODUCT_PHOTO_QUALITY,
-  isValidProductPhotoQuality,
+  DEFAULT_PRODUCT_PHOTO_TIER,
+  normalizeProductPhotoOptions,
+  productPhotoPricingKey,
+  productPhotoProviderResolution,
   buildGeneratedFilename,
   buildProductPhotoPrompt,
 } from "@/lib/product-photo";
@@ -23,8 +25,8 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { getProductPhotoCredits } from "@/lib/pricing-resolver";
-import { getPhotoModels, replicateRef } from "@/lib/model-resolver";
+import { getProductPhotoCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { getPhotoModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
@@ -141,12 +143,12 @@ export async function POST(req: Request) {
     const file = formData.get("image");
     const poseId = String(formData.get("poseId") || "").trim();
     const styleId = String(formData.get("styleId") || "").trim();
-    // Pricing Config v2.1: optional quality tier (defaults to Standard). Drives the
-    // pricing key only — the Nano Banana call does not yet take a size/quality
-    // parameter (tracked follow-up), so quality currently affects credits, not
-    // the provider output resolution.
-    const qualityRaw = String(formData.get("quality") || "").trim();
-    const quality = qualityRaw === "" ? DEFAULT_PRODUCT_PHOTO_QUALITY : qualityRaw;
+    // Product Photo v2.3: model tier + optional resolution.
+    //   basic    -> google/nano-banana      (no resolution param)
+    //   balanced -> google/nano-banana-2     (resolution 1K/2K/4K)
+    //   pro      -> google/nano-banana-pro   (resolution 1K/2K/4K)
+    const modelTierRaw = String(formData.get("modelTier") || "").trim() || DEFAULT_PRODUCT_PHOTO_TIER;
+    const resolutionRaw = String(formData.get("resolution") || "").trim();
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
@@ -171,15 +173,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid photo style" }, { status: 400 });
     }
 
-    if (!isValidProductPhotoQuality(quality)) {
-      return NextResponse.json({ error: "Invalid photo quality" }, { status: 400 });
+    // Validate/normalize tier + resolution. Basic ignores resolution (-> null);
+    // balanced/pro require a valid 1k/2k/4k. Invalid tier or missing/invalid
+    // resolution for a resolution-bearing tier -> 400 (before any job/spend/provider).
+    const normalized = normalizeProductPhotoOptions({
+      modelTier: modelTierRaw,
+      resolution: resolutionRaw,
+    });
+    if (!normalized.ok) {
+      return NextResponse.json({ error: normalized.error }, { status: 400 });
     }
+    const { modelTier, resolution } = normalized;
+    const pricingKey = productPhotoPricingKey({ modelTier, resolution });
+    const providerResolution = productPhotoProviderResolution(resolution);
 
-    // ---- Resolve runtime model + pricing (Admin Phase 2) ----
-    // DB-backed config with fallback to the hardcoded defaults. The SAME resolved
-    // model is reused for createJob, createProcessingAsset, the provider call, and
-    // recordUsageEvent so observability never disagrees with what actually ran.
-    const { image: photoModel } = await getPhotoModels();
+    // ---- Resolve runtime model + pricing (Admin Phase 2 / Product Photo v2.3) ----
+    // DB-backed per-tier model config with fallback to the built-in per-tier model
+    // id. The SAME resolved model is reused for createJob, createProcessingAsset,
+    // the provider call, and recordUsageEvent so observability never disagrees with
+    // what actually ran.
+    const photoModel = await getPhotoModel(modelTier);
     const photoModelRef = replicateRef(photoModel);
 
     // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
@@ -195,7 +208,15 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ poseId, styleId, quality });
+    const requestHash = computeRequestHash({
+      poseId,
+      styleId,
+      modelTier,
+      resolution,
+      pricingKey,
+      providerModel: photoModel.model,
+      providerResolution,
+    });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -234,7 +255,7 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId, quality },
+      input: { poseId, styleId, modelTier, resolution, pricingKey },
     }));
     if (job) {
       jobId = job.id;
@@ -242,7 +263,8 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — must not be safe-wrapped) ----
-    // Product Photo is a flat 5 credits. The debit MUST happen before any
+    // Product Photo is priced by the selected model tier (+ resolution for
+    // balanced/pro) provider cost (v2.3). The debit MUST happen before any
     // provider work below (createReplicateClient / uploadProductImageToReplicate
     // / runWithRetry / Nano Banana). If the wallet is short we fail the job (if
     // it exists) and return 402 — no processing asset, no provider call. A
@@ -253,7 +275,7 @@ export async function POST(req: Request) {
     // request. A full HTTP retry by the client produces a NEW jobId and a NEW
     // spend key — that double-charge risk is an accepted limitation of this
     // dummy phase (future fix: client/request-level idempotency key).
-    const requiredCredits = await getProductPhotoCredits({ quality });
+    const requiredCredits = await getProductPhotoCredits({ modelTier, resolution });
     try {
       await spendCredits({
         profileId: profileId!,
@@ -263,7 +285,16 @@ export async function POST(req: Request) {
           : `spend:product_photo:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
         description: "Product Photo generation",
-        metadata: { tool: "photo", jobType: "product_photo", poseId, styleId, quality },
+        metadata: {
+          tool: "photo",
+          jobType: "product_photo",
+          poseId,
+          styleId,
+          modelTier,
+          resolution,
+          pricingKey,
+          providerModel: photoModel.model,
+        },
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
@@ -310,7 +341,7 @@ export async function POST(req: Request) {
       bucket: PRODUCT_PHOTO_BUCKET,
       provider: photoModel.provider,
       model: photoModel.model,
-      metadata: { poseId, styleId, quality },
+      metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },
     }));
     if (asset) photoAssetId = asset.id;
 
@@ -324,15 +355,44 @@ export async function POST(req: Request) {
 
     const prompt = buildProductPhotoPrompt(poseId, styleId);
 
-    await beginStep("image_generation", "Nano Banana product photo generation");
-    console.log(`[Product Photo] Running ${photoModelRef}...`);
-    const output = await runWithRetry(replicate, photoModelRef, {
-      input: {
+    // Build the provider input per tier. We only send parameters each model
+    // actually supports — Basic (google/nano-banana) has NO resolution param;
+    // Balanced (google/nano-banana-2) and Pro (google/nano-banana-pro) take the
+    // resolution enum. We never invent unsupported params.
+    let providerInput: Record<string, unknown>;
+    if (modelTier === "basic") {
+      providerInput = {
         prompt,
         image_input: [productImageUrl],
         aspect_ratio: "4:5",
         output_format: "png",
-      },
+      };
+    } else if (modelTier === "balanced") {
+      providerInput = {
+        prompt,
+        resolution: providerResolution,
+        image_input: [productImageUrl],
+        aspect_ratio: "4:5",
+        google_search: false,
+        image_search: false,
+        output_format: "png",
+      };
+    } else {
+      // pro
+      providerInput = {
+        prompt,
+        resolution: providerResolution,
+        image_input: [productImageUrl],
+        aspect_ratio: "4:5",
+        output_format: "png",
+        allow_fallback_model: false,
+      };
+    }
+
+    await beginStep("image_generation", "Nano Banana product photo generation");
+    console.log(`[Product Photo] Running ${photoModelRef} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
+    const output = await runWithRetry(replicate, photoModelRef, {
+      input: providerInput,
     });
 
     const generatedImageUrl = extractMediaUrl(output);
@@ -375,7 +435,7 @@ export async function POST(req: Request) {
         publicUrl: saved.publicUrl,
         mimeType,
         costCredits: creditsAmount,
-        metadata: { poseId, styleId, quality },
+        metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },
       }));
     }
     if (jobId && profileId) {
@@ -397,7 +457,16 @@ export async function POST(req: Request) {
       unitType: "image_count",
       units: 1,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "product_photo", poseId, styleId, quality },
+      metadata: {
+        jobType: "product_photo",
+        poseId,
+        styleId,
+        modelTier,
+        resolution,
+        pricingKey,
+        providerModel: photoModel.model,
+        providerResolution,
+      },
     }));
 
     const successResponse = {
@@ -417,8 +486,13 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     console.error("[Product Photo] Error:", error);
     const message = error instanceof Error ? error.message : String(error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -456,6 +530,9 @@ export async function POST(req: Request) {
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

@@ -1,9 +1,12 @@
 # Pricing Config v2 — Provider-Cost-Based Pricing
 
-> Status: APPROVED PLAN (documentation only). Nothing in this document has been
-> implemented yet. No migration, schema change, resolver change, route change,
-> admin/UI change, or payment work has been performed. This file captures the
-> agreed design so the team can review before any implementation step.
+> Status: IMPLEMENTED. v2.1 (provider-cost pricing), v2.2 (clean runtime model),
+> and v2.3 (Product Photo model tiers) are live. Sections 1–15 below capture the
+> original approved design; **§16 (v2.2 cleanup)** records the clean runtime
+> behavior; **§17 (v2.3 Product Photo tiers)** is the authoritative, final design
+> for Product Photo and supersedes the Product Photo notes in §16. No payment /
+> top-up / Xendit / subscription work has been performed — this remains pricing
+> config only.
 
 ---
 
@@ -353,3 +356,199 @@ strictly no-cost:
   cost** (video per-second, image per-image), **not** the full literal total cost.
   TTS (MiniMax), Whisper, and LLM sub-calls are currently **not** charged. This is
   an intentional simplification, not literal total-cost parity.
+
+---
+
+## 16. v2.2 cleanup — Clean Runtime Pricing Model (IMPLEMENTED)
+
+> Status: IMPLEMENTED (migration `010_pricing_v2_cleanup.sql`). This section
+> supersedes the v2.1 fallback design described above wherever they differ.
+> Still no payment / top-up / Xendit / subscription work — pricing config only.
+
+**Goal:** remove the legacy/v2 confusion. v2 provider-cost rows are now the ONLY
+normal runtime/admin pricing model. No row shows as "Runtime active (legacy
+amount)", and runtime never falls back to an old undercharging legacy DB row.
+
+### What changed
+
+- **v2 provider-cost rows are the single source of truth.** `billing_settings`
+  remains the only global conversion source (usd_to_idr, credit_value_idr,
+  margin_multiplier, ceil-final).
+- **Legacy generation rows are soft-deprecated**, not deleted. Migration 010 adds
+  `pricing_configs.is_deprecated` and sets `is_deprecated=true, enabled=false` on
+  the five legacy generation keys: `product_photo`, `storyboard_image`,
+  `storyboard_video`, `seedance_video_per_second`, `veo_video_per_second`.
+  `initial_dummy_credits` is untouched (it is a platform credit grant, not a
+  generation price).
+- **New runtime fallback chain** (server resolver + client context, identical):
+  1. v2 DB row (`provider_cost_usd` + `cost_unit`, enabled, not deprecated) ×
+     `billing_settings`
+  2. **built-in v2 defaults** (`lib/pricing-defaults.ts`) × `billing_settings`
+  3. **fail closed** — `PricingConfigError` (`code: PRICING_CONFIG_MISSING`) for an
+     unknown key, thrown BEFORE `createJob` / `spendCredits` / any provider call.
+  The legacy-DB-row and undercharging-constant fallbacks (e.g. the old
+  `2 credits/sec`) are **removed** from the generation pricing path. A
+  missing/disabled v2 row reverts to the built-in v2 default (correct provider
+  cost) — never to a legacy value, and never silently free.
+- **Built-in v2 defaults** (`lib/pricing-defaults.ts`), provider USD per unit:
+  `seedance_480p` 0.07/s · `seedance_720p` 0.15/s · `veo_720p` 0.05/s ·
+  `veo_1080p` 0.08/s · storyboard image `low` 0.012 / `medium` 0.047 / `auto`
+  0.128 per image · product photo `fallback` 0.035 / `1k` 0.15 / `2k` 0.15 / `4k`
+  0.30 per image.
+
+### Storyboard Video now uses Seedance pricing
+
+- The legacy flat **30 credits** path (`getStoryboardVideoCredits`) is removed
+  from runtime. The route accepts a `resolution` (`480p`/`720p`, default `480p`),
+  prices the fixed 15s clip via `getSeedanceCredits({ resolution, durationSec:15 })`,
+  wires the chosen resolution into the Seedance call, and records it in the
+  idempotency hash + job/asset/usage/spend metadata.
+  - 480p × 15s = **95 credits**, 720p × 15s = **203 credits**.
+- `jobType`/tool/ledger identifiers stay `storyboard_video` (they are identifiers,
+  not pricing keys).
+
+### Product Photo now exposes 1K / 2K / 4K
+
+> SUPERSEDED by **§17 (v2.3)**. These `product_photo_{1k,2k,4k}_per_image` keys
+> were ambiguous (they assumed Nano Banana Pro while the app ran plain
+> google/nano-banana) and are now deprecated + disabled. See §17 for the live
+> model-tier design.
+
+- UI shows explicit **1K / 2K / 4K** (default **1K**). Backend accepts only
+  `1k`/`2k`/`4k`; quality is included in pricing, metadata, and the idempotency
+  hash. Pricing keys: `product_photo_1k_per_image` ($0.15 → 14),
+  `product_photo_2k_per_image` ($0.15 → 14), `product_photo_4k_per_image`
+  ($0.30 → 27).
+- **Provider output size remains an OPEN follow-up**: the Nano Banana
+  (`google/nano-banana`) call does not expose a supported 1K/2K/4K size/quality
+  input parameter, and we do not invent unsupported params. Today quality affects
+  **pricing + metadata only**, not the provider's output resolution.
+
+### Storyboard Image
+
+- Runtime default uses `storyboard_gpt_image_2_auto_per_image` = **12 credits**.
+  No fallback to the legacy `storyboard_image` row. No quality selector yet.
+
+### Admin UI
+
+- The pricing tab shows only the **primary v2 provider-cost rows** plus a separate
+  **Platform credit settings** group (`initial_dummy_credits`). `provider_cost_usd`
+  is editable; `credit_amount` is no longer presented as authoritative for v2 rows
+  (saves send `provider_cost_usd` + `enabled`). Deprecated legacy rows live in a
+  collapsed, read-only "Deprecated fallback only · not runtime active" section.
+
+### Worked credit math (factor 90 = 18000/200, margin 1.0, single final ceil)
+
+| Item | Provider cost | Units | Credits |
+|---|---|---|---|
+| Product Photo 1K | $0.15/img | 1 | 14 |
+| Product Photo 2K | $0.15/img | 1 | 14 |
+| Product Photo 4K | $0.30/img | 1 | 27 |
+| Storyboard image (auto) | $0.128/img | 1 | 12 |
+| Storyboard video 480p | $0.07/s | 15 | 95 |
+| Storyboard video 720p | $0.15/s | 15 | 203 |
+| Seedance 720p | $0.15/s | 15 | 203 |
+| Veo 720p | $0.05/s | 15 | 68 |
+
+---
+
+## 17. v2.3 — Product Photo model tiers (Basic / Balanced / Pro)
+
+> Status: IMPLEMENTED (migration `011_product_photo_model_tiers.sql`). Authoritative
+> for Product Photo; supersedes the §16 "1K / 2K / 4K" notes. No provider /
+> generation / payment / cron calls were made to verify this — math is checked
+> against the shared pricing formula and read-only DB queries only.
+
+### Why the old design was wrong
+
+The previous Product Photo pricing (`product_photo_fallback/1k/2k/4k_per_image`)
+assumed the tool ran **Nano Banana Pro** with a 1K/2K/4K size parameter. In
+reality the route called plain **`google/nano-banana`**, which:
+
+- has **no resolution / size parameter**, and
+- has a **different, lower provider cost** ($0.039/image).
+
+So the "1K/2K/4K" tiers charged Pro-level credits (14/14/27) for a model that
+neither cost that much nor accepted a resolution. The keys were ambiguous and are
+now **deprecated + disabled** (kept for audit, never read by the runtime).
+
+### The three real tiers
+
+| Tier | Provider model | Resolution param | Provider USD | Credits (factor 90) |
+|---|---|---|---|---|
+| **Basic** | `google/nano-banana` | none | $0.039 | **4** |
+| **Balanced 1K** | `google/nano-banana-2` | `1K` | $0.067 | **7** |
+| **Balanced 2K** | `google/nano-banana-2` | `2K` | $0.101 | **10** |
+| **Balanced 4K** | `google/nano-banana-2` | `4K` | $0.151 | **14** |
+| **Pro 1K** | `google/nano-banana-pro` | `1K` | $0.15 | **14** |
+| **Pro 2K** | `google/nano-banana-pro` | `2K` | $0.15 | **14** |
+| **Pro 4K** | `google/nano-banana-pro` | `4K` | $0.30 | **27** |
+
+Credit math: `ceil(provider_usd × 90)` (usd_to_idr 18000 / credit_value_idr 200 ×
+margin 1.0), single final ceil. e.g. Basic `ceil(0.039 × 90) = ceil(3.51) = 4`;
+Pro 4K `ceil(0.30 × 90) = 27`.
+
+### Pricing keys (v2 provider-cost rows)
+
+- `product_photo_nano_banana_per_image` — Basic ($0.039 → 4)
+- `product_photo_nano_banana_2_1k_per_image` — Balanced 1K ($0.067 → 7)
+- `product_photo_nano_banana_2_2k_per_image` — Balanced 2K ($0.101 → 10)
+- `product_photo_nano_banana_2_4k_per_image` — Balanced 4K ($0.151 → 14)
+- `product_photo_nano_banana_pro_1k_per_image` — Pro 1K ($0.15 → 14)
+- `product_photo_nano_banana_pro_2k_per_image` — Pro 2K ($0.15 → 14)
+- `product_photo_nano_banana_pro_4k_per_image` — Pro 4K ($0.30 → 27)
+
+Deprecated + disabled (audit only, never resolved at runtime):
+`product_photo_fallback_per_image`, `product_photo_1k_per_image`,
+`product_photo_2k_per_image`, `product_photo_4k_per_image`.
+
+### Model roles (`model_configs`)
+
+- `photo.image_basic` → `google/nano-banana` (enabled)
+- `photo.image_balanced` → `google/nano-banana-2` (enabled)
+- `photo.image_pro` → `google/nano-banana-pro` (enabled)
+- `photo.image` (legacy single role) → **disabled**, `metadata.deprecated=true`
+  (soft-retired; built-in fallback retained so any legacy caller still works).
+
+The route resolves the model via `getPhotoModel(modelTier)` (per-tier role with a
+built-in per-tier fallback), not the old `getPhotoModels().image`.
+
+### Resolution: Basic has none, Balanced/Pro support it
+
+- **Basic** (`google/nano-banana`) sends **no** `resolution` param. The UI hides
+  the resolution selector and the server normalizes any incoming resolution to
+  `null`.
+- **Balanced** (`google/nano-banana-2`) and **Pro** (`google/nano-banana-pro`)
+  require a resolution; the UI value `1k`/`2k`/`4k` maps to the provider enum
+  `"1K"`/`"2K"`/`"4K"`. Default resolution is **1K**.
+
+### Provider input by tier (only supported params; none invented)
+
+- **Basic** `google/nano-banana`: `prompt`, `image_input`, `aspect_ratio`,
+  `output_format` — **no `resolution`**.
+- **Balanced** `google/nano-banana-2`: `prompt`, `resolution`, `image_input`,
+  `aspect_ratio`, `google_search: false`, `image_search: false`, `output_format`.
+- **Pro** `google/nano-banana-pro`: `prompt`, `resolution`, `image_input`,
+  `aspect_ratio`, `output_format`, `allow_fallback_model: false`.
+
+### Backend validation (`app/api/generate-photo/route.ts`)
+
+- Default `modelTier = basic`, default `resolution = 1k` (only used by
+  balanced/pro).
+- Invalid `modelTier` → **400**.
+- Balanced/Pro with a missing or invalid `resolution` → **400**.
+- Basic + any `resolution` → normalized to `null` (no 400).
+- `modelTier`, normalized `resolution`, the resolved `pricingKey`, the provider
+  `model`, and the provider `resolution` enum are included in the **idempotency
+  hash** and in job / spend / asset / usage metadata.
+- Pricing fails closed: an unknown tier/resolution pricing key throws
+  `PricingConfigError` **before** any spend/provider call (HTTP 500,
+  `code: PRICING_CONFIG_MISSING`). No fallback to the deprecated
+  `product_photo_{1k,2k,4k}` keys.
+
+### Defaults / UX
+
+- Recommended default tier: **Basic** (cheapest, fastest; matches the prior
+  real provider). Balanced is positioned as "best value", Pro as "highest
+  quality".
+- Generate button shows the live credit cost for the selected tier (+ resolution).

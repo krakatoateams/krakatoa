@@ -4,49 +4,70 @@ import {
   type PricingType,
   type CostUnit,
 } from "@/lib/pricing-configs-db";
-import {
-  INITIAL_DUMMY_CREDITS,
-  VIDEO_CREDITS_PER_SECOND,
-  estimateProductPhotoCredits,
-  estimateStoryboardImageCredits,
-  estimateStoryboardVideoCredits,
-} from "@/lib/credit-costs";
+import { INITIAL_DUMMY_CREDITS } from "@/lib/credit-costs";
 import {
   type BillingSettings,
   type PricingRow,
-  DEFAULT_BILLING_SETTINGS,
-  videoCreditsFromRow,
-  imageCreditsFromRow,
+  calculateCredits,
   runCreditsFromRow,
   seedancePricingKey,
   veoPricingKey,
 } from "@/lib/pricing-math";
 import { getBillingSettings } from "@/lib/billing-settings-db";
-import { productPhotoPricingKey } from "@/lib/product-photo";
+import {
+  productPhotoPricingKey,
+  type ProductPhotoModelTier,
+  type ProductPhotoResolution,
+} from "@/lib/product-photo";
+import { V2_PRICING_DEFAULTS } from "@/lib/pricing-defaults";
 
 /**
- * Runtime pricing resolver (Admin Phase 2, Pricing Config v2.1).
+ * Runtime pricing resolver (Pricing Config v2.2 — Clean Runtime Pricing Model).
  *
- * Reads admin-editable `pricing_configs` + the `billing_settings` knobs and
- * returns the effective credit cost. Two pricing paths:
+ * v2 provider-cost rows are the ONLY configurable runtime pricing source. Credits
+ * are derived from the provider USD cost via lib/pricing-math.ts:
+ *   credits = ceil(provider_cost_usd * unit_count * usd_to_idr
+ *                  * margin_multiplier / credit_value_idr)
+ * with a SINGLE final ceil (no per-second rounding; total USD first).
  *
- *   v2 (provider-cost): when a row has provider_cost_usd + cost_unit, credits are
- *       computed via lib/pricing-math.ts: ceil(cost_usd * units * usd_to_idr *
- *       margin / credit_value_idr) with a SINGLE final ceil (no per-second
- *       rounding).
- *   legacy: when provider_cost_usd is absent, the row's credit_amount is used
- *       (per-second rate for video, flat for image/fixed), then the
- *       lib/credit-costs.ts constants.
+ * Fallback chain (per pricing key):
+ *   1. v2 DB row (enabled, provider_cost_usd >= 0, cost_unit) + billing_settings
+ *   2. built-in v2 default (lib/pricing-defaults.ts) + billing_settings
+ *   3. fail closed — throw PricingConfigError before job/spend/provider
  *
- * Fallback chain (never throws): v2 provider_cost -> row credit_amount ->
- * legacy-key credit_amount -> lib/credit-costs.ts constant.
+ * Removed in v2.2: the legacy-DB-row + undercharging-constant fallbacks (e.g. the
+ * old 2 credits/sec `seedance_video_per_second` row). The resolver NEVER reads the
+ * soft-deprecated legacy generation rows. A missing/disabled v2 row reverts to the
+ * built-in v2 default (correct provider cost) — never to an undercharging legacy
+ * value, and never silently free.
+ *
+ * Special-cased: initial_dummy_credits is a platform credit grant (fixed
+ * credit_amount), NOT a generation provider-cost price — it keeps its own path.
  *
  * Guarantees:
- *   - NEVER throws (every path returns a usable number).
+ *   - Only throws PricingConfigError, and only for an unknown pricing key (a
+ *     programming error: every tool maps to a key present in the built-in map).
  *   - Video pricing floors at 1 credit (never zero-cost).
  *   - Reads no secrets and touches no payment/external services.
- *   - Keeps a 60s TTL cache (billing settings cache lives in billing-settings-db).
+ *   - 60s TTL cache (billing settings cache lives in billing-settings-db).
  */
+
+/**
+ * Thrown when a pricing key has neither a usable v2 DB row nor a built-in v2
+ * default. Generation routes catch this BEFORE createJob/spend/provider and
+ * return HTTP 500 with code PRICING_CONFIG_MISSING (fail closed).
+ */
+export class PricingConfigError extends Error {
+  readonly code = "PRICING_CONFIG_MISSING" as const;
+  readonly pricingKey: string;
+  constructor(pricingKey: string) {
+    super(
+      `No pricing configuration found for "${pricingKey}". An admin must configure this provider-cost pricing before the generation can run.`
+    );
+    this.name = "PricingConfigError";
+    this.pricingKey = pricingKey;
+  }
+}
 
 const CACHE_TTL_MS = 60_000;
 
@@ -59,7 +80,8 @@ let cache: PricingCache = { map: null, expiresAt: 0 };
 
 /**
  * Return a cached map of pricing_configs by pricing_key, or null if the DB read
- * fails. A failed read is not cached so the next call retries.
+ * fails. A failed read is not cached so the next call retries. A null map makes
+ * every lookup fall back to the built-in v2 defaults (never undercharge).
  */
 async function getPricingMap(): Promise<Map<string, PricingConfig> | null> {
   const now = Date.now();
@@ -72,7 +94,7 @@ async function getPricingMap(): Promise<Map<string, PricingConfig> | null> {
     cache = { map, expiresAt: now + CACHE_TTL_MS };
     return map;
   } catch (e) {
-    console.warn("[pricing-resolver] DB read failed, using fallback constants:", e);
+    console.warn("[pricing-resolver] DB read failed, using built-in v2 defaults:", e);
     return null;
   }
 }
@@ -110,118 +132,109 @@ function toRow(cfg: PricingConfig | null): PricingRow | null {
   };
 }
 
-/** A legacy row is a usable per-second rate source. */
-function usablePerSecondRate(cfg: PricingConfig | null): number | null {
-  if (
-    cfg &&
-    cfg.enabled &&
-    Number.isInteger(cfg.credit_amount) &&
-    cfg.credit_amount >= 0
-  ) {
-    return cfg.credit_amount;
-  }
-  return null;
-}
-
-/** A legacy row is a usable per-image / fixed amount source. */
+/** A legacy row is a usable per-image / fixed amount source (initial credits). */
 function usableFixedAmount(cfg: PricingConfig | null): number | null {
-  if (
-    cfg &&
-    cfg.enabled &&
-    Number.isInteger(cfg.credit_amount) &&
-    cfg.credit_amount >= 0
-  ) {
-    return cfg.credit_amount;
+  const amt = coerceNum(cfg?.credit_amount);
+  if (cfg && cfg.enabled && amt !== null && Number.isInteger(amt) && amt >= 0) {
+    return amt;
   }
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// Video pricing (per second) — v2 provider-cost path with fallback chain.
+// v2 resolution core — the ONLY source of generation provider costs.
 // ---------------------------------------------------------------------------
 
-async function computeVideoCredits(params: {
-  pricingKey: string;
-  durationSec: number;
-  legacyKey?: string;
-}): Promise<number> {
-  try {
-    const [settings, row] = await Promise.all([
-      getBillingSettings(),
-      getPricingConfig(params.pricingKey),
-    ]);
+type ResolvedCost = {
+  providerCostUsd: number;
+  costUnit: CostUnit;
+  source: "db" | "default";
+};
 
-    // Legacy fallback rate: the old per-second key, else the constant.
-    let fallbackRate = VIDEO_CREDITS_PER_SECOND;
-    if (params.legacyKey) {
-      const legacy = await getPricingConfig(params.legacyKey);
-      const rate = usablePerSecondRate(legacy);
-      if (rate !== null) fallbackRate = rate;
+/**
+ * Resolve a pricing key to its authoritative provider USD cost via the v2 chain:
+ * DB row -> built-in v2 default -> fail closed. A deprecated/disabled/invalid DB
+ * row falls through to the built-in default (never undercharges, never free).
+ */
+function resolveProviderCost(
+  pricingKey: string,
+  dbRow: PricingConfig | null
+): ResolvedCost {
+  // 1) v2 DB row: authoritative only when enabled, not deprecated, with a valid
+  //    provider cost and a cost unit.
+  if (dbRow && dbRow.enabled && !dbRow.is_deprecated) {
+    const cost = coerceNum(dbRow.provider_cost_usd);
+    const unit = (dbRow.cost_unit as CostUnit | null) ?? null;
+    if (cost !== null && cost >= 0 && unit !== null) {
+      return { providerCostUsd: cost, costUnit: unit, source: "db" };
     }
-
-    if (row?.enabled === false) {
-      console.warn(`[pricing-resolver] '${params.pricingKey}' disabled — using fallback rate.`);
-    }
-    return videoCreditsFromRow(toRow(row), params.durationSec, settings, fallbackRate);
-  } catch (e) {
-    console.warn(`[pricing-resolver] video '${params.pricingKey}' failed, using constant:`, e);
-    return videoCreditsFromRow(null, params.durationSec, DEFAULT_BILLING_SETTINGS, VIDEO_CREDITS_PER_SECOND);
   }
+
+  // 2) Built-in v2 default.
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (def) {
+    if (dbRow && (!dbRow.enabled || dbRow.is_deprecated)) {
+      console.warn(
+        `[pricing-resolver] "${pricingKey}" DB row is disabled/deprecated — using built-in v2 default (${def.providerCostUsd} USD).`
+      );
+    } else if (dbRow) {
+      console.warn(
+        `[pricing-resolver] "${pricingKey}" DB row has no usable provider_cost_usd/cost_unit — using built-in v2 default.`
+      );
+    }
+    return { providerCostUsd: def.providerCostUsd, costUnit: def.costUnit, source: "default" };
+  }
+
+  // 3) Fail closed — unknown pricing key. Caller must surface before any spend.
+  throw new PricingConfigError(pricingKey);
 }
 
-// ---------------------------------------------------------------------------
-// Image pricing (per image) — v2 provider-cost path with fallback chain.
-// ---------------------------------------------------------------------------
-
-async function computeImageCredits(params: {
-  pricingKey: string;
-  imageCount: number;
-  legacyKey?: string;
-  fallbackConstant: number;
-}): Promise<number> {
-  try {
-    const [settings, row] = await Promise.all([
-      getBillingSettings(),
-      getPricingConfig(params.pricingKey),
-    ]);
-
-    // Legacy fallback per-image amount: the old key, else the constant.
-    let fallbackPerImage = params.fallbackConstant;
-    if (params.legacyKey) {
-      const legacy = await getPricingConfig(params.legacyKey);
-      const amt = usableFixedAmount(legacy);
-      if (amt !== null) fallbackPerImage = amt;
-    }
-
-    if (row?.enabled === false) {
-      console.warn(`[pricing-resolver] '${params.pricingKey}' disabled — using fallback.`);
-    }
-    return imageCreditsFromRow(toRow(row), params.imageCount, settings, fallbackPerImage);
-  } catch (e) {
-    console.warn(`[pricing-resolver] image '${params.pricingKey}' failed, using constant:`, e);
-    return imageCreditsFromRow(null, params.imageCount, DEFAULT_BILLING_SETTINGS, params.fallbackConstant);
-  }
+/** Per-second video credits via the v2 chain. Floors at 1 (never zero-cost). */
+async function computeVideoCreditsV2(
+  pricingKey: string,
+  durationSec: number
+): Promise<number> {
+  const [settings, dbRow] = await Promise.all([
+    getBillingSettings(),
+    getPricingConfig(pricingKey),
+  ]);
+  const { providerCostUsd } = resolveProviderCost(pricingKey, dbRow);
+  const dur = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+  return Math.max(1, calculateCredits({ providerCostUsd, unitCount: dur, settings }));
 }
 
-/** Resolve a legacy fixed (per-generation) credit cost with fallback. Never throws. */
+/** Per-image credits via the v2 chain. No 1-credit floor (0-cost honored). */
+async function computeImageCreditsV2(
+  pricingKey: string,
+  imageCount: number
+): Promise<number> {
+  const [settings, dbRow] = await Promise.all([
+    getBillingSettings(),
+    getPricingConfig(pricingKey),
+  ]);
+  const { providerCostUsd } = resolveProviderCost(pricingKey, dbRow);
+  const count = Number.isFinite(imageCount) ? Math.max(0, imageCount) : 0;
+  return calculateCredits({ providerCostUsd, unitCount: count, settings });
+}
+
+/**
+ * Resolve a platform fixed credit amount (e.g. initial_dummy_credits). This is a
+ * credit GRANT, not a provider-cost price, so it keeps the legacy credit_amount
+ * path with a built-in fallback. Never throws.
+ */
 async function fixedCredits(pricingKey: string, fallback: number): Promise<number> {
   try {
     const cfg = await getPricingConfig(pricingKey);
     const amt = usableFixedAmount(cfg);
-    if (amt !== null) {
-      if (amt === 0) {
-        console.warn(`[pricing-resolver] '${pricingKey}' is set to 0 credits (free) by admin config.`);
-      }
-      return amt;
-    }
+    if (amt !== null) return amt;
   } catch (e) {
-    console.warn(`[pricing-resolver] '${pricingKey}' fixed lookup failed, using fallback:`, e);
+    console.warn(`[pricing-resolver] "${pricingKey}" fixed lookup failed, using fallback:`, e);
   }
   return fallback;
 }
 
 // ---------------------------------------------------------------------------
-// Public tool-pricing functions.
+// Public tool-pricing functions (all v2 provider-cost based).
 // ---------------------------------------------------------------------------
 
 /** ReelsGen/Seedance cost by resolution × total duration (single final ceil). */
@@ -229,11 +242,7 @@ export async function getSeedanceCredits(params: {
   resolution?: string;
   durationSec: number;
 }): Promise<number> {
-  return computeVideoCredits({
-    pricingKey: seedancePricingKey(params.resolution),
-    durationSec: params.durationSec,
-    legacyKey: "seedance_video_per_second",
-  });
+  return computeVideoCreditsV2(seedancePricingKey(params.resolution), params.durationSec);
 }
 
 /** Veo cost by resolution × total duration (single final ceil). */
@@ -241,38 +250,30 @@ export async function getVeoCredits(params: {
   resolution?: string;
   durationSec: number;
 }): Promise<number> {
-  return computeVideoCredits({
-    pricingKey: veoPricingKey(params.resolution),
-    durationSec: params.durationSec,
-    legacyKey: "veo_video_per_second",
-  });
+  return computeVideoCreditsV2(veoPricingKey(params.resolution), params.durationSec);
 }
 
-/** Generic per-second video pricing by explicit key. */
+/** Generic per-second video pricing by explicit v2 key (fail closed if unknown). */
 export async function getVideoCredits(params: {
   pricingKey: string;
   durationSec: number;
-  legacyKey?: string;
 }): Promise<number> {
-  return computeVideoCredits(params);
+  return computeVideoCreditsV2(params.pricingKey, params.durationSec);
 }
 
-/** Generic per-image pricing by explicit key. */
+/** Generic per-image pricing by explicit v2 key (fail closed if unknown). */
 export async function getImageCredits(params: {
   pricingKey: string;
   imageCount: number;
-  legacyKey?: string;
-  fallbackConstant?: number;
 }): Promise<number> {
-  return computeImageCredits({
-    pricingKey: params.pricingKey,
-    imageCount: params.imageCount,
-    legacyKey: params.legacyKey,
-    fallbackConstant: params.fallbackConstant ?? 0,
-  });
+  return computeImageCreditsV2(params.pricingKey, params.imageCount);
 }
 
-/** Generic per-run pricing by explicit key (e.g. Whisper — informational only). */
+/**
+ * Generic per-run pricing by explicit key (informational/analytics only — e.g.
+ * Whisper). Soft: returns the fallback when no usable row exists (never throws,
+ * never blocks a generation, since this is not a charged path).
+ */
 export async function getRunCredits(params: {
   pricingKey: string;
   fallbackConstant?: number;
@@ -284,7 +285,7 @@ export async function getRunCredits(params: {
     ]);
     return runCreditsFromRow(toRow(row), settings, params.fallbackConstant ?? 0);
   } catch (e) {
-    console.warn(`[pricing-resolver] run '${params.pricingKey}' failed, using constant:`, e);
+    console.warn(`[pricing-resolver] run "${params.pricingKey}" failed, using constant:`, e);
     return Math.max(0, Math.ceil(params.fallbackConstant ?? 0));
   }
 }
@@ -300,131 +301,112 @@ export async function getStoryboardImageCredits(params?: {
       : quality === "medium"
         ? "storyboard_gpt_image_2_medium_per_image"
         : "storyboard_gpt_image_2_auto_per_image";
-  return computeImageCredits({
-    pricingKey: key,
-    imageCount: 1,
-    legacyKey: "storyboard_image",
-    fallbackConstant: estimateStoryboardImageCredits(),
-  });
+  return computeImageCreditsV2(key, 1);
 }
 
 /**
- * Product Photo cost by quality tier. standard -> 1K, ultra_4k -> 4K, low ->
- * fallback. Falls back to the legacy `product_photo` row then PRODUCT_PHOTO_CREDITS.
+ * Product Photo cost by model tier + resolution (v2.3).
+ *   - basic    -> product_photo_nano_banana_per_image (no resolution)
+ *   - balanced -> product_photo_nano_banana_2_{1k,2k,4k}_per_image
+ *   - pro      -> product_photo_nano_banana_pro_{1k,2k,4k}_per_image
+ * v2 provider-cost based. Fails closed on an unknown tier/resolution pricing key;
+ * never falls back to the deprecated ambiguous product_photo_{1k,2k,4k} keys.
  */
-export async function getProductPhotoCredits(params?: {
-  quality?: string;
+export async function getProductPhotoCredits(params: {
+  modelTier: ProductPhotoModelTier;
+  resolution: ProductPhotoResolution | null;
 }): Promise<number> {
-  const key = productPhotoPricingKey(params?.quality ?? "standard");
-  return computeImageCredits({
-    pricingKey: key,
-    imageCount: 1,
-    legacyKey: "product_photo",
-    fallbackConstant: estimateProductPhotoCredits(),
+  const key = productPhotoPricingKey({
+    modelTier: params.modelTier,
+    resolution: params.resolution,
   });
-}
-
-/**
- * Storyboard video cost (fixed). Pricing Config v2.1 keeps this on the legacy
- * fixed path (least-risky behavior): the storyboard-video route runs a Seedance
- * 720p 15s clip, but charging it the full per-second provider cost (~203 cr) would
- * be a large jump from the current flat 30 cr. Left as a follow-up to migrate to
- * per-second pricing intentionally. Falls back to STORYBOARD_VIDEO_CREDITS.
- */
-export async function getStoryboardVideoCredits(): Promise<number> {
-  return fixedCredits("storyboard_video", estimateStoryboardVideoCredits());
+  return computeImageCreditsV2(key, 1);
 }
 
 /**
  * Initial dummy credit grant (fixed). NOT consumed by generation routes — the
  * seed/trigger in 006_dummy_credits.sql grants these. Falls back to
- * INITIAL_DUMMY_CREDITS.
+ * INITIAL_DUMMY_CREDITS. (Platform credit grant, not a provider-cost price.)
  */
 export async function getInitialDummyCredits(): Promise<number> {
   return fixedCredits("initial_dummy_credits", INITIAL_DUMMY_CREDITS);
 }
 
 // ---------------------------------------------------------------------------
-// Client-facing snapshots (used by /api/credits/pricing).
+// Client-facing payload (used by /api/credits/pricing).
 // ---------------------------------------------------------------------------
 
-/** Legacy effective-pricing snapshot (kept for backward-compatible UI fallback). */
-export type EffectivePricing = {
-  seedanceRatePerSecond: number;
-  veoRatePerSecond: number;
-  storyboardImage: number;
-  storyboardVideo: number;
-  productPhoto: number;
-};
-
-/** A safe, public subset of a pricing_configs row (no audit/secret fields). */
+/**
+ * A safe, public subset of a v2 pricing_configs row (no audit/secret fields).
+ * Only PRIMARY v2 provider-cost rows are exposed — never legacy/deprecated rows.
+ */
 export type PublicPricingConfig = {
   pricingKey: string;
   displayName: string;
   pricingType: PricingType;
-  creditAmount: number;
   enabled: boolean;
   providerCostUsd: number | null;
   costUnit: CostUnit | null;
   pricingGroup: string | null;
   variantKey: string | null;
   currency: string;
+  /** Credits for ONE unit at the current billing settings (single final ceil). */
+  computedCreditsPreview: number;
+  /** Always true for rows in this payload — they are the runtime pricing source. */
+  isPrimaryRuntimePrice: true;
 };
 
-function toPublicConfig(cfg: PricingConfig): PublicPricingConfig {
+function toPublicConfig(cfg: PricingConfig, settings: BillingSettings): PublicPricingConfig {
+  const providerCostUsd = coerceNum(cfg.provider_cost_usd);
+  const computedCreditsPreview =
+    providerCostUsd !== null
+      ? calculateCredits({ providerCostUsd, unitCount: 1, settings })
+      : 0;
   return {
     pricingKey: cfg.pricing_key,
     displayName: cfg.display_name,
     pricingType: cfg.pricing_type,
-    creditAmount: coerceNum(cfg.credit_amount) ?? 0,
     enabled: cfg.enabled,
-    providerCostUsd: coerceNum(cfg.provider_cost_usd),
+    providerCostUsd,
     costUnit: (cfg.cost_unit as CostUnit | null) ?? null,
     pricingGroup: cfg.pricing_group ?? null,
     variantKey: cfg.variant_key ?? null,
     currency: cfg.currency ?? "USD",
+    computedCreditsPreview,
+    isPrimaryRuntimePrice: true,
   };
 }
 
-/**
- * Effective pricing snapshot for client labels (post-fallback). Returns plain
- * numbers the UI can use directly. Never throws. The rate fields are best-effort
- * legacy values kept only as a client fallback — v2 labels compute from `configs`.
- */
-export async function getEffectivePricing(): Promise<EffectivePricing> {
-  const rateOf = async (key: string, fallback: number): Promise<number> => {
-    const rate = usablePerSecondRate(await getPricingConfig(key));
-    return rate ?? fallback;
-  };
-
-  return {
-    seedanceRatePerSecond: await rateOf("seedance_video_per_second", VIDEO_CREDITS_PER_SECOND),
-    veoRatePerSecond: await rateOf("veo_video_per_second", VIDEO_CREDITS_PER_SECOND),
-    storyboardImage: await getStoryboardImageCredits(),
-    storyboardVideo: await getStoryboardVideoCredits(),
-    productPhoto: await getProductPhotoCredits(),
-  };
+/** A v2 row is a primary runtime price: not deprecated, with a provider cost + unit. */
+function isPrimaryV2Row(cfg: PricingConfig): boolean {
+  return (
+    !cfg.is_deprecated &&
+    coerceNum(cfg.provider_cost_usd) !== null &&
+    ((cfg.cost_unit as CostUnit | null) ?? null) !== null
+  );
 }
 
 /**
- * Full pricing payload for /api/credits/pricing: billing settings + the public
- * v2 config rows + the legacy snapshot. Lets the client compute labels with the
- * SAME pricing math the server bills with. Never throws.
+ * Pricing payload for /api/credits/pricing: billing settings + the PRIMARY v2
+ * provider-cost configs only. Legacy/deprecated rows are never exposed. Lets the
+ * client compute labels with the SAME pricing math the server bills with. The
+ * client falls back to the built-in v2 defaults (lib/pricing-defaults.ts) for any
+ * key not present here. Never throws.
  */
 export async function getPricingPayload(): Promise<{
   billingSettings: BillingSettings;
   configs: PublicPricingConfig[];
-  pricing: EffectivePricing;
 }> {
-  const [billingSettings, map, pricing] = await Promise.all([
+  const [billingSettings, map] = await Promise.all([
     getBillingSettings(),
     getPricingMap(),
-    getEffectivePricing(),
   ]);
 
   const configs = map
-    ? Array.from(map.values()).map(toPublicConfig)
+    ? Array.from(map.values())
+        .filter(isPrimaryV2Row)
+        .map((cfg) => toPublicConfig(cfg, billingSettings))
     : [];
 
-  return { billingSettings, configs, pricing };
+  return { billingSettings, configs };
 }

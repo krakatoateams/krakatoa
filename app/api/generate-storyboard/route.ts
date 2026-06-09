@@ -23,7 +23,7 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { getStoryboardImageCredits } from "@/lib/pricing-resolver";
+import { getStoryboardImageCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
@@ -353,8 +353,9 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard image is a flat 2 credits. Insufficient → 402 with no
-    // provider call; other infra failures bubble to outer catch as 500.
+    // Storyboard image is priced from the GPT Image 2 `auto` tier provider cost
+    // (v2.2 default 12 credits). Insufficient → 402 with no provider call; other
+    // infra failures bubble to outer catch as 500.
     const requiredCredits = await getStoryboardImageCredits();
     try {
       await spendCredits({
@@ -631,8 +632,13 @@ export async function POST(req: Request) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error("[Storyboard] Error:", error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -666,6 +672,9 @@ export async function POST(req: Request) {
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

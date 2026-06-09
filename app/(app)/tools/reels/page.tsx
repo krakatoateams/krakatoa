@@ -163,12 +163,16 @@ export default function ReelsPage() {
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
-  // Effective pricing (Pricing Config v2.1): the resolver-backed billing settings
+  // Effective pricing (Pricing Config v2.2): the resolver-backed billing settings
   // and per-tier provider costs are fetched once on mount. Labels compute through
   // the SAME shared pricing math the server bills with (videoCredits/imageCredits),
-  // so the on-screen cost matches the charge within the ~60s cache window. The
-  // legacy snapshot (pricing.*) is the built-in fallback while loading / on error.
-  const { pricing, videoCredits, imageCredits } = usePricing();
+  // so the on-screen cost matches the charge within the ~60s cache window. For any
+  // key not yet fetched the context falls back to the built-in v2 defaults.
+  const { videoCredits, imageCredits } = usePricing();
+
+  // Storyboard-to-video resolution (Pricing Config v2.2). Drives the Seedance
+  // per-second pricing tier for the fixed 15s clip. Default 480p (lower cost).
+  const [storyboardVideoResolution, setStoryboardVideoResolution] = useState<"480p" | "720p">("480p");
 
   // Credit cost previews — provider-cost based. Video totals the duration first,
   // then converts to credits with a single final ceil (no per-second rounding).
@@ -177,10 +181,9 @@ export default function ReelsPage() {
     () =>
       videoCredits(
         seedancePricingKey(resolution),
-        Math.max(1, Number(numScenes) || 1) * Math.max(1, Number(durationPerScene) || 5),
-        pricing.seedanceRatePerSecond
+        Math.max(1, Number(numScenes) || 1) * Math.max(1, Number(durationPerScene) || 5)
       ),
-    [numScenes, durationPerScene, resolution, videoCredits, pricing.seedanceRatePerSecond]
+    [numScenes, durationPerScene, resolution, videoCredits]
   );
   const veoCost = useMemo(() => {
     const dur = Math.max(1, Number(veoDuration) || 6);
@@ -188,14 +191,14 @@ export default function ReelsPage() {
       veoMode === "single" ? 1 : Math.min(3, Math.max(1, Number(veoNumScenes) || 1));
     // Mirror the route: single mode bills the clip duration; perScene multiplies
     // by the (clamped) scene count.
-    return videoCredits(veoPricingKey(veoResolution), dur * sceneCount, pricing.veoRatePerSecond);
-  }, [veoMode, veoDuration, veoNumScenes, veoResolution, videoCredits, pricing.veoRatePerSecond]);
-  const storyboardImageCost = imageCredits(
-    "storyboard_gpt_image_2_auto_per_image",
-    1,
-    pricing.storyboardImage
+    return videoCredits(veoPricingKey(veoResolution), dur * sceneCount);
+  }, [veoMode, veoDuration, veoNumScenes, veoResolution, videoCredits]);
+  const storyboardImageCost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
+  // 15s fixed clip priced via the Seedance tier for the selected resolution.
+  const storyboardVideoCost = videoCredits(
+    seedancePricingKey(storyboardVideoResolution),
+    15
   );
-  const storyboardVideoCost = pricing.storyboardVideo;
 
   const fetchStoryboards = useCallback(async () => {
     try {
@@ -429,7 +432,7 @@ export default function ReelsPage() {
           "Content-Type": "application/json",
           "Idempotency-Key": newIdempotencyKey(),
         },
-        body: JSON.stringify({ storyboardId: id }),
+        body: JSON.stringify({ storyboardId: id, resolution: storyboardVideoResolution }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -624,6 +627,29 @@ export default function ReelsPage() {
                             alt="Generated storyboard"
                             className="w-full h-auto object-contain max-h-[480px] mx-auto"
                           />
+                        </div>
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                          <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
+                            <Monitor className="w-4 h-4 text-emerald-400" />
+                            Video quality
+                          </div>
+                          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+                            {(["480p", "720p"] as const).map((res) => (
+                              <button
+                                key={res}
+                                type="button"
+                                onClick={() => setStoryboardVideoResolution(res)}
+                                disabled={videoLoading}
+                                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all disabled:opacity-40 ${
+                                  storyboardVideoResolution === res
+                                    ? "bg-emerald-600 text-white"
+                                    : "text-slate-400 hover:text-white"
+                                }`}
+                              >
+                                {res}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-3">
                           <button

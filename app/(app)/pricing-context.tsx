@@ -3,29 +3,25 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
-  PRODUCT_PHOTO_CREDITS,
-  STORYBOARD_IMAGE_CREDITS,
-  STORYBOARD_VIDEO_CREDITS,
-  VIDEO_CREDITS_PER_SECOND,
-} from "@/lib/credit-costs";
-import {
   type BillingSettings,
   type CostUnit,
-  type PricingRow,
   DEFAULT_BILLING_SETTINGS,
   normalizeBillingSettings,
-  videoCreditsFromRow,
-  imageCreditsFromRow,
-  runCreditsFromRow,
+  calculateCredits,
 } from "@/lib/pricing-math";
+import { V2_PRICING_DEFAULTS } from "@/lib/pricing-defaults";
 
 /**
- * Client-side effective pricing cache for cost labels (Pricing Config v2.1).
+ * Client-side pricing cache for cost labels (Pricing Config v2.2).
+ *
  * Fetches once on mount (no polling) and fails silently. Exposes the billing
- * settings + the public v2 config rows so labels are computed with the SAME
- * lib/pricing-math.ts the server bills with — preventing FE/BE drift. When the
- * fetch fails/pending, helpers fall back to the canonical credit-costs constants
- * so labels never show NaN/0.
+ * settings + the PRIMARY v2 provider-cost configs so labels are computed with the
+ * SAME lib/pricing-math.ts the server bills with — preventing FE/BE drift.
+ *
+ * Fallback model (matches the server resolver exactly): for any pricing key not
+ * present in the fetched configs (fetch pending/failed, or a brand-new key), the
+ * client uses the typed built-in v2 defaults (lib/pricing-defaults.ts) — NOT the
+ * old legacy numbers. So labels never show NaN and never undercharge.
  *
  * Holds NO balance, transaction, payment, or secret data.
  */
@@ -34,69 +30,27 @@ export type PublicPricingConfig = {
   pricingKey: string;
   displayName: string;
   pricingType: "fixed" | "per_second" | "per_image";
-  creditAmount: number;
   enabled: boolean;
   providerCostUsd: number | null;
   costUnit: CostUnit | null;
   pricingGroup: string | null;
   variantKey: string | null;
   currency: string;
-};
-
-// Legacy snapshot kept as the ultimate fallback for known tools.
-export type EffectivePricing = {
-  seedanceRatePerSecond: number;
-  veoRatePerSecond: number;
-  storyboardImage: number;
-  storyboardVideo: number;
-  productPhoto: number;
-};
-
-const FALLBACK_PRICING: EffectivePricing = {
-  seedanceRatePerSecond: VIDEO_CREDITS_PER_SECOND,
-  veoRatePerSecond: VIDEO_CREDITS_PER_SECOND,
-  storyboardImage: STORYBOARD_IMAGE_CREDITS,
-  storyboardVideo: STORYBOARD_VIDEO_CREDITS,
-  productPhoto: PRODUCT_PHOTO_CREDITS,
+  computedCreditsPreview: number;
+  isPrimaryRuntimePrice: true;
 };
 
 type PricingState = {
   billingSettings: BillingSettings;
   configs: Record<string, PublicPricingConfig>;
-  pricing: EffectivePricing;
   loading: boolean;
-  /** Credits for a per-second video tier over a TOTAL duration (single final ceil). */
-  videoCredits: (pricingKey: string, durationSec: number, fallbackRatePerSecond?: number) => number;
+  /** Credits for a per-second video tier over a TOTAL duration (single final ceil). Floors at 1. */
+  videoCredits: (pricingKey: string, durationSec: number) => number;
   /** Credits for a per-image tier over an image count. */
-  imageCredits: (pricingKey: string, imageCount: number, fallbackPerImage?: number) => number;
-  /** Generic dispatch by the tier's cost unit. */
+  imageCredits: (pricingKey: string, imageCount: number) => number;
+  /** Generic dispatch by the tier's cost unit (per_second → video, else image). */
   creditsFor: (pricingKey: string, unitCount: number) => number;
 };
-
-function isValidNumber(n: unknown): n is number {
-  return typeof n === "number" && Number.isFinite(n) && n >= 0;
-}
-
-function normalizePricing(raw: Partial<EffectivePricing> | undefined): EffectivePricing {
-  if (!raw) return FALLBACK_PRICING;
-  return {
-    seedanceRatePerSecond: isValidNumber(raw.seedanceRatePerSecond)
-      ? raw.seedanceRatePerSecond
-      : FALLBACK_PRICING.seedanceRatePerSecond,
-    veoRatePerSecond: isValidNumber(raw.veoRatePerSecond)
-      ? raw.veoRatePerSecond
-      : FALLBACK_PRICING.veoRatePerSecond,
-    storyboardImage: isValidNumber(raw.storyboardImage)
-      ? raw.storyboardImage
-      : FALLBACK_PRICING.storyboardImage,
-    storyboardVideo: isValidNumber(raw.storyboardVideo)
-      ? raw.storyboardVideo
-      : FALLBACK_PRICING.storyboardVideo,
-    productPhoto: isValidNumber(raw.productPhoto)
-      ? raw.productPhoto
-      : FALLBACK_PRICING.productPhoto,
-  };
-}
 
 function toConfigMap(raw: unknown): Record<string, PublicPricingConfig> {
   const map: Record<string, PublicPricingConfig> = {};
@@ -107,31 +61,41 @@ function toConfigMap(raw: unknown): Record<string, PublicPricingConfig> {
   return map;
 }
 
-function toRow(cfg: PublicPricingConfig | undefined): PricingRow | null {
-  if (!cfg) return null;
-  return {
-    providerCostUsd:
-      typeof cfg.providerCostUsd === "number" && Number.isFinite(cfg.providerCostUsd)
-        ? cfg.providerCostUsd
-        : null,
-    costUnit: cfg.costUnit ?? null,
-    creditAmount:
-      typeof cfg.creditAmount === "number" && Number.isFinite(cfg.creditAmount)
-        ? cfg.creditAmount
-        : null,
-    enabled: Boolean(cfg.enabled),
-  };
+/**
+ * Provider USD cost + cost unit for a pricing key: fetched v2 config first, then
+ * the built-in v2 default. Returns null only for an unknown key (should not
+ * happen for any key the UI uses).
+ */
+function resolveCost(
+  configs: Record<string, PublicPricingConfig>,
+  pricingKey: string
+): { providerCostUsd: number; costUnit: CostUnit } | null {
+  const cfg = configs[pricingKey];
+  if (cfg && typeof cfg.providerCostUsd === "number" && Number.isFinite(cfg.providerCostUsd) && cfg.costUnit) {
+    return { providerCostUsd: cfg.providerCostUsd, costUnit: cfg.costUnit };
+  }
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (def) return { providerCostUsd: def.providerCostUsd, costUnit: def.costUnit };
+  return null;
 }
 
 const DEFAULT_STATE: PricingState = {
   billingSettings: DEFAULT_BILLING_SETTINGS,
   configs: {},
-  pricing: FALLBACK_PRICING,
   loading: false,
-  videoCredits: (_k, durationSec, fallbackRatePerSecond) =>
-    videoCreditsFromRow(null, durationSec, DEFAULT_BILLING_SETTINGS, fallbackRatePerSecond),
-  imageCredits: (_k, imageCount, fallbackPerImage) =>
-    imageCreditsFromRow(null, imageCount, DEFAULT_BILLING_SETTINGS, fallbackPerImage ?? 0),
+  videoCredits: (pricingKey, durationSec) => {
+    const c = resolveCost({}, pricingKey);
+    if (!c) return 1;
+    return Math.max(
+      1,
+      calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: durationSec, settings: DEFAULT_BILLING_SETTINGS })
+    );
+  },
+  imageCredits: (pricingKey, imageCount) => {
+    const c = resolveCost({}, pricingKey);
+    if (!c) return 0;
+    return calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: imageCount, settings: DEFAULT_BILLING_SETTINGS });
+  },
   creditsFor: () => 0,
 };
 
@@ -141,7 +105,6 @@ export function PricingProvider({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
   const [billingSettings, setBillingSettings] = useState<BillingSettings>(DEFAULT_BILLING_SETTINGS);
   const [configs, setConfigs] = useState<Record<string, PublicPricingConfig>>({});
-  const [pricing, setPricing] = useState<EffectivePricing>(FALLBACK_PRICING);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -153,24 +116,18 @@ export function PricingProvider({ children }: { children: React.ReactNode }) {
       .then(
         (
           data:
-            | {
-                billingSettings?: Partial<BillingSettings>;
-                configs?: unknown;
-                pricing?: Partial<EffectivePricing>;
-              }
+            | { billingSettings?: Partial<BillingSettings>; configs?: unknown }
             | null
         ) => {
           if (cancelled) return;
           setBillingSettings(normalizeBillingSettings(data?.billingSettings));
           setConfigs(toConfigMap(data?.configs));
-          setPricing(normalizePricing(data?.pricing));
         }
       )
       .catch(() => {
         if (!cancelled) {
           setBillingSettings(DEFAULT_BILLING_SETTINGS);
           setConfigs({});
-          setPricing(FALLBACK_PRICING);
         }
       })
       .finally(() => {
@@ -182,34 +139,31 @@ export function PricingProvider({ children }: { children: React.ReactNode }) {
   }, [status]);
 
   const value = useMemo<PricingState>(() => {
-    const videoCredits = (
-      pricingKey: string,
-      durationSec: number,
-      fallbackRatePerSecond: number = VIDEO_CREDITS_PER_SECOND
-    ): number =>
-      videoCreditsFromRow(toRow(configs[pricingKey]), durationSec, billingSettings, fallbackRatePerSecond);
-
-    const imageCredits = (
-      pricingKey: string,
-      imageCount: number,
-      fallbackPerImage: number = 0
-    ): number =>
-      imageCreditsFromRow(toRow(configs[pricingKey]), imageCount, billingSettings, fallbackPerImage);
-
-    const creditsFor = (pricingKey: string, unitCount: number): number => {
-      const cfg = configs[pricingKey];
-      const row = toRow(cfg);
-      if (cfg?.costUnit === "per_second") {
-        return videoCreditsFromRow(row, unitCount, billingSettings, VIDEO_CREDITS_PER_SECOND);
-      }
-      if (cfg?.costUnit === "per_run") {
-        return runCreditsFromRow(row, billingSettings, cfg?.creditAmount ?? 0);
-      }
-      return imageCreditsFromRow(row, unitCount, billingSettings, cfg?.creditAmount ?? 0);
+    const videoCredits = (pricingKey: string, durationSec: number): number => {
+      const c = resolveCost(configs, pricingKey);
+      if (!c) return 1; // video is never zero-cost; unknown key should not happen
+      return Math.max(
+        1,
+        calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: durationSec, settings: billingSettings })
+      );
     };
 
-    return { billingSettings, configs, pricing, loading, videoCredits, imageCredits, creditsFor };
-  }, [billingSettings, configs, pricing, loading]);
+    const imageCredits = (pricingKey: string, imageCount: number): number => {
+      const c = resolveCost(configs, pricingKey);
+      if (!c) return 0;
+      return calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: imageCount, settings: billingSettings });
+    };
+
+    const creditsFor = (pricingKey: string, unitCount: number): number => {
+      const c = resolveCost(configs, pricingKey);
+      if (!c) return 0;
+      return c.costUnit === "per_second"
+        ? videoCredits(pricingKey, unitCount)
+        : imageCredits(pricingKey, unitCount);
+    };
+
+    return { billingSettings, configs, loading, videoCredits, imageCredits, creditsFor };
+  }, [billingSettings, configs, loading]);
 
   return <PricingContext.Provider value={value}>{children}</PricingContext.Provider>;
 }

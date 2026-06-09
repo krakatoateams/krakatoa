@@ -61,36 +61,40 @@ const WHISPER_VERSION =
  * and a legacy credit_amount fallback, mirroring the 009 seed verbatim.
  */
 export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
-  // ---- Legacy rows (007) ----
+  // ---- Platform credit grant (007) — NOT a generation price ----
   initial_dummy_credits: {
     pricing_type: "fixed",
     credit_amount: INITIAL_DUMMY_CREDITS,
     enabled: true,
   },
+  // ---- Deprecated legacy generation rows (v2.2, migration 010) ----
+  // Soft-deprecated + disabled: superseded by the v2 provider-cost rows below and
+  // never read by the runtime resolver. Defaults keep them disabled so a reset
+  // does not re-activate a confusing legacy price.
   product_photo: {
     pricing_type: "per_image",
     credit_amount: PRODUCT_PHOTO_CREDITS,
-    enabled: true,
+    enabled: false,
   },
   storyboard_image: {
     pricing_type: "per_image",
     credit_amount: STORYBOARD_IMAGE_CREDITS,
-    enabled: true,
+    enabled: false,
   },
   storyboard_video: {
     pricing_type: "fixed",
     credit_amount: STORYBOARD_VIDEO_CREDITS,
-    enabled: true,
+    enabled: false,
   },
   seedance_video_per_second: {
     pricing_type: "per_second",
     credit_amount: VIDEO_CREDITS_PER_SECOND,
-    enabled: true,
+    enabled: false,
   },
   veo_video_per_second: {
     pricing_type: "per_second",
     credit_amount: VIDEO_CREDITS_PER_SECOND,
-    enabled: true,
+    enabled: false,
   },
   // ---- v2 provider-cost rows (009). credit_amount is fallback only. ----
   seedance_480p_per_second: {
@@ -121,21 +125,54 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_image", credit_amount: 12, enabled: true,
     provider_cost_usd: 0.128, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "auto", currency: "USD",
   },
+  // ---- Deprecated ambiguous Product Photo v2 rows (v2.3, migration 011) ----
+  // Superseded by the model-tier rows below (the previous 1k/2k/4k keys assumed
+  // Nano Banana Pro but the app actually ran plain google/nano-banana). Disabled
+  // so a reset never re-activates an ambiguous price; runtime no longer reads them.
   product_photo_fallback_per_image: {
-    pricing_type: "per_image", credit_amount: 4, enabled: true,
+    pricing_type: "per_image", credit_amount: 4, enabled: false,
     provider_cost_usd: 0.035, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "fallback", currency: "USD",
   },
   product_photo_1k_per_image: {
-    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    pricing_type: "per_image", credit_amount: 14, enabled: false,
     provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "1k", currency: "USD",
   },
   product_photo_2k_per_image: {
-    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    pricing_type: "per_image", credit_amount: 14, enabled: false,
     provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "2k", currency: "USD",
   },
   product_photo_4k_per_image: {
-    pricing_type: "per_image", credit_amount: 27, enabled: true,
+    pricing_type: "per_image", credit_amount: 27, enabled: false,
     provider_cost_usd: 0.30, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "4k", currency: "USD",
+  },
+  // ---- Product Photo model tiers (v2.3, migration 011). credit_amount fallback. ----
+  product_photo_nano_banana_per_image: {
+    pricing_type: "per_image", credit_amount: 4, enabled: true,
+    provider_cost_usd: 0.039, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "basic", currency: "USD",
+  },
+  product_photo_nano_banana_2_1k_per_image: {
+    pricing_type: "per_image", credit_amount: 7, enabled: true,
+    provider_cost_usd: 0.067, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_1k", currency: "USD",
+  },
+  product_photo_nano_banana_2_2k_per_image: {
+    pricing_type: "per_image", credit_amount: 10, enabled: true,
+    provider_cost_usd: 0.101, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_2k", currency: "USD",
+  },
+  product_photo_nano_banana_2_4k_per_image: {
+    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.151, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_4k", currency: "USD",
+  },
+  product_photo_nano_banana_pro_1k_per_image: {
+    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "pro_1k", currency: "USD",
+  },
+  product_photo_nano_banana_pro_2k_per_image: {
+    pricing_type: "per_image", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "pro_2k", currency: "USD",
+  },
+  product_photo_nano_banana_pro_4k_per_image: {
+    pricing_type: "per_image", credit_amount: 27, enabled: true,
+    provider_cost_usd: 0.30, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "pro_4k", currency: "USD",
   },
 };
 
@@ -152,7 +189,12 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "storyboard.scene_llm": { provider: "replicate", model: "openai/gpt-5", parameters: {}, enabled: true, is_default: true },
   "storyboard.image": { provider: "replicate", model: "openai/gpt-image-2", parameters: {}, enabled: true, is_default: true },
   "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-fast", parameters: {}, enabled: true, is_default: true },
-  "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: true, is_default: true },
+  // Legacy single Product Photo model role — disabled/deprecated in migration 011
+  // (replaced by the per-tier roles below). Reset keeps it disabled.
+  "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: false, is_default: true },
+  "photo.image_basic": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: true, is_default: true },
+  "photo.image_balanced": { provider: "replicate", model: "google/nano-banana-2", parameters: {}, enabled: true, is_default: true },
+  "photo.image_pro": { provider: "replicate", model: "google/nano-banana-pro", parameters: {}, enabled: true, is_default: true },
   "render.rendi": { provider: "rendi", model: "default", parameters: {}, enabled: true, is_default: true },
 };
 

@@ -39,53 +39,171 @@ export type ModelPoseId = (typeof MODEL_POSES)[number]["id"];
 export type PhotoStyleId = (typeof PHOTO_STYLES)[number]["id"];
 
 /**
- * Product Photo quality tiers (Pricing Config v2.1). Each tier maps to a v2
- * pricing key whose provider_cost_usd drives the credit charge. `fallbackCredits`
- * is the client/UI fallback used only when the pricing API is unavailable (so
- * labels never show NaN); the backend always charges via the resolver.
+ * Product Photo model tiers (Pricing Config v2.3).
  *
- * NOTE: quality currently affects PRICING only. The Nano Banana call does not yet
- * take a 1K/4K size/quality parameter — wiring the actual provider output size to
- * the selected tier is a tracked follow-up (see the v2 plan, open items).
+ * Three real provider models, each its own credit price:
+ *   - basic    -> google/nano-banana       (NO resolution param)        4 cr
+ *   - balanced -> google/nano-banana-2      (resolution 1K/2K/4K)   7/10/14 cr
+ *   - pro      -> google/nano-banana-pro    (resolution 1K/2K/4K)  14/14/27 cr
+ *
+ * The credit charge is provider-cost based (lib/pricing-defaults.ts +
+ * lib/pricing-resolver.ts) at the current factor-90 billing knobs. `fallbackCredits`
+ * is a UI safety value only — the backend always charges via the resolver.
+ *
+ * The route maps the tier to a model_configs role (image_basic/image_balanced/
+ * image_pro) and, for Balanced/Pro, sends the provider `resolution` enum
+ * ("1K"/"2K"/"4K"). Basic sends no resolution. We never invent unsupported params.
  */
-export const PRODUCT_PHOTO_QUALITIES = [
-  {
-    id: "standard",
-    label: "Standard",
-    description: "1K resolution",
-    pricingKey: "product_photo_1k_per_image",
-    fallbackCredits: 14,
-  },
-  {
-    id: "ultra_4k",
-    label: "Ultra 4K",
-    description: "4K resolution",
-    pricingKey: "product_photo_4k_per_image",
-    fallbackCredits: 27,
-  },
-] as const;
 
-export type ProductPhotoQuality = (typeof PRODUCT_PHOTO_QUALITIES)[number]["id"];
+export type ProductPhotoModelTier = "basic" | "balanced" | "pro";
+export type ProductPhotoResolution = "1k" | "2k" | "4k";
 
-export const DEFAULT_PRODUCT_PHOTO_QUALITY: ProductPhotoQuality = "standard";
+export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";
+export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
 
-/**
- * Quality -> v2 pricing key. Includes the internal-only "low" tier (not shown in
- * the UI) so the backend can still accept and price it if ever requested.
- */
-export const PRODUCT_PHOTO_QUALITY_KEYS: Record<string, string> = {
-  standard: "product_photo_1k_per_image",
-  ultra_4k: "product_photo_4k_per_image",
-  low: "product_photo_fallback_per_image",
+/** UI resolution id -> provider `resolution` enum value. */
+const PROVIDER_RESOLUTION: Record<ProductPhotoResolution, string> = {
+  "1k": "1K",
+  "2k": "2K",
+  "4k": "4K",
 };
 
-/** Server-side allow-list for the `quality` form field. */
-export function isValidProductPhotoQuality(id: string): boolean {
-  return id in PRODUCT_PHOTO_QUALITY_KEYS;
+export type ProductPhotoResolutionOption = {
+  id: ProductPhotoResolution;
+  label: string;
+  pricingKey: string;
+  fallbackCredits: number;
+};
+
+export type ProductPhotoTier = {
+  id: ProductPhotoModelTier;
+  label: string;
+  subtitle: string;
+  /** model_configs config_key for this tier. */
+  modelRole: string;
+  /** Provider model id (display/metadata only; resolved via model_configs). */
+  providerModel: string;
+  hasResolution: boolean;
+  /** Single pricing key for a no-resolution tier (basic). */
+  basicPricingKey?: string;
+  basicFallbackCredits?: number;
+  /** Per-resolution pricing keys (balanced/pro). */
+  resolutions: ProductPhotoResolutionOption[];
+};
+
+export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
+  {
+    id: "basic",
+    label: "Basic",
+    subtitle: "Fast · Nano Banana",
+    modelRole: "image_basic",
+    providerModel: "google/nano-banana",
+    hasResolution: false,
+    basicPricingKey: "product_photo_nano_banana_per_image",
+    basicFallbackCredits: 4,
+    resolutions: [],
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    subtitle: "Best value · Nano Banana 2",
+    modelRole: "image_balanced",
+    providerModel: "google/nano-banana-2",
+    hasResolution: true,
+    resolutions: [
+      { id: "1k", label: "1K", pricingKey: "product_photo_nano_banana_2_1k_per_image", fallbackCredits: 7 },
+      { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_2_2k_per_image", fallbackCredits: 10 },
+      { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_2_4k_per_image", fallbackCredits: 14 },
+    ],
+  },
+  {
+    id: "pro",
+    label: "Pro",
+    subtitle: "Highest quality · Nano Banana Pro",
+    modelRole: "image_pro",
+    providerModel: "google/nano-banana-pro",
+    hasResolution: true,
+    resolutions: [
+      { id: "1k", label: "1K", pricingKey: "product_photo_nano_banana_pro_1k_per_image", fallbackCredits: 14 },
+      { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_pro_2k_per_image", fallbackCredits: 14 },
+      { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_pro_4k_per_image", fallbackCredits: 27 },
+    ],
+  },
+];
+
+const TIER_BY_ID = Object.fromEntries(
+  PRODUCT_PHOTO_TIERS.map((t) => [t.id, t])
+) as Record<ProductPhotoModelTier, ProductPhotoTier>;
+
+export function getProductPhotoTier(modelTier: ProductPhotoModelTier): ProductPhotoTier {
+  return TIER_BY_ID[modelTier] ?? TIER_BY_ID[DEFAULT_PRODUCT_PHOTO_TIER];
 }
 
-export function productPhotoPricingKey(quality: string): string {
-  return PRODUCT_PHOTO_QUALITY_KEYS[quality] ?? PRODUCT_PHOTO_QUALITY_KEYS.standard;
+export function isValidProductPhotoTier(id: string): id is ProductPhotoModelTier {
+  return id === "basic" || id === "balanced" || id === "pro";
+}
+
+export function isValidProductPhotoResolution(id: string): id is ProductPhotoResolution {
+  return id === "1k" || id === "2k" || id === "4k";
+}
+
+export function productPhotoTierHasResolution(modelTier: ProductPhotoModelTier): boolean {
+  return getProductPhotoTier(modelTier).hasResolution;
+}
+
+/** Model role (config_key) for the tier. */
+export function productPhotoModelRole(modelTier: ProductPhotoModelTier): string {
+  return getProductPhotoTier(modelTier).modelRole;
+}
+
+/** UI resolution id -> provider resolution enum ("1K"/"2K"/"4K"), or null. */
+export function productPhotoProviderResolution(
+  resolution: ProductPhotoResolution | null
+): string | null {
+  return resolution ? PROVIDER_RESOLUTION[resolution] ?? null : null;
+}
+
+/** Pricing key for a (normalized) tier + resolution. */
+export function productPhotoPricingKey(opts: {
+  modelTier: ProductPhotoModelTier;
+  resolution: ProductPhotoResolution | null;
+}): string {
+  const tier = getProductPhotoTier(opts.modelTier);
+  if (!tier.hasResolution) {
+    return tier.basicPricingKey ?? "product_photo_nano_banana_per_image";
+  }
+  const res = opts.resolution ?? DEFAULT_PRODUCT_PHOTO_RESOLUTION;
+  const found = tier.resolutions.find((r) => r.id === res);
+  return found?.pricingKey ?? tier.resolutions[0].pricingKey;
+}
+
+/**
+ * Normalize + validate incoming options for the route.
+ *   - Invalid tier -> error (route returns 400).
+ *   - basic -> resolution forced to null (ignored, never a 400).
+ *   - balanced/pro -> resolution required and must be 1k/2k/4k, else error (400).
+ */
+export function normalizeProductPhotoOptions(input: {
+  modelTier: string;
+  resolution?: string | null;
+}):
+  | { ok: true; modelTier: ProductPhotoModelTier; resolution: ProductPhotoResolution | null }
+  | { ok: false; error: string } {
+  if (!isValidProductPhotoTier(input.modelTier)) {
+    return { ok: false, error: "Invalid model tier. Use basic, balanced, or pro." };
+  }
+  const tier = input.modelTier;
+  if (!productPhotoTierHasResolution(tier)) {
+    return { ok: true, modelTier: tier, resolution: null };
+  }
+  const raw = (input.resolution ?? "").toString().trim().toLowerCase();
+  if (raw === "") {
+    return { ok: false, error: "resolution is required for this model tier (1k, 2k, or 4k)." };
+  }
+  if (!isValidProductPhotoResolution(raw)) {
+    return { ok: false, error: "Invalid resolution. Use 1k, 2k, or 4k." };
+  }
+  return { ok: true, modelTier: tier, resolution: raw };
 }
 
 export type ProductPhotoHistoryItem = {

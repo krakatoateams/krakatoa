@@ -34,7 +34,7 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { getVeoCredits } from "@/lib/pricing-resolver";
+import { getVeoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getVeoModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
@@ -1118,8 +1118,13 @@ Return ONLY raw JSON array, nothing else.`;
   } catch (error: unknown) {
     console.error("[generate-veo]", error);
     const message = error instanceof Error ? error.message : String(error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -1155,6 +1160,9 @@ Return ONLY raw JSON array, nothing else.`;
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

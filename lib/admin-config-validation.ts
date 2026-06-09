@@ -169,7 +169,8 @@ export function validatePricingPatch(
   }
 
   // Advisory: if provider_cost_usd is set, cost_unit should be present so the v2
-  // path can engage. Never a hard reject (the resolver falls back to legacy).
+  // path can engage. Never a hard reject (the resolver falls back to the built-in
+  // v2 default for the key — never to a legacy/undercharging value).
   const resolvedCostUnit =
     patch.cost_unit !== undefined
       ? patch.cost_unit
@@ -181,7 +182,7 @@ export function validatePricingPatch(
     patch.provider_cost_usd !== null &&
     !resolvedCostUnit
   ) {
-    warnings.push("provider_cost_usd is set but cost_unit is empty; the legacy credit_amount will be used until cost_unit is set.");
+    warnings.push("provider_cost_usd is set but cost_unit is empty; runtime will use the built-in v2 default for this key until cost_unit is set.");
   }
 
   return { ok: true, patch, warnings };

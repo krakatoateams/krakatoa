@@ -12,8 +12,15 @@ import { supabaseServer } from "@/lib/supabase-server";
  *
  * Pricing Config v2.1 added provider-cost columns (provider_cost_usd, cost_unit,
  * pricing_group, variant_key, currency). When provider_cost_usd is set the
- * resolver computes credits from the provider USD cost (via lib/pricing-math.ts);
- * credit_amount stays as the legacy fallback. See migration 009.
+ * resolver computes credits from the provider USD cost (via lib/pricing-math.ts).
+ * See migration 009.
+ *
+ * Pricing Config v2.2 added is_deprecated (migration 010). v2 provider-cost rows
+ * are the ONLY runtime pricing source; the legacy generation rows (product_photo,
+ * storyboard_image, storyboard_video, seedance_video_per_second,
+ * veo_video_per_second) are soft-deprecated (is_deprecated=true, enabled=false)
+ * and are no longer read by the resolver. credit_amount is a non-authoritative
+ * fallback only (initial_dummy_credits is the one row that legitimately uses it).
  */
 
 export type PricingType = "fixed" | "per_second" | "per_image";
@@ -36,6 +43,10 @@ export type PricingConfig = {
   pricing_group: string | null;
   variant_key: string | null;
   currency: string;
+  // Pricing Config v2.2: soft-deprecation flag (migration 010). Deprecated rows
+  // are never read by the runtime resolver and are hidden from the normal admin
+  // list / public pricing payload.
+  is_deprecated: boolean;
 };
 
 const PRICING_CONFIGS_TABLE = "pricing_configs";
@@ -54,15 +65,26 @@ function handleError(error: { message: string } | null, fallback: string): void 
   throw new Error(error.message || fallback);
 }
 
-/** List all pricing configs ordered by pricing_key. */
-export async function listPricingConfigs(): Promise<PricingConfig[]> {
+/**
+ * List pricing configs ordered by pricing_key. By default returns ALL rows
+ * (including soft-deprecated ones) so the admin panel can show a read-only
+ * "deprecated" section. Pass `{ includeDeprecated: false }` to drop the
+ * v2.2-deprecated legacy rows (e.g. for a clean runtime/admin view).
+ */
+export async function listPricingConfigs(options?: {
+  includeDeprecated?: boolean;
+}): Promise<PricingConfig[]> {
   const { data, error } = await supabaseServer
     .from(PRICING_CONFIGS_TABLE)
     .select("*")
     .order("pricing_key", { ascending: true });
 
   handleError(error, "Failed to list pricing configs.");
-  return (data as PricingConfig[] | null) ?? [];
+  const rows = (data as PricingConfig[] | null) ?? [];
+  if (options?.includeDeprecated === false) {
+    return rows.filter((r) => !r.is_deprecated);
+  }
+  return rows;
 }
 
 export type PricingConfigPatch = {

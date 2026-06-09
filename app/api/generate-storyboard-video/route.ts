@@ -19,7 +19,7 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { getStoryboardVideoCredits } from "@/lib/pricing-resolver";
+import { getSeedanceCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
@@ -37,6 +37,19 @@ export const maxDuration = 300;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Pricing Config v2.2: the storyboard-to-video clip is a fixed 15s Seedance run,
+// priced via the Seedance per-second provider cost of the chosen resolution
+// (480p → ~95 cr, 720p → ~203 cr). Default 480p keeps internal-testing cost low.
+const STORYBOARD_VIDEO_DURATION_SEC = 15;
+type StoryboardVideoResolution = "480p" | "720p";
+const STORYBOARD_VIDEO_DIMENSIONS: Record<
+  StoryboardVideoResolution,
+  { width: number; height: number }
+> = {
+  "480p": { width: 854, height: 480 },
+  "720p": { width: 1280, height: 720 },
+};
 
 export async function POST(req: Request) {
   // Platform-observability trackers — declared before the try so the catch block
@@ -105,6 +118,21 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // Resolution drives the Seedance per-second pricing tier. Validate strictly
+    // (only 480p/720p); default 480p when omitted. Duration is fixed at 15s.
+    const resolutionRaw = body.resolution;
+    let resolution: StoryboardVideoResolution = "480p";
+    if (resolutionRaw !== undefined && resolutionRaw !== null && resolutionRaw !== "") {
+      if (resolutionRaw !== "480p" && resolutionRaw !== "720p") {
+        return NextResponse.json(
+          { error: "resolution must be '480p' or '720p'." },
+          { status: 400 }
+        );
+      }
+      resolution = resolutionRaw;
+    }
+    const durationSec = STORYBOARD_VIDEO_DURATION_SEC;
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
@@ -177,7 +205,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ storyboardId });
+    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -213,7 +241,7 @@ export async function POST(req: Request) {
       jobType: "storyboard_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      input: { storyboardId },
+      input: { storyboardId, resolution, durationSec },
     }));
     if (job) {
       jobId = job.id;
@@ -221,9 +249,11 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard video is a flat 30 credits. Insufficient → 402 with no
-    // provider call, no storyboards.status mutation, no processing asset.
-    const requiredCredits = await getStoryboardVideoCredits();
+    // Storyboard video is priced via the Seedance per-second provider cost for the
+    // chosen resolution over the fixed 15s clip (v2.2: 480p → ~95, 720p → ~203).
+    // The legacy flat-30 path is gone. Insufficient → 402 with no provider call,
+    // no storyboards.status mutation, no processing asset.
+    const requiredCredits = await getSeedanceCredits({ resolution, durationSec });
     try {
       await spendCredits({
         profileId: profileId!,
@@ -237,6 +267,8 @@ export async function POST(req: Request) {
           tool: "storyboard",
           jobType: "storyboard_video",
           storyboardId,
+          resolution,
+          durationSec,
         },
       });
       creditsSpent = true;
@@ -291,7 +323,7 @@ export async function POST(req: Request) {
       role: "final_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      metadata: { storyboardId },
+      metadata: { storyboardId, resolution, durationSec },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -316,7 +348,7 @@ export async function POST(req: Request) {
     };
 
     await beginStep("video_generation", "Seedance video from storyboard reference");
-    console.log("[Storyboard Video] Calling Seedance (15s, 16:9, audio, reference)...");
+    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, 16:9, audio, reference)...`);
     const videoResult = await runReplicateWithRetry(
       replicate,
       videoModelRef,
@@ -324,9 +356,9 @@ export async function POST(req: Request) {
         input: {
           prompt: seedancePrompt,
           reference_images: [storyboardUrl],
-          duration: 15,
+          duration: durationSec,
           generate_audio: true,
-          resolution: "720p",
+          resolution,
           aspect_ratio: "16:9",
         },
       }
@@ -391,11 +423,11 @@ export async function POST(req: Request) {
         storagePath,
         publicUrl: videoUrl,
         mimeType: "video/mp4",
-        durationSec: 15,
-        width: 1280,
-        height: 720,
+        durationSec,
+        width: STORYBOARD_VIDEO_DIMENSIONS[resolution].width,
+        height: STORYBOARD_VIDEO_DIMENSIONS[resolution].height,
         costCredits: creditsAmount,
-        metadata: { storyboardId },
+        metadata: { storyboardId, resolution, durationSec },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -414,7 +446,7 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId },
+        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec },
         costCredits: creditsAmount,
       }));
     }
@@ -428,9 +460,9 @@ export async function POST(req: Request) {
       provider: videoModel.provider,
       model: videoModel.model,
       unitType: "video_seconds",
-      units: 15,
+      units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId },
+      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec },
     }));
 
     let historyItem;
@@ -462,8 +494,13 @@ export async function POST(req: Request) {
     const message =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     console.error("[Storyboard Video] Error:", error);
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message };
+    const errJson = pricingMissing
+      ? { message, code: "PRICING_CONFIG_MISSING" }
+      : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -497,6 +534,9 @@ export async function POST(req: Request) {
       }));
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      { status: 500 }
+    );
   }
 }

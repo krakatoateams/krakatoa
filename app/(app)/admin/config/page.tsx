@@ -29,6 +29,8 @@ type PricingConfig = {
   pricing_group: string | null;
   variant_key: string | null;
   currency: string;
+  // Pricing Config v2.2 soft-deprecation flag.
+  is_deprecated: boolean;
 };
 
 type ModelConfig = {
@@ -74,35 +76,33 @@ function Badge({ tone, children }: { tone: BadgeTone; children: React.ReactNode 
 // ---- Effective-status helpers (client-side mirror of resolver behavior). ----
 // These are advisory only. The server validators + resolvers are authoritative.
 
-function isValidCreditAmount(amount: number): boolean {
-  return Number.isInteger(amount) && amount >= 0 && amount <= CREDIT_AMOUNT_MAX;
-}
-
 /** A v2 row prices from the provider cost when it has a numeric cost + a cost unit. */
 function isV2Row(p: PricingConfig): boolean {
   return typeof p.provider_cost_usd === "number" && p.cost_unit !== null;
 }
 
+/** A primary runtime pricing row: a non-deprecated v2 provider-cost row. */
+function isPrimaryRow(p: PricingConfig): boolean {
+  return !p.is_deprecated && isV2Row(p);
+}
+
+/** Platform/global credit setting (e.g. initial_dummy_credits): not a provider cost. */
+function isPlatformRow(p: PricingConfig): boolean {
+  return !p.is_deprecated && !isV2Row(p);
+}
+
+// Status for a PRIMARY v2 row. v2.2: disabling a row reverts runtime to the
+// built-in v2 default (correct provider cost) — it never undercharges/frees.
 function pricingStatus(p: PricingConfig): { tone: BadgeTone; label: string } {
-  if (!p.enabled) return { tone: "disabled", label: "Disabled — fallback/default used" };
-  if (isV2Row(p)) {
-    if (typeof p.provider_cost_usd !== "number" || p.provider_cost_usd < 0)
-      return { tone: "invalid", label: "Invalid cost — fallback/default used" };
-    return { tone: "active", label: "Runtime active (provider cost)" };
-  }
-  if (!isValidCreditAmount(p.credit_amount))
-    return { tone: "invalid", label: "Invalid — fallback/default used" };
-  return { tone: "active", label: "Runtime active (legacy amount)" };
+  if (!p.enabled) return { tone: "disabled", label: "Disabled — built-in v2 default used" };
+  if (typeof p.provider_cost_usd !== "number" || p.provider_cost_usd < 0)
+    return { tone: "invalid", label: "Invalid cost — built-in v2 default used" };
+  return { tone: "active", label: "Runtime active (provider cost)" };
 }
 
 function pricingWarning(p: PricingConfig): string | null {
-  if (isV2Row(p) && p.provider_cost_usd === 0) {
+  if (p.provider_cost_usd === 0) {
     return "Provider cost 0 — this tier computes to 0 credits (free).";
-  }
-  if (!isV2Row(p) && p.credit_amount === 0) {
-    return p.pricing_type === "per_second"
-      ? "0 per second — video still floors to 1 credit."
-      : "0 credits — this makes generation free.";
   }
   return null;
 }
@@ -120,9 +120,7 @@ const COST_UNIT_LABEL: Record<CostUnit, string> = {
  * the real charge totals the duration first, then ceils once.
  */
 function computedPreview(p: PricingConfig, settings: BillingSettings): string {
-  if (!isV2Row(p) || typeof p.provider_cost_usd !== "number") {
-    return `legacy · ${p.credit_amount} cr`;
-  }
+  if (typeof p.provider_cost_usd !== "number") return "—";
   const credits = calculateCredits({ providerCostUsd: p.provider_cost_usd, unitCount: 1, settings });
   const unit = p.cost_unit ? COST_UNIT_LABEL[p.cost_unit] : "unit";
   return `${credits} cr / ${unit}`;
@@ -199,6 +197,7 @@ export default function AdminConfigPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [apiWarnings, setApiWarnings] = useState<string[]>([]);
+  const [showDeprecated, setShowDeprecated] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -223,6 +222,7 @@ export default function AdminConfigPage() {
               row.provider_cost_usd === null || row.provider_cost_usd === undefined
                 ? null
                 : Number(row.provider_cost_usd),
+            is_deprecated: Boolean(row.is_deprecated),
           }))
         );
         setModels(m.models ?? []);
@@ -457,16 +457,17 @@ export default function AdminConfigPage() {
           <NoteBox>
             <ul className="ml-4 list-disc space-y-0.5">
               <li>
-                <span className="font-mono text-gray-300">Provider USD</span> drives the credit
-                charge via the billing settings above. Leave it blank to use the legacy{" "}
-                <span className="font-mono text-gray-300">credit amount</span> instead.
+                <span className="font-mono text-gray-300">Provider USD</span> is the source of truth
+                for runtime pricing — credits = cost × units via the billing settings above.
+              </li>
+              <li>
+                If a row is disabled or its cost is blank, runtime uses the built-in v2 default cost
+                (it never undercharges and never becomes free).
               </li>
               <li>
                 <span className="font-mono text-gray-300">Computed</span> previews credits for one
-                unit. Video totals the full duration first, then rounds once (so the per-second
-                preview is not multiplied yet).
+                unit. Video totals the full duration first, then rounds once.
               </li>
-              <li>Video always costs at least 1 credit. A 0 provider cost / amount makes a generation free.</li>
             </ul>
           </NoteBox>
           <div className="overflow-x-auto rounded-xl border border-gray-800">
@@ -478,13 +479,12 @@ export default function AdminConfigPage() {
                   <th className={TH}>Provider USD</th>
                   <th className={TH}>Unit</th>
                   <th className={TH}>Computed</th>
-                  <th className={TH}>Legacy amount</th>
                   <th className={TH}>Enabled</th>
                   <th className={TH}></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
-                {pricing.map((p) => {
+                {pricing.filter(isPrimaryRow).map((p) => {
                   const status = pricingStatus(p);
                   const warn = pricingWarning(p);
                   return (
@@ -526,22 +526,6 @@ export default function AdminConfigPage() {
                       <td className="px-3 py-2 text-xs font-mono text-emerald-300">
                         {computedPreview(p, billingSettings)}
                       </td>
-                      <td className="px-3 py-2 w-28">
-                        <input
-                          type="number"
-                          min={0}
-                          max={CREDIT_AMOUNT_MAX}
-                          value={p.credit_amount}
-                          onChange={(e) =>
-                            setPricingField(
-                              p.pricing_key,
-                              "credit_amount",
-                              Number(e.target.value)
-                            )
-                          }
-                          className={INPUT}
-                        />
-                      </td>
                       <td className="px-3 py-2">
                         <input
                           type="checkbox"
@@ -556,7 +540,6 @@ export default function AdminConfigPage() {
                           busy={busy}
                           onSave={() =>
                             patch(`/api/admin/config/pricing/${p.pricing_key}`, {
-                              credit_amount: p.credit_amount,
                               provider_cost_usd: p.provider_cost_usd,
                               enabled: p.enabled,
                             })
@@ -575,6 +558,127 @@ export default function AdminConfigPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Platform / global credit settings — NOT generation provider-cost rows.
+              initial_dummy_credits is a credit GRANT, so credit_amount is its real
+              value here (kept separate to avoid mixing with provider-cost pricing). */}
+          {pricing.filter(isPlatformRow).length > 0 ? (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-white">Platform credit settings</h3>
+              <div className="overflow-x-auto rounded-xl border border-gray-800">
+                <table className="w-full">
+                  <thead className="bg-gray-900/60">
+                    <tr>
+                      <th className={TH}>Key</th>
+                      <th className={TH}>Credit amount</th>
+                      <th className={TH}>Enabled</th>
+                      <th className={TH}></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {pricing.filter(isPlatformRow).map((p) => (
+                      <tr key={p.pricing_key} className="text-sm text-gray-300">
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-white">{p.display_name}</div>
+                          <div className="text-xs text-gray-500">{p.pricing_key}</div>
+                        </td>
+                        <td className="px-3 py-2 w-28">
+                          <input
+                            type="number"
+                            min={0}
+                            max={CREDIT_AMOUNT_MAX}
+                            value={p.credit_amount}
+                            onChange={(e) =>
+                              setPricingField(p.pricing_key, "credit_amount", Number(e.target.value))
+                            }
+                            className={INPUT}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={p.enabled}
+                            onChange={(e) =>
+                              setPricingField(p.pricing_key, "enabled", e.target.checked)
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <RowButtons
+                            busy={busy}
+                            onSave={() =>
+                              patch(`/api/admin/config/pricing/${p.pricing_key}`, {
+                                credit_amount: p.credit_amount,
+                                enabled: p.enabled,
+                              })
+                            }
+                            onReset={() =>
+                              resetRow(
+                                `/api/admin/config/pricing/${p.pricing_key}/reset`,
+                                p.display_name
+                              )
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Deprecated legacy rows — read-only, NOT runtime active. Kept for audit
+              only; the resolver never reads them (it uses v2 rows + built-in v2
+              defaults). Collapsed by default to keep the mental model clean. */}
+          {pricing.filter((p) => p.is_deprecated).length > 0 ? (
+            <div className="rounded-xl border border-gray-800 bg-gray-900/30">
+              <button
+                type="button"
+                onClick={() => setShowDeprecated((v) => !v)}
+                className="flex w-full items-center justify-between px-4 py-3 text-left"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-gray-300">
+                  Deprecated legacy rows
+                  <Badge tone="disabled">Deprecated fallback only · not runtime active</Badge>
+                </span>
+                <span className="text-xs text-gray-500">{showDeprecated ? "Hide" : "Show"}</span>
+              </button>
+              {showDeprecated ? (
+                <div className="overflow-x-auto border-t border-gray-800">
+                  <table className="w-full">
+                    <thead className="bg-gray-900/60">
+                      <tr>
+                        <th className={TH}>Pricing key</th>
+                        <th className={TH}>Legacy amount</th>
+                        <th className={TH}>State</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {pricing
+                        .filter((p) => p.is_deprecated)
+                        .map((p) => (
+                          <tr key={p.pricing_key} className="text-sm text-gray-400">
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-gray-300">{p.display_name}</div>
+                              <div className="text-xs text-gray-600">{p.pricing_key}</div>
+                            </td>
+                            <td className="px-3 py-2 font-mono text-gray-500">{p.credit_amount}</td>
+                            <td className="px-3 py-2">
+                              <Badge tone="disabled">Deprecated · disabled</Badge>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                  <p className="px-4 py-3 text-[11px] text-gray-500">
+                    These rows are superseded by the provider-cost rows above and are never used as
+                    runtime pricing. They are retained for history and are read-only.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

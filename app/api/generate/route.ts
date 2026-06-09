@@ -14,7 +14,7 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from '@/lib/credits-db';
-import { getSeedanceCredits } from '@/lib/pricing-resolver';
+import { getSeedanceCredits, PricingConfigError } from '@/lib/pricing-resolver';
 import { getReelsModels, replicateRef } from '@/lib/model-resolver';
 import { assertToolEnabled, ToolDisabledError } from '@/lib/tool-access';
 import { recordUsageEvent } from '@/lib/usage-events-db';
@@ -1083,8 +1083,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   } catch (error: any) {
     console.error('Generate pipeline error:', error);
 
+    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
+    // and any provider call, so no credits were charged and no provider ran.
+    const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = { message: error?.message || String(error) };
+    const errJson = pricingMissing
+      ? { message: error?.message || String(error), code: 'PRICING_CONFIG_MISSING' }
+      : { message: error?.message || String(error) };
     if (currentStepId && profileId) {
       await safe('failStep', () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -1124,7 +1129,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       }));
     }
 
-    return NextResponse.json({ error: error.message || String(error) }, { status: 500 });
+    return NextResponse.json(
+      pricingMissing
+        ? { error: error.message || String(error), code: 'PRICING_CONFIG_MISSING' }
+        : { error: error.message || String(error) },
+      { status: 500 }
+    );
   }
 }
 

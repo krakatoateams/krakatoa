@@ -1,4 +1,8 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
+import {
+  productPhotoModelRole,
+  type ProductPhotoModelTier,
+} from "@/lib/product-photo";
 
 /**
  * Runtime model resolver (Admin Phase 2).
@@ -139,7 +143,13 @@ const FALLBACKS = {
     video: { provider: REPLICATE, model: "bytedance/seedance-2.0-fast", parameters: {} },
   },
   photo: {
+    // Legacy single-model role (config_key=image). Disabled/deprecated in
+    // migration 011; kept only as a defensive fallback. Product Photo now uses
+    // the per-tier roles below.
     image: { provider: REPLICATE, model: "google/nano-banana", parameters: {} },
+    image_basic: { provider: REPLICATE, model: "google/nano-banana", parameters: {} },
+    image_balanced: { provider: REPLICATE, model: "google/nano-banana-2", parameters: {} },
+    image_pro: { provider: REPLICATE, model: "google/nano-banana-pro", parameters: {} },
   },
   render: {
     rendi: { provider: "rendi", model: "default", parameters: {} },
@@ -208,7 +218,11 @@ export async function getStoryboardModels(): Promise<{
   return { sceneLlm, image, video };
 }
 
-/** Resolved model for Product Photo. */
+/**
+ * @deprecated Use getPhotoModel(modelTier) instead (Product Photo v2.3 model
+ * tiers). The legacy `photo.image` row is disabled/deprecated in migration 011.
+ * Kept for backward compatibility only.
+ */
 export async function getPhotoModels(): Promise<{ image: ResolvedModel }> {
   const image = await resolveModel({
     toolKey: "photo",
@@ -216,6 +230,26 @@ export async function getPhotoModels(): Promise<{ image: ResolvedModel }> {
     fallback: fb(FALLBACKS.photo.image),
   });
   return { image };
+}
+
+/**
+ * Resolve the Product Photo provider model for a tier (v2.3).
+ *   basic -> photo.image_basic (google/nano-banana)
+ *   balanced -> photo.image_balanced (google/nano-banana-2)
+ *   pro -> photo.image_pro (google/nano-banana-pro)
+ * Falls back to the built-in per-tier model id when the DB row is missing/disabled.
+ */
+export async function getPhotoModel(
+  modelTier: ProductPhotoModelTier
+): Promise<ResolvedModel> {
+  const role = productPhotoModelRole(modelTier);
+  const fallback =
+    role === "image_pro"
+      ? FALLBACKS.photo.image_pro
+      : role === "image_balanced"
+        ? FALLBACKS.photo.image_balanced
+        : FALLBACKS.photo.image_basic;
+  return resolveModel({ toolKey: "photo", configKey: role, fallback: fb(fallback) });
 }
 
 /** Resolved Rendi render config (informational; routes keep the hardcoded URL). */
