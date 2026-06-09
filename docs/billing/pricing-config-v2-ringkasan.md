@@ -69,9 +69,13 @@ Harga awal yang dipakai:
 | Video Veo | 720p | $0,05 / detik |
 | Video Veo | 1080p | $0,08 / detik |
 | Storyboard (gambar) | auto/biasa | $0,128 / gambar |
-| Foto Produk | Standard (1K/2K) | $0,15 / gambar |
-| Foto Produk | Ultra 4K | $0,30 / gambar |
-| Foto Produk | Low (internal) | $0,035 / gambar |
+| Foto Produk | Basic (Nano Banana) | $0,039 / gambar |
+| Foto Produk | Balanced 1K (Nano Banana 2) | $0,067 / gambar |
+| Foto Produk | Balanced 2K (Nano Banana 2) | $0,101 / gambar |
+| Foto Produk | Balanced 4K (Nano Banana 2) | $0,151 / gambar |
+| Foto Produk | Pro 1K (Nano Banana Pro) | $0,15 / gambar |
+| Foto Produk | Pro 2K (Nano Banana Pro) | $0,15 / gambar |
+| Foto Produk | Pro 4K (Nano Banana Pro) | $0,30 / gambar |
 
 Catatan: harga ini bisa berubah kalau provider ganti tarif. Nanti bisa diubah
 dari panel admin.
@@ -110,23 +114,43 @@ Selisihnya kelihatan kecil (203 vs 210), tapi prinsipnya: bulatkan **sekali saja
 | Seedance 720p, 15 detik | 0,15 × 15 × 90 | **203** |
 | Veo 720p, 15 detik | 0,05 × 15 × 90 | **68** |
 | Veo 1080p, 15 detik | 0,08 × 15 × 90 | **108** |
-| Foto Produk Standard (1K) | 0,15 × 90 | **14** |
-| Foto Produk Ultra 4K | 0,30 × 90 | **27** |
+| Foto Produk Basic | 0,039 × 90 | **4** |
+| Foto Produk Balanced 1K | 0,067 × 90 | **7** |
+| Foto Produk Balanced 2K | 0,101 × 90 | **10** |
+| Foto Produk Balanced 4K | 0,151 × 90 | **14** |
+| Foto Produk Pro 1K | 0,15 × 90 | **14** |
+| Foto Produk Pro 2K | 0,15 × 90 | **14** |
+| Foto Produk Pro 4K | 0,30 × 90 | **27** |
 
 Semua sudah dibulatkan ke atas di langkah terakhir.
 
 ---
 
-## Foto Produk: pilihan kualitas
+## Foto Produk: pilihan model (Basic / Balanced / Pro)
 
-Rencananya user bisa pilih kualitas, dan harganya ikut kualitas:
+Foto Produk sekarang punya **3 pilihan model**, masing-masing modelnya beda dan
+harganya beda. User pilih modelnya dulu; untuk Balanced & Pro baru pilih resolusi.
 
-- **Standard** → 14 kredit
-- **Ultra 4K** → 27 kredit
-- (opsional internal) **Low** → sekitar 4 kredit
+- **Basic** → model `Nano Banana` → **4 kredit**
+  - Tidak ada pilihan resolusi (modelnya memang tidak punya opsi itu).
+- **Balanced** → model `Nano Banana 2` → ada resolusi:
+  - 1K → **7 kredit**
+  - 2K → **10 kredit**
+  - 4K → **14 kredit**
+- **Pro** → model `Nano Banana Pro` → ada resolusi:
+  - 1K → **14 kredit**
+  - 2K → **14 kredit** (harga provider 1K & 2K kebetulan sama)
+  - 4K → **27 kredit**
 
-Kenapa cuma Standard & Ultra 4K dulu? Karena 1K dan 2K **harga providernya sama**
-($0,15), jadi belum perlu dipisah. 2K disiapkan untuk nanti.
+Default: **Basic** (paling murah & cepat).
+
+### Kenapa berubah dari versi lama (1K/2K/4K)?
+
+Versi lama menganggap Foto Produk = "Nano Banana Pro 1K/2K/4K" dan menagih
+14/14/27 kredit. Ternyata aplikasinya **sebenarnya pakai `Nano Banana` biasa**
+yang harganya lebih murah ($0,039) dan **tidak punya parameter resolusi**. Jadi
+angka lama itu salah/menyesatkan. Sekarang sudah dibetulkan jadi 3 model nyata di
+atas, dan key harga lama (`product_photo_1k/2k/4k`) sudah di-nonaktifkan.
 
 ---
 
@@ -139,6 +163,15 @@ Kenapa cuma Standard & Ultra 4K dulu? Karena 1K dan 2K **harga providernya sama*
 
 Makin tinggi resolusi → makin mahal per detik → makin banyak kredit. Wajar,
 karena biaya providernya juga lebih mahal.
+
+Khusus **Storyboard → Create Video** (klip 15 detik), tiap kartu storyboard
+sekarang punya pemilih resolusi sendiri:
+
+- 480p → **95 kredit** (0,07 × 15 × 90)
+- 720p → **203 kredit** (0,15 × 15 × 90)
+
+Tombolnya juga menampilkan resolusi + biayanya, misal "Create Video 480p · 95
+credits", jadi user tahu persis harga sebelum klik.
 
 ---
 
@@ -163,6 +196,24 @@ Jadi untuk sekarang, "harga = biaya provider 1:1" itu maksudnya **biaya utama**
 - Karena dibulatkan ke atas, kadang user "bayar" lebih sedikit dari biaya asli
   (kurang dari 1 kredit). Itu normal dan disengaja.
 - Angka di sini adalah **perkiraan** biaya provider; bisa sedikit beda dengan tagihan asli.
+
+---
+
+## Lihat biaya di panel admin (Est. USD & Est. Rupiah)
+
+Di panel admin → halaman **Usage** ada tabel "Usage by provider / model". Sekarang
+tabelnya menampilkan **Est. USD** dan **Est. Rupiah** per alat/model.
+
+Angkanya dihitung dari **kredit yang sudah dipakai**, bukan tebakan:
+
+```
+Est. Rupiah = jumlah kredit × Rp200
+Est. USD    = Est. Rupiah ÷ Rp18.000
+```
+
+Karena margin masih 1.0, angka ini = perkiraan biaya provider yang kita bayar.
+Contoh: 10 kredit = Rp2.000 ≈ $0,11. Kalau nanti margin dinaikkan (ada untung),
+kolom ini akan menampilkan harga jual, bukan lagi biaya modal.
 
 ---
 
