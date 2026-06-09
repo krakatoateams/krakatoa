@@ -83,6 +83,46 @@ function buildPrompt(opts: {
   return lines.join("\n");
 }
 
+// General mode: one caption that broadly fits a whole batch of videos.
+// No transcript/audio — only the title + tags creators typed per card.
+function buildGeneralPrompt(videos: { title?: string; tags?: string }[]): string {
+  const lines: string[] = [
+    "You are a YouTube Shorts content expert. Generate ONE engaging caption that broadly fits an entire batch of related Shorts.",
+    "",
+    "The creator is bulk-scheduling these videos and wants a single shared caption that works for all of them.",
+    "",
+    "Videos in this batch:",
+  ];
+
+  videos.forEach((v, i) => {
+    const parts: string[] = [];
+    if (v.title) parts.push(`title: "${v.title}"`);
+    if (v.tags) parts.push(`tags: ${v.tags}`);
+    if (parts.length > 0) lines.push(`${i + 1}. ${parts.join(" — ")}`);
+  });
+
+  lines.push(
+    "",
+    "Write a caption with this exact structure:",
+    "1. A strong hook (first line, max 10 words, must grab attention)",
+    "2. Body (2-3 sentences that broadly describe the theme shared across these videos)",
+    "3. 5-8 relevant hashtags",
+    "4. 2-3 relevant emojis",
+    "",
+    "Rules:",
+    "- The caption must read naturally for ANY video in the batch — stay general, do not reference one specific video",
+    "- Always write the caption in English",
+    "- Never use placeholder text like [Your Name] or [Topic]",
+    "- Base it on the actual titles and tags provided",
+    "- Keep total length under 300 characters",
+    "- Sound natural and engaging, not robotic",
+    "",
+    "Return only the caption, nothing else.",
+  );
+
+  return lines.join("\n");
+}
+
 function buildPolishPrompt(existingCaption: string): string {
   return [
     "You are a YouTube Shorts content expert.",
@@ -115,6 +155,45 @@ export async function POST(req: NextRequest) {
     const existingCaption: string = (body.existingCaption ?? "").toString().trim();
 
     const replicate = createReplicateClient();
+
+    // ----- General mode: one shared caption for a batch, no transcription -----
+    if (mode === "general") {
+      const rawVideos = Array.isArray(body.videos) ? body.videos : [];
+      const videos = rawVideos
+        .map((v: unknown) => {
+          const obj = (v ?? {}) as Record<string, unknown>;
+          return {
+            title: (obj.title ?? "").toString().trim(),
+            tags: (obj.tags ?? "").toString().trim(),
+          };
+        })
+        .filter((v: { title: string; tags: string }) => v.title || v.tags);
+
+      if (videos.length === 0) {
+        return NextResponse.json(
+          { error: "Provide at least one video with a title or tags." },
+          { status: 400 },
+        );
+      }
+
+      const generalOutput = await runWithRetry(replicate, LLM_MODEL, {
+        input: {
+          prompt: buildGeneralPrompt(videos),
+          max_tokens: 300,
+          temperature: 0.7,
+        },
+      });
+
+      const generalCaption = joinReplicateOutput(generalOutput);
+      if (!generalCaption) {
+        return NextResponse.json(
+          { error: "Model returned an empty response. Please try again." },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json({ caption: generalCaption, mode: "general" });
+    }
 
     // ----- Polish mode: rewrite an existing caption, no transcription -----
     if (mode === "polish") {
