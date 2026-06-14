@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X } from "lucide-react";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X, CalendarClock } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -1258,6 +1258,20 @@ export default function ReelsPage() {
                       <Download className="w-5 h-5" />
                       Save to Gallery
                     </a>
+                    {/* Schedule hand-off is reel-only: storyboard clips are 16:9, but the
+                        scheduler targets vertical YouTube Shorts. Deep-links the hosted
+                        video URL + theme into the scheduler's existing asset intake. */}
+                    {!resultIsStoryboardFormat && (
+                      <Link
+                        href={`/tools/scheduler?assetUrl=${encodeURIComponent(videoUrl)}${
+                          theme.trim() ? `&title=${encodeURIComponent(theme.trim())}` : ""
+                        }`}
+                        className="flex items-center justify-center gap-2 w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-2xl font-bold transition-all shadow-lg shadow-emerald-500/20"
+                      >
+                        <CalendarClock className="w-5 h-5" />
+                        Schedule to YouTube
+                      </Link>
+                    )}
                   </div>
                 )}
 

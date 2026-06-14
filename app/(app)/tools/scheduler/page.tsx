@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import CreationsHistory from "@/components/CreationsHistory";
 import {
@@ -1280,9 +1281,36 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
   );
 }
 
+// ─── Deep-link intake ─────────────────────────────────────────────────────────
+
+// Reads a `?assetUrl=&title=` hand-off (e.g. from ReelsGen's "Schedule to
+// YouTube") and applies it exactly once. Isolated in its own component so the
+// `useSearchParams()` call can sit under a <Suspense> boundary as App Router
+// requires. The useRef guard makes it StrictMode-safe (effects double-invoke in
+// dev) and immune to re-renders.
+function DeepLinkIntake({
+  onAsset,
+}: {
+  onAsset: (assetUrl: string, title: string | null) => void;
+}) {
+  const searchParams = useSearchParams();
+  const consumed = useRef(false);
+
+  useEffect(() => {
+    if (consumed.current) return;
+    const assetUrl = searchParams.get("assetUrl");
+    if (!assetUrl) return;
+    consumed.current = true;
+    onAsset(assetUrl, searchParams.get("title"));
+  }, [searchParams, onAsset]);
+
+  return null;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SchedulerDashboardPage() {
+  const router = useRouter();
   const today = new Date().toISOString().split("T")[0];
   // Unified state: single mode = one item, bulk mode = 2..5 items.
   // Always holds at least one (empty) draft so the form is editable pre-upload.
@@ -1507,6 +1535,26 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
+  // Deep-link hand-off (e.g. ReelsGen → "Schedule to YouTube"). Reuses the
+  // asset intake above, then pre-fills the title on the card that now holds the
+  // asset (matched by videoUrl — the prior setItems updates are already queued,
+  // so this functional update sees the just-added/filled item). Finally strips
+  // the query params so a refresh doesn't re-trigger and the URL stays clean.
+  const handleDeepLinkAsset = useCallback(
+    (assetUrl: string, title: string | null) => {
+      handleAssetSelected(assetUrl);
+      if (title && title.trim()) {
+        setItems((prev) => {
+          const idx = prev.findIndex((i) => i.videoUrl === assetUrl);
+          if (idx === -1) return prev;
+          return prev.map((i, k) => (k === idx ? { ...i, title: title.trim() } : i));
+        });
+      }
+      router.replace("/tools/scheduler");
+    },
+    [handleAssetSelected, router],
+  );
+
   const handleSuccess = useCallback(() => {
     setItems([makeDraft(today)]);
     fetchPosts();
@@ -1629,6 +1677,9 @@ export default function SchedulerDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-950">
+      <Suspense fallback={null}>
+        <DeepLinkIntake onAsset={handleDeepLinkAsset} />
+      </Suspense>
       <main className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
