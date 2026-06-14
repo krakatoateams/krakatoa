@@ -845,8 +845,17 @@ function useCaptionAI() {
   const [error, setError] = useState<string | null>(null);
   // null = nothing to show; true/false = result of the last Generate
   const [lastUsedTranscript, setLastUsedTranscript] = useState<boolean | null>(null);
+  // Richer than the boolean: distinguishes a genuinely silent video ("no_audio")
+  // from a failed extraction/transcription ("failed") so the UI can show an
+  // accurate, retryable message instead of falsely claiming "no audio".
+  const [lastTranscriptStatus, setLastTranscriptStatus] = useState<
+    "ok" | "no_audio" | "failed" | null
+  >(null);
 
-  const resetWarning = useCallback(() => setLastUsedTranscript(null), []);
+  const resetWarning = useCallback(() => {
+    setLastUsedTranscript(null);
+    setLastTranscriptStatus(null);
+  }, []);
   const clearError = useCallback(() => setError(null), []);
 
   const generate = useCallback(
@@ -854,6 +863,7 @@ function useCaptionAI() {
       setBusy("generate");
       setError(null);
       setLastUsedTranscript(null);
+      setLastTranscriptStatus(null);
       try {
         const res = await fetch("/api/generate-caption", {
           method: "POST",
@@ -868,6 +878,13 @@ function useCaptionAI() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
         setLastUsedTranscript(data.usedTranscript === true);
+        setLastTranscriptStatus(
+          data.transcriptStatus === "ok" ||
+            data.transcriptStatus === "no_audio" ||
+            data.transcriptStatus === "failed"
+            ? data.transcriptStatus
+            : null,
+        );
         return data.caption as string;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -887,6 +904,7 @@ function useCaptionAI() {
       setBusy("generate");
       setError(null);
       setLastUsedTranscript(null);
+      setLastTranscriptStatus(null);
       try {
         const res = await fetch("/api/generate-caption", {
           method: "POST",
@@ -910,6 +928,7 @@ function useCaptionAI() {
     setBusy("polish");
     setError(null);
     setLastUsedTranscript(null);
+    setLastTranscriptStatus(null);
     try {
       const res = await fetch("/api/generate-caption", {
         method: "POST",
@@ -927,7 +946,7 @@ function useCaptionAI() {
     }
   }, []);
 
-  return { busy, error, lastUsedTranscript, resetWarning, clearError, generate, generateGeneral, polish };
+  return { busy, error, lastUsedTranscript, lastTranscriptStatus, resetWarning, clearError, generate, generateGeneral, polish };
 }
 
 // Buttons + status + transcript warning + error, driven by a useCaptionAI() instance.
@@ -959,8 +978,15 @@ function CaptionControls({
 
   return (
     <div className="space-y-2">
+      {hasContent && ai.lastTranscriptStatus === "failed" && (
+        <p className="mt-1 text-xs text-amber-400">
+          ⚠️ Couldn&apos;t read the audio this time — caption was generated from your title and tags.
+          Try generating again.
+        </p>
+      )}
+
       {hasContent &&
-        ai.lastUsedTranscript === false &&
+        ai.lastTranscriptStatus === "no_audio" &&
         (hasTitle ? (
           <p className="mt-1 text-xs text-slate-400">
             🎵 No audio detected — caption was generated from your title and tags.

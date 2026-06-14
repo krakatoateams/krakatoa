@@ -235,6 +235,11 @@ export async function POST(req: NextRequest) {
     }
 
     let transcript: string | null = null;
+    // Distinguish the two reasons `transcript` ends up null so the client can
+    // show an honest message: "no_audio" = pipeline ran but found no speech;
+    // "failed" = extraction/Whisper threw (e.g. missing RENDI_API_KEY, provider
+    // error, timeout). Defaults to "no_audio" (incl. the no-videoUrl case).
+    let transcriptStatus: "ok" | "no_audio" | "failed" = "no_audio";
     if (videoUrl) {
       // Strip query params so the URL ends in a real file extension (.mp4/.mov).
       // Supabase public URLs carry no auth token in the query string, so this is safe.
@@ -257,16 +262,24 @@ export async function POST(req: NextRequest) {
           },
         });
         const text = extractTranscript(wRes);
-        transcript = text.length > 0 ? text : null;
+        if (text.length > 0) {
+          transcript = text;
+          transcriptStatus = "ok";
+        } else {
+          transcript = null;
+          transcriptStatus = "no_audio";
+        }
       } catch (err) {
         // Soft-fail: audio extraction or Whisper failed (e.g. silent video,
         // no audio track, Rendi/Replicate error). Continue with title/tags/
-        // description only rather than failing the whole request.
+        // description only rather than failing the whole request — but flag it
+        // as "failed" (not "no_audio") so the UI doesn't wrongly claim silence.
         console.warn(
           "[generate-caption] audio extraction or Whisper failed, continuing without transcript:",
           err instanceof Error ? err.message : err,
         );
         transcript = null;
+        transcriptStatus = "failed";
       }
     }
 
@@ -294,7 +307,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ caption, usedTranscript: !!transcript });
+    return NextResponse.json({
+      caption,
+      usedTranscript: !!transcript,
+      transcriptStatus,
+    });
   } catch (err: unknown) {
     console.error("[generate-caption]", err);
 
