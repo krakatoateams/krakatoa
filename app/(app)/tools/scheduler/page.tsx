@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import CreationsHistory from "@/components/CreationsHistory";
 import {
   Upload,
@@ -844,8 +845,17 @@ function useCaptionAI() {
   const [error, setError] = useState<string | null>(null);
   // null = nothing to show; true/false = result of the last Generate
   const [lastUsedTranscript, setLastUsedTranscript] = useState<boolean | null>(null);
+  // Richer than the boolean: distinguishes a genuinely silent video ("no_audio")
+  // from a failed extraction/transcription ("failed") so the UI can show an
+  // accurate, retryable message instead of falsely claiming "no audio".
+  const [lastTranscriptStatus, setLastTranscriptStatus] = useState<
+    "ok" | "no_audio" | "failed" | null
+  >(null);
 
-  const resetWarning = useCallback(() => setLastUsedTranscript(null), []);
+  const resetWarning = useCallback(() => {
+    setLastUsedTranscript(null);
+    setLastTranscriptStatus(null);
+  }, []);
   const clearError = useCallback(() => setError(null), []);
 
   const generate = useCallback(
@@ -853,6 +863,7 @@ function useCaptionAI() {
       setBusy("generate");
       setError(null);
       setLastUsedTranscript(null);
+      setLastTranscriptStatus(null);
       try {
         const res = await fetch("/api/generate-caption", {
           method: "POST",
@@ -867,6 +878,13 @@ function useCaptionAI() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
         setLastUsedTranscript(data.usedTranscript === true);
+        setLastTranscriptStatus(
+          data.transcriptStatus === "ok" ||
+            data.transcriptStatus === "no_audio" ||
+            data.transcriptStatus === "failed"
+            ? data.transcriptStatus
+            : null,
+        );
         return data.caption as string;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -886,6 +904,7 @@ function useCaptionAI() {
       setBusy("generate");
       setError(null);
       setLastUsedTranscript(null);
+      setLastTranscriptStatus(null);
       try {
         const res = await fetch("/api/generate-caption", {
           method: "POST",
@@ -909,6 +928,7 @@ function useCaptionAI() {
     setBusy("polish");
     setError(null);
     setLastUsedTranscript(null);
+    setLastTranscriptStatus(null);
     try {
       const res = await fetch("/api/generate-caption", {
         method: "POST",
@@ -926,7 +946,7 @@ function useCaptionAI() {
     }
   }, []);
 
-  return { busy, error, lastUsedTranscript, resetWarning, clearError, generate, generateGeneral, polish };
+  return { busy, error, lastUsedTranscript, lastTranscriptStatus, resetWarning, clearError, generate, generateGeneral, polish };
 }
 
 // Buttons + status + transcript warning + error, driven by a useCaptionAI() instance.
@@ -958,8 +978,15 @@ function CaptionControls({
 
   return (
     <div className="space-y-2">
+      {hasContent && ai.lastTranscriptStatus === "failed" && (
+        <p className="mt-1 text-xs text-amber-400">
+          ⚠️ Couldn&apos;t read the audio this time — caption was generated from your title and tags.
+          Try generating again.
+        </p>
+      )}
+
       {hasContent &&
-        ai.lastUsedTranscript === false &&
+        ai.lastTranscriptStatus === "no_audio" &&
         (hasTitle ? (
           <p className="mt-1 text-xs text-slate-400">
             🎵 No audio detected — caption was generated from your title and tags.
@@ -1478,14 +1505,47 @@ export default function SchedulerDashboardPage() {
       setItems([...existingReal, ...spacedNew]);
 
       // Sequential uploads — one at a time, updating each item as it resolves.
+      // Direct-to-Supabase: the server only mints a tiny signed-URL payload, then
+      // the file bytes go browser → Storage via uploadToSignedUrl. This bypasses
+      // the serverless request-body limit (~4.5 MB on Vercel) that the old
+      // multipart /api/upload POST hit for larger files.
       for (const it of newItems) {
         try {
-          const formData = new FormData();
-          formData.append("file", it.file as File);
-          const res = await fetch("/api/upload", { method: "POST", body: formData });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error ?? "Upload failed.");
-          updateItem(it.id, { videoUrl: data.url as string, uploadStatus: "done" });
+          const file = it.file as File;
+
+          const signRes = await fetch("/api/upload/sign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename: file.name,
+              contentType: file.type,
+              size: file.size,
+            }),
+          });
+
+          // Guard against a non-JSON error body (e.g. an upstream error page) so
+          // the user sees a readable message instead of a JSON-parse exception.
+          const signData = await signRes.json().catch(() => null);
+          if (!signRes.ok || !signData) {
+            throw new Error(
+              (signData && signData.error) || "Couldn't start the upload. Please try again.",
+            );
+          }
+
+          const { bucket, path, token, publicUrl } = signData as {
+            bucket: string;
+            path: string;
+            token: string;
+            publicUrl: string;
+          };
+
+          const { error: uploadError } = await getSupabaseBrowser()
+            .storage.from(bucket)
+            .uploadToSignedUrl(path, token, file, { contentType: file.type });
+
+          if (uploadError) throw new Error(uploadError.message || "Upload failed.");
+
+          updateItem(it.id, { videoUrl: publicUrl, uploadStatus: "done" });
         } catch (err) {
           updateItem(it.id, {
             uploadStatus: "error",
@@ -1512,9 +1572,17 @@ export default function SchedulerDashboardPage() {
         scheduleError: null,
       };
 
-      const emptyIdx = items.findIndex((i) => !i.file && !i.videoUrl);
-      if (emptyIdx !== -1) {
-        updateItem(items[emptyIdx].id, assetPatch);
+      // A reusable card is an empty draft OR a card whose device upload failed
+      // (it still holds a File but has no hosted URL). Reusing the errored card
+      // lets a picked asset recover it in place instead of appending a zombie
+      // card and forcing bulk mode. `assetPatch` already clears file/error.
+      const reusableIdx = items.findIndex(
+        (i) =>
+          (!i.file && !i.videoUrl) ||
+          (i.uploadStatus === "error" && !i.videoUrl),
+      );
+      if (reusableIdx !== -1) {
+        updateItem(items[reusableIdx].id, assetPatch);
         return;
       }
 
