@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import CreationsHistory from "@/components/CreationsHistory";
 import {
   Upload,
@@ -1478,14 +1479,47 @@ export default function SchedulerDashboardPage() {
       setItems([...existingReal, ...spacedNew]);
 
       // Sequential uploads — one at a time, updating each item as it resolves.
+      // Direct-to-Supabase: the server only mints a tiny signed-URL payload, then
+      // the file bytes go browser → Storage via uploadToSignedUrl. This bypasses
+      // the serverless request-body limit (~4.5 MB on Vercel) that the old
+      // multipart /api/upload POST hit for larger files.
       for (const it of newItems) {
         try {
-          const formData = new FormData();
-          formData.append("file", it.file as File);
-          const res = await fetch("/api/upload", { method: "POST", body: formData });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error ?? "Upload failed.");
-          updateItem(it.id, { videoUrl: data.url as string, uploadStatus: "done" });
+          const file = it.file as File;
+
+          const signRes = await fetch("/api/upload/sign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename: file.name,
+              contentType: file.type,
+              size: file.size,
+            }),
+          });
+
+          // Guard against a non-JSON error body (e.g. an upstream error page) so
+          // the user sees a readable message instead of a JSON-parse exception.
+          const signData = await signRes.json().catch(() => null);
+          if (!signRes.ok || !signData) {
+            throw new Error(
+              (signData && signData.error) || "Couldn't start the upload. Please try again.",
+            );
+          }
+
+          const { bucket, path, token, publicUrl } = signData as {
+            bucket: string;
+            path: string;
+            token: string;
+            publicUrl: string;
+          };
+
+          const { error: uploadError } = await getSupabaseBrowser()
+            .storage.from(bucket)
+            .uploadToSignedUrl(path, token, file, { contentType: file.type });
+
+          if (uploadError) throw new Error(uploadError.message || "Upload failed.");
+
+          updateItem(it.id, { videoUrl: publicUrl, uploadStatus: "done" });
         } catch (err) {
           updateItem(it.id, {
             uploadStatus: "error",
@@ -1512,9 +1546,17 @@ export default function SchedulerDashboardPage() {
         scheduleError: null,
       };
 
-      const emptyIdx = items.findIndex((i) => !i.file && !i.videoUrl);
-      if (emptyIdx !== -1) {
-        updateItem(items[emptyIdx].id, assetPatch);
+      // A reusable card is an empty draft OR a card whose device upload failed
+      // (it still holds a File but has no hosted URL). Reusing the errored card
+      // lets a picked asset recover it in place instead of appending a zombie
+      // card and forcing bulk mode. `assetPatch` already clears file/error.
+      const reusableIdx = items.findIndex(
+        (i) =>
+          (!i.file && !i.videoUrl) ||
+          (i.uploadStatus === "error" && !i.videoUrl),
+      );
+      if (reusableIdx !== -1) {
+        updateItem(items[reusableIdx].id, assetPatch);
         return;
       }
 
