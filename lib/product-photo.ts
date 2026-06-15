@@ -61,6 +61,38 @@ export type ProductPhotoResolution = "1k" | "2k" | "4k";
 export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";
 export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
 
+/**
+ * Aspect ratios offered by the omni-form (/tools/photo-v2). These map 1:1 to the
+ * `aspect_ratio` enum accepted by the Nano Banana family on Replicate, so the
+ * selected value can be forwarded to the provider verbatim.
+ */
+export type PhotoAspectRatio =
+  | "1:1"
+  | "3:4"
+  | "2:3"
+  | "9:16"
+  | "3:2"
+  | "4:3"
+  | "16:9"
+  | "21:9";
+
+export const PHOTO_ASPECT_RATIOS: { id: PhotoAspectRatio; label: string; cinematic?: boolean }[] = [
+  { id: "1:1", label: "1:1" },
+  { id: "3:4", label: "3:4" },
+  { id: "2:3", label: "2:3" },
+  { id: "9:16", label: "9:16" },
+  { id: "3:2", label: "3:2" },
+  { id: "4:3", label: "4:3" },
+  { id: "16:9", label: "16:9", cinematic: true },
+  { id: "21:9", label: "21:9", cinematic: true },
+];
+
+export const DEFAULT_PHOTO_ASPECT_RATIO: PhotoAspectRatio = "1:1";
+
+export function isValidPhotoAspectRatio(id: string): id is PhotoAspectRatio {
+  return PHOTO_ASPECT_RATIOS.some((a) => a.id === id);
+}
+
 /** UI resolution id -> provider `resolution` enum value. */
 const PROVIDER_RESOLUTION: Record<ProductPhotoResolution, string> = {
   "1k": "1K",
@@ -226,17 +258,27 @@ const STYLE_BY_ID = Object.fromEntries(PHOTO_STYLES.map((s) => [s.id, s])) as Re
   (typeof PHOTO_STYLES)[number]
 >;
 
-export function buildProductPhotoPrompt(poseId: ModelPoseId, styleId: PhotoStyleId): string {
+export function buildProductPhotoPrompt(
+  poseId: ModelPoseId,
+  styleId: PhotoStyleId,
+  userPrompt?: string
+): string {
   const pose = POSE_BY_ID[poseId];
   const style = STYLE_BY_ID[styleId];
+  const direction = (userPrompt ?? "").trim();
   return [
     "Professional commercial product photography.",
     `A fashion model is ${pose.prompt}, naturally holding and showcasing the exact product from the reference image.`,
     "Keep the product design, colors, logos, and packaging identical to the reference — do not alter the product.",
     "Full-body or three-quarter framing, photorealistic, sharp focus on both model and product.",
     style.prompt,
+    // Optional free-text creative direction from the omni-form (/tools/photo-v2).
+    // Layered in as guidance without overriding the product-fidelity constraints above.
+    direction ? `Creative direction from the user: ${direction}.` : "",
     "High-end advertising quality, 4K detail.",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** Filename: {timestamp}__{poseId}__{styleId}.png */

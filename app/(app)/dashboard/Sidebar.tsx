@@ -9,10 +9,11 @@ import {
   Mountain,
   Video,
   Camera,
-  Zap,
+  Aperture,
   CalendarClock,
   CalendarDays,
   LayoutDashboard,
+  Images,
   Settings,
   Shield,
   LogOut,
@@ -38,13 +39,20 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Create",
     items: [
-      { label: "ReelsGen", href: "/tools/reels", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
-      { label: "Product Photo", href: "/tools/photo", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
-      { label: "IG Automation", href: "/tools/ig", icon: <Zap className="h-4 w-4" />, toolKey: "ig" },
+      { label: "Reels", href: "/tools/reels", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
+      { label: "Photo", href: "/tools/photo-v2", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
+      { label: "Photo backup", href: "/tools/photo", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
+      { label: "Instagram", href: "/tools/ig", icon: <Aperture className="h-4 w-4" />, toolKey: "ig" },
     ],
   },
   {
-    title: "Post",
+    title: "Library",
+    items: [
+      { label: "My Library", href: "/dashboard/assets", icon: <Images className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Publish",
     items: [
       { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" />, toolKey: "schedule" },
       { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" />, toolKey: "calendar" },

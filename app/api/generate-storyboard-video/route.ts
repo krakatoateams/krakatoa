@@ -487,7 +487,10 @@ export async function POST(req: Request) {
         mediaUrl: videoUrl,
         storagePath,
         title: String(row.theme || "Storyboard video").slice(0, 200),
-        metadata: { storyboardId },
+        metadata: {
+          storyboardId,
+          ...(row.theme ? { prompt: String(row.theme) } : {}),
+        },
       });
     } catch (historyErr) {
       console.warn("[Storyboard Video] History log failed:", historyErr);

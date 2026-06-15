@@ -61,6 +61,8 @@ export async function saveGeneratedProductPhoto(params: {
   poseId: ModelPoseId;
   styleId: PhotoStyleId;
   contentType?: string;
+  prompt?: string;
+  title?: string;
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
   const storagePath = generatedPath(params.userId, params.filename);
 
@@ -81,6 +83,8 @@ export async function saveGeneratedProductPhoto(params: {
     storagePath,
     poseId: params.poseId,
     styleId: params.styleId,
+    prompt: params.prompt,
+    title: params.title,
   });
 
   return { storagePath, publicUrl, historyItem };

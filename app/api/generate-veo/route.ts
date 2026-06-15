@@ -1099,6 +1099,9 @@ Return ONLY raw JSON array, nothing else.`;
           resolution,
           voiceId,
           emotion,
+          prompt: theme,
+          scenePrompts: scenes.map((s) => String(s.video_prompt || "")),
+          narration: fullNarration,
         },
       });
     } catch (historyErr) {
