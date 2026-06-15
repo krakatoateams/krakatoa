@@ -83,7 +83,10 @@ export async function uploadToYouTube(params: YouTubeUploadParams): Promise<stri
         categoryId: "22", // People & Blogs — safe default
       },
       status: {
-        privacyStatus: "unlisted", // Safe for testing; change to "public" for production
+        // Scheduler publishes for real. The API honors requested visibility for
+        // this project (verified: test uploads land as requested, not force-private),
+        // so scheduled videos go live publicly. No per-post override by design.
+        privacyStatus: "public",
       },
     },
     media: {

@@ -722,6 +722,7 @@ function ScheduleCard({
           tags,
           scheduled_time,
           platform: "youtube",
+          format,
         }),
       });
 
@@ -1876,6 +1877,7 @@ export default function SchedulerDashboardPage() {
             tags: it.tags,
             scheduled_time,
             platform: "youtube",
+            format: it.format,
           }),
         });
         const data = await res.json();
