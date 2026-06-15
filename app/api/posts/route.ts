@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
     // ── Parse body ────────────────────────────────────────────────────────────
     const body = await req.json();
-    const { video_url, title, description, tags, scheduled_time, platform, asset_id, project_id } =
+    const { video_url, title, description, tags, scheduled_time, platform, asset_id, project_id, format } =
       body as {
         video_url?: string;
         title: string;
@@ -72,7 +72,12 @@ export async function POST(req: NextRequest) {
         platform: string;
         asset_id?: string;
         project_id?: string;
+        format?: string;
       };
+
+    // Publish format is optional; only persist a recognized value, otherwise
+    // leave it null (unknown). Never fail the request over a bad format.
+    const normalizedFormat = format === "short" || format === "video" ? format : null;
 
     // Optional platform linkage. Validate UUID format up front so malformed ids
     // return 400 instead of a Postgres uuid-cast 500 later.
@@ -170,6 +175,7 @@ export async function POST(req: NextRequest) {
     if (profileId) insertRow.profile_id = profileId;
     if (verifiedProjectId) insertRow.project_id = verifiedProjectId;
     if (verifiedAssetId) insertRow.asset_id = verifiedAssetId;
+    if (normalizedFormat) insertRow.format = normalizedFormat;
 
     const { data, error } = await supabaseServer
       .from("posts")
