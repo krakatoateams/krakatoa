@@ -63,6 +63,11 @@ interface Post {
 // Per-card scheduling lifecycle for bulk "Schedule All" (Prompt 3)
 type ScheduleStatus = "idle" | "scheduling" | "scheduled" | "failed";
 
+// Publish target. YouTube auto-classifies Short vs regular video from aspect +
+// duration; we upload identically either way. `format` only drives our UI,
+// validation copy, caption style, and the auto-appended #Shorts tag.
+type VideoFormat = "short" | "video";
+
 interface VideoItem {
   id: string;
   file: File | null;
@@ -70,6 +75,14 @@ interface VideoItem {
   uploadStatus: UploadStatus;
   uploadError: string | null;
   duration: number | null;
+  // Measured pixel dimensions (from <video> metadata), used to auto-suggest
+  // the format and to warn when a Short isn't vertical. null until known.
+  aspect: { w: number; h: number } | null;
+  // Publish target. Defaults to "short" (preserves the original intent) and is
+  // re-suggested from metadata until the user manually overrides it.
+  format: VideoFormat;
+  // Once true, auto-suggest stops touching `format` — the manual choice wins.
+  formatTouched: boolean;
   title: string;
   tags: string;
   caption: string;
@@ -91,6 +104,9 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     uploadStatus: "idle",
     uploadError: null,
     duration: null,
+    aspect: null,
+    format: "short",
+    formatTouched: false,
     title: "",
     tags: "",
     caption: "",
@@ -107,6 +123,47 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// YouTube Shorts cap (current limit is 3 minutes).
+const SHORT_MAX_SECONDS = 180;
+
+// Auto-suggest the publish format from metadata: a vertical clip no longer than
+// the Shorts cap suggests "short"; landscape OR longer suggests "video".
+// Unknown aspect falls back to duration alone (so a short, dimensionless clip
+// still suggests "short").
+function suggestFormat(
+  durationSec: number | null,
+  aspect: { w: number; h: number } | null,
+): VideoFormat {
+  const isPortrait = aspect ? aspect.h > aspect.w : true;
+  const withinShort = durationSec === null || durationSec <= SHORT_MAX_SECONDS;
+  return isPortrait && withinShort ? "short" : "video";
+}
+
+// Ensure a Short's description carries #Shorts (case-insensitive), appending it
+// once if absent. Reinforces YouTube's Short classification + discovery.
+function withShortsTag(description: string): string {
+  if (/#shorts\b/i.test(description)) return description;
+  const base = description.trim();
+  return base ? `${base}\n\n#Shorts` : "#Shorts";
+}
+
+// Advisory (non-blocking) warning for a card. Only "short" produces warnings;
+// "video" and unknown metadata produce none.
+function formatWarning(
+  format: VideoFormat,
+  durationSec: number | null,
+  aspect: { w: number; h: number } | null,
+): string | null {
+  if (format !== "short") return null;
+  if (durationSec !== null && durationSec > SHORT_MAX_SECONDS) {
+    return `⚠️ Over 3 min (${fmtDuration(durationSec)}) — YouTube will publish this as a regular video, not a Short.`;
+  }
+  if (aspect && aspect.h <= aspect.w) {
+    return "⚠️ Not vertical — Shorts should be 9:16. It may publish as a regular video.";
+  }
+  return null;
 }
 
 // <input type="date"> expects a local "YYYY-MM-DD" string.
@@ -252,13 +309,15 @@ interface UploadCardProps {
   // Bulk: report one or more selected files to the parent
   onFilesAdded: (files: File[]) => void;
   onRemove: () => void;
-  // Task 1.3: callback to report video duration to parent
-  onDurationChange: (duration: number | null) => void;
+  // Report measured duration + aspect to the parent (drives format auto-suggest)
+  onMetaChange: (meta: { duration: number | null; aspect: { w: number; h: number } | null }) => void;
   // Asset source: report a picked creation's hosted URL to the parent
   onAssetSelected: (mediaUrl: string) => void;
+  // Active publish format — switches the preview frame (9:16 short / 16:9 video)
+  format: VideoFormat;
 }
 
-function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onDurationChange, onAssetSelected }: UploadCardProps) {
+function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onMetaChange, onAssetSelected, format }: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [tab, setTab] = useState<"upload" | "assets">("upload");
   // Task 2.1: local object URL for instant preview
@@ -283,8 +342,8 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
     }
     setPreviewUrl(null);
     setDuration(null);
-    onDurationChange(null);
-  }, [file, videoUrl, onDurationChange]);
+    onMetaChange({ duration: null, aspect: null });
+  }, [file, videoUrl, onMetaChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -310,12 +369,18 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  // Task 2.3: capture duration from video metadata
+  // Capture duration + pixel dimensions from video metadata (dimensions feed
+  // the format auto-suggest and the "Short isn't vertical" warning).
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const d = e.currentTarget.duration;
+    const el = e.currentTarget;
+    const d = el.duration;
     const valid = isFinite(d) ? d : null;
+    const aspect =
+      el.videoWidth > 0 && el.videoHeight > 0
+        ? { w: el.videoWidth, h: el.videoHeight }
+        : null;
     setDuration(valid);
-    onDurationChange(valid);
+    onMetaChange({ duration: valid, aspect });
   };
 
   const dropZoneClass =
@@ -428,15 +493,23 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
           />
         )}
 
-        {/* Task 2.2 & 2.4: video preview + duration */}
+        {/* Video preview + duration. Frame adapts to the chosen format:
+            9:16 for a Short, 16:9 for a Video. object-contain letterboxes
+            gracefully when the real ratio differs from the frame. */}
         {previewUrl && uploadStatus === "done" && (
           <div className="mt-4 space-y-2">
-            <video
-              src={previewUrl}
-              controls
-              onLoadedMetadata={handleLoadedMetadata}
-              className="w-full max-h-[200px] rounded-lg border border-gray-700 bg-black"
-            />
+            <div
+              className={`mx-auto w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${
+                format === "short" ? "aspect-[9/16] max-w-[240px]" : "aspect-video"
+              }`}
+            >
+              <video
+                src={previewUrl}
+                controls
+                onLoadedMetadata={handleLoadedMetadata}
+                className="h-full w-full object-contain"
+              />
+            </div>
             {duration !== null && (
               <p className="text-center text-xs text-gray-500">
                 Duration: {fmtDuration(duration)}
@@ -446,7 +519,7 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
         )}
 
         <input ref={inputRef} type="file" multiple accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/avi,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
-        <p className="mt-3 text-center text-xs text-gray-600">Up to 5 videos · Max 60s each · MP4, MOV, AVI · Max 50MB</p>
+        <p className="mt-3 text-center text-xs text-gray-600">Up to 5 videos · Shorts ≤ 3 min · MP4, MOV, AVI · Max 50MB</p>
       </div>
     </Card>
   );
@@ -460,9 +533,10 @@ interface DescriptionCardProps {
   title: string;
   tags: string;
   videoUrl: string | null;
+  format: VideoFormat;
 }
 
-function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: DescriptionCardProps) {
+function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, format }: DescriptionCardProps) {
   // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
   // removing the duplicated fetch logic. Behavior is preserved: Generate requires
   // a video (Whisper), Polish appears once there's content, and the two-branch
@@ -476,7 +550,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: De
 
   const handleGenerate = async () => {
     try {
-      const next = await ai.generate({ title, tags, videoUrl });
+      const next = await ai.generate({ title, tags, videoUrl, format });
       onCaptionChange(next);
     } catch {
       // error surfaced by the hook
@@ -510,7 +584,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: De
             className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
           />
           <p className="mt-1 text-right text-xs text-gray-600">
-            {caption.length} / 300 chars
+            {format === "short" ? `${caption.length} / 300 chars` : `${caption.length} chars`}
           </p>
         </div>
 
@@ -528,6 +602,47 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl }: De
   );
 }
 
+// ─── Format toggle ────────────────────────────────────────────────────────────
+
+// Short / Video selector. Calling onChange always counts as a manual override
+// (the parent flips `formatTouched` so auto-suggest stops adjusting this card).
+function FormatToggle({
+  value,
+  onChange,
+  size = "md",
+}: {
+  value: VideoFormat;
+  onChange: (next: VideoFormat) => void;
+  size?: "sm" | "md";
+}) {
+  const pad = size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-3 py-1.5 text-xs";
+  const opts: { id: VideoFormat; label: string }[] = [
+    { id: "short", label: "Short" },
+    { id: "video", label: "Video" },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="Publish format"
+      className="inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5"
+    >
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          aria-pressed={value === o.id}
+          onClick={() => onChange(o.id)}
+          className={`cursor-pointer rounded-md font-medium transition-colors ${pad} ${
+            value === o.id ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── Schedule Card ────────────────────────────────────────────────────────────
 
 interface ScheduleCardProps {
@@ -535,8 +650,12 @@ interface ScheduleCardProps {
   caption: string;
   onSuccess: () => void;
   onToast: (toast: ToastState) => void;
-  // Task 3.1: duration from parent for guard
+  // Measured metadata — drives advisory (non-blocking) warnings
   videoDuration: number | null;
+  videoAspect: { w: number; h: number } | null;
+  // Publish format + override handler
+  format: VideoFormat;
+  onFormatChange: (next: VideoFormat) => void;
   // Lifted to page so DescriptionCard can read them for AI prompts
   title: string;
   tags: string;
@@ -550,6 +669,9 @@ function ScheduleCard({
   onSuccess,
   onToast,
   videoDuration,
+  videoAspect,
+  format,
+  onFormatChange,
   title,
   tags,
   onTitleChange,
@@ -587,13 +709,16 @@ function ScheduleCard({
     try {
       const scheduled_time = new Date(`${form.date}T${form.time}:00`).toISOString();
 
+      // Shorts get #Shorts appended to reinforce YouTube's classification.
+      const description = format === "short" ? withShortsTag(caption) : caption;
+
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           video_url: videoUrl,
           title: title.trim(),
-          description: caption,
+          description,
           tags,
           scheduled_time,
           platform: "youtube",
@@ -616,22 +741,33 @@ function ScheduleCard({
     }
   };
 
-  // Task 3.3: duration guard included in isReady
-  const durationOk = videoDuration === null || videoDuration <= 60;
-  const isReady = !!videoUrl && !!title.trim() && !!form.date && !!form.time && durationOk;
+  // Duration no longer blocks scheduling — only the essentials gate the button.
+  const isReady = !!videoUrl && !!title.trim() && !!form.date && !!form.time;
+
+  // Advisory (non-blocking) warnings for Shorts only.
+  const shortWarn = formatWarning(format, videoDuration, videoAspect);
 
   return (
     <Card className="sticky top-20">
       <CardHeader title="Schedule Post" icon={<Calendar className="h-4 w-4" />} />
 
       <div className="space-y-5 p-5">
-        {/* Task 3.2: duration warning banner */}
-        {videoDuration !== null && videoDuration > 60 && (
+        {/* Format */}
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-400">Format</label>
+          <FormatToggle value={format} onChange={onFormatChange} />
+          <p className="mt-1 text-xs text-gray-600">
+            {format === "short"
+              ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
+              : "Any aspect ratio or length · publishes as a regular video"}
+          </p>
+        </div>
+
+        {/* Advisory warnings (Short only; never blocks) */}
+        {shortWarn && (
           <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
             <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
-            <p className="text-xs text-amber-400">
-              ⚠️ Video is {Math.round(videoDuration)}s — YouTube Shorts requires under 60s
-            </p>
+            <p className="text-xs text-amber-400">{shortWarn}</p>
           </div>
         )}
 
@@ -736,7 +872,6 @@ function ScheduleCard({
 
         <p className="text-center text-xs text-gray-600">
           {!videoUrl ? "Upload a video to enable scheduling"
-            : videoDuration !== null && videoDuration > 60 ? "Shorten video to under 60s to schedule"
             : !title.trim() ? "Add a title to schedule"
             : ""}
         </p>
@@ -859,7 +994,12 @@ function useCaptionAI() {
   const clearError = useCallback(() => setError(null), []);
 
   const generate = useCallback(
-    async (input: { title: string; tags: string; videoUrl: string | null }): Promise<string> => {
+    async (input: {
+      title: string;
+      tags: string;
+      videoUrl: string | null;
+      format?: VideoFormat;
+    }): Promise<string> => {
       setBusy("generate");
       setError(null);
       setLastUsedTranscript(null);
@@ -873,6 +1013,7 @@ function useCaptionAI() {
             title: input.title,
             tags: input.tags,
             videoUrl: input.videoUrl ?? undefined,
+            format: input.format ?? "short",
           }),
         });
         const data = await res.json();
@@ -1102,8 +1243,17 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
   }, [item.videoUrl, ai.resetWarning]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const d = e.currentTarget.duration;
-    onUpdate({ duration: isFinite(d) ? d : null });
+    const el = e.currentTarget;
+    const d = el.duration;
+    const duration = isFinite(d) ? d : null;
+    const aspect =
+      el.videoWidth > 0 && el.videoHeight > 0
+        ? { w: el.videoWidth, h: el.videoHeight }
+        : null;
+    const patch: Partial<VideoItem> = { duration, aspect };
+    // Auto-suggest the format until the user manually overrides this card.
+    if (!item.formatTouched) patch.format = suggestFormat(duration, aspect);
+    onUpdate(patch);
   };
 
   const handleGenerate = async () => {
@@ -1112,6 +1262,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
         title: item.title,
         tags: item.tags,
         videoUrl: item.videoUrl,
+        format: item.format,
       });
       onUpdate({ caption });
     } catch {
@@ -1128,7 +1279,8 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
     }
   };
 
-  const overLimit = item.duration !== null && item.duration > 60;
+  const warn = formatWarning(item.format, item.duration, item.aspect);
+  const frameClass = item.format === "short" ? "aspect-[9/16]" : "aspect-video";
 
   return (
     <Card className="p-4">
@@ -1136,31 +1288,39 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
         {/* Left: compact thumbnail + meta */}
         <div className="w-full shrink-0 space-y-1.5 sm:w-36">
           {previewUrl ? (
-            <video
-              src={previewUrl}
-              controls
-              onLoadedMetadata={handleLoadedMetadata}
-              className="max-h-[220px] w-full rounded-lg border border-gray-700 bg-black object-contain sm:max-h-[200px]"
-            />
+            <div className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${frameClass}`}>
+              <video
+                src={previewUrl}
+                controls
+                onLoadedMetadata={handleLoadedMetadata}
+                className="h-full w-full object-contain"
+              />
+            </div>
           ) : (
-            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 sm:max-h-[200px]">
+            <div className={`flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 ${frameClass}`}>
               <FileVideo className="h-6 w-6 text-gray-600" />
             </div>
           )}
 
+          <FormatToggle
+            value={item.format}
+            onChange={(next) => onUpdate({ format: next, formatTouched: true })}
+            size="sm"
+          />
+
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
             <span className="truncate">{item.file?.name ?? `Video ${index + 1}`}</span>
             {item.duration !== null && (
-              <span className={`shrink-0 ${overLimit ? "text-amber-400" : ""}`}>
+              <span className={`shrink-0 ${warn ? "text-amber-400" : ""}`}>
                 {fmtDuration(item.duration)}
               </span>
             )}
           </div>
 
-          {overLimit && (
-            <p className="flex items-center gap-1 text-[11px] text-amber-400">
-              <AlertCircle className="h-3 w-3 shrink-0" />
-              Over 60s — Shorts must be shorter
+          {warn && (
+            <p className="flex items-start gap-1 text-[11px] text-amber-400">
+              <AlertCircle className="mt-px h-3 w-3 shrink-0" />
+              <span>{warn.replace(/^⚠️\s*/, "")}</span>
             </p>
           )}
 
@@ -1287,7 +1447,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
               className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
             <p className="mt-0.5 text-right text-[11px] text-gray-600">
-              {item.caption.length} / 300 chars
+              {item.format === "short" ? `${item.caption.length} / 300 chars` : `${item.caption.length} chars`}
             </p>
           </div>
 
@@ -1370,8 +1530,26 @@ export default function SchedulerDashboardPage() {
   // onDurationChange lives in UploadCard's effect deps — an inline arrow would
   // re-run that effect every render and can loop.
   const handleItem0Remove = useCallback(() => removeItem(item0Id), [removeItem, item0Id]);
-  const handleItem0Duration = useCallback(
-    (d: number | null) => updateItem(item0Id, { duration: d }),
+  // Receives measured duration + aspect; auto-suggests the format until the user
+  // overrides it. Reads the live item via functional update to see `formatTouched`.
+  const handleItem0Meta = useCallback(
+    (meta: { duration: number | null; aspect: { w: number; h: number } | null }) =>
+      setItems((prev) =>
+        prev.map((i) =>
+          i.id === item0Id
+            ? {
+                ...i,
+                duration: meta.duration,
+                aspect: meta.aspect,
+                format: i.formatTouched ? i.format : suggestFormat(meta.duration, meta.aspect),
+              }
+            : i,
+        ),
+      ),
+    [item0Id],
+  );
+  const handleItem0Format = useCallback(
+    (next: VideoFormat) => updateItem(item0Id, { format: next, formatTouched: true }),
     [updateItem, item0Id],
   );
   const handleItem0Caption = useCallback(
@@ -1568,6 +1746,9 @@ export default function SchedulerDashboardPage() {
         uploadError: null,
         file: null,
         duration: null,
+        aspect: null,
+        format: "short",
+        formatTouched: false,
         scheduleStatus: "idle",
         scheduleError: null,
       };
@@ -1633,15 +1814,11 @@ export default function SchedulerDashboardPage() {
   // Empty caption is confirmed once for the whole batch, not per card.
   const [confirmEmptyBatch, setConfirmEmptyBatch] = useState(false);
 
-  // A card is schedulable when it has a hosted video, a title, a date/time, and
-  // (if known) a ≤60s duration — mirrors single-mode ScheduleCard.isReady.
+  // A card is schedulable when it has a hosted video, a title, and a date/time.
+  // Duration no longer gates scheduling — mirrors single-mode ScheduleCard.isReady.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      !!i.videoUrl &&
-      !!i.title.trim() &&
-      !!i.date &&
-      !!i.time &&
-      (i.duration === null || i.duration <= 60),
+      !!i.videoUrl && !!i.title.trim() && !!i.date && !!i.time,
     [],
   );
 
@@ -1688,13 +1865,14 @@ export default function SchedulerDashboardPage() {
     for (const it of targets) {
       try {
         const scheduled_time = new Date(`${it.date}T${it.time}:00`).toISOString();
+        const description = it.format === "short" ? withShortsTag(it.caption) : it.caption;
         const res = await fetch("/api/posts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             video_url: it.videoUrl,
             title: it.title.trim(),
-            description: it.caption,
+            description,
             tags: it.tags,
             scheduled_time,
             platform: "youtube",
@@ -1769,8 +1947,9 @@ export default function SchedulerDashboardPage() {
                 uploadError={item0.uploadError}
                 onFilesAdded={handleFilesAdded}
                 onRemove={handleItem0Remove}
-                onDurationChange={handleItem0Duration}
+                onMetaChange={handleItem0Meta}
                 onAssetSelected={handleAssetSelected}
+                format={item0.format}
               />
               <DescriptionCard
                 caption={item0.caption}
@@ -1778,6 +1957,7 @@ export default function SchedulerDashboardPage() {
                 title={item0.title}
                 tags={item0.tags}
                 videoUrl={item0.videoUrl}
+                format={item0.format}
               />
             </div>
 
@@ -1788,6 +1968,9 @@ export default function SchedulerDashboardPage() {
                 onSuccess={handleSuccess}
                 onToast={setToast}
                 videoDuration={item0.duration}
+                videoAspect={item0.aspect}
+                format={item0.format}
+                onFormatChange={handleItem0Format}
                 title={item0.title}
                 tags={item0.tags}
                 onTitleChange={handleItem0Title}
@@ -1804,8 +1987,9 @@ export default function SchedulerDashboardPage() {
               uploadError={null}
               onFilesAdded={handleFilesAdded}
               onRemove={noop}
-              onDurationChange={noop}
+              onMetaChange={noop}
               onAssetSelected={handleAssetSelected}
+              format="short"
             />
 
             <div className="flex items-center gap-3">
