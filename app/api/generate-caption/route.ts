@@ -42,13 +42,51 @@ function extractTranscript(wRes: unknown): string {
   return "";
 }
 
+type CaptionFormat = "short" | "video";
+
 function buildPrompt(opts: {
   transcript: string | null;
   title?: string;
   tags?: string;
   description?: string;
+  format?: CaptionFormat;
 }): string {
-  const { transcript, title, tags, description } = opts;
+  const { transcript, title, tags, description, format = "short" } = opts;
+
+  // Long-form video: a richer description, no forced #Shorts, longer allowance.
+  if (format === "video") {
+    const lines: string[] = [
+      "You are a YouTube content expert. Generate an engaging description for a regular (long-form) YouTube video.",
+      "",
+      "Context about the video:",
+    ];
+
+    if (transcript) lines.push(`Video transcript: "${transcript}"`);
+    if (title) lines.push(`Video title: "${title}"`);
+    if (tags) lines.push(`Tags/topics: ${tags}`);
+    if (description) lines.push(`Creator's description: "${description}"`);
+
+    lines.push(
+      "",
+      "Write a description with this structure:",
+      "1. A compelling opening line that summarizes the value of the video",
+      "2. Body (2-4 sentences describing what viewers will learn or see)",
+      "3. 3-6 relevant hashtags",
+      "",
+      "Rules:",
+      "- Always write in English, even if the transcript or context is in another language",
+      "- Do NOT add a #Shorts hashtag — this is a regular video, not a Short",
+      "- Never use placeholder text like [Your Name] or [Topic]",
+      "- Be specific based on the actual content provided",
+      "- Keep it concise but informative (a few short paragraphs is fine)",
+      "- Sound natural and engaging, not robotic",
+      "- If no context is available, write a generic but engaging YouTube video description",
+      "",
+      "Return only the description, nothing else.",
+    );
+
+    return lines.join("\n");
+  }
 
   const lines: string[] = [
     "You are a YouTube Shorts content expert. Generate an engaging caption for a YouTube Short.",
@@ -66,7 +104,7 @@ function buildPrompt(opts: {
     "Write a caption with this exact structure:",
     "1. A strong hook (first line, max 10 words, must grab attention)",
     "2. Body (2-3 sentences describing what the video is about)",
-    "3. 5-8 relevant hashtags",
+    "3. 5-8 relevant hashtags (include #Shorts)",
     "4. 2-3 relevant emojis",
     "",
     "Rules:",
@@ -153,6 +191,7 @@ export async function POST(req: NextRequest) {
     const tags: string = (body.tags ?? "").toString().trim();
     const videoUrl: string = (body.videoUrl ?? "").toString().trim();
     const existingCaption: string = (body.existingCaption ?? "").toString().trim();
+    const format: CaptionFormat = body.format === "video" ? "video" : "short";
 
     const replicate = createReplicateClient();
 
@@ -288,12 +327,14 @@ export async function POST(req: NextRequest) {
       title: title || undefined,
       tags: tags || undefined,
       description: description || undefined,
+      format,
     });
 
     const output = await runWithRetry(replicate, LLM_MODEL, {
       input: {
         prompt,
-        max_tokens: 300,
+        // Long-form descriptions get more room than the 300-char Shorts caption.
+        max_tokens: format === "video" ? 600 : 300,
         temperature: 0.7,
       },
     });
