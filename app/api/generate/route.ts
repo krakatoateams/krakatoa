@@ -1033,6 +1033,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           resolution: RESOLUTION,
           voiceId: VOICE_ID,
           emotion: USER_EMOTION,
+          prompt: String(theme),
+          scenePrompts: scenes.map((s) => String(s.video_prompt || "")),
+          narration: fullNarration,
         },
       });
     } catch (historyErr) {

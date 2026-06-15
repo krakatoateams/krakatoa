@@ -584,6 +584,7 @@ export async function POST(req: Request) {
         metadata: {
           storyboardId: inserted.id,
           storyboardStyle,
+          prompt: imagePrompt,
         },
       });
     } catch (historyErr) {

@@ -34,6 +34,8 @@ export async function insertProductPhotoGeneration(params: {
   storagePath: string;
   poseId: ModelPoseId;
   styleId: PhotoStyleId;
+  prompt?: string;
+  title?: string;
 }): Promise<ProductPhotoHistoryItem> {
   const pose = POSE_BY_ID[params.poseId];
   const style = STYLE_BY_ID[params.styleId];
@@ -43,12 +45,13 @@ export async function insertProductPhotoGeneration(params: {
     mediaType: "image",
     mediaUrl: params.imageUrl,
     storagePath: params.storagePath,
-    title: `${pose?.label ?? params.poseId} · ${style?.label ?? params.styleId}`,
+    title: params.title || `${pose?.label ?? params.poseId} · ${style?.label ?? params.styleId}`,
     metadata: {
       poseId: params.poseId,
       styleId: params.styleId,
       poseLabel: pose?.label,
       styleLabel: style?.label,
+      ...(params.prompt ? { prompt: params.prompt } : {}),
     },
   });
   return creationToProductPhotoItem(item);

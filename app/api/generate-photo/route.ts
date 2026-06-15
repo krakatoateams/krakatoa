@@ -11,6 +11,8 @@ import {
   productPhotoProviderResolution,
   buildGeneratedFilename,
   buildProductPhotoPrompt,
+  isValidPhotoAspectRatio,
+  DEFAULT_PHOTO_ASPECT_RATIO,
 } from "@/lib/product-photo";
 import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
@@ -43,6 +45,9 @@ export const dynamic = "force-dynamic";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+// Optional free-text creative direction (omni-form at /tools/photo-v2). Capped so a
+// runaway client value can't bloat the provider prompt; empty when not supplied.
+const PROMPT_MAX_CHARS = 1500;
 
 function isValidPose(id: string): id is ModelPoseId {
   return MODEL_POSES.some((p) => p.id === id);
@@ -149,22 +154,50 @@ export async function POST(req: Request) {
     //   pro      -> google/nano-banana-pro   (resolution 1K/2K/4K)
     const modelTierRaw = String(formData.get("modelTier") || "").trim() || DEFAULT_PRODUCT_PHOTO_TIER;
     const resolutionRaw = String(formData.get("resolution") || "").trim();
+    // Optional user prompt from the omni-form. Trim + hard-cap; "" means none.
+    const userPrompt = String(formData.get("prompt") || "")
+      .trim()
+      .slice(0, PROMPT_MAX_CHARS);
+    // Generation mode: "product" (default — requires a product reference image and
+    // wraps the prompt in product-photography scaffolding) or "image" (text-to-image:
+    // no reference image, the prompt is required and used verbatim). Surfaced by the
+    // omni-form's "Generate any image" creation type at /tools/photo-v2.
+    const isImageMode = String(formData.get("mode") || "product").trim() === "image";
+    // Aspect ratio chip (omni-form). Validated against the provider-supported enum;
+    // anything unknown falls back to the default so a bad client value can't error.
+    const aspectRatioRaw = String(formData.get("aspectRatio") || "").trim();
+    const aspectRatio = isValidPhotoAspectRatio(aspectRatioRaw)
+      ? aspectRatioRaw
+      : DEFAULT_PHOTO_ASPECT_RATIO;
 
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
+    if (isImageMode) {
+      // Text-to-image: no product reference; the prompt carries the full intent.
+      if (!userPrompt) {
+        return NextResponse.json(
+          { error: "A prompt is required to generate an image." },
+          { status: 400 }
+        );
+      }
+    } else {
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
+      }
+
+      if (!ALLOWED_TYPES.has(file.type)) {
+        return NextResponse.json(
+          { error: "Only JPEG, PNG, or WebP images are supported" },
+          { status: 400 }
+        );
+      }
+
+      if (file.size > MAX_FILE_BYTES) {
+        return NextResponse.json({ error: "Image must be 10MB or smaller" }, { status: 400 });
+      }
     }
 
-    if (!ALLOWED_TYPES.has(file.type)) {
-      return NextResponse.json(
-        { error: "Only JPEG, PNG, or WebP images are supported" },
-        { status: 400 }
-      );
-    }
-
-    if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ error: "Image must be 10MB or smaller" }, { status: 400 });
-    }
-
+    // Pose/style are product-photo concepts. The omni-form always sends valid
+    // defaults (even in image mode), so we validate unconditionally — this also
+    // narrows poseId/styleId for the shared metadata/storage code below.
     if (!isValidPose(poseId)) {
       return NextResponse.json({ error: "Invalid model pose" }, { status: 400 });
     }
@@ -216,6 +249,9 @@ export async function POST(req: Request) {
       pricingKey,
       providerModel: photoModel.model,
       providerResolution,
+      userPrompt,
+      mode: isImageMode ? "image" : "product",
+      aspectRatio,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -255,7 +291,7 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId, modelTier, resolution, pricingKey },
+      input: { poseId, styleId, modelTier, resolution, pricingKey, mode: isImageMode ? "image" : "product" },
     }));
     if (job) {
       jobId = job.id;
@@ -348,12 +384,22 @@ export async function POST(req: Request) {
     // Provider client is created only after the spend has succeeded.
     const replicate = createReplicateClient();
 
-    await beginStep("reference_upload", "Upload product reference image to Replicate");
-    console.log("[Product Photo] Uploading product image to Replicate...");
-    const productImageUrl = await uploadProductImageToReplicate(replicate, file);
-    await endStep({ productImageUrl });
+    // Product mode uploads the reference image; image mode skips it entirely.
+    let productImageUrl: string | null = null;
+    if (!isImageMode) {
+      await beginStep("reference_upload", "Upload product reference image to Replicate");
+      console.log("[Product Photo] Uploading product image to Replicate...");
+      productImageUrl = await uploadProductImageToReplicate(replicate, file as File);
+      await endStep({ productImageUrl });
+    }
 
-    const prompt = buildProductPhotoPrompt(poseId, styleId);
+    // Product mode wraps the prompt in product-photography scaffolding; image mode
+    // (text-to-image) uses the user's prompt verbatim.
+    const prompt = isImageMode ? userPrompt : buildProductPhotoPrompt(poseId, styleId, userPrompt);
+
+    // Aspect ratio comes from the chip (validated above); image mode omits
+    // image_input, product mode includes the uploaded reference.
+    const imageInput = productImageUrl ? [productImageUrl] : undefined;
 
     // Build the provider input per tier. We only send parameters each model
     // actually supports — Basic (google/nano-banana) has NO resolution param;
@@ -363,16 +409,16 @@ export async function POST(req: Request) {
     if (modelTier === "basic") {
       providerInput = {
         prompt,
-        image_input: [productImageUrl],
-        aspect_ratio: "4:5",
+        ...(imageInput ? { image_input: imageInput } : {}),
+        aspect_ratio: aspectRatio,
         output_format: "png",
       };
     } else if (modelTier === "balanced") {
       providerInput = {
         prompt,
         resolution: providerResolution,
-        image_input: [productImageUrl],
-        aspect_ratio: "4:5",
+        ...(imageInput ? { image_input: imageInput } : {}),
+        aspect_ratio: aspectRatio,
         google_search: false,
         image_search: false,
         output_format: "png",
@@ -382,8 +428,8 @@ export async function POST(req: Request) {
       providerInput = {
         prompt,
         resolution: providerResolution,
-        image_input: [productImageUrl],
-        aspect_ratio: "4:5",
+        ...(imageInput ? { image_input: imageInput } : {}),
+        aspect_ratio: aspectRatio,
         output_format: "png",
         allow_fallback_model: false,
       };
@@ -421,6 +467,10 @@ export async function POST(req: Request) {
       poseId,
       styleId,
       contentType: "image/png",
+      prompt,
+      // Image-mode items aren't pose/style shots, so give the library a prompt-based
+      // title instead of the misleading "Standing · Minimalist Studio".
+      title: isImageMode ? userPrompt.slice(0, 60) || "Generated image" : undefined,
     });
     await endStep({ storagePath: saved.storagePath, publicUrl: saved.publicUrl });
 

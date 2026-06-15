@@ -6,20 +6,17 @@ import {
   User,
   Coins,
   Link2,
-  Images,
   SlidersHorizontal,
 } from "lucide-react";
 import AccountTab from "./AccountTab";
 import CreditsTab from "./CreditsTab";
 import ConnectionsTab from "./ConnectionsTab";
-import AssetsTab from "./AssetsTab";
 import BasicSettingsTab from "./BasicSettingsTab";
 
 const TABS = [
   { id: "account", label: "Account", icon: User },
   { id: "credits", label: "Credits", icon: Coins },
   { id: "connections", label: "Connections", icon: Link2 },
-  { id: "assets", label: "Assets", icon: Images },
   { id: "settings", label: "Basic Settings", icon: SlidersHorizontal },
 ] as const;
 
@@ -50,7 +47,7 @@ function SettingsContent() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white">Profile Settings</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Manage your account, credits, connections, and assets.
+          Manage your account, credits, and connections.
         </p>
       </div>
 
@@ -90,7 +87,6 @@ function SettingsContent() {
           {activeTab === "account" && <AccountTab />}
           {activeTab === "credits" && <CreditsTab />}
           {activeTab === "connections" && <ConnectionsTab />}
-          {activeTab === "assets" && <AssetsTab />}
           {activeTab === "settings" && <BasicSettingsTab />}
         </div>
       </div>
