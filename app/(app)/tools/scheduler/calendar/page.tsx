@@ -13,6 +13,7 @@ import {
   ExternalLink,
   RefreshCw,
 } from "lucide-react";
+import { derivePostDisplayStatus } from "@/lib/post-status";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ interface Post {
   tags: string;
   scheduled_time: string;
   status: "draft" | "scheduled" | "published" | "failed";
+  last_error?: string | null;
+  publish_started_at?: string | null;
   created_at: string;
 }
 
@@ -50,6 +53,20 @@ const STATUS_CFG = {
     badge: "border-blue-500/30 bg-blue-500/10 text-blue-400",
     chip: "border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20",
     stat: "text-blue-400",
+  },
+  overdue: {
+    label: "Overdue",
+    dot: "bg-amber-400",
+    badge: "border-amber-500/30 bg-amber-500/10 text-amber-400",
+    chip: "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20",
+    stat: "text-amber-400",
+  },
+  publishing: {
+    label: "Publishing",
+    dot: "bg-violet-400",
+    badge: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+    chip: "border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20",
+    stat: "text-violet-300",
   },
   published: {
     label: "Published",
@@ -185,7 +202,7 @@ function YouTubeStatusBadge() {
 // ─── Post Detail Modal ────────────────────────────────────────────────────────
 
 function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
-  const cfg = STATUS_CFG[post.status] ?? STATUS_CFG.draft;
+  const cfg = STATUS_CFG[derivePostDisplayStatus(post)] ?? STATUS_CFG.draft;
   const tags = post.tags ? post.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
   useEffect(() => {
@@ -226,6 +243,13 @@ function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
             <Clock className="h-3.5 w-3.5 text-gray-600" />
             {fmtDateTime(post.scheduled_time)}
           </div>
+
+          {post.status === "failed" && post.last_error && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="leading-relaxed">{post.last_error}</span>
+            </div>
+          )}
 
           {post.description && (
             <div>
@@ -287,7 +311,7 @@ interface PostChipProps {
 }
 
 function PostChip({ post, onClick, onDragStart, isDragging }: PostChipProps) {
-  const cfg = STATUS_CFG[post.status] ?? STATUS_CFG.draft;
+  const cfg = STATUS_CFG[derivePostDisplayStatus(post)] ?? STATUS_CFG.draft;
 
   return (
     <button

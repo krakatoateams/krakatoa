@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import {
   Upload,
@@ -57,6 +58,8 @@ interface Post {
   scheduled_time: string;
   youtube_video_id?: string | null;
   platform: string;
+  last_error?: string | null;
+  publish_started_at?: string | null;
 }
 
 // Bulk scheduling: one record per video (single mode = one item)
@@ -884,10 +887,12 @@ function ScheduleCard({
 // ─── Recent Posts Card ────────────────────────────────────────────────────────
 
 const STATUS_CFG = {
-  scheduled: { label: "Scheduled", badge: "border-blue-500/30 bg-blue-500/10 text-blue-400", dot: "bg-blue-400" },
-  published: { label: "Published", badge: "border-green-500/30 bg-green-500/10 text-green-400", dot: "bg-green-400" },
-  failed:    { label: "Failed",    badge: "border-red-500/30 bg-red-500/10 text-red-400",     dot: "bg-red-400"   },
-  draft:     { label: "Draft",     badge: "border-gray-700 bg-gray-800 text-gray-400",        dot: "bg-gray-500"  },
+  scheduled:  { label: "Scheduled",  badge: "border-blue-500/30 bg-blue-500/10 text-blue-400",       dot: "bg-blue-400"   },
+  overdue:    { label: "Overdue",    badge: "border-amber-500/30 bg-amber-500/10 text-amber-400",    dot: "bg-amber-400"  },
+  publishing: { label: "Publishing", badge: "border-violet-500/30 bg-violet-500/10 text-violet-300", dot: "bg-violet-400" },
+  published:  { label: "Published",  badge: "border-green-500/30 bg-green-500/10 text-green-400",     dot: "bg-green-400"  },
+  failed:     { label: "Failed",     badge: "border-red-500/30 bg-red-500/10 text-red-400",           dot: "bg-red-400"    },
+  draft:      { label: "Draft",      badge: "border-gray-700 bg-gray-800 text-gray-400",              dot: "bg-gray-500"   },
 } as const;
 
 interface RecentPostsCardProps {
@@ -916,13 +921,19 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
         )}
 
         {posts.map((post) => {
-          const cfg = STATUS_CFG[post.status] ?? STATUS_CFG.draft;
+          const display = derivePostDisplayStatus(post);
+          const cfg = STATUS_CFG[display] ?? STATUS_CFG.draft;
           return (
             <div key={post.id} className="flex items-center gap-3 px-5 py-3.5">
               <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${cfg.dot}`} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{post.title}</p>
                 <p className="mt-0.5 text-xs text-gray-500">{fmtScheduledTime(post.scheduled_time)}</p>
+                {post.status === "failed" && post.last_error && (
+                  <p className="mt-1 truncate text-xs text-red-400/80" title={post.last_error}>
+                    {post.last_error}
+                  </p>
+                )}
               </div>
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${cfg.badge}`}>
                 {cfg.label}
