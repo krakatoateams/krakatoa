@@ -2,18 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
 
+// Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
+export const maxDuration = 60;
+
+// How many due posts a single invocation will process. The rest drain on the next
+// tick. Kept small so the run finishes well under maxDuration even on slow uploads.
+const MAX_POSTS_PER_RUN = 3;
+
+// A post claimed (publish_started_at set) but not resolved within this window is
+// treated as abandoned — e.g. the function timed out mid-upload — and may be
+// re-claimed by a later run.
+const CLAIM_STALE_MS = 10 * 60 * 1000;
+
 /**
  * GET /api/cron
  *
- * Finds all posts whose scheduled_time has passed and status is still
- * "scheduled", then uploads each one to YouTube and marks it published/failed.
+ * Finds posts whose scheduled_time has passed and status is still "scheduled",
+ * claims a bounded batch, uploads each to YouTube, and marks it published/failed.
+ *
+ * Safety:
+ *  - Bounded batch + maxDuration keep each run inside platform limits.
+ *  - A claim-lock (publish_started_at) prevents overlapping/retried runs from
+ *    uploading the same post twice. Stale claims become re-claimable.
+ *  - Posts that already carry a youtube_video_id are never re-uploaded.
+ *  - Failures store a human-readable reason in last_error.
  *
  * Protection: when CRON_SECRET is set in env, requests must include
  *   Authorization: Bearer <CRON_SECRET>
  * When CRON_SECRET is absent (local dev), all requests are allowed.
  *
- * Compatible with Vercel Cron Jobs — add to vercel.json:
- *   { "crons": [{ "path": "/api/cron", "schedule": "* * * * *" }] }
+ * Triggered by an external pinger (GitHub Actions) every few minutes; see
+ * .github/workflows/publish-cron.yml.
  */
 export async function GET(req: NextRequest) {
   // ── Auth guard ─────────────────────────────────────────────────────────────
@@ -25,14 +44,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Fetch posts that are due ────────────────────────────────────────────────
-  const now = new Date().toISOString();
+  // ── Fetch a bounded batch of due posts ──────────────────────────────────────
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const staleCutoff = new Date(nowMs - CLAIM_STALE_MS).toISOString();
+
   const { data: duePosts, error: fetchErr } = await supabaseServer
     .from("posts")
     .select("*")
     .eq("status", "scheduled")
     .lte("scheduled_time", now)
-    .order("scheduled_time", { ascending: true });
+    .order("scheduled_time", { ascending: true })
+    .limit(MAX_POSTS_PER_RUN);
 
   if (fetchErr) {
     console.error("[cron] failed to fetch posts:", fetchErr.message);
@@ -40,14 +63,15 @@ export async function GET(req: NextRequest) {
   }
 
   const posts = duePosts ?? [];
-  console.log(`[cron] ${posts.length} post(s) due at ${now}`);
+  console.log(`[cron] ${posts.length} candidate post(s) due at ${now} (cap ${MAX_POSTS_PER_RUN})`);
 
   if (posts.length === 0) {
-    return NextResponse.json({ processed: 0, published: 0, failed: 0 });
+    return NextResponse.json({ processed: 0, published: 0, failed: 0, skipped: 0 });
   }
 
   let published = 0;
   let failed = 0;
+  let skipped = 0;
 
   for (const post of posts) {
     console.log(`[cron] Processing post:`, {
@@ -58,6 +82,41 @@ export async function GET(req: NextRequest) {
       scheduled_time: post.scheduled_time,
       video_url: post.video_url,
     });
+
+    // ── Claim-lock: only proceed if we win the conditional update. This blocks a
+    //    concurrent/overlapping run from uploading the same post. A claim older
+    //    than the stale window is treated as abandoned and re-claimable. ────────
+    const { data: claimed, error: claimErr } = await supabaseServer
+      .from("posts")
+      .update({ publish_started_at: now })
+      .eq("id", post.id)
+      .eq("status", "scheduled")
+      .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
+      .select("id, youtube_video_id")
+      .maybeSingle();
+
+    if (claimErr) {
+      console.error(`[cron] Claim error for post ${post.id}:`, claimErr.message);
+      skipped++;
+      continue;
+    }
+
+    if (!claimed) {
+      console.log(`[cron] Post ${post.id} already claimed elsewhere — skipping`);
+      skipped++;
+      continue;
+    }
+
+    // ── Idempotency: a post that already uploaded must never upload again. ──────
+    if (claimed.youtube_video_id) {
+      console.log(`[cron] Post ${post.id} already has a YouTube ID — marking published, no re-upload`);
+      await supabaseServer
+        .from("posts")
+        .update({ status: "published", last_error: null, publish_started_at: null })
+        .eq("id", post.id);
+      published++;
+      continue;
+    }
 
     try {
       // ── Get user's platform token ──────────────────────────────────────────
@@ -115,7 +174,12 @@ export async function GET(req: NextRequest) {
       // ── Mark published and store YouTube video ID ───────────────────────────
       await supabaseServer
         .from("posts")
-        .update({ status: "published", youtube_video_id: youtubeId })
+        .update({
+          status: "published",
+          youtube_video_id: youtubeId,
+          last_error: null,
+          publish_started_at: null,
+        })
         .eq("id", post.id);
 
       published++;
@@ -133,7 +197,11 @@ export async function GET(req: NextRequest) {
 
       await supabaseServer
         .from("posts")
-        .update({ status: "failed" })
+        .update({
+          status: "failed",
+          last_error: message.slice(0, 1000),
+          publish_started_at: null,
+        })
         .eq("id", post.id);
 
       failed++;
@@ -144,5 +212,6 @@ export async function GET(req: NextRequest) {
     processed: posts.length,
     published,
     failed,
+    skipped,
   });
 }

@@ -1,0 +1,53 @@
+name: Publish scheduled posts
+
+# Vercel Hobby caps cron jobs at once per day, which is too slow for a scheduler.
+# This free GitHub Actions job pings the publisher endpoint every ~5 minutes so
+# due posts go live on time. The endpoint itself is idempotent and bounded, so
+# occasional overlapping or skipped ticks are safe.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CRON_TARGET_URL  e.g. https://your-app.vercel.app   (no trailing slash)
+#   CRON_SECRET      same value as the CRON_SECRET env var in Vercel
+#
+# Note: GitHub's scheduled runs are best-effort and can be delayed by a few
+# minutes under load. The manual "Run workflow" button is available for testing.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+# Don't let a slow run overlap the next scheduled tick.
+concurrency:
+  group: publish-cron
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger publisher
+        env:
+          CRON_TARGET_URL: ${{ secrets.CRON_TARGET_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_TARGET_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_TARGET_URL and CRON_SECRET repository secrets must be set."
+            exit 1
+          fi
+
+          response=$(curl -sS -m 60 -w "\n%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${CRON_TARGET_URL%/}/api/cron")
+
+          body=$(printf '%s' "$response" | sed '$d')
+          code=$(printf '%s' "$response" | tail -n1)
+
+          echo "HTTP $code"
+          echo "$body"
+
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::Publisher returned HTTP $code"
+            exit 1
+          fi

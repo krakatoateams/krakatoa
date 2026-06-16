@@ -31,3 +31,27 @@ The UI SHALL present a post as "overdue/processing" when its status is `schedule
 #### Scenario: Genuinely failed post
 - **WHEN** the publisher attempted an upload and it was rejected
 - **THEN** the post shows as `failed`
+
+### Requirement: A post is never published twice
+
+The publisher SHALL claim a post before uploading and SHALL NOT upload a post that another run has already claimed or already uploaded, so that overlapping or retried invocations cannot create duplicate YouTube uploads.
+
+#### Scenario: Overlapping runs do not double-upload
+- **WHEN** two publisher invocations see the same due post
+- **THEN** only one claims it and uploads; the other skips it
+
+#### Scenario: Already-uploaded post is not re-uploaded
+- **WHEN** a claimed post already has a `youtube_video_id`
+- **THEN** the publisher marks it `published` without uploading again
+
+#### Scenario: A claim that never completed becomes retryable
+- **WHEN** a claimed post's upload did not finish and its claim is older than the stale window
+- **THEN** a later invocation may re-claim and retry it
+
+### Requirement: Failure reason is stored and shown
+
+When an upload fails the system SHALL store the failure reason on the post and the UI SHALL surface it, so users understand why a post did not publish.
+
+#### Scenario: Failed post explains itself
+- **WHEN** a post lands `failed`
+- **THEN** the stored failure reason is visible in the scheduler list and the calendar detail view
