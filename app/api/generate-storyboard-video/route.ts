@@ -39,6 +39,8 @@ import {
   storyboardVideoDimensions,
   resolveStoryboardLanguage,
   storyboardLanguageDirective,
+  fitSeedancePrompt,
+  SEEDANCE_PROMPT_MAX_CHARS,
   DEFAULT_STORYBOARD_LANGUAGE,
   type StoryboardAspectRatio,
   type StoryboardLanguageId,
@@ -218,8 +220,13 @@ export async function POST(req: Request) {
     // 'video_generating'. The status remains whatever it was on the
     // insufficient-credits / pre-spend infra-failure paths.
 
-    if (!/\[Image1\]/i.test(seedancePrompt)) {
-      seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
+    // ---- Assemble the final Seedance prompt within the 2000-char limit ----
+    // The descriptive BODY (the stored/edited seedance_prompt, plus the [Image1]
+    // composition reference) carries the scene beats and dialogue; the PREFIX
+    // carries the framing directives that must survive.
+    let promptBody = seedancePrompt;
+    if (!/\[Image1\]/i.test(promptBody)) {
+      promptBody = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${promptBody}`;
     }
 
     // Honor the storyboard's chosen visual style in the VIDEO, not just the sheet.
@@ -228,7 +235,19 @@ export async function POST(req: Request) {
     // render in the picked aesthetic. The storyboard image stays the primary
     // composition reference; this directive sets the rendering style.
     const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
-    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n${storyboardVideoAspectDirective(aspectRatio)}\n${storyboardLanguageDirective(language)}\n\n${seedancePrompt}`;
+    const promptPrefix = `${storyboardVideoStyleDirective(storyboardStyle)}\n${storyboardVideoAspectDirective(aspectRatio)}\n${storyboardLanguageDirective(language)}`;
+
+    // Seedance 2.0 hard-truncates prompts over 2000 chars FROM THE END, which
+    // would silently drop the closing scene beats + dialogue. Build the prompt
+    // ourselves so the framing directives are preserved and only the body is
+    // trimmed at a clean sentence/word boundary when it would overflow.
+    const fitted = fitSeedancePrompt(promptPrefix, promptBody);
+    seedancePrompt = fitted.prompt;
+    if (fitted.truncated) {
+      console.warn(
+        `[Storyboard Video] Seedance prompt trimmed from ${fitted.originalLength} to ${seedancePrompt.length} chars to fit the ${SEEDANCE_PROMPT_MAX_CHARS}-char limit (storyboard ${storyboardId}). Consider shortening the prompt for full fidelity.`
+      );
+    }
 
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,

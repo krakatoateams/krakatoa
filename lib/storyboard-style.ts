@@ -195,6 +195,85 @@ export function storyboardLanguageDirective(raw: unknown): string {
   return `All spoken dialogue and narration must be in ${label}. If any quoted lines are written in another language, translate them into ${label}.`;
 }
 
+/**
+ * Seedance 2.0 prompt length.
+ *
+ * The provider enforces a HARD 2000-character prompt limit and silently
+ * truncates anything longer FROM THE END — which drops the closing scene beats
+ * and dialogue (the most important content) and makes the video drift from the
+ * storyboard. We therefore:
+ *   - cap the GPT-authored body at SEEDANCE_PROMPT_BODY_BUDGET_CHARS at
+ *     generation/import time (root cause), leaving headroom for the runtime
+ *     style / aspect / language directives the video route prepends; and
+ *   - assemble the final prompt with fitSeedancePrompt() at video time
+ *     (safety net), keeping the framing directives intact and trimming only the
+ *     body at a clean boundary instead of letting the provider blind-cut it.
+ */
+export const SEEDANCE_PROMPT_MAX_CHARS = 2000;
+
+/**
+ * Target length for the GPT-authored seedance_prompt body. Kept comfortably
+ * under SEEDANCE_PROMPT_MAX_CHARS so the runtime directives (style + aspect +
+ * language + [Image1] reference, ~450 chars worst case) still fit without any
+ * truncation.
+ */
+export const SEEDANCE_PROMPT_BODY_BUDGET_CHARS = 1450;
+
+/**
+ * Trim `text` to at most `max` characters, preferring to cut at the last
+ * sentence end, then the last whitespace, so a word is never sliced in half.
+ * Only cuts at a boundary that lands in the back half of the budget, otherwise
+ * a hard slice is used (degenerate input with no late boundary).
+ */
+function trimToBoundary(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max);
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf(". "),
+    slice.lastIndexOf("! "),
+    slice.lastIndexOf("? "),
+    slice.lastIndexOf(".\n"),
+    slice.lastIndexOf("!\n"),
+    slice.lastIndexOf("?\n")
+  );
+  if (sentenceEnd >= max * 0.5) return slice.slice(0, sentenceEnd + 1).trim();
+  const wordEnd = slice.lastIndexOf(" ");
+  if (wordEnd >= max * 0.5) return slice.slice(0, wordEnd).trim();
+  return slice.trim();
+}
+
+/**
+ * Assemble the final Seedance prompt from a high-priority `prefix` (framing
+ * directives that MUST survive) and a `body` (the descriptive scene plan),
+ * keeping the whole thing within Seedance's hard character limit. The prefix is
+ * preserved verbatim; only the body is trimmed (at a sentence/word boundary)
+ * when the combined length would exceed `max`. Returns the prompt plus whether
+ * trimming occurred and the original combined length so callers can log it.
+ */
+export function fitSeedancePrompt(
+  prefix: string,
+  body: string,
+  max: number = SEEDANCE_PROMPT_MAX_CHARS
+): { prompt: string; truncated: boolean; originalLength: number } {
+  const joiner = "\n\n";
+  const combined = `${prefix}${joiner}${body}`;
+  if (combined.length <= max) {
+    return { prompt: combined, truncated: false, originalLength: combined.length };
+  }
+  const room = max - prefix.length - joiner.length;
+  // Degenerate case: the prefix alone already fills the budget. Preserve the
+  // prefix's priority by trimming it (dropping the body) rather than overflowing.
+  if (room <= 0) {
+    return { prompt: trimToBoundary(prefix, max), truncated: true, originalLength: combined.length };
+  }
+  const trimmedBody = trimToBoundary(body, room);
+  return {
+    prompt: `${prefix}${joiner}${trimmedBody}`,
+    truncated: true,
+    originalLength: combined.length,
+  };
+}
+
 /** Image-prompt style instruction for a (possibly untrusted) style value. */
 export function storyboardStyleInstruction(raw: unknown): string {
   return STORYBOARD_STYLE_INSTRUCTIONS[resolveStoryboardStyle(raw)];

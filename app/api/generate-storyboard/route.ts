@@ -44,6 +44,7 @@ import {
   storyboardVideoAspectDirective,
   resolveStoryboardLanguage,
   storyboardLanguageLabel,
+  SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
   type StoryboardAspectRatio,
 } from "@/lib/storyboard-style";
 
@@ -88,7 +89,8 @@ The JSON object MUST have exactly this shape:
 Rules:
 - "scenes" MUST be an array of exactly 6 objects, scene_id 1 through 6 in order. Timestamp ranges must partition a 15-second video (0:00 through 0:15) with no gaps or overlap.
 - Each scene: concrete visual_description, character_dialogue written in ${languageLabel}, mood. Frame every visual_description for a ${orientation} ${aspectRatio} video.
-- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, ${aspectRatio} ${orientation}, native audio). It MUST refer to the storyboard as [Image1] and align beats to the six scenes. Include overall cinematic style, lighting, atmosphere, camera language, pacing. Write ALL spoken lines in ${languageLabel}, placed in double quotes as Seedance expects (e.g. the character says: "..."). Describe ambient sound and music mood.`;
+- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, ${aspectRatio} ${orientation}, native audio). It MUST refer to the storyboard as [Image1] and align beats to the six scenes. Include overall cinematic style, lighting, atmosphere, camera language, pacing. Write ALL spoken lines in ${languageLabel}, placed in double quotes as Seedance expects (e.g. the character says: "..."). Describe ambient sound and music mood.
+- CRITICAL: keep "seedance_prompt" at or under ${SEEDANCE_PROMPT_BODY_BUDGET_CHARS} characters. Seedance hard-truncates the final prompt at 2000 characters AFTER runtime style/orientation/language directives are prepended, so an over-long prompt loses its closing beats and dialogue. Be concise and information-dense: prioritize the spoken lines and the key visual beat of each scene over decorative description.`;
 }
 
 function extractJson(raw: string): unknown {

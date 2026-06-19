@@ -42,6 +42,7 @@ import {
   storyboardVideoAspectDirective,
   resolveStoryboardLanguage,
   storyboardLanguageLabel,
+  SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
   type StoryboardAspectRatio,
 } from "@/lib/storyboard-style";
 
@@ -532,7 +533,8 @@ Reply with ONLY valid JSON (no markdown code fences, no text before or after the
 Rules:
 - Derive the scenes from what is ACTUALLY shown in [Image1]; use between 3 and 6 scenes whose timestamp ranges partition the 15 seconds (0:00 through 0:15) with no gaps or overlap.
 - Frame every visual_description for a ${orientation} ${aspectRatio} video.
-- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, ${aspectRatio} ${orientation}, native audio). It MUST refer to the storyboard as [Image1] and follow its composition and beats. Include overall cinematic style, lighting, atmosphere, camera language, and pacing. Write ALL spoken lines in ${languageLabel}, placed in double quotes as Seedance expects (e.g. the character says: "..."). Describe ambient sound and music mood.`;
+- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, ${aspectRatio} ${orientation}, native audio). It MUST refer to the storyboard as [Image1] and follow its composition and beats. Include overall cinematic style, lighting, atmosphere, camera language, and pacing. Write ALL spoken lines in ${languageLabel}, placed in double quotes as Seedance expects (e.g. the character says: "..."). Describe ambient sound and music mood.
+- CRITICAL: keep "seedance_prompt" at or under ${SEEDANCE_PROMPT_BODY_BUDGET_CHARS} characters. Seedance hard-truncates the final prompt at 2000 characters AFTER runtime style/orientation/language directives are prepended, so an over-long prompt loses its closing beats and dialogue. Be concise and information-dense: prioritize the spoken lines and the key visual beat of each scene over decorative description.`;
 }
 
 function buildImportUserPrompt(description: string, videoStyleDirective: string): string {

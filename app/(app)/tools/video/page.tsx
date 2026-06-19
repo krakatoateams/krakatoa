@@ -65,6 +65,7 @@ import {
   STORYBOARD_STYLE_LABELS,
   DEFAULT_STORYBOARD_STYLE,
   type StoryboardStyleKey,
+  SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
 } from "@/lib/storyboard-style";
 
 // One fresh idempotency key per submit (sent as the Idempotency-Key header).
@@ -2244,20 +2245,37 @@ function StoryboardToVideoComposer({
                     placeholder="The video prompt Seedance will follow…"
                     className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
                   />
-                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500">
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500">
                     <span>
                       Style, orientation &amp; language are re-applied automatically on render.
                     </span>
-                    {promptDirty && (
-                      <button
-                        type="button"
-                        onClick={() => setPromptDraft(storedPrompt)}
-                        className="font-semibold text-gray-400 hover:text-gray-200"
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className={
+                          promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS
+                            ? "font-semibold text-amber-300"
+                            : "text-gray-500"
+                        }
+                        title={`Keep the prompt under ~${SEEDANCE_PROMPT_BODY_BUDGET_CHARS} characters so style, orientation & language can be added without the video model truncating it.`}
                       >
-                        Reset
-                      </button>
-                    )}
+                        {promptDraft.length}/{SEEDANCE_PROMPT_BODY_BUDGET_CHARS}
+                      </span>
+                      {promptDirty && (
+                        <button
+                          type="button"
+                          onClick={() => setPromptDraft(storedPrompt)}
+                          className="font-semibold text-gray-400 hover:text-gray-200"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  {promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS && (
+                    <p className="mt-1 text-[11px] text-amber-300/80">
+                      This prompt is long — it may be trimmed at a sentence boundary on render so the style, orientation &amp; language directives still fit. Shorten it for full fidelity.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
