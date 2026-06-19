@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
-  ExternalLink,
   History,
   ImageIcon,
   LayoutGrid,
   Loader2,
+  RotateCcw,
   Star,
+  Trash2,
   User,
   Video,
   X,
@@ -30,17 +33,44 @@ type Props = {
   refreshKey?: number;
   /** Show the All / Videos / Photos / Favorites tab bar and per-card favorite toggle */
   enableTabs?: boolean;
+  /** Enable library-style hover actions + rich preview modal (favorite, download, delete, prev/next) WITHOUT the tab bar. */
+  showActions?: boolean;
   /** When false, only the created date is shown on each card (no title / tool label) */
   showMeta?: boolean;
+  /** When false, the built-in Refresh button is hidden (parent provides its own). */
+  showRefresh?: boolean;
 };
 
-type LibraryTab = "all" | "video" | "image" | "character" | "favorite";
+/** Windowed page numbers with ellipses, e.g. [1, "…", 4, 5, 6, "…", 12]. */
+function pageWindow(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set<number>([1, total, current, current - 1, current + 1]);
+  const sorted = Array.from(pages)
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+  const out: (number | "ellipsis")[] = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (prev && p - prev > 1) out.push("ellipsis");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+type LibraryTab = "all" | "video" | "image" | "character" | "favorite" | "trash";
 
 const FAVORITES_KEY = "krakatoa:library:favorites";
 
 /** A creation tagged as a Character creation (turnaround sheet) in the omni-form. */
 function isCharacterItem(item: CreationHistoryItem): boolean {
   return item.metadata?.creationKind === "character";
+}
+
+/** A creation that has been soft-deleted (lives in Trash until purged). */
+function isTrashedItem(item: CreationHistoryItem): boolean {
+  const deletedAt = item.metadata?.deletedAt;
+  return typeof deletedAt === "string" && deletedAt.trim().length > 0;
 }
 
 /** Display name for a character creation (its given name, falling back to title). */
@@ -90,15 +120,35 @@ export default function CreationsHistory({
   className = "",
   refreshKey = 0,
   enableTabs = false,
+  showActions = false,
   showMeta = true,
+  showRefresh = true,
 }: Props) {
+  // Library-grade cards + preview (hover actions, rich preview modal) ride on the
+  // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
+  // history) opt into the same UI without rendering the chips.
+  const richUI = enableTabs || showActions;
+  // `limit` doubles as the page size; pages are fetched from the server.
+  const pageSize = limit;
   const [items, setItems] = useState<CreationHistoryItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [serverCounts, setServerCounts] = useState<{
+    all: number;
+    image: number;
+    video: number;
+    character: number;
+    trash: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<LibraryTab>("all");
+  const [page, setPage] = useState(1);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<CreationHistoryItem | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [mutatingId, setMutatingId] = useState<string | null>(null);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -125,14 +175,39 @@ export default function CreationsHistory({
     }
   }, []);
 
+  // Navigate the preview across the currently loaded page of items.
+  const previewIndex = previewItem
+    ? items.findIndex((i) => i.id === previewItem.id)
+    : -1;
+  const hasPrevPreview = previewIndex > 0;
+  const hasNextPreview = previewIndex >= 0 && previewIndex < items.length - 1;
+
+  const showPrevPreview = useCallback(() => {
+    setPreviewItem((cur) => {
+      if (!cur) return cur;
+      const idx = items.findIndex((i) => i.id === cur.id);
+      return idx > 0 ? items[idx - 1] : cur;
+    });
+  }, [items]);
+
+  const showNextPreview = useCallback(() => {
+    setPreviewItem((cur) => {
+      if (!cur) return cur;
+      const idx = items.findIndex((i) => i.id === cur.id);
+      return idx >= 0 && idx < items.length - 1 ? items[idx + 1] : cur;
+    });
+  }, [items]);
+
   useEffect(() => {
     if (!previewItem) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setPreviewItem(null);
+      else if (e.key === "ArrowLeft") showPrevPreview();
+      else if (e.key === "ArrowRight") showNextPreview();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [previewItem]);
+  }, [previewItem, showPrevPreview, showNextPreview]);
 
   // Seed the rename field whenever a new item opens in the preview.
   useEffect(() => {
@@ -170,8 +245,8 @@ export default function CreationsHistory({
   }, [previewItem, nameDraft]);
 
   useEffect(() => {
-    if (enableTabs) setFavorites(loadFavorites());
-  }, [enableTabs]);
+    if (richUI) setFavorites(loadFavorites());
+  }, [richUI]);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites((prev) => {
@@ -190,49 +265,196 @@ export default function CreationsHistory({
     });
   }, []);
 
+  // The active tab maps to server-side filters so paging stays correct without
+  // loading the whole library. mediaType prop (picker usage) takes precedence.
+  const tabMediaType =
+    enableTabs && activeTab === "video"
+      ? "video"
+      : enableTabs && activeTab === "image"
+        ? "image"
+        : undefined;
+  const effectiveMediaType = mediaType ?? tabMediaType;
+  const tabKind = enableTabs && activeTab === "character" ? "character" : undefined;
+  const isFavoriteTab = enableTabs && activeTab === "favorite";
+  const isTrashTab = enableTabs && activeTab === "trash";
+  // Favorites live in localStorage; serialize the ids so the fetch re-runs when
+  // they change while the Favorites tab is open.
+  const favoriteIdsKey = isFavoriteTab
+    ? Array.from(favorites).sort().join(",")
+    : "";
+  const toolsKey = tools?.length ? tools.join(",") : "";
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (tools?.length) params.set("tool", tools.join(","));
-    if (mediaType) params.set("mediaType", mediaType);
-    params.set("limit", String(limit));
+    if (toolsKey) params.set("tool", toolsKey);
+    if (effectiveMediaType) params.set("mediaType", effectiveMediaType);
+    if (tabKind) params.set("kind", tabKind);
+    if (isTrashTab) params.set("trashed", "1");
+    params.set("limit", String(pageSize));
+    params.set("offset", String((page - 1) * pageSize));
+    if (enableTabs) params.set("counts", "1");
+    if (isFavoriteTab) params.set("ids", favoriteIdsKey);
 
     try {
       const res = await fetch(`/api/creations/history?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load history");
       setItems(data.items || []);
+      setTotal(typeof data.total === "number" ? data.total : (data.items?.length ?? 0));
+      if (data.counts) setServerCounts(data.counts);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to load history";
       setError(message);
       setItems([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [tools, mediaType, limit]);
+  }, [
+    toolsKey,
+    effectiveMediaType,
+    tabKind,
+    isFavoriteTab,
+    isTrashTab,
+    favoriteIdsKey,
+    enableTabs,
+    pageSize,
+    page,
+  ]);
 
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
 
-  const counts = useMemo(
-    () => ({
-      all: items.length,
-      video: items.filter((i) => i.mediaType === "video").length,
-      image: items.filter((i) => i.mediaType === "image").length,
-      character: items.filter(isCharacterItem).length,
-      favorite: items.filter((i) => favorites.has(i.id)).length,
-    }),
-    [items, favorites]
+  // Back to page 1 whenever the filter or the underlying data changes.
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, refreshKey, effectiveMediaType, toolsKey]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Keep the page in range if the total shrinks (e.g. unfavoriting, deletes).
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  // Drop an id from the client-side favorites set (used after permanent delete).
+  const forgetFavorite = useCallback((id: string) => {
+    setFavorites((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      try {
+        window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // localStorage may be unavailable; favorites stay in-memory
+      }
+      return next;
+    });
+  }, []);
+
+  const trashItem = useCallback(
+    async (item: CreationHistoryItem) => {
+      setMutatingId(item.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/creations/${item.id}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to move to Trash");
+        setPreviewItem(null);
+        await load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to move to Trash");
+      } finally {
+        setMutatingId(null);
+      }
+    },
+    [load]
   );
 
-  const visibleItems = useMemo(() => {
-    if (!enableTabs || activeTab === "all") return items;
-    if (activeTab === "favorite") return items.filter((i) => favorites.has(i.id));
-    if (activeTab === "character") return items.filter(isCharacterItem);
-    return items.filter((i) => i.mediaType === activeTab);
-  }, [items, enableTabs, activeTab, favorites]);
+  const restoreItem = useCallback(
+    async (item: CreationHistoryItem) => {
+      setMutatingId(item.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/creations/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "restore" }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to restore");
+        setPreviewItem(null);
+        await load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to restore");
+      } finally {
+        setMutatingId(null);
+      }
+    },
+    [load]
+  );
+
+  const deleteForever = useCallback(
+    async (item: CreationHistoryItem) => {
+      if (
+        !window.confirm(
+          "Permanently delete this asset? This can't be undone."
+        )
+      ) {
+        return;
+      }
+      setMutatingId(item.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/creations/${item.id}?permanent=1`, {
+          method: "DELETE",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete");
+        forgetFavorite(item.id);
+        setPreviewItem(null);
+        await load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to delete");
+      } finally {
+        setMutatingId(null);
+      }
+    },
+    [load, forgetFavorite]
+  );
+
+  const emptyTrash = useCallback(async () => {
+    setEmptyingTrash(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/creations/trash/empty`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to empty Trash");
+      setPreviewItem(null);
+      setConfirmEmptyTrash(false);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to empty Trash");
+    } finally {
+      setEmptyingTrash(false);
+    }
+  }, [load]);
+
+  // Tab pill counts come from the server (favorites are client-side only).
+  const counts = {
+    all: serverCounts?.all ?? 0,
+    video: serverCounts?.video ?? 0,
+    image: serverCounts?.image ?? 0,
+    character: serverCounts?.character ?? 0,
+    favorite: favorites.size,
+    trash: serverCounts?.trash ?? 0,
+  };
+
+  // Items are already filtered + paged by the server.
+  const pagedItems = items;
 
   const TABS: { id: LibraryTab; label: string; icon: LucideIcon }[] = [
     { id: "all", label: "All", icon: LayoutGrid },
@@ -240,6 +462,7 @@ export default function CreationsHistory({
     { id: "image", label: "Photos", icon: ImageIcon },
     { id: "character", label: "Characters", icon: User },
     { id: "favorite", label: "Favorites", icon: Star },
+    { id: "trash", label: "Trash", icon: Trash2 },
   ];
 
   const previewMeta = previewItem?.metadata ?? {};
@@ -277,7 +500,7 @@ export default function CreationsHistory({
             </h2>
             <p className="text-sm text-gray-500 mt-1">{description}</p>
           </div>
-          {refreshButton}
+          {showRefresh && refreshButton}
         </div>
       )}
 
@@ -312,7 +535,7 @@ export default function CreationsHistory({
               );
             })}
           </div>
-          {refreshButton}
+          {showRefresh && refreshButton}
         </div>
       )}
 
@@ -327,12 +550,17 @@ export default function CreationsHistory({
         <div className="flex items-center justify-center py-20 text-gray-500">
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
-      ) : visibleItems.length === 0 ? (
+      ) : pagedItems.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
           {enableTabs && activeTab === "favorite" ? (
             <>
               <Star className="w-12 h-12 text-gray-600 mx-auto mb-4" />
               <p className="text-gray-400">No favorites yet.</p>
+            </>
+          ) : enableTabs && activeTab === "trash" ? (
+            <>
+              <Trash2 className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-400">Trash is empty.</p>
             </>
           ) : (
             <>
@@ -346,9 +574,10 @@ export default function CreationsHistory({
           )}
         </div>
       ) : (
+        <>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {visibleItems.map((item) => {
-            const selectable = !!onSelect && !enableTabs;
+          {pagedItems.map((item) => {
+            const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
             const cardClass = `group relative text-left rounded-2xl overflow-hidden border transition-all hover:scale-[1.02] ${
               selectedUrl === item.mediaUrl
@@ -404,14 +633,18 @@ export default function CreationsHistory({
                     </p>
                   )
                 )}
-                <p className="text-[10px] text-gray-500 mt-1">
-                  {new Date(item.createdAt).toLocaleDateString()}
+                <p className="text-xs text-white mt-1">
+                  {new Date(item.createdAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
                 </p>
               </div>
             );
 
             const isDownloading = downloadingId === item.id;
-            const actionsOverlay = enableTabs ? (
+            const actionsOverlay = richUI ? (
               <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5">
                 <button
                   type="button"
@@ -429,25 +662,27 @@ export default function CreationsHistory({
                     <Download className="h-4 w-4" />
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFavorite(item.id);
-                  }}
-                  aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                  aria-pressed={isFavorite}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full backdrop-blur-sm transition-colors ${
-                    isFavorite
-                      ? "bg-amber-400/20 text-amber-300"
-                      : "bg-black/40 text-white/70 opacity-0 group-hover:opacity-100 hover:text-white"
-                  }`}
-                >
-                  <Star
-                    className="h-4 w-4"
-                    fill={isFavorite ? "currentColor" : "none"}
-                  />
-                </button>
+                {!isTrashedItem(item) && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFavorite(item.id);
+                    }}
+                    aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                    aria-pressed={isFavorite}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full backdrop-blur-sm transition-colors ${
+                      isFavorite
+                        ? "bg-amber-400/20 text-amber-300"
+                        : "bg-black/40 text-white/70 opacity-0 group-hover:opacity-100 hover:text-white"
+                    }`}
+                  >
+                    <Star
+                      className="h-4 w-4"
+                      fill={isFavorite ? "currentColor" : "none"}
+                    />
+                  </button>
+                )}
               </div>
             ) : null;
 
@@ -481,6 +716,126 @@ export default function CreationsHistory({
             );
           })}
         </div>
+
+        {totalPages > 1 && (
+          <div className="mt-8 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <p className="text-xs text-gray-500">
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                aria-label="Previous page"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-gray-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              {pageWindow(page, totalPages).map((p, i) =>
+                p === "ellipsis" ? (
+                  <span key={`e${i}`} className="px-1 text-sm text-gray-600">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    aria-current={p === page ? "page" : undefined}
+                    className={`h-8 min-w-8 rounded-lg border px-2 text-sm transition-colors ${
+                      p === page
+                        ? "border-violet-400/40 bg-violet-500/15 text-violet-200"
+                        : "border-white/10 bg-white/[0.03] text-gray-300 hover:border-white/25 hover:text-white"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                aria-label="Next page"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-gray-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+        </>
+      )}
+
+      {enableTabs && activeTab === "trash" && counts.trash > 0 && (
+        <div className="mt-8 flex flex-col items-center gap-3 border-t border-white/10 pt-6">
+          <p className="text-xs text-gray-500">
+            Items in Trash are kept for 14 days, then deleted automatically.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfirmEmptyTrash(true)}
+            disabled={emptyingTrash}
+            className="flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 transition-colors hover:bg-red-500/20 hover:text-red-200 disabled:opacity-50"
+          >
+            {emptyingTrash ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            Empty Trash
+          </button>
+        </div>
+      )}
+
+      {confirmEmptyTrash && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm empty trash"
+          onClick={() => !emptyingTrash && setConfirmEmptyTrash(false)}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-gray-950 p-6"
+          >
+            <div className="mb-4 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/15 text-red-300">
+                <Trash2 className="h-5 w-5" />
+              </span>
+              <h3 className="text-base font-semibold text-white">Empty Trash?</h3>
+            </div>
+            <p className="mb-6 text-sm text-gray-400">
+              This permanently deletes all {counts.trash} item
+              {counts.trash === 1 ? "" : "s"} in Trash. This can&apos;t be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmEmptyTrash(false)}
+                disabled={emptyingTrash}
+                className="flex h-9 items-center rounded-full bg-white/5 px-4 text-sm text-gray-300 transition-colors hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={emptyTrash}
+                disabled={emptyingTrash}
+                className="flex h-9 items-center gap-1.5 rounded-full bg-red-500/90 px-4 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+              >
+                {emptyingTrash ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Delete permanently
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {previewItem && (
@@ -499,10 +854,31 @@ export default function CreationsHistory({
               type="button"
               onClick={() => setPreviewItem(null)}
               aria-label="Close preview"
-              className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+              className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
             >
               <X className="h-5 w-5" />
             </button>
+
+            {hasPrevPreview && (
+              <button
+                type="button"
+                onClick={showPrevPreview}
+                aria-label="Previous asset"
+                className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
+            {hasNextPreview && (
+              <button
+                type="button"
+                onClick={showNextPreview}
+                aria-label="Next asset"
+                className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            )}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="flex items-center justify-center bg-black">
@@ -526,7 +902,7 @@ export default function CreationsHistory({
                 )}
               </div>
 
-              {enableTabs && isCharacterItem(previewItem) && (
+              {richUI && isCharacterItem(previewItem) && (
                 <div className="border-b border-white/10 px-4 py-4">
                   <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">
                     Character name
@@ -605,8 +981,8 @@ export default function CreationsHistory({
               <p className="text-xs text-gray-400">
                 {new Date(previewItem.createdAt).toLocaleDateString()}
               </p>
-              <div className="flex items-center gap-2">
-                {enableTabs && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {richUI && !isTrashedItem(previewItem) && (
                   <button
                     type="button"
                     onClick={() => toggleFavorite(previewItem.id)}
@@ -637,15 +1013,47 @@ export default function CreationsHistory({
                   )}
                   Download
                 </button>
-                <a
-                  href={previewItem.mediaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Open original
-                </a>
+                {richUI &&
+                  (isTrashedItem(previewItem) ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => restoreItem(previewItem)}
+                        disabled={mutatingId === previewItem.id}
+                        className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
+                      >
+                        {mutatingId === previewItem.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        )}
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteForever(previewItem)}
+                        disabled={mutatingId === previewItem.id}
+                        className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete permanently
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => trashItem(previewItem)}
+                      disabled={mutatingId === previewItem.id}
+                      className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
+                    >
+                      {mutatingId === previewItem.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      Delete
+                    </button>
+                  ))}
               </div>
             </div>
           </div>

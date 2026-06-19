@@ -331,6 +331,15 @@ export function isValidProductPhotoTier(id: string): id is ProductPhotoModelTier
   return PRODUCT_PHOTO_TIERS.some((t) => t.id === id);
 }
 
+/**
+ * Whether a tier can consume more than one reference image. Product Try-on with a
+ * separate character/model image needs this (the references are [product, character]).
+ * FLUX Kontext takes a single `input_image`, so it would silently drop the character.
+ */
+export function tierSupportsMultiReference(tier: ProductPhotoTier): boolean {
+  return tier.providerFamily !== "flux_kontext";
+}
+
 export function isValidProductPhotoResolution(id: string): id is ProductPhotoResolution {
   return id === "1k" || id === "2k" || id === "4k";
 }
@@ -417,11 +426,33 @@ const STYLE_BY_ID = Object.fromEntries(PHOTO_STYLES.map((s) => [s.id, s])) as Re
 export function buildProductPhotoPrompt(
   poseId: ModelPoseId,
   styleId: PhotoStyleId,
-  userPrompt?: string
+  userPrompt?: string,
+  opts?: { hasCharacterReference?: boolean }
 ): string {
   const pose = POSE_BY_ID[poseId];
   const style = STYLE_BY_ID[styleId];
   const direction = (userPrompt ?? "").trim();
+
+  // When a character/model reference accompanies the product, the references are
+  // sent as [product, character]. Spell out which image is which and demand
+  // identity preservation so the model actually uses the selected person instead
+  // of inventing a generic one.
+  if (opts?.hasCharacterReference) {
+    return [
+      "Professional commercial product photography.",
+      "The FIRST reference image is the product. The SECOND reference image is the exact person to use as the model.",
+      "Use that exact person as the model — preserve their face, hairstyle, skin tone, and body type precisely; do NOT replace them with a different person.",
+      `The model is ${pose.prompt}, naturally holding and showcasing the exact product from the first reference image.`,
+      "Keep the product design, colors, logos, and packaging identical to the product reference — do not alter the product.",
+      "Full-body or three-quarter framing, photorealistic, sharp focus on both the model and the product.",
+      style.prompt,
+      direction ? `Creative direction from the user: ${direction}.` : "",
+      "High-end advertising quality, 4K detail.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
   return [
     "Professional commercial product photography.",
     `A fashion model is ${pose.prompt}, naturally holding and showcasing the exact product from the reference image.`,

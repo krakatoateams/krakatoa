@@ -37,6 +37,7 @@ import {
   DEFAULT_CHARACTER_GENDER,
   DEFAULT_CHARACTER_AGE,
   getProductPhotoTier,
+  tierSupportsMultiReference,
   ModelPoseId,
   PhotoStyleId,
   PhotoAspectRatio,
@@ -447,10 +448,17 @@ export default function PhotoOmniPage() {
   // it loads (or on API failure) fall back to the in-code capability rule so the
   // form is never empty.
   const enabledTierIds = featureModels?.[featureKey]?.enabledTiers ?? null;
-  const availableTiers = PRODUCT_PHOTO_TIERS.filter((t) =>
-    enabledTierIds
-      ? enabledTierIds.includes(t.id)
-      : isImageMode || isCharacterMode || t.supportsReference
+  // When a separate character/model image is attached to a Product Try-on, only
+  // multi-reference models can honor it (the references are [product, character]).
+  // Hide single-image models so users don't pick one that drops the character.
+  const hasCharacterAttached =
+    requiresProduct && (!!character.file || !!selectedCharacter);
+  const availableTiers = PRODUCT_PHOTO_TIERS.filter(
+    (t) =>
+      (enabledTierIds
+        ? enabledTierIds.includes(t.id)
+        : isImageMode || isCharacterMode || t.supportsReference) &&
+      (!hasCharacterAttached || tierSupportsMultiReference(t))
   );
   const availableTierKey = availableTiers.map((t) => t.id).join(",");
 
@@ -959,7 +967,9 @@ export default function PhotoOmniPage() {
             tools={["product_photo"]}
             mediaType="image"
             refreshKey={historyRefreshKey}
-            onSelect={(item) => setLightboxUrl(item.mediaUrl)}
+            showActions
+            showMeta={false}
+            limit={20}
           />
         </div>
       </div>
