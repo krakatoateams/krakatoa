@@ -41,7 +41,6 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Reels", href: "/tools/reels", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
       { label: "Photo", href: "/tools/photo-v2", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
-      { label: "Photo backup", href: "/tools/photo", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
       { label: "Instagram", href: "/tools/ig", icon: <Aperture className="h-4 w-4" />, toolKey: "ig" },
     ],
   },

@@ -76,6 +76,69 @@ export async function insertUserCreation(params: {
   return rowToCreationItem(data as UserCreationRow);
 }
 
+/** Fetch a single creation owned by the user, or null if not found. Never throws. */
+export async function getUserCreationForUser(
+  userId: string,
+  id: string
+): Promise<CreationHistoryItem | null> {
+  const { data, error } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToCreationItem(data as UserCreationRow);
+}
+
+/**
+ * Update an existing creation's title and/or merge a metadata patch. Scoped to the
+ * owner (user_id) so a user can only edit their own creations. Reads the current
+ * row first to merge metadata (jsonb), then writes back. Throws if not found.
+ */
+export async function updateUserCreation(params: {
+  userId: string;
+  id: string;
+  title?: string;
+  metadataPatch?: Record<string, unknown>;
+}): Promise<CreationHistoryItem> {
+  const { data: existing, error: selErr } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("*")
+    .eq("id", params.id)
+    .eq("user_id", params.userId)
+    .single();
+
+  if (selErr || !existing) {
+    const msg = selErr?.message || "Creation not found";
+    if (tableMissingMessage(msg)) throw missingTableError();
+    throw new Error(msg);
+  }
+
+  const current = existing as UserCreationRow;
+  const update: Record<string, unknown> = {
+    metadata: { ...(current.metadata ?? {}), ...(params.metadataPatch ?? {}) },
+  };
+  if (params.title !== undefined) update.title = params.title;
+
+  const { data, error } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .update(update)
+    .eq("id", params.id)
+    .eq("user_id", params.userId)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    const msg = error?.message || "Failed to update creation record";
+    if (tableMissingMessage(msg)) throw missingTableError();
+    throw new Error(msg);
+  }
+
+  return rowToCreationItem(data as UserCreationRow);
+}
+
 export async function listUserCreations(
   userId: string,
   options?: {

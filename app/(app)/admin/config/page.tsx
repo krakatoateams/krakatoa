@@ -8,6 +8,8 @@ import {
   calculateCredits,
   normalizeBillingSettings,
 } from "@/lib/pricing-math";
+import { PRODUCT_PHOTO_TIERS } from "@/lib/product-photo";
+import { PHOTO_FEATURES } from "@/lib/creation-features";
 
 type ToolConfig = {
   tool_key: string;
@@ -43,7 +45,41 @@ type ModelConfig = {
   is_default: boolean;
 };
 
+type FeatureModelConfig = {
+  id: string;
+  tool_key: string;
+  feature_key: string;
+  model_tier: string;
+  enabled: boolean;
+  is_default: boolean;
+  sort_order: number;
+};
+
 type Tab = "tools" | "pricing" | "models";
+
+// Friendly labels for the Models tree (creation type → feature → models).
+const TIER_LABEL: Record<string, string> = Object.fromEntries(
+  PRODUCT_PHOTO_TIERS.map((t) => [t.id, t.modelLabel])
+);
+const TIER_SUBTITLE: Record<string, string> = Object.fromEntries(
+  PRODUCT_PHOTO_TIERS.map((t) => [t.id, t.providerModel])
+);
+const PHOTO_FEATURE_LABEL: Record<string, string> = Object.fromEntries(
+  PHOTO_FEATURES.map((f) => [f.key, f.label])
+);
+const PHOTO_FEATURE_DESC: Record<string, string> = Object.fromEntries(
+  PHOTO_FEATURES.map((f) => [f.key, f.description])
+);
+const PHOTO_FEATURE_ORDER = PHOTO_FEATURES.map((f) => f.key);
+
+// model_configs rows grouped under a creation type + feature label for the tree.
+const MODEL_CONFIG_GROUP: Record<string, { type: string; feature: string; order: number }> = {
+  reels: { type: "Reels", feature: "ReelsGen pipeline", order: 0 },
+  veo: { type: "Reels", feature: "Veo pipeline", order: 1 },
+  storyboard: { type: "Reels", feature: "Storyboard pipeline", order: 2 },
+  photo: { type: "Photo", feature: "Model definitions (provider / model)", order: 3 },
+  render: { type: "Other", feature: "Rendering", order: 4 },
+};
 
 const SAVE_NOTICE = "Saved. Runtime may update within ~60 seconds.";
 const RESET_NOTICE = "Reset to default. Runtime may update within ~60 seconds.";
@@ -264,6 +300,7 @@ export default function AdminConfigPage() {
   const [tools, setTools] = useState<ToolConfig[]>([]);
   const [pricing, setPricing] = useState<PricingConfig[]>([]);
   const [models, setModels] = useState<ModelConfig[]>([]);
+  const [featureModels, setFeatureModels] = useState<FeatureModelConfig[]>([]);
   const [billingSettings, setBillingSettings] = useState<BillingSettings>(DEFAULT_BILLING_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -284,9 +321,15 @@ export default function AdminConfigPage() {
       fetch("/api/credits/pricing")
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
+      // Per-feature model enablement. Resolves even on error (e.g. before the
+      // 012 migration) so the rest of the panel still loads.
+      fetch("/api/admin/config/feature-models")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
     ])
-      .then(([t, p, m, pr]) => {
+      .then(([t, p, m, pr, fm]) => {
         setTools(t.tools ?? []);
+        setFeatureModels((fm?.featureModels ?? []) as FeatureModelConfig[]);
         // Coerce provider_cost_usd: PostgREST may serialize `numeric` as a string.
         setPricing(
           ((p.pricing ?? []) as PricingConfig[]).map((row) => ({
@@ -359,6 +402,189 @@ export default function AdminConfigPage() {
     );
   const setModelField = (id: string, field: keyof ModelConfig, value: unknown) =>
     setModels((prev) => prev.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
+  const setFeatureModelEnabled = (id: string, value: boolean) =>
+    setFeatureModels((prev) => prev.map((f) => (f.id === id ? { ...f, enabled: value } : f)));
+  // Default is exclusive per (tool_key, feature_key): selecting one clears siblings
+  // locally (the server enforces the same on save).
+  const setFeatureModelDefault = (id: string, value: boolean) =>
+    setFeatureModels((prev) => {
+      const target = prev.find((f) => f.id === id);
+      if (!target) return prev;
+      return prev.map((f) => {
+        if (f.id === id) return { ...f, is_default: value };
+        if (value && f.tool_key === target.tool_key && f.feature_key === target.feature_key) {
+          return { ...f, is_default: false };
+        }
+        return f;
+      });
+    });
+
+  // --- Models tab render helpers (creation type → feature → models) ---
+
+  // One editable model_configs row (provider/model/enable/default). Used by the
+  // Reels pipeline + Photo model-definition sections.
+  const renderModelConfigRow = (m: ModelConfig) => {
+    const status = modelStatus(m);
+    const warn = modelWarning(m);
+    return (
+      <tr key={m.id} className="text-sm text-gray-300">
+        <td className="px-3 py-2">
+          <div className="font-medium text-white">{m.config_key}</div>
+          <div className="text-xs text-gray-500">{m.tool_key}</div>
+        </td>
+        <td className="px-3 py-2">
+          <Badge tone={status.tone}>{status.label}</Badge>
+        </td>
+        <td className="px-3 py-2 w-32">
+          <input
+            value={m.provider}
+            onChange={(e) => setModelField(m.id, "provider", e.target.value)}
+            className={INPUT}
+          />
+        </td>
+        <td className="px-3 py-2 min-w-64">
+          <input
+            value={m.model}
+            onChange={(e) => setModelField(m.id, "model", e.target.value)}
+            className={INPUT}
+          />
+          {warn ? <div className="mt-1 text-[11px] text-amber-300">⚠ {warn}</div> : null}
+        </td>
+        <td className="px-3 py-2">
+          <input
+            type="checkbox"
+            checked={m.enabled}
+            onChange={(e) => setModelField(m.id, "enabled", e.target.checked)}
+          />
+        </td>
+        <td className="px-3 py-2">
+          <input
+            type="checkbox"
+            checked={m.is_default}
+            onChange={(e) => setModelField(m.id, "is_default", e.target.checked)}
+          />
+        </td>
+        <td className="px-3 py-2 text-right">
+          <RowButtons
+            busy={busy}
+            onSave={() =>
+              patch(`/api/admin/config/models/${m.id}`, {
+                provider: m.provider,
+                model: m.model,
+                enabled: m.enabled,
+                is_default: m.is_default,
+              })
+            }
+            onReset={() =>
+              resetRow(`/api/admin/config/models/${m.id}/reset`, `${m.tool_key}/${m.config_key}`)
+            }
+          />
+        </td>
+      </tr>
+    );
+  };
+
+  const renderModelConfigTable = (rows: ModelConfig[]) => (
+    <div className="overflow-x-auto rounded-xl border border-gray-800">
+      <table className="w-full">
+        <thead className="bg-gray-900/60">
+          <tr>
+            <th className={TH}>Config key</th>
+            <th className={TH}>Status</th>
+            <th className={TH}>Provider</th>
+            <th className={TH}>Model</th>
+            <th className={TH}>Enabled</th>
+            <th className={TH}>Default</th>
+            <th className={TH}></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">{rows.map(renderModelConfigRow)}</tbody>
+      </table>
+    </div>
+  );
+
+  // One per-feature enablement row (which Photo model is offered for a feature).
+  const renderFeatureModelTable = (featureKey: string) => {
+    const rows = featureModels
+      .filter((f) => f.tool_key === "photo" && f.feature_key === featureKey)
+      .sort((a, b) => a.sort_order - b.sort_order || a.model_tier.localeCompare(b.model_tier));
+    if (rows.length === 0) {
+      return (
+        <p className="rounded-lg border border-dashed border-gray-800 px-4 py-3 text-xs text-gray-500">
+          No models materialized yet. Apply migration 012, then reload.
+        </p>
+      );
+    }
+    return (
+      <div className="overflow-x-auto rounded-xl border border-gray-800">
+        <table className="w-full">
+          <thead className="bg-gray-900/60">
+            <tr>
+              <th className={TH}>Model</th>
+              <th className={TH}>Status</th>
+              <th className={TH}>Enabled</th>
+              <th className={TH}>Default</th>
+              <th className={TH}></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {rows.map((f) => (
+              <tr key={f.id} className="text-sm text-gray-300">
+                <td className="px-3 py-2">
+                  <div className="font-medium text-white">
+                    {TIER_LABEL[f.model_tier] ?? f.model_tier}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {TIER_SUBTITLE[f.model_tier] ?? f.model_tier}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <Badge tone={f.enabled ? "active" : "disabled"}>
+                    {f.enabled ? "Offered" : "Hidden from this feature"}
+                  </Badge>
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={f.enabled}
+                    onChange={(e) => setFeatureModelEnabled(f.id, e.target.checked)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="radio"
+                    name={`default-${f.tool_key}-${f.feature_key}`}
+                    checked={f.is_default}
+                    disabled={!f.enabled}
+                    onChange={(e) => setFeatureModelDefault(f.id, e.target.checked)}
+                  />
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <RowButtons
+                    busy={busy}
+                    onSave={() =>
+                      patch(`/api/admin/config/feature-models/${f.id}`, {
+                        enabled: f.enabled,
+                        is_default: f.is_default,
+                      })
+                    }
+                    onReset={() =>
+                      resetRow(
+                        `/api/admin/config/feature-models/${f.id}/reset`,
+                        `${PHOTO_FEATURE_LABEL[f.feature_key] ?? f.feature_key} · ${
+                          TIER_LABEL[f.model_tier] ?? f.model_tier
+                        }`
+                      )
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -766,100 +992,109 @@ export default function AdminConfigPage() {
       ) : null}
 
       {!loading && tab === "models" ? (
-        <div className="space-y-3">
+        <div className="space-y-8">
           <NoteBox>
             <ul className="ml-4 list-disc space-y-0.5">
-              <li>Model IDs must be exact. No external validation is performed here.</li>
-              <li>A typo is treated as intentional and can fail at generation time.</li>
               <li>
-                The Whisper version pin lives in{" "}
-                <span className="font-mono text-gray-300">parameters.version</span>.
+                Models are organized by <span className="text-gray-300">creation type → feature</span>.
+              </li>
+              <li>
+                Under <span className="text-gray-300">Photo</span>, each feature lists the models it
+                can use. Toggle <span className="text-gray-300">Enabled</span> to offer/hide a model
+                for that feature, and pick one <span className="text-gray-300">Default</span>.
+                Disabling a model here hides it from that feature only.
+              </li>
+              <li>
+                Reference-only models (text-to-image) never appear under Product try-on — that is a
+                hard capability, not an admin toggle.
+              </li>
+              <li>
+                Provider/model IDs (and the Whisper version pin in{" "}
+                <span className="font-mono text-gray-300">parameters.version</span>) are edited in the
+                model-definition tables. IDs must be exact; a typo can fail at generation time.
               </li>
               <li>Secrets / API keys are never stored here — they stay in environment variables.</li>
             </ul>
           </NoteBox>
-          <div className="overflow-x-auto rounded-xl border border-gray-800">
-            <table className="w-full">
-              <thead className="bg-gray-900/60">
-                <tr>
-                  <th className={TH}>Tool / key</th>
-                  <th className={TH}>Status</th>
-                  <th className={TH}>Provider</th>
-                  <th className={TH}>Model</th>
-                  <th className={TH}>Enabled</th>
-                  <th className={TH}>Default</th>
-                  <th className={TH}></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {models.map((m) => {
-                  const status = modelStatus(m);
-                  const warn = modelWarning(m);
-                  return (
-                    <tr key={m.id} className="text-sm text-gray-300">
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-white">{m.tool_key}</div>
-                        <div className="text-xs text-gray-500">{m.config_key}</div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge tone={status.tone}>{status.label}</Badge>
-                      </td>
-                      <td className="px-3 py-2 w-32">
-                        <input
-                          value={m.provider}
-                          onChange={(e) => setModelField(m.id, "provider", e.target.value)}
-                          className={INPUT}
-                        />
-                      </td>
-                      <td className="px-3 py-2 min-w-64">
-                        <input
-                          value={m.model}
-                          onChange={(e) => setModelField(m.id, "model", e.target.value)}
-                          className={INPUT}
-                        />
-                        {warn ? (
-                          <div className="mt-1 text-[11px] text-amber-300">⚠ {warn}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={m.enabled}
-                          onChange={(e) => setModelField(m.id, "enabled", e.target.checked)}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={m.is_default}
-                          onChange={(e) => setModelField(m.id, "is_default", e.target.checked)}
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <RowButtons
-                          busy={busy}
-                          onSave={() =>
-                            patch(`/api/admin/config/models/${m.id}`, {
-                              provider: m.provider,
-                              model: m.model,
-                              enabled: m.enabled,
-                              is_default: m.is_default,
-                            })
-                          }
-                          onReset={() =>
-                            resetRow(
-                              `/api/admin/config/models/${m.id}/reset`,
-                              `${m.tool_key}/${m.config_key}`
-                            )
-                          }
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+
+          {/* ---- Photo creation type ---- */}
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-white">Photo</h2>
+              <p className="text-xs text-gray-500">
+                Image generation, product try-on, and character generation share one catalog of
+                models. Enable models per feature below.
+              </p>
+            </div>
+
+            {PHOTO_FEATURE_ORDER.map((fk) => (
+              <div key={fk} className="space-y-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-violet-300">
+                    {PHOTO_FEATURE_LABEL[fk] ?? fk}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">{PHOTO_FEATURE_DESC[fk]}</p>
+                </div>
+                {renderFeatureModelTable(fk)}
+              </div>
+            ))}
+
+            {models.some((m) => m.tool_key === "photo") ? (
+              <details className="rounded-xl border border-gray-800 bg-gray-900/30">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-300">
+                  Advanced · Photo model definitions (provider / model)
+                </summary>
+                <div className="border-t border-gray-800 p-3">
+                  <p className="mb-2 text-[11px] text-gray-500">
+                    The provider model id behind each Nano tier. Extended models (Seedream, FLUX,
+                    Imagen, Ideogram) resolve from code defaults unless overridden here.
+                  </p>
+                  {renderModelConfigTable(models.filter((m) => m.tool_key === "photo"))}
+                </div>
+              </details>
+            ) : null}
+          </section>
+
+          {/* ---- Reels creation type (pipeline model roles) ---- */}
+          {(["reels", "veo", "storyboard"] as const).some((t) =>
+            models.some((m) => m.tool_key === t)
+          ) ? (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold text-white">Reels</h2>
+                <p className="text-xs text-gray-500">
+                  Video pipelines. Each feature is a fixed sequence of model roles (LLM, video, TTS,
+                  Whisper) rather than an interchangeable catalog.
+                </p>
+              </div>
+              {(["reels", "veo", "storyboard"] as const).map((toolKey) => {
+                const rows = models.filter((m) => m.tool_key === toolKey);
+                if (rows.length === 0) return null;
+                return (
+                  <div key={toolKey} className="space-y-2">
+                    <h3 className="text-sm font-semibold text-violet-300">
+                      {MODEL_CONFIG_GROUP[toolKey]?.feature ?? toolKey}
+                    </h3>
+                    {renderModelConfigTable(rows)}
+                  </div>
+                );
+              })}
+            </section>
+          ) : null}
+
+          {/* ---- Other model roles (render, legacy, anything ungrouped) ---- */}
+          {models.some(
+            (m) => !["reels", "veo", "storyboard", "photo"].includes(m.tool_key)
+          ) ? (
+            <section className="space-y-2">
+              <h2 className="text-base font-semibold text-white">Other</h2>
+              {renderModelConfigTable(
+                models.filter(
+                  (m) => !["reels", "veo", "storyboard", "photo"].includes(m.tool_key)
+                )
+              )}
+            </section>
+          ) : null}
         </div>
       ) : null}
     </div>

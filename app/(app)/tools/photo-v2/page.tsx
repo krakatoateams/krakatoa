@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Camera,
   Plus,
@@ -15,19 +15,34 @@ import {
   Layers,
   Cpu,
   Crop,
+  Upload,
+  Users,
+  Palette,
+  VenusAndMars,
+  Cake,
 } from "lucide-react";
+import type { CreationHistoryItem } from "@/lib/creations";
 import {
   MODEL_POSES,
   PHOTO_STYLES,
   PRODUCT_PHOTO_TIERS,
   PHOTO_ASPECT_RATIOS,
+  CHARACTER_STYLES,
+  CHARACTER_GENDERS,
+  CHARACTER_AGES,
   DEFAULT_PRODUCT_PHOTO_TIER,
   DEFAULT_PRODUCT_PHOTO_RESOLUTION,
   DEFAULT_PHOTO_ASPECT_RATIO,
+  DEFAULT_CHARACTER_STYLE,
+  DEFAULT_CHARACTER_GENDER,
+  DEFAULT_CHARACTER_AGE,
   getProductPhotoTier,
   ModelPoseId,
   PhotoStyleId,
   PhotoAspectRatio,
+  CharacterStyleId,
+  CharacterGenderId,
+  CharacterAgeId,
   ProductPhotoModelTier,
   ProductPhotoResolution,
 } from "@/lib/product-photo";
@@ -62,18 +77,15 @@ function describeIdempotencyError(
 const CREATION_TYPES = [
   { id: "generate-any-image", label: "Generate any image", available: true },
   { id: "product-tryon", label: "Product Try-on", available: true },
-  { id: "avatar", label: "Avatar", available: false },
+  { id: "character", label: "Character creation", available: true },
   { id: "social-post", label: "Social media post", available: false },
 ] as const;
 type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
 
-// Friendly model names for the model chip. Each maps 1:1 to a product-photo tier
-// so selecting a model drives the same `modelTier` the backend already understands.
-const MODEL_LABELS: Record<ProductPhotoModelTier, string> = {
-  basic: "Nano Banana",
-  balanced: "Nano Banana 2",
-  pro: "Nano Banana Pro",
-};
+// First reference-capable model — the default we snap to when the user enters a
+// mode that needs a product reference (Product Try-on) with a text-only model selected.
+const FIRST_REFERENCE_TIER =
+  PRODUCT_PHOTO_TIERS.find((t) => t.supportsReference)?.id ?? DEFAULT_PRODUCT_PHOTO_TIER;
 
 type ChipOption = { id: string; label: string; hint?: string };
 
@@ -170,11 +182,217 @@ function ChipDropdown({
   );
 }
 
+type ImageUpload = {
+  file: File | null;
+  preview: string | null;
+  inputRef: React.RefObject<HTMLInputElement>;
+  open: () => void;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  clear: () => void;
+};
+
+// Encapsulates one optional image slot: file state, object-URL preview lifecycle,
+// hidden <input> ref, and open/clear helpers. Used for product, character, and
+// reference uploads so each tile manages itself.
+function useImageUpload(): ImageUpload {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
+  const set = (next: File | null) => {
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return next ? URL.createObjectURL(next) : null;
+    });
+    setFile(next);
+  };
+
+  return {
+    file,
+    preview,
+    inputRef,
+    open: () => inputRef.current?.click(),
+    onChange: (e) => {
+      const next = e.target.files?.[0];
+      if (next) set(next);
+    },
+    clear: () => {
+      set(null);
+      if (inputRef.current) inputRef.current.value = "";
+    },
+  };
+}
+
+// A 64×64 upload tile (PRODUCT / CHARACTER / REFERENCE). Shows the picked image
+// with a clear button, or a "+ label" prompt when empty.
+function UploadTile({
+  label,
+  upload,
+  disabled,
+}: {
+  label: string;
+  upload: ImageUpload;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={upload.open}
+      disabled={disabled}
+      className={`group relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-[4px] border text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+        upload.preview
+          ? "border-purple-400/50"
+          : "border-white/10 bg-white/5 text-gray-400 hover:border-purple-400/50 hover:text-white"
+      }`}
+      title={upload.preview ? `Change ${label.toLowerCase()} image` : `Add ${label.toLowerCase()} image`}
+    >
+      {upload.preview ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={upload.preview}
+            alt={label}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              upload.clear();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                upload.clear();
+              }
+            }}
+            className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+          >
+            <X className="h-3 w-3" />
+          </span>
+        </>
+      ) : (
+        <>
+          <Plus className="h-4 w-4" />
+          <span>{label}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+// Character slot for Product Try-on: shows the chosen image (uploaded OR a saved
+// character) with a clear button, or a "+ Character" button that opens a small
+// menu to either upload an image or pick a previously generated character.
+function CharacterTile({
+  preview,
+  onUpload,
+  onPick,
+  onClear,
+  disabled,
+}: {
+  preview: string | null;
+  onUpload: () => void;
+  onPick: () => void;
+  onClear: () => void;
+  disabled?: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  if (preview) {
+    return (
+      <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-purple-400/50">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={preview} alt="Character" className="absolute inset-0 h-full w-full object-cover" />
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={onClear}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onClear();
+          }}
+          className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+        >
+          <X className="h-3 w-3" />
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setMenuOpen((o) => !o)}
+        className="group flex h-16 w-16 flex-col items-center justify-center gap-1 rounded-[4px] border border-white/10 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white"
+        title="Add character"
+      >
+        <Plus className="h-4 w-4" />
+        <span>Character</span>
+      </button>
+      {menuOpen && (
+        <div className="absolute left-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onUpload();
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-300 transition-colors hover:bg-white/5"
+          >
+            <Upload className="h-4 w-4 text-purple-300" />
+            Upload image
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onPick();
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-gray-300 transition-colors hover:bg-white/5"
+          >
+            <Users className="h-4 w-4 text-purple-300" />
+            Use a saved character
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PhotoOmniPage() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [productFile, setProductFile] = useState<File | null>(null);
-  const [productPreview, setProductPreview] = useState<string | null>(null);
+  const product = useImageUpload();
+  const character = useImageUpload();
+  const reference = useImageUpload();
+  // Product Try-on character chosen from previously generated characters.
+  const [selectedCharacter, setSelectedCharacter] = useState<{
+    id: string;
+    url: string;
+    name: string;
+  } | null>(null);
+  const [characterPickerOpen, setCharacterPickerOpen] = useState(false);
+  const [savedCharacters, setSavedCharacters] = useState<CreationHistoryItem[]>([]);
+  const [charactersLoading, setCharactersLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>("generate-any-image");
   const [poseId, setPoseId] = useState<ModelPoseId>("standing");
   const [styleId, setStyleId] = useState<PhotoStyleId>("minimalist-studio");
@@ -183,6 +401,14 @@ export default function PhotoOmniPage() {
     DEFAULT_PRODUCT_PHOTO_RESOLUTION
   );
   const [aspectRatio, setAspectRatio] = useState<PhotoAspectRatio>(DEFAULT_PHOTO_ASPECT_RATIO);
+  const [characterStyle, setCharacterStyle] = useState<CharacterStyleId>(DEFAULT_CHARACTER_STYLE);
+  const [characterGender, setCharacterGender] = useState<CharacterGenderId>(DEFAULT_CHARACTER_GENDER);
+  const [characterAge, setCharacterAge] = useState<CharacterAgeId>(DEFAULT_CHARACTER_AGE);
+  // Admin-controlled per-feature model enablement (null until loaded → code fallback).
+  const [featureModels, setFeatureModels] = useState<Record<
+    string,
+    { enabledTiers: string[]; defaultTier: string | null }
+  > | null>(null);
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,18 +430,72 @@ export default function PhotoOmniPage() {
   const creationSupported = selectedCreation?.available ?? false;
   // "Generate any image" = text-to-image: no product reference, prompt-driven.
   const isImageMode = creationType === "generate-any-image";
-  const requiresProduct = creationSupported && !isImageMode;
-  const promptRequired = isImageMode;
+  // "Character creation" = text-to-image turnaround sheet (one image, multiple angles).
+  const isCharacterMode = creationType === "character";
+  const requiresProduct = creationSupported && creationType === "product-tryon";
+  // Reference image upload is only meaningful for reference-capable models, and only
+  // in the no-product modes (Generate any image / Character creation).
+  const allowReferenceUpload = (isImageMode || isCharacterMode) && tier.supportsReference;
+
+  // Which creation feature the current mode maps to (matches the admin config +
+  // generate-photo `mode`). Unsupported types fall through to "product" but the
+  // form is disabled for those, so it never matters.
+  const featureKey = isImageMode ? "image" : isCharacterMode ? "character" : "product";
+
+  // Models usable in the current mode. When the admin enablement has loaded, use
+  // its per-feature list (it already encodes capability + admin toggles). Before
+  // it loads (or on API failure) fall back to the in-code capability rule so the
+  // form is never empty.
+  const enabledTierIds = featureModels?.[featureKey]?.enabledTiers ?? null;
+  const availableTiers = PRODUCT_PHOTO_TIERS.filter((t) =>
+    enabledTierIds
+      ? enabledTierIds.includes(t.id)
+      : isImageMode || isCharacterMode || t.supportsReference
+  );
+  const availableTierKey = availableTiers.map((t) => t.id).join(",");
+
   const canGenerate =
     creationSupported &&
-    (requiresProduct ? !!productFile : true) &&
-    (promptRequired ? prompt.trim().length > 0 : true);
+    availableTiers.length > 0 &&
+    (requiresProduct ? !!product.file : true) &&
+    (isImageMode ? prompt.trim().length > 0 : true) &&
+    // Character: need a description OR a usable reference image.
+    (isCharacterMode
+      ? prompt.trim().length > 0 || (allowReferenceUpload && !!reference.file)
+      : true);
 
+  // Load admin per-feature model enablement once.
   useEffect(() => {
+    let active = true;
+    fetch("/api/tools/photo/features")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data?.features) return;
+        const map: Record<string, { enabledTiers: string[]; defaultTier: string | null }> = {};
+        for (const f of data.features) {
+          map[f.key] = { enabledTiers: f.enabledTiers ?? [], defaultTier: f.defaultTier ?? null };
+        }
+        setFeatureModels(map);
+      })
+      .catch(() => {});
     return () => {
-      if (productPreview) URL.revokeObjectURL(productPreview);
+      active = false;
     };
-  }, [productPreview]);
+  }, []);
+
+  // Keep the selected model valid for the current feature: if it isn't offered,
+  // snap to the feature's default (admin-configured) or the first available model.
+  useEffect(() => {
+    if (availableTiers.length === 0) return;
+    if (availableTiers.some((t) => t.id === modelTier)) return;
+    const preferred = featureModels?.[featureKey]?.defaultTier;
+    const next =
+      (preferred && availableTiers.find((t) => t.id === preferred)?.id) ||
+      availableTiers[0]?.id ||
+      FIRST_REFERENCE_TIER;
+    setModelTier(next as ProductPhotoModelTier);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableTierKey, featureKey, modelTier]);
 
   useEffect(() => {
     if (!lightboxUrl) return;
@@ -226,21 +506,40 @@ export default function PhotoOmniPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxUrl]);
 
-  const setFile = (file: File | null) => {
-    if (productPreview) URL.revokeObjectURL(productPreview);
-    if (!file) {
-      setProductFile(null);
-      setProductPreview(null);
-      return;
+  const loadSavedCharacters = useCallback(async () => {
+    setCharactersLoading(true);
+    try {
+      const res = await fetch(
+        "/api/creations/history?tool=product_photo&mediaType=image&limit=100"
+      );
+      const data = await res.json();
+      const all: CreationHistoryItem[] = data.items || [];
+      setSavedCharacters(all.filter((i) => i.metadata?.creationKind === "character"));
+    } catch {
+      setSavedCharacters([]);
+    } finally {
+      setCharactersLoading(false);
     }
-    setProductFile(file);
-    setProductPreview(URL.createObjectURL(file));
-    setError(null);
+  }, []);
+
+  const openCharacterPicker = () => {
+    setCharacterPickerOpen(true);
+    void loadSavedCharacters();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) setFile(file);
+  const chooseSavedCharacter = (item: CreationHistoryItem) => {
+    const name =
+      (typeof item.metadata?.characterName === "string" && item.metadata.characterName.trim()) ||
+      item.title ||
+      "Character";
+    character.clear();
+    setSelectedCharacter({ id: item.id, url: item.mediaUrl, name });
+    setCharacterPickerOpen(false);
+  };
+
+  const clearCharacter = () => {
+    character.clear();
+    setSelectedCharacter(null);
   };
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -252,13 +551,28 @@ export default function PhotoOmniPage() {
     setWarning(null);
 
     try {
+      const mode = isCharacterMode ? "character" : isImageMode ? "image" : "product";
       const formData = new FormData();
-      formData.append("mode", isImageMode ? "image" : "product");
-      if (productFile) formData.append("image", productFile);
+      formData.append("mode", mode);
+      if (requiresProduct && product.file) {
+        formData.append("image", product.file);
+        if (character.file) formData.append("character", character.file);
+        else if (selectedCharacter) formData.append("characterCreationId", selectedCharacter.id);
+      }
+      if (allowReferenceUpload && reference.file) {
+        formData.append("reference", reference.file);
+      }
+      if (isCharacterMode) {
+        if (characterName.trim()) formData.append("characterName", characterName.trim());
+        formData.append("style", characterStyle);
+        formData.append("gender", characterGender);
+        formData.append("age", characterAge);
+      }
       formData.append("poseId", poseId);
       formData.append("styleId", styleId);
       formData.append("modelTier", modelTier);
-      formData.append("aspectRatio", aspectRatio);
+      // Character creation has no aspect chip — it always uses a 2:3 portrait sheet.
+      formData.append("aspectRatio", isCharacterMode ? "2:3" : aspectRatio);
       if (prompt.trim()) formData.append("prompt", prompt.trim());
       if (tier.hasResolution) {
         formData.append("resolution", resolution);
@@ -294,8 +608,6 @@ export default function PhotoOmniPage() {
     }
   };
 
-  const openPicker = () => fileInputRef.current?.click();
-
   return (
     <div className="min-h-screen bg-[#030712] text-white selection:bg-purple-500/30">
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
@@ -311,11 +623,28 @@ export default function PhotoOmniPage() {
         </div>
 
         <input
-          ref={fileInputRef}
+          ref={product.inputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           className="hidden"
-          onChange={handleFileChange}
+          onChange={product.onChange}
+        />
+        <input
+          ref={character.inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            character.onChange(e);
+            if (e.target.files?.[0]) setSelectedCharacter(null);
+          }}
+        />
+        <input
+          ref={reference.inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={reference.onChange}
         />
 
         {/* Omni-form composer */}
@@ -357,11 +686,11 @@ export default function PhotoOmniPage() {
             />
             <ChipDropdown
               icon={<Cpu className="h-3.5 w-3.5" />}
-              value={MODEL_LABELS[modelTier]}
+              value={tier.modelLabel}
               activeId={modelTier}
-              options={PRODUCT_PHOTO_TIERS.map((t) => ({
+              options={availableTiers.map((t) => ({
                 id: t.id,
-                label: MODEL_LABELS[t.id],
+                label: t.modelLabel,
                 hint: t.hasResolution
                   ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
                   : `${imageCredits(t.basicPricingKey!, 1)}`,
@@ -372,65 +701,50 @@ export default function PhotoOmniPage() {
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+            {/* Character name (Character creation only) */}
+            {isCharacterMode && (
+              <div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-3">
+                <User className="h-4 w-4 shrink-0 text-purple-300" />
+                <input
+                  type="text"
+                  value={characterName}
+                  onChange={(e) => setCharacterName(e.target.value)}
+                  placeholder="Name your character (optional)"
+                  maxLength={80}
+                  className="w-full bg-transparent text-sm font-semibold text-white placeholder:font-normal placeholder:text-gray-500 focus:outline-none"
+                />
+              </div>
+            )}
+
             {/* Prompt row */}
             <div className="flex items-start gap-3">
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={
-                  isImageMode
-                    ? "Describe the image you want to generate…"
-                    : "Describe what happens in the shot…"
+                  isCharacterMode
+                    ? "Describe your character — appearance, outfit, vibe…"
+                    : isImageMode
+                      ? "Describe the image you want to generate…"
+                      : "Describe what happens in the shot…"
                 }
                 rows={2}
                 className="min-h-[48px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
               />
               {requiresProduct && (
-                <button
-                  type="button"
-                  onClick={openPicker}
-                  className={`group relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-[4px] border text-[10px] font-semibold uppercase tracking-wide transition-colors ${
-                    productPreview
-                      ? "border-purple-400/50"
-                      : "border-white/10 bg-white/5 text-gray-400 hover:border-purple-400/50 hover:text-white"
-                  }`}
-                  title={productPreview ? "Change product image" : "Add product image"}
-                >
-                  {productPreview ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={productPreview}
-                        alt="Product"
-                        className="absolute inset-0 h-full w-full object-cover"
-                      />
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFile(null);
-                          if (fileInputRef.current) fileInputRef.current.value = "";
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.stopPropagation();
-                            setFile(null);
-                            if (fileInputRef.current) fileInputRef.current.value = "";
-                          }
-                        }}
-                        className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
-                      >
-                        <X className="h-3 w-3" />
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="h-4 w-4" />
-                      <span>Product</span>
-                    </>
-                  )}
-                </button>
+                <>
+                  <UploadTile label="Product" upload={product} disabled={loading} />
+                  <CharacterTile
+                    preview={selectedCharacter?.url ?? character.preview}
+                    onUpload={character.open}
+                    onPick={openCharacterPicker}
+                    onClear={clearCharacter}
+                    disabled={loading}
+                  />
+                </>
+              )}
+              {allowReferenceUpload && (
+                <UploadTile label="Reference" upload={reference} disabled={loading} />
               )}
             </div>
 
@@ -438,21 +752,57 @@ export default function PhotoOmniPage() {
             <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               {/* Chip dropdowns */}
               <div className="flex flex-wrap items-center gap-2">
-                <ChipDropdown
-                  square
-                  showChevron={false}
-                  icon={<Crop className="h-3.5 w-3.5" />}
-                  value={aspectRatio}
-                  activeId={aspectRatio}
-                  options={PHOTO_ASPECT_RATIOS.map((a) => ({
-                    id: a.id,
-                    label: a.label,
-                    hint: a.cinematic ? "Cinematic" : undefined,
-                  }))}
-                  onSelect={(id) => setAspectRatio(id as PhotoAspectRatio)}
-                  disabled={loading}
-                />
-                {!isImageMode && (
+                {!isCharacterMode && (
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Crop className="h-3.5 w-3.5" />}
+                    value={aspectRatio}
+                    activeId={aspectRatio}
+                    options={PHOTO_ASPECT_RATIOS.map((a) => ({
+                      id: a.id,
+                      label: a.label,
+                      hint: a.cinematic ? "Cinematic" : undefined,
+                    }))}
+                    onSelect={(id) => setAspectRatio(id as PhotoAspectRatio)}
+                    disabled={loading}
+                  />
+                )}
+                {isCharacterMode && (
+                  <>
+                    <ChipDropdown
+                      square
+                      showChevron={false}
+                      icon={<Palette className="h-3.5 w-3.5" />}
+                      value={CHARACTER_STYLES.find((s) => s.id === characterStyle)?.label ?? "Style"}
+                      activeId={characterStyle}
+                      options={CHARACTER_STYLES.map((s) => ({ id: s.id, label: s.label }))}
+                      onSelect={(id) => setCharacterStyle(id as CharacterStyleId)}
+                      disabled={loading}
+                    />
+                    <ChipDropdown
+                      square
+                      showChevron={false}
+                      icon={<VenusAndMars className="h-3.5 w-3.5" />}
+                      value={CHARACTER_GENDERS.find((g) => g.id === characterGender)?.label ?? "Gender"}
+                      activeId={characterGender}
+                      options={CHARACTER_GENDERS.map((g) => ({ id: g.id, label: g.label }))}
+                      onSelect={(id) => setCharacterGender(id as CharacterGenderId)}
+                      disabled={loading}
+                    />
+                    <ChipDropdown
+                      square
+                      showChevron={false}
+                      icon={<Cake className="h-3.5 w-3.5" />}
+                      value={CHARACTER_AGES.find((a) => a.id === characterAge)?.label ?? "Age"}
+                      activeId={characterAge}
+                      options={CHARACTER_AGES.map((a) => ({ id: a.id, label: a.label }))}
+                      onSelect={(id) => setCharacterAge(id as CharacterAgeId)}
+                      disabled={loading}
+                    />
+                  </>
+                )}
+                {requiresProduct && (
                   <>
                     <ChipDropdown
                       square
@@ -520,18 +870,29 @@ export default function PhotoOmniPage() {
               {selectedCreation?.label} is coming soon — switch to Generate any image or Product
               Try-on.
             </p>
-          ) : requiresProduct && !productFile ? (
+          ) : requiresProduct && !product.file ? (
             <p className="mt-2 pl-1 text-xs text-gray-500">
-              Attach a product image to enable generation.
+              Attach a product image to enable generation. Character image is optional.
             </p>
-          ) : (
-            promptRequired &&
-            !prompt.trim() && (
-              <p className="mt-2 pl-1 text-xs text-gray-500">
-                Describe the image you want to generate.
-              </p>
-            )
-          )}
+          ) : isCharacterMode ? (
+            <p className="mt-2 pl-1 text-xs text-gray-500">
+              Generates one turnaround sheet showing your character from multiple angles.
+              {allowReferenceUpload ? " Reference image is optional." : ""}
+            </p>
+          ) : isImageMode && !prompt.trim() ? (
+            <p className="mt-2 pl-1 text-xs text-gray-500">
+              Describe the image you want to generate.
+              {allowReferenceUpload ? " Reference image is optional." : ""}
+            </p>
+          ) : requiresProduct ? (
+            <p className="mt-2 pl-1 text-xs text-gray-500">
+              Character is optional — upload a model image or use one of your saved characters.
+            </p>
+          ) : allowReferenceUpload ? (
+            <p className="mt-2 pl-1 text-xs text-gray-500">
+              Reference image is optional — it guides the generated result.
+            </p>
+          ) : null}
         </form>
 
         {warning && (
@@ -551,7 +912,9 @@ export default function PhotoOmniPage() {
         {loading && (
           <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
             <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
-            Creating your shot with {tier.label} — it will appear below when ready.
+            {isCharacterMode
+              ? `Creating your character turnaround with ${tier.label} — it will appear below when ready.`
+              : `Creating your shot with ${tier.label} — it will appear below when ready.`}
           </div>
         )}
 
@@ -575,9 +938,11 @@ export default function PhotoOmniPage() {
                 Saved to your library
               </div>
               <p className="text-sm text-gray-300">
-                {isImageMode
-                  ? `Generated image · ${tier.label}`
-                  : `${selectedPose?.label} · ${selectedStyle?.label} · ${tier.label}`}
+                {isCharacterMode
+                  ? `Character${characterName.trim() ? ` · ${characterName.trim()}` : ""} · ${tier.label}`
+                  : isImageMode
+                    ? `Generated image · ${tier.label}`
+                    : `${selectedPose?.label} · ${selectedStyle?.label} · ${tier.label}`}
               </p>
               <p className="mt-1 text-xs text-gray-500">
                 Click the thumbnail to view full size, or generate another below.
@@ -598,6 +963,87 @@ export default function PhotoOmniPage() {
           />
         </div>
       </div>
+
+      {characterPickerOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose a saved character"
+          onClick={() => setCharacterPickerOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-950"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Users className="h-4 w-4 text-purple-300" />
+                Choose a character
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCharacterPickerOpen(false)}
+                aria-label="Close"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {charactersLoading ? (
+                <div className="flex items-center justify-center py-16 text-gray-500">
+                  <Loader2 className="h-7 w-7 animate-spin" />
+                </div>
+              ) : savedCharacters.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] py-16 text-center">
+                  <Users className="mx-auto mb-3 h-10 w-10 text-gray-600" />
+                  <p className="text-sm text-gray-400">No saved characters yet.</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Create one with the “Character creation” type, then reuse it here.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+                  {savedCharacters.map((item) => {
+                    const name =
+                      (typeof item.metadata?.characterName === "string" &&
+                        item.metadata.characterName.trim()) ||
+                      item.title ||
+                      "Character";
+                    const active = selectedCharacter?.id === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => chooseSavedCharacter(item)}
+                        className={`group overflow-hidden rounded-xl border text-left transition-colors ${
+                          active
+                            ? "border-purple-400/70 ring-2 ring-purple-400/30"
+                            : "border-white/10 hover:border-purple-400/50"
+                        }`}
+                      >
+                        <div className="relative aspect-square w-full bg-black/40">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.mediaUrl}
+                            alt={name}
+                            className="absolute inset-0 h-full w-full object-cover"
+                          />
+                        </div>
+                        <p className="truncate px-2 py-1.5 text-[11px] font-medium text-white">
+                          {name}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {lightboxUrl && (
         <div

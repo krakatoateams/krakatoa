@@ -56,6 +56,15 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   product_photo_nano_banana_pro_1k_per_image: { providerCostUsd: 0.15, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_1k" },
   product_photo_nano_banana_pro_2k_per_image: { providerCostUsd: 0.15, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_2k" },
   product_photo_nano_banana_pro_4k_per_image: { providerCostUsd: 0.30, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_4k" },
+  // Extended Product Photo / omni-form models (per image) — single price each,
+  // no resolution tiers. Approx Replicate provider costs.
+  product_photo_seedream_4_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "seedream4" },
+  product_photo_flux_kontext_pro_per_image: { providerCostUsd: 0.04, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "flux_kontext" },
+  product_photo_flux_1_1_pro_per_image: { providerCostUsd: 0.04, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "flux11" },
+  product_photo_imagen_4_per_image: { providerCostUsd: 0.04, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "imagen4" },
+  product_photo_ideogram_v3_turbo_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "ideogram3" },
+  product_photo_seedream_3_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "seedream3" },
+  product_photo_flux_schnell_per_image: { providerCostUsd: 0.003, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "flux_schnell" },
 };
 
 /** Built-in v2 default for a pricing key, or null if the key is unknown. */
