@@ -207,6 +207,23 @@ export function seedancePricingKey(resolution: string | null | undefined): strin
   return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
 }
 
+/**
+ * Seedance 2 pricing key, variant-aware. Seedance charges a higher per-second
+ * rate when a reference VIDEO is provided ("video_in") vs not ("non_video_in").
+ * Used by Text to Video; Reels/Storyboard (no video input) keep
+ * seedancePricingKey() which always resolves to the non_video_in keys.
+ */
+export function seedance2PricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const is720 = params.resolution === "720p";
+  if (params.hasReferenceVideo) {
+    return is720 ? "seedance_720p_video_in_per_second" : "seedance_480p_video_in_per_second";
+  }
+  return is720 ? "seedance_720p_per_second" : "seedance_480p_per_second";
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";

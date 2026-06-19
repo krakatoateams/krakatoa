@@ -33,8 +33,13 @@ export type V2PricingDefault = {
 
 export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // Seedance (per second) — also powers Storyboard Video pricing.
+  // "non_video_in" variant (no reference video input): used by Reels/Storyboard
+  // and by Text to Video unless a reference video is attached.
   seedance_480p_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "seedance", variantKey: "480p" },
   seedance_720p_per_second: { providerCostUsd: 0.15, costUnit: "per_second", pricingGroup: "seedance", variantKey: "720p" },
+  // "video_in" variant (a reference video is provided) — Seedance charges more.
+  seedance_480p_video_in_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "seedance", variantKey: "480p_video_in" },
+  seedance_720p_video_in_per_second: { providerCostUsd: 0.17, costUnit: "per_second", pricingGroup: "seedance", variantKey: "720p_video_in" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },

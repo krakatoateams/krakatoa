@@ -105,6 +105,16 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 14, enabled: true,
     provider_cost_usd: 0.15, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p", currency: "USD",
   },
+  // Seedance "video_in" variant (a reference video is provided) — pricier tier
+  // (migration 014). Used by Text to Video when a reference video is attached.
+  seedance_480p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "seedance", variant_key: "480p_video_in", currency: "USD",
+  },
+  seedance_720p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 16, enabled: true,
+    provider_cost_usd: 0.17, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p_video_in", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
