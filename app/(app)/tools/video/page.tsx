@@ -32,6 +32,7 @@ import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import {
   VIDEO_MODELS,
   getVideoModel,
@@ -67,11 +68,6 @@ import {
   type StoryboardStyleKey,
   SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
 } from "@/lib/storyboard-style";
-
-// One fresh idempotency key per submit (sent as the Idempotency-Key header).
-function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
 
 function describeIdempotencyError(
   status: number,
@@ -766,6 +762,8 @@ function VideoOmniPage() {
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
 
@@ -823,34 +821,40 @@ function VideoOmniPage() {
     e.preventDefault();
     if (!canGenerate) return;
 
+    const toRef = (items: { url: string; path: string }[]) =>
+      items.map((r) => ({ url: r.url, path: r.path }));
+
+    const body = {
+      modelId,
+      prompt: prompt.trim(),
+      duration,
+      resolution,
+      aspectRatio,
+      generateAudio,
+      references: {
+        firstFrame: firstFrame.done[0] ?? null,
+        lastFrame: lastFrame.done[0] ?? null,
+        referenceImages: toRef(refImages.done),
+        referenceVideos: toRef(refVideos.done),
+        referenceAudios: toRef(refAudios.done),
+      },
+    };
+
+    // Stable key per attempt + synchronous in-flight lock: a double-click or a
+    // retry after a network blip can't spawn a second provider run. The full
+    // body is the signature, so any input change rotates the key.
+    const attempt = beginSubmit(JSON.stringify(body));
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const toRef = (items: { url: string; path: string }[]) =>
-        items.map((r) => ({ url: r.url, path: r.path }));
-
-      const body = {
-        modelId,
-        prompt: prompt.trim(),
-        duration,
-        resolution,
-        aspectRatio,
-        generateAudio,
-        references: {
-          firstFrame: firstFrame.done[0] ?? null,
-          lastFrame: lastFrame.done[0] ?? null,
-          referenceImages: toRef(refImages.done),
-          referenceVideos: toRef(refVideos.done),
-          referenceAudios: toRef(refAudios.done),
-        },
-      };
-
       const response = await fetch("/api/generate-video", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify(body),
       });
@@ -867,6 +871,7 @@ function VideoOmniPage() {
         throw new Error(data.error || "Generation failed");
       }
 
+      attempt.settle(true);
       setResultUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
@@ -878,6 +883,7 @@ function VideoOmniPage() {
       refVideos.reset();
       refAudios.reset();
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
     } finally {
@@ -1265,6 +1271,8 @@ function MotionControlComposer({
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
 
@@ -1323,28 +1331,33 @@ function MotionControlComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+
+    const body = {
+      modelId,
+      prompt: prompt.trim(),
+      mode,
+      characterOrientation: orientation,
+      keepOriginalSound,
+      refVideoDurationSec: videoDurationSec,
+      image: resolvedCharacter,
+      video: motionVideo.done[0]
+        ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
+        : null,
+    };
+
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(JSON.stringify(body));
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const body = {
-        modelId,
-        prompt: prompt.trim(),
-        mode,
-        characterOrientation: orientation,
-        keepOriginalSound,
-        refVideoDurationSec: videoDurationSec,
-        image: resolvedCharacter,
-        video: motionVideo.done[0]
-          ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
-          : null,
-      };
-
       const response = await fetch("/api/generate-motion-control", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify(body),
       });
@@ -1361,12 +1374,14 @@ function MotionControlComposer({
         throw new Error(data.error || "Generation failed");
       }
 
+      attempt.settle(true);
       setResultUrl(data.videoUrl);
       onGenerated();
       charImage.reset();
       motionVideo.reset();
       setLibraryChar(null);
     } catch (err: unknown) {
+      attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);
@@ -1645,6 +1660,8 @@ function ImportStoryboardModal({
   const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
 
   const cost = imageCredits("storyboard_import_vision_per_image", 1);
 
@@ -1668,6 +1685,13 @@ function ImportStoryboardModal({
 
   const analyze = async () => {
     if (!file || busy) return;
+    // Acquire the synchronous in-flight lock BEFORE the upload so a double-click
+    // can't upload the sheet and charge the vision pass twice. Each attempt
+    // re-uploads to a fresh temp path (which the server folds into its request
+    // hash), so the key is unique per attempt — here the lock, not key reuse, is
+    // what prevents the duplicate.
+    const attempt = beginSubmit(`storyboard-import:${Date.now()}:${Math.random()}`);
+    if (!attempt) return;
     setBusy(true);
     setError(null);
     try {
@@ -1676,7 +1700,7 @@ function ImportStoryboardModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify({
           imagePath: path,
@@ -1697,6 +1721,7 @@ function ImportStoryboardModal({
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Couldn't import the storyboard.");
       }
+      attempt.settle(true);
       onImported({
         id: String(data.storyboardId),
         storyboardUrl: String(data.storyboardUrl),
@@ -1708,6 +1733,7 @@ function ImportStoryboardModal({
         source: "uploaded",
       });
     } catch (err: unknown) {
+      attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setBusy(false);
@@ -1883,6 +1909,10 @@ function StoryboardToVideoComposer({
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
+  // synchronous in-flight lock, so a double-click or a retry after a network
+  // blip can never spawn a second Replicate run for the same storyboard.
+  const { begin: beginSubmit } = useIdempotentSubmit();
   // "Upload your own storyboard" modal.
   const [showUpload, setShowUpload] = useState(false);
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
@@ -1971,16 +2001,31 @@ function StoryboardToVideoComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate || !selectedId) return;
+
+    const editedPrompt = promptDirty ? promptDraft.trim() : undefined;
+    // Signature mirrors the fields the server hashes for idempotency (durationSec
+    // is fixed server-side) so the key is reused only while the request is
+    // unchanged. begin() returns null when a submit is already in flight — that
+    // drops a same-tick double-click before it can fire a second request.
+    const signature = JSON.stringify({
+      storyboardId: selectedId,
+      resolution,
+      aspectRatio: aspect,
+      language,
+      promptOverride: editedPrompt ?? null,
+    });
+    const attempt = beginSubmit(signature);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setResultUrl(null);
     try {
-      const editedPrompt = promptDirty ? promptDraft.trim() : undefined;
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify({
           storyboardId: selectedId,
@@ -2001,6 +2046,9 @@ function StoryboardToVideoComposer({
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Generation failed");
       }
+      // Confirmed success (or a server-side replay of the same key): retire the
+      // key so the next click starts a fresh generation.
+      attempt.settle(true);
       // If the prompt was edited it is now the stored prompt — reflect that in
       // local state so re-selecting the board shows the saved edit.
       if (editedPrompt) {
@@ -2011,6 +2059,9 @@ function StoryboardToVideoComposer({
       setResultUrl(data.videoUrl);
       onGenerated();
     } catch (err: unknown) {
+      // Keep the key so an immediate identical retry dedupes server-side
+      // (replay / in-progress / takeover) rather than launching a second run.
+      attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);

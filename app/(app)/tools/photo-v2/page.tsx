@@ -68,12 +68,7 @@ import {
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
-
-// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
-// attempt, sent as the Idempotency-Key header (never inside FormData). Not persisted.
-function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
+import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 
 function describeIdempotencyError(
   status: number,
@@ -423,6 +418,8 @@ function StoryboardComposer({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ url: string; id: string } | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
 
   const cost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
   const canGenerate = !loading && theme.trim().length > 0;
@@ -435,6 +432,12 @@ function StoryboardComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+
+    const body = { theme: theme.trim(), storyboardStyle: style, aspectRatio: aspect, language };
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`storyboard:${JSON.stringify(body)}`);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     try {
@@ -442,9 +445,9 @@ function StoryboardComposer({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
-        body: JSON.stringify({ theme: theme.trim(), storyboardStyle: style, aspectRatio: aspect, language }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -457,6 +460,7 @@ function StoryboardComposer({
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate storyboard");
       }
+      attempt.settle(true);
       setResult({
         url: typeof data.storyboardUrl === "string" ? data.storyboardUrl : "",
         id: typeof data.storyboardId === "string" ? data.storyboardId : "",
@@ -464,6 +468,7 @@ function StoryboardComposer({
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
     } catch (err: unknown) {
+      attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);
@@ -663,6 +668,8 @@ function PhotoOmniPage() {
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
   const { refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
 
@@ -801,12 +808,38 @@ function PhotoOmniPage() {
     e.preventDefault();
     if (loading || !canGenerate) return;
 
+    const mode = isCharacterMode ? "character" : isImageMode ? "image" : "product";
+    // Signature mirrors every input the request depends on, including file
+    // identities (the server hash ignores image bytes), so any change rotates the
+    // key. Stable key + synchronous lock stop a double-click / retry double-charge.
+    const fileSig = (f: File | null | undefined) =>
+      f ? `${f.name}/${f.size}/${f.lastModified}` : "";
+    const signature = [
+      "photo-v2",
+      mode,
+      fileSig(requiresProduct ? product.file : null),
+      fileSig(character.file),
+      selectedCharacter?.id ?? "",
+      fileSig(allowReferenceUpload ? reference.file : null),
+      isCharacterMode ? characterName.trim() : "",
+      isCharacterMode ? characterStyle : "",
+      isCharacterMode ? characterGender : "",
+      isCharacterMode ? characterAge : "",
+      poseId,
+      styleId,
+      modelTier,
+      isCharacterMode ? "2:3" : aspectRatio,
+      prompt.trim(),
+      tier.hasResolution ? resolution : "",
+    ].join("|");
+    const attempt = beginSubmit(signature);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setWarning(null);
 
     try {
-      const mode = isCharacterMode ? "character" : isImageMode ? "image" : "product";
       const formData = new FormData();
       formData.append("mode", mode);
       if (requiresProduct && product.file) {
@@ -835,7 +868,7 @@ function PhotoOmniPage() {
 
       const response = await fetch("/api/generate-photo", {
         method: "POST",
-        headers: { "Idempotency-Key": newIdempotencyKey() },
+        headers: { "Idempotency-Key": attempt.key },
         body: formData,
       });
 
@@ -851,11 +884,13 @@ function PhotoOmniPage() {
         throw new Error(data.error || "Generation failed");
       }
 
+      attempt.settle(true);
       setResultUrl(data.imageUrl);
       if (data.warning) setWarning(data.warning);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
     } finally {

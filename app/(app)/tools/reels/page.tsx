@@ -7,13 +7,7 @@ import CreationsHistory from "@/components/CreationsHistory";
 import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
-
-// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
-// attempt, sent as the Idempotency-Key header. Not persisted anywhere — a browser/
-// network retry of the SAME in-flight request reuses it; a new submit gets a new key.
-function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
+import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 
 // Translate the idempotency status codes into a user-facing message. Returns null
 // when the response is not an idempotency signal (so callers fall through).
@@ -100,6 +94,9 @@ export default function ReelsPage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts). One
+  // instance covers both engines — they share `loading` and are mutually exclusive.
+  const { begin: beginSubmit } = useIdempotentSubmit();
   
   const [testAudioPredictionId, setTestAudioPredictionId] = useState("g99vpsrf3hrmr0cy1jvtwy72cw");
   const [testVideoPredictionId, setTestVideoPredictionId] = useState("qxhe8d8dqhrmr0cy1jvryg745r");
@@ -156,6 +153,19 @@ export default function ReelsPage() {
     if (!theme.trim()) return;
     if (loading) return;
 
+    const body = {
+      theme,
+      numScenes: Number(numScenes),
+      durationPerScene: Number(durationPerScene),
+      resolution,
+      voiceId,
+      emotion,
+      captionStyle,
+    };
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`reels-seedance:${JSON.stringify(body)}`);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setVideoUrl(null);
@@ -166,17 +176,9 @@ export default function ReelsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
-        body: JSON.stringify({
-          theme,
-          numScenes: Number(numScenes),
-          durationPerScene: Number(durationPerScene),
-          resolution,
-          voiceId,
-          emotion,
-          captionStyle
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -192,11 +194,13 @@ export default function ReelsPage() {
         throw new Error(data.error || "Failed to generate video");
       }
 
+      attempt.settle(true);
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
       setLogs((prev) => [...prev, "Video generated successfully!"]);
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
       setLogs((prev) => [...prev, `Error: ${message}`]);
@@ -210,36 +214,41 @@ export default function ReelsPage() {
     if (!theme.trim()) return;
     if (loading) return;
 
+    if (veoResolution === "1080p" && veoDuration !== 8) {
+      setError("1080p requires 8 second duration.");
+      return;
+    }
+    const emotionForApi = resolveEmotionForVeo();
+    const payload: Record<string, unknown> = {
+      theme,
+      captionStyle,
+      voiceId,
+      emotion: emotionForApi,
+      duration: veoDuration,
+      resolution: veoResolution,
+      mode: veoMode === "single" ? "single" : "perScene",
+    };
+    if (veoMode === "single") {
+      payload.singlePromptScenes = singlePromptScenes;
+    } else {
+      payload.numScenes = Number(veoNumScenes);
+    }
+
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`reels-veo:${JSON.stringify(payload)}`);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setVideoUrl(null);
     setLogs(["Starting Veo generation pipeline..."]);
 
     try {
-      if (veoResolution === "1080p" && veoDuration !== 8) {
-        throw new Error("1080p requires 8 second duration.");
-      }
-      const emotionForApi = resolveEmotionForVeo();
-      const payload: Record<string, unknown> = {
-        theme,
-        captionStyle,
-        voiceId,
-        emotion: emotionForApi,
-        duration: veoDuration,
-        resolution: veoResolution,
-        mode: veoMode === "single" ? "single" : "perScene",
-      };
-      if (veoMode === "single") {
-        payload.singlePromptScenes = singlePromptScenes;
-      } else {
-        payload.numScenes = Number(veoNumScenes);
-      }
-
       const response = await fetch("/api/generate-veo", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify(payload),
       });
@@ -254,11 +263,13 @@ export default function ReelsPage() {
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
+      attempt.settle(true);
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
       setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
       setLogs((prev) => [...prev, `Error: ${message}`]);
