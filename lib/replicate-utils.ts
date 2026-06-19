@@ -1,4 +1,8 @@
 import Replicate from "replicate";
+import {
+  ReplicateCancellationError,
+  type ReplicateRunHooks,
+} from "@/lib/replicate-server";
 
 export function extractMediaUrl(res: unknown): string {
   if (typeof res === "string") return res;
@@ -38,12 +42,34 @@ export async function runWithRetry(
   replicate: Replicate,
   model: `${string}/${string}` | `${string}/${string}:${string}`,
   options: { input: Record<string, unknown> },
-  maxRetries = 10
+  maxRetries = 10,
+  hooks?: ReplicateRunHooks
 ) {
   for (let i = 0; i < maxRetries; i++) {
+    // Track this attempt's last status so an external cancellation (status
+    // 'canceled', which the SDK does NOT throw on) surfaces as an explicit error.
+    let lastStatus: string | undefined;
+    const progress = (prediction: { id?: string; status?: string } | null) => {
+      if (!prediction || typeof prediction !== "object") return;
+      lastStatus = prediction.status;
+      const id = prediction.id;
+      if (hooks?.onPrediction && typeof id === "string" && id) {
+        try {
+          hooks.onPrediction({ id, status: String(prediction.status ?? "") });
+        } catch {
+          /* hooks must never break generation */
+        }
+      }
+    };
     try {
-      return await replicate.run(model, options);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await replicate.run(model, options, progress as any);
+      if (lastStatus === "canceled" || lastStatus === "aborted") {
+        throw new ReplicateCancellationError();
+      }
+      return result;
     } catch (e: unknown) {
+      if (e instanceof ReplicateCancellationError) throw e;
       const errMsg = e instanceof Error ? e.message : String(e);
       if (errMsg.includes("429")) {
         let delayMs = 15000;

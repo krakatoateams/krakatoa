@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, CalendarClock } from "lucide-react";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, CalendarClock, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -96,7 +96,7 @@ export default function ReelsPage() {
   const [logs, setLogs] = useState<string[]>([]);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts). One
   // instance covers both engines — they share `loading` and are mutually exclusive.
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   
   const [testAudioPredictionId, setTestAudioPredictionId] = useState("g99vpsrf3hrmr0cy1jvtwy72cw");
   const [testVideoPredictionId, setTestVideoPredictionId] = useState("qxhe8d8dqhrmr0cy1jvryg745r");
@@ -184,6 +184,14 @@ export default function ReelsPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          refetchCredits();
+          setLogs((prev) => [...prev, "Generation cancelled — credits refunded."]);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? seedanceCost}, current: ${data.currentBalance ?? 0}.`
@@ -254,6 +262,14 @@ export default function ReelsPage() {
       });
       const data = await response.json();
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          refetchCredits();
+          setLogs((prev) => [...prev, "Generation cancelled — credits refunded."]);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? veoCost}, current: ${data.currentBalance ?? 0}.`
@@ -711,6 +727,26 @@ export default function ReelsPage() {
                     </>
                   )}
                 </button>
+                {loading && (
+                  <button
+                    type="button"
+                    onClick={() => cancelSubmit()}
+                    disabled={cancelling}
+                    className="w-full mt-3 py-3 rounded-2xl text-base font-bold transition-all flex items-center justify-center gap-2 border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Cancelling…
+                      </>
+                    ) : (
+                      <>
+                        <X className="w-5 h-5" />
+                        Cancel generation
+                      </>
+                    )}
+                  </button>
+                )}
               </form>
 
               {/* Advanced Testing Section — Seedance only */}

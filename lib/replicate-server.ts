@@ -1,17 +1,80 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Replicate from "replicate";
 
+/**
+ * Thrown by `runReplicateWithRetry` when the underlying Replicate prediction was
+ * cancelled (status `canceled`/`aborted`) — typically because the user hit the
+ * Cancel button, which calls `replicate.predictions.cancel(id)` from a separate
+ * request. Routes catch this to mark the job 'cancelled' (not 'failed') and
+ * refund, instead of surfacing a generic provider failure.
+ *
+ * NOTE: the Replicate JS SDK's `run()` only THROWS on `failed`; a cancelled
+ * prediction makes `run()` resolve with `undefined` output. We detect the
+ * cancelled status via the progress callback and throw this explicitly.
+ */
+export class ReplicateCancellationError extends Error {
+  readonly code = "GENERATION_CANCELLED";
+  constructor(message = "Generation was cancelled.") {
+    super(message);
+    this.name = "ReplicateCancellationError";
+  }
+}
+
+/** Type guard for the cancellation error (also matches the code, post-serialization). */
+export function isCancellation(e: unknown): e is ReplicateCancellationError {
+  return (
+    e instanceof ReplicateCancellationError ||
+    (e instanceof Error && (e as any).code === "GENERATION_CANCELLED")
+  );
+}
+
+/** A minimal view of a Replicate prediction surfaced to the onPrediction hook. */
+export type PredictionTick = { id: string; status: string };
+
+export type ReplicateRunHooks = {
+  /**
+   * Called for every prediction lifecycle tick (on create, each poll, and on
+   * completion). Routes use it to persist the prediction id so a separate cancel
+   * request can stop it. MUST be cheap and non-throwing (fire-and-forget any DB
+   * work); exceptions are swallowed so they never break generation.
+   */
+  onPrediction?: (tick: PredictionTick) => void;
+};
+
 /** Shared Replicate 429 backoff — matches `app/api/generate/route.ts` behavior. */
 export async function runReplicateWithRetry(
   replicate: Replicate,
   model: `${string}/${string}` | string,
   options: { input: Record<string, unknown> },
-  maxRetries = 10
+  maxRetries = 10,
+  hooks?: ReplicateRunHooks
 ): Promise<unknown> {
   for (let i = 0; i < maxRetries; i++) {
+    // Track the last status seen by the progress callback for THIS attempt so we
+    // can distinguish a user cancellation from a normal completion/failure.
+    let lastStatus: string | undefined;
+    const progress = (prediction: any) => {
+      if (!prediction || typeof prediction !== "object") return;
+      lastStatus = prediction.status;
+      const id = prediction.id;
+      if (hooks?.onPrediction && typeof id === "string" && id) {
+        try {
+          hooks.onPrediction({ id, status: String(prediction.status ?? "") });
+        } catch {
+          /* hooks must never break generation */
+        }
+      }
+    };
     try {
-      return await replicate.run(model as any, options as any);
+      const result = await replicate.run(model as any, options as any, progress);
+      // A cancelled prediction resolves with undefined output (SDK only throws on
+      // 'failed'). Surface it explicitly so the route can refund + mark cancelled.
+      if (lastStatus === "canceled" || lastStatus === "aborted") {
+        throw new ReplicateCancellationError();
+      }
+      return result;
     } catch (e: any) {
+      if (e instanceof ReplicateCancellationError) throw e;
       const errMsg = e.message || String(e);
       if (errMsg.includes("429")) {
         let delayMs = 15000;

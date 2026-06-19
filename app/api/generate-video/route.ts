@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
+import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
+import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { insertUserCreation } from "@/lib/creations-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import {
@@ -407,10 +409,28 @@ export async function POST(req: Request) {
       resolution,
       aspectRatio,
     });
+    // Abort before paying for a provider run the user already asked to cancel.
+    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
     console.log(
       `[Text to Video] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
     );
-    const output = await runWithRetry(replicate, modelRef, { input: providerInput });
+    const recordPredictionTick = makePredictionRecorder({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "video_text2video",
+    });
+    const output = await runWithRetry(replicate, modelRef, { input: providerInput }, 10, {
+      onPrediction: recordPredictionTick,
+    });
+
+    // Post-run cancel safety net (see generate-storyboard-video): honor a cancel
+    // that landed in the provider's pre-poll window with a refund + no delivery.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
 
     const generatedVideoUrl = extractMediaUrl(output);
     if (!generatedVideoUrl.startsWith("http")) {
@@ -520,12 +540,21 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    console.error("[Text to Video] Error:", error);
-    const message = error instanceof Error ? error.message : String(error);
+    // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
+    const cancelled = isCancellation(error);
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    if (cancelled) console.log("[Text to Video] Cancelled by user.");
+    else console.error("[Text to Video] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
 
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
@@ -535,10 +564,14 @@ export async function POST(req: Request) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when a spend actually succeeded.
+    // Best-effort refund. Fires on both failures and user cancellations.
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () =>
         refundCredits({
@@ -548,8 +581,10 @@ export async function POST(req: Request) {
             ? `refund:video_text2video:${jobId}`
             : `refund:video_text2video:profile:${profileId}:${Date.now()}`,
           jobId: jobId ?? null,
-          description: "Best-effort refund after generation failure",
-          metadata: { reason: "generation_failed", originalError: errJson },
+          description: cancelled
+            ? "Refund after user cancellation"
+            : "Best-effort refund after generation failure",
+          metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
         })
       );
     }
@@ -564,6 +599,12 @@ export async function POST(req: Request) {
       );
     }
 
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
       { status: 500 }

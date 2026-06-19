@@ -763,7 +763,7 @@ function VideoOmniPage() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
 
@@ -861,6 +861,15 @@ function VideoOmniPage() {
 
       const data = await response.json();
       if (!response.ok) {
+        // User-initiated cancellation: return to idle (credits were refunded),
+        // not a red error. settle(false) keeps the key so a same-input retry
+        // takes over the cancelled attempt server-side.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          refetchCredits();
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? videoCost}, current: ${data.currentBalance ?? 0}.`
@@ -1059,6 +1068,23 @@ function VideoOmniPage() {
                     </>
                   )}
                 </button>
+                {loading && (
+                  <button
+                    type="button"
+                    onClick={() => cancelSubmit()}
+                    disabled={cancelling}
+                    className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Cancelling</span>
+                      </>
+                    ) : (
+                      <span>Cancel</span>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1272,7 +1298,7 @@ function MotionControlComposer({
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
 
@@ -1364,6 +1390,12 @@ function MotionControlComposer({
 
       const data = await response.json();
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
@@ -1559,6 +1591,23 @@ function MotionControlComposer({
                   </>
                 )}
               </button>
+              {loading && (
+                <button
+                  type="button"
+                  onClick={() => cancelSubmit()}
+                  disabled={cancelling}
+                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <span>Cancel</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1912,7 +1961,7 @@ function StoryboardToVideoComposer({
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
   // synchronous in-flight lock, so a double-click or a retry after a network
   // blip can never spawn a second Replicate run for the same storyboard.
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   // "Upload your own storyboard" modal.
   const [showUpload, setShowUpload] = useState(false);
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
@@ -2037,6 +2086,12 @@ function StoryboardToVideoComposer({
       });
       const data = await response.json();
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
@@ -2264,6 +2319,23 @@ function StoryboardToVideoComposer({
                   </>
                 )}
               </button>
+              {loading && (
+                <button
+                  type="button"
+                  onClick={() => cancelSubmit()}
+                  disabled={cancelling}
+                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <span>Cancel</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 

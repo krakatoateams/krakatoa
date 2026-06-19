@@ -7,9 +7,10 @@ import {
   STORYBOARDS_TABLE,
   videosStoryboardPath,
 } from "@/lib/storage-buckets";
-import { extractMediaUrl, runReplicateWithRetry } from "@/lib/replicate-server";
+import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
+import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed, findStoryboardImageAsset } from "@/lib/assets-db";
 import { createAssetRelation } from "@/lib/asset-relations-db";
@@ -70,6 +71,10 @@ export async function POST(req: Request) {
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
   let generationRequestId: string | null = null;
+  // Cleanup handles so the catch can reset a stuck storyboard out of
+  // 'video_generating' on cancellation/failure (declared before the try).
+  let storyboardIdForCleanup: string | null = null;
+  let supabaseForCleanup: ReturnType<typeof getSupabase> | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -384,6 +389,10 @@ export async function POST(req: Request) {
     // credits abort never rewrites the stored prompt. Store the RAW edited text.
     const statusUpdate: Record<string, unknown> = { status: "video_generating" };
     if (promptEdited) statusUpdate.seedance_prompt = editedPrompt;
+    // Arm cleanup: from here the storyboard is in 'video_generating', so a later
+    // cancel/failure must reset it (see catch) to avoid a stuck spinner.
+    storyboardIdForCleanup = storyboardId;
+    supabaseForCleanup = supabase;
     const { error: statusErr } = await supabase
       .from(STORYBOARDS_TABLE)
       .update(statusUpdate)
@@ -426,7 +435,20 @@ export async function POST(req: Request) {
     };
 
     await beginStep("video_generation", "Seedance video from storyboard reference");
+    // If the user already hit Cancel between spend and provider call, abort now so
+    // we never start (and pay for) a provider run we're about to throw away.
+    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
     console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`);
+    // Record each Replicate prediction id so POST /api/generations/cancel can stop
+    // this run mid-flight (the SDK progress callback fires on create + each poll).
+    const recordPredictionTick = makePredictionRecorder({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "storyboard_video",
+    });
     const videoResult = await runReplicateWithRetry(
       replicate,
       videoModelRef,
@@ -439,8 +461,18 @@ export async function POST(req: Request) {
           resolution,
           aspect_ratio: aspectRatio,
         },
-      }
+      },
+      10,
+      { onPrediction: recordPredictionTick }
     );
+
+    // Post-run cancel safety net: if the user cancelled while the prediction was
+    // still in the provider's initial (pre-poll) window — before its id was
+    // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
+    // refunding and NOT delivering the result, rather than charging for an unwanted clip.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
 
     const videoRemoteUrl = extractMediaUrl(videoResult);
     if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
@@ -574,16 +606,25 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : String(error ?? "Unknown error");
-    console.error("[Storyboard Video] Error:", error);
+    // User-initiated cancellation is a normal outcome, not a failure: the job is
+    // marked 'cancelled' (not 'failed') and credits are refunded below.
+    const cancelled = isCancellation(error);
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error ?? "Unknown error");
+    if (cancelled) console.log("[Storyboard Video] Cancelled by user.");
+    else console.error("[Storyboard Video] Error:", error);
     // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
     // and any provider call, so no credits were charged and no provider ran.
     const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -591,11 +632,27 @@ export async function POST(req: Request) {
     if (videoAssetId && profileId) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
+    // Reset the storyboard out of 'video_generating' back to 'ready' so a
+    // cancelled/failed run does not leave it stuck spinning, and the user can
+    // immediately retry video generation.
+    if (storyboardIdForCleanup && supabaseForCleanup) {
+      await safe("resetStoryboardStatus", async () => {
+        await supabaseForCleanup!
+          .from(STORYBOARDS_TABLE)
+          .update({ status: "ready" })
+          .eq("id", storyboardIdForCleanup!);
+      });
+    }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when spendCredits actually succeeded.
+    // Best-effort refund. Fires whenever spendCredits succeeded — covers both
+    // failures and user cancellations (the user must not pay for a cancelled run).
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -604,8 +661,10 @@ export async function POST(req: Request) {
           ? `refund:storyboard_video:${jobId}`
           : `refund:storyboard_video:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after generation failure",
-        metadata: { reason: "generation_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after generation failure",
+        metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
       }));
     }
 
@@ -617,6 +676,12 @@ export async function POST(req: Request) {
       }));
     }
 
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
       { status: 500 }

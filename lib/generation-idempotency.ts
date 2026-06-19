@@ -37,6 +37,7 @@ export type GenerationRequestRow = {
   response_json: Record<string, unknown> | null;
   error_json: Record<string, unknown> | null;
   locked_until: string | null;
+  cancel_requested?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -204,6 +205,8 @@ export async function beginGenerationRequest(params: {
       response_json: null,
       job_id: null,
       asset_id: null,
+      // A re-run of the same key must not inherit a stale cancel flag.
+      cancel_requested: false,
     })
     .eq("id", existing.id)
     .eq("updated_at", existing.updated_at)

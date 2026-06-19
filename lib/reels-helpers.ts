@@ -2,6 +2,10 @@
  * Shared helpers copied from `app/api/generate/route.ts` (Seedance route left unchanged).
  */
 import Replicate from "replicate";
+import {
+  ReplicateCancellationError,
+  type ReplicateRunHooks,
+} from "@/lib/replicate-server";
 
 export function extractJson(raw: string): unknown {
   const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
@@ -63,12 +67,35 @@ export async function runWithRetry(
   replicate: Replicate,
   model: string,
   options: { input: Record<string, unknown> },
-  maxRetries = 10
+  maxRetries = 10,
+  hooks?: ReplicateRunHooks
 ): Promise<unknown> {
   for (let i = 0; i < maxRetries; i++) {
+    // Per-attempt status tracking + prediction recording. An external cancellation
+    // makes replicate.run resolve with status 'canceled' (it only throws on
+    // 'failed'), so we detect it here and surface a ReplicateCancellationError.
+    let lastStatus: string | undefined;
+    const progress = (prediction: { id?: string; status?: string } | null) => {
+      if (!prediction || typeof prediction !== "object") return;
+      lastStatus = prediction.status;
+      const id = prediction.id;
+      if (hooks?.onPrediction && typeof id === "string" && id) {
+        try {
+          hooks.onPrediction({ id, status: String(prediction.status ?? "") });
+        } catch {
+          /* hooks must never break generation */
+        }
+      }
+    };
     try {
-      return await replicate.run(model as `${string}/${string}`, options as { input: object });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await replicate.run(model as `${string}/${string}`, options as { input: object }, progress as any);
+      if (lastStatus === "canceled" || lastStatus === "aborted") {
+        throw new ReplicateCancellationError();
+      }
+      return result;
     } catch (e: unknown) {
+      if (e instanceof ReplicateCancellationError) throw e;
       const errMsg = e instanceof Error ? e.message : String(e);
       if (errMsg.includes("429")) {
         let delayMs = 15000;

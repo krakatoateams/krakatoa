@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /**
  * Client-side double-submit / double-charge protection for generation forms.
@@ -40,6 +40,10 @@ export function useIdempotentSubmit() {
   const inFlightRef = useRef(false);
   const keyRef = useRef<string | null>(null);
   const signatureRef = useRef<string | null>(null);
+  // Reactive mirrors so the UI can render a Cancel button while an attempt is
+  // in flight, and disable it once a cancel request has been sent.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   /**
    * Acquire an attempt for the given input `signature` (a stable string built
@@ -59,11 +63,15 @@ export function useIdempotentSubmit() {
     }
 
     const key = keyRef.current;
+    setActiveKey(key);
+    setCancelling(false);
     let settled = false;
     const settle = (succeeded: boolean) => {
       if (settled) return;
       settled = true;
       inFlightRef.current = false;
+      setActiveKey(null);
+      setCancelling(false);
       if (succeeded) {
         keyRef.current = null;
         signatureRef.current = null;
@@ -72,5 +80,36 @@ export function useIdempotentSubmit() {
     return { key, settle };
   }, []);
 
-  return { begin };
+  /**
+   * Cancel the in-flight attempt. Sends the attempt's Idempotency-Key to the
+   * cancel endpoint, which stops the underlying Replicate prediction(s). The
+   * still-open generate request then settles on its own (with a refund), which
+   * resets `activeKey`/`cancelling` via settle(). Returns true when the cancel
+   * request was accepted. Safe to call when nothing is in flight (no-op).
+   */
+  const cancel = useCallback(async (): Promise<boolean> => {
+    const key = keyRef.current;
+    if (!key || !inFlightRef.current) return false;
+    setCancelling(true);
+    try {
+      const res = await fetch("/api/generations/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: key }),
+      });
+      if (!res.ok) {
+        // Let the user try again; the generate request is still running.
+        setCancelling(false);
+        return false;
+      }
+      // Keep `cancelling` true: the in-flight generate fetch will resolve shortly
+      // and settle() will reset the state.
+      return true;
+    } catch {
+      setCancelling(false);
+      return false;
+    }
+  }, []);
+
+  return { begin, cancel, activeKey, cancelling };
 }
