@@ -223,9 +223,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: refCheck.error }, { status: 400 });
     }
 
-    // A reference video bumps Seedance to its pricier "video_in" tier.
+    // Variant-aware pricing: Seedance keys off resolution + reference video
+    // ("video_in"); Veo 3.1 Fast keys off audio.
     const hasReferenceVideo = referenceVideos.length > 0;
-    const pricingKey = model.pricingKey(resolution, hasReferenceVideo);
+    const pricingKey = model.pricingKey({ resolution, hasReferenceVideo, generateAudio });
 
     // ---- Resolve runtime model (admin-overridable; reuses reels.video row) ----
     const resolvedModel = await resolveModel({

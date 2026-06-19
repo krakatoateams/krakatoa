@@ -52,6 +52,10 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },
+  // Veo 3.1 Fast (google/veo-3.1-fast, Text to Video). Priced by AUDIO, not
+  // resolution: with audio costs more than without.
+  veo31fast_with_audio_per_second: { providerCostUsd: 0.15, costUnit: "per_second", pricingGroup: "veo31fast", variantKey: "with_audio" },
+  veo31fast_without_audio_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "veo31fast", variantKey: "without_audio" },
   // Storyboard image / GPT Image 2 (per image).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },

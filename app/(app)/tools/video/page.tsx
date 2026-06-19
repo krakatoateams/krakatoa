@@ -471,6 +471,18 @@ export default function VideoOmniPage() {
   const refVideos = useMediaRefs("video", model.references.referenceVideos);
   const refAudios = useMediaRefs("audio", model.references.referenceAudios);
 
+  // Drop any references the newly-selected model can't accept (e.g. switching to
+  // Veo 3.1 Fast, which only supports first/last frame — no reference arrays).
+  useEffect(() => {
+    const caps = getVideoModel(modelId).references;
+    if (!caps.firstFrame) firstFrame.reset();
+    if (!caps.lastFrame) lastFrame.reset();
+    if (caps.referenceImages === 0) refImages.reset();
+    if (caps.referenceVideos === 0) refVideos.reset();
+    if (caps.referenceAudios === 0) refAudios.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
+
   // Mutual-exclusion gating (mirrors validateVideoReferences).
   const hasFrames = firstFrame.items.length > 0 || lastFrame.items.length > 0;
   const hasRefImages = refImages.items.length > 0;
@@ -487,7 +499,7 @@ export default function VideoOmniPage() {
   // A reference video bumps Seedance to its pricier "video_in" tier — keep the
   // cost label aligned with what the server will actually bill.
   const hasReferenceVideo = refVideos.done.length > 0;
-  const pricingKey = model.pricingKey(resolution, hasReferenceVideo);
+  const pricingKey = model.pricingKey({ resolution, hasReferenceVideo, generateAudio });
   const videoCost = videoCredits(pricingKey, duration);
 
   const referenceInputs = {
@@ -675,7 +687,7 @@ export default function VideoOmniPage() {
                   options={model.resolutions.map((r) => ({
                     id: r,
                     label: r,
-                    hint: `${videoCredits(model.pricingKey(r, hasReferenceVideo), duration)}`,
+                    hint: `${videoCredits(model.pricingKey({ resolution: r, hasReferenceVideo, generateAudio }), duration)}`,
                   }))}
                   onSelect={(id) => setResolution(id as VideoResolution)}
                   disabled={loading}
@@ -743,65 +755,75 @@ export default function VideoOmniPage() {
               <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <RefGroup
-                icon={<ImageIcon className="h-3.5 w-3.5" />}
-                label="First frame"
-                accept={IMAGE_ACCEPT}
-                multiple={false}
-                group={firstFrame}
-                disabled={loading || hasRefImages}
-                disabledReason={hasRefImages ? "Remove reference images to use a first frame." : undefined}
-                hint="Image-to-video starting frame."
-              />
-              <RefGroup
-                icon={<ImageIcon className="h-3.5 w-3.5" />}
-                label="Last frame"
-                accept={IMAGE_ACCEPT}
-                multiple={false}
-                group={lastFrame}
-                disabled={loading || hasRefImages || !firstFrameReady}
-                disabledReason={
-                  hasRefImages
-                    ? "Remove reference images to use a last frame."
-                    : !firstFrameReady
-                      ? "Add a first frame first."
+              {model.references.firstFrame && (
+                <RefGroup
+                  icon={<ImageIcon className="h-3.5 w-3.5" />}
+                  label="First frame"
+                  accept={IMAGE_ACCEPT}
+                  multiple={false}
+                  group={firstFrame}
+                  disabled={loading || hasRefImages}
+                  disabledReason={hasRefImages ? "Remove reference images to use a first frame." : undefined}
+                  hint="Image-to-video starting frame."
+                />
+              )}
+              {model.references.lastFrame && (
+                <RefGroup
+                  icon={<ImageIcon className="h-3.5 w-3.5" />}
+                  label="Last frame"
+                  accept={IMAGE_ACCEPT}
+                  multiple={false}
+                  group={lastFrame}
+                  disabled={loading || hasRefImages || !firstFrameReady}
+                  disabledReason={
+                    hasRefImages
+                      ? "Remove reference images to use a last frame."
+                      : !firstFrameReady
+                        ? "Add a first frame first."
+                        : undefined
+                  }
+                  hint="End frame (needs a first frame)."
+                />
+              )}
+              {model.references.referenceImages > 0 && (
+                <RefGroup
+                  icon={<ImageIcon className="h-3.5 w-3.5" />}
+                  label="Reference images"
+                  accept={IMAGE_ACCEPT}
+                  multiple
+                  group={refImages}
+                  disabled={loading || hasFrames}
+                  disabledReason={hasFrames ? "Remove first/last frame to use reference images." : undefined}
+                  hint="Character / style / composition. Use [Image1]…"
+                />
+              )}
+              {model.references.referenceVideos > 0 && (
+                <RefGroup
+                  icon={<Film className="h-3.5 w-3.5" />}
+                  label="Reference videos"
+                  accept={VIDEO_ACCEPT}
+                  multiple
+                  group={refVideos}
+                  disabled={loading}
+                  hint="Motion / style transfer. Use [Video1]…"
+                />
+              )}
+              {model.references.referenceAudios > 0 && (
+                <RefGroup
+                  icon={<Music className="h-3.5 w-3.5" />}
+                  label="Reference audio"
+                  accept={AUDIO_ACCEPT}
+                  multiple
+                  group={refAudios}
+                  disabled={loading || !hasRefImageOrVideo}
+                  disabledReason={
+                    !hasRefImageOrVideo
+                      ? "Add a reference image or video to use audio."
                       : undefined
-                }
-                hint="End frame (needs a first frame)."
-              />
-              <RefGroup
-                icon={<ImageIcon className="h-3.5 w-3.5" />}
-                label="Reference images"
-                accept={IMAGE_ACCEPT}
-                multiple
-                group={refImages}
-                disabled={loading || hasFrames}
-                disabledReason={hasFrames ? "Remove first/last frame to use reference images." : undefined}
-                hint="Character / style / composition. Use [Image1]…"
-              />
-              <RefGroup
-                icon={<Film className="h-3.5 w-3.5" />}
-                label="Reference videos"
-                accept={VIDEO_ACCEPT}
-                multiple
-                group={refVideos}
-                disabled={loading}
-                hint="Motion / style transfer. Use [Video1]…"
-              />
-              <RefGroup
-                icon={<Music className="h-3.5 w-3.5" />}
-                label="Reference audio"
-                accept={AUDIO_ACCEPT}
-                multiple
-                group={refAudios}
-                disabled={loading || !hasRefImageOrVideo}
-                disabledReason={
-                  !hasRefImageOrVideo
-                    ? "Add a reference image or video to use audio."
-                    : undefined
-                }
-                hint="Audio-driven / lip-sync. Use [Audio1]…"
-              />
+                  }
+                  hint="Audio-driven / lip-sync. Use [Audio1]…"
+                />
+              )}
             </div>
           </div>
 

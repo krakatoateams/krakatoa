@@ -243,3 +243,13 @@ export function seedance2PricingKey(params: {
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";
 }
+
+/**
+ * Veo 3.1 Fast (google/veo-3.1-fast) pricing key. Unlike Seedance/Veo above, this
+ * model is priced by AUDIO, not resolution: generating audio costs more.
+ */
+export function veo31FastPricingKey(params: { generateAudio: boolean }): string {
+  return params.generateAudio
+    ? "veo31fast_with_audio_per_second"
+    : "veo31fast_without_audio_per_second";
+}

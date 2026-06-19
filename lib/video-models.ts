@@ -1,4 +1,8 @@
-import { seedanceFastPricingKey, seedance2PricingKey } from "@/lib/pricing-math";
+import {
+  seedanceFastPricingKey,
+  seedance2PricingKey,
+  veo31FastPricingKey,
+} from "@/lib/pricing-math";
 
 /**
  * Video model registry (Text to Video — omni-composer at /tools/video).
@@ -14,7 +18,7 @@ import { seedanceFastPricingKey, seedance2PricingKey } from "@/lib/pricing-math"
  * model_configs row (admin-editable), whose fallback is bytedance/seedance-2.0-fast.
  */
 
-export type VideoModelId = "seedance2_fast" | "seedance2";
+export type VideoModelId = "seedance2_fast" | "seedance2" | "veo31_fast";
 
 export type VideoResolution = "480p" | "720p" | "1080p";
 
@@ -28,7 +32,18 @@ export type VideoAspectRatio =
   | "9:21"
   | "adaptive";
 
-export type VideoProviderFamily = "seedance2";
+export type VideoProviderFamily = "seedance2" | "veo31fast";
+
+/**
+ * Inputs that can influence the per-second pricing key. Different models key off
+ * different dimensions (Seedance: resolution + reference video; Veo 3.1 Fast:
+ * audio), so pricingKey() takes the full context and uses what it needs.
+ */
+export type VideoPricingContext = {
+  resolution?: VideoResolution | string | null;
+  hasReferenceVideo?: boolean;
+  generateAudio?: boolean;
+};
 
 /** Reference-input capabilities for a model. A count of 0 = the slot is unsupported. */
 export type VideoReferenceCaps = {
@@ -65,13 +80,11 @@ export type VideoModel = {
   defaultGenerateAudio: boolean;
   references: VideoReferenceCaps;
   /**
-   * Pricing key for a resolution, variant-aware: a reference video bumps Seedance
-   * to its pricier "video_in" tier. Drives the per-second cost for client + server.
+   * Per-second pricing key, variant-aware. Seedance keys off resolution + whether
+   * a reference video is present ("video_in"); Veo 3.1 Fast keys off audio. Drives
+   * the per-second cost for BOTH the client label and the server billing.
    */
-  pricingKey: (
-    resolution: VideoResolution | string | null | undefined,
-    hasReferenceVideo?: boolean
-  ) => string;
+  pricingKey: (ctx: VideoPricingContext) => string;
 };
 
 export const VIDEO_MODELS: VideoModel[] = [
@@ -99,10 +112,10 @@ export const VIDEO_MODELS: VideoModel[] = [
       referenceVideos: 3,
       referenceAudios: 3,
     },
-    pricingKey: (resolution, hasReferenceVideo) =>
+    pricingKey: (ctx) =>
       seedanceFastPricingKey({
-        resolution: resolution ?? undefined,
-        hasReferenceVideo: !!hasReferenceVideo,
+        resolution: ctx.resolution ?? undefined,
+        hasReferenceVideo: !!ctx.hasReferenceVideo,
       }),
   },
   {
@@ -130,11 +143,39 @@ export const VIDEO_MODELS: VideoModel[] = [
       referenceVideos: 3,
       referenceAudios: 3,
     },
-    pricingKey: (resolution, hasReferenceVideo) =>
+    pricingKey: (ctx) =>
       seedance2PricingKey({
-        resolution: resolution ?? undefined,
-        hasReferenceVideo: !!hasReferenceVideo,
+        resolution: ctx.resolution ?? undefined,
+        hasReferenceVideo: !!ctx.hasReferenceVideo,
       }),
+  },
+  {
+    id: "veo31_fast",
+    label: "Veo 3.1 Fast",
+    modelLabel: "Veo 3.1 Fast",
+    // Distinct config_key; no model_configs row seeded — resolver falls back to providerModel.
+    modelRole: "video_veo31_fast",
+    providerModel: "google/veo-3.1-fast",
+    providerFamily: "veo31fast",
+    durations: [4, 6, 8],
+    defaultDuration: 8,
+    resolutions: ["720p", "1080p"],
+    defaultResolution: "1080p",
+    // Veo 3.1 Fast only supports landscape/portrait.
+    aspectRatios: ["16:9", "9:16"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: true,
+    references: {
+      // First/last frame only — no reference image/video/audio arrays.
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    // Priced by audio, not resolution.
+    pricingKey: (ctx) => veo31FastPricingKey({ generateAudio: ctx.generateAudio ?? true }),
   },
 ];
 
@@ -252,11 +293,33 @@ export function buildVideoProviderInput(params: {
   aspectRatio: VideoAspectRatio;
   generateAudio: boolean;
   seed?: number | null;
+  negativePrompt?: string | null;
   references: VideoReferenceInputs;
 }): Record<string, unknown> {
   const { references: refs } = params;
+  const hasSeed = typeof params.seed === "number" && Number.isFinite(params.seed);
+  const negativePrompt =
+    typeof params.negativePrompt === "string" && params.negativePrompt.trim().length > 0
+      ? params.negativePrompt.trim()
+      : null;
 
   switch (params.model.providerFamily) {
+    case "veo31fast": {
+      // google/veo-3.1-fast: prompt + duration/resolution/aspect_ratio + audio,
+      // optional first frame (image) / last_frame, negative_prompt, seed.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+        generate_audio: params.generateAudio,
+      };
+      if (hasSeed) input.seed = params.seed;
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.image = refs.firstFrame;
+      if (refs.lastFrame) input.last_frame = refs.lastFrame;
+      return input;
+    }
     case "seedance2":
     default: {
       const input: Record<string, unknown> = {
@@ -266,9 +329,7 @@ export function buildVideoProviderInput(params: {
         aspect_ratio: params.aspectRatio,
         generate_audio: params.generateAudio,
       };
-      if (typeof params.seed === "number" && Number.isFinite(params.seed)) {
-        input.seed = params.seed;
-      }
+      if (hasSeed) input.seed = params.seed;
       const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
       const referenceVideos = (refs.referenceVideos ?? []).filter(Boolean);
       const referenceAudios = (refs.referenceAudios ?? []).filter(Boolean);
