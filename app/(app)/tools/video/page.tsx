@@ -23,6 +23,7 @@ import {
   Sparkles,
   Repeat,
   UserRound,
+  SlidersHorizontal,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -79,6 +80,11 @@ const CREATION_TYPES = [
 
 type VideoCreationType = "text2video" | "motion_control";
 
+// Motion Control character source: an uploaded file, or one previously created
+// in Photo → Character (stored as a product_photo creation, kind "character").
+type CharacterSource = "upload" | "library";
+type LibraryCharacter = { id: string; url: string; title: string };
+
 const ASPECT_RATIO_LABELS: Record<VideoAspectRatio, string> = {
   "16:9": "16:9",
   "4:3": "4:3",
@@ -92,6 +98,41 @@ const ASPECT_RATIO_LABELS: Record<VideoAspectRatio, string> = {
 
 type ChipOption = { id: string; label: string; hint?: string };
 
+// Glassy floating tooltip bubble shown above its anchor. The anchor's wrapper
+// must be position:relative. Always rendered (so it can fade) but inert when
+// hidden. Visibility is driven by the caller's hover/focus state.
+function TooltipBubble({ label, show }: { label: string; show: boolean }) {
+  return (
+    <span
+      role="tooltip"
+      className={`pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 w-max max-w-[260px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#0b1020]/95 px-3 py-2 text-center text-xs font-medium leading-snug text-gray-200 shadow-2xl shadow-black/60 backdrop-blur-md transition-all duration-150 ${
+        show ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+      }`}
+    >
+      {label}
+      <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-[#0b1020]/95" />
+    </span>
+  );
+}
+
+// Wraps any element with a hover/focus tooltip. Use for plain buttons; the
+// ChipDropdown has its own built-in tooltip support via the `tooltip` prop.
+function Tooltip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div
+      className="relative inline-flex"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onFocusCapture={() => setShow(true)}
+      onBlurCapture={() => setShow(false)}
+    >
+      {children}
+      <TooltipBubble label={label} show={show} />
+    </div>
+  );
+}
+
 function ChipDropdown({
   icon,
   value,
@@ -101,6 +142,7 @@ function ChipDropdown({
   disabled,
   square = false,
   showChevron = true,
+  tooltip,
 }: {
   icon: React.ReactNode;
   value: string;
@@ -110,8 +152,10 @@ function ChipDropdown({
   disabled?: boolean;
   square?: boolean;
   showChevron?: boolean;
+  tooltip?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -131,7 +175,17 @@ function ChipDropdown({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className="relative"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocusCapture={() => setHover(true)}
+      onBlurCapture={() => setHover(false)}
+    >
+      {tooltip && (
+        <TooltipBubble label={tooltip} show={hover && !open && !disabled} />
+      )}
       <button
         type="button"
         disabled={disabled}
@@ -444,6 +498,189 @@ function RefGroup({
   );
 }
 
+// Motion Control "Your character" input. Lets the user either upload an image OR
+// pick a character they previously generated in Photo → Character creation
+// (stored as a product_photo creation with metadata.creationKind === "character").
+function CharacterPicker({
+  group,
+  source,
+  onSourceChange,
+  selected,
+  onSelect,
+  disabled,
+}: {
+  group: RefGroupApi;
+  source: CharacterSource;
+  onSourceChange: (s: CharacterSource) => void;
+  selected: LibraryCharacter | null;
+  onSelect: (c: LibraryCharacter | null) => void;
+  disabled?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [items, setItems] = useState<LibraryCharacter[]>([]);
+  const [loadState, setLoadState] = useState<"idle" | "loading" | "loaded" | "error">(
+    "idle"
+  );
+  // Guards the fetch so it runs exactly once. We intentionally do NOT cancel the
+  // request on cleanup: tying cancellation to a state/dep change here would abort
+  // the in-flight fetch the instant we flip to "loading" and leave it stuck.
+  const startedRef = useRef(false);
+
+  const loadCharacters = useCallback(() => {
+    startedRef.current = true;
+    setLoadState("loading");
+    fetch(
+      "/api/creations/history?tool=product_photo&mediaType=image&kind=character&limit=60"
+    )
+      .then((r) => r.json())
+      .then((d: { items?: { id: string; mediaUrl?: string; title?: string }[] }) => {
+        const list: LibraryCharacter[] = (d.items ?? [])
+          .filter((it) => !!it.mediaUrl)
+          .map((it) => ({ id: it.id, url: it.mediaUrl as string, title: it.title || "Character" }));
+        setItems(list);
+        setLoadState("loaded");
+      })
+      .catch(() => setLoadState("error"));
+  }, []);
+
+  // Lazily load saved characters the first time the user opens the library tab.
+  useEffect(() => {
+    if (source !== "library" || startedRef.current) return;
+    loadCharacters();
+  }, [source, loadCharacters]);
+
+  const uploaded = group.items[0];
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+          <span className="text-purple-300">
+            <UserRound className="h-3.5 w-3.5" />
+          </span>
+          Your character
+        </span>
+        <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
+          {([
+            { id: "upload", label: "Upload" },
+            { id: "library", label: "My characters" },
+          ] as const).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSourceChange(opt.id)}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${
+                source === opt.id
+                  ? "bg-purple-500/25 text-white"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {source === "upload" ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {uploaded ? (
+              <RefTile item={uploaded} onRemove={() => group.remove(uploaded.id)} />
+            ) : (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => inputRef.current?.click()}
+                className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add</span>
+              </button>
+            )}
+          </div>
+          <p className="mt-2 text-[10px] text-gray-600">
+            A clear image with a visible face and body. JPG/PNG.
+          </p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={MC_IMAGE_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) group.add(e.target.files);
+              if (inputRef.current) inputRef.current.value = "";
+            }}
+          />
+        </>
+      ) : loadState === "loading" || loadState === "idle" ? (
+        <div className="flex h-16 items-center gap-2 text-[11px] text-gray-500">
+          <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
+          Loading your characters…
+        </div>
+      ) : loadState === "error" ? (
+        <div className="flex h-16 items-center gap-2 text-[11px] text-red-300">
+          <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your characters.
+          <button
+            type="button"
+            onClick={loadCharacters}
+            className="font-semibold text-purple-300 underline-offset-2 hover:underline"
+          >
+            Try again
+          </button>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex h-16 flex-col justify-center gap-1 text-[11px] text-gray-500">
+          <span>No saved characters yet.</span>
+          <a
+            href="/tools/photo-v2"
+            className="font-semibold text-purple-300 hover:text-purple-200"
+          >
+            Create one in Photo → Character →
+          </a>
+        </div>
+      ) : (
+        <>
+          <div className="grid max-h-44 grid-cols-3 gap-2 overflow-y-auto pr-1">
+            {items.map((c) => {
+              const active = selected?.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onSelect(active ? null : c)}
+                  title={c.title}
+                  className={`relative aspect-square overflow-hidden rounded-[6px] border transition-colors disabled:opacity-40 ${
+                    active
+                      ? "border-purple-400 ring-2 ring-purple-400/40"
+                      : "border-white/10 hover:border-white/30"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={c.url}
+                    alt={c.title}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  {active && (
+                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-white">
+                      <Check className="h-2.5 w-2.5" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[10px] text-gray-600">
+            {selected ? `Selected: ${selected.title}` : "Tap a character to animate."}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm";
 const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/webm";
@@ -706,6 +943,7 @@ export default function VideoOmniPage() {
                   icon={<Clock className="h-3.5 w-3.5" />}
                   value={`${duration}s`}
                   activeId={String(duration)}
+                  tooltip="How long the generated clip is, in seconds. Longer clips cost more credits."
                   options={getAllowedDurations(model, resolution).map((d) => ({
                     id: String(d),
                     label: `${d} seconds`,
@@ -720,6 +958,7 @@ export default function VideoOmniPage() {
                   icon={<Maximize2 className="h-3.5 w-3.5" />}
                   value={resolution}
                   activeId={resolution}
+                  tooltip="Video resolution. Higher resolution is crisper but costs more credits."
                   options={model.resolutions.map((r) => ({
                     id: r,
                     label: r,
@@ -734,6 +973,7 @@ export default function VideoOmniPage() {
                   icon={<Crop className="h-3.5 w-3.5" />}
                   value={ASPECT_RATIO_LABELS[aspectRatio]}
                   activeId={aspectRatio}
+                  tooltip="Shape of the frame. 9:16 is vertical (Reels/TikTok), 16:9 is widescreen, 1:1 is square."
                   options={model.aspectRatios.map((a) => ({
                     id: a,
                     label: ASPECT_RATIO_LABELS[a],
@@ -742,24 +982,31 @@ export default function VideoOmniPage() {
                   disabled={loading}
                 />
                 {model.supportsAudio && (
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setGenerateAudio((v) => !v)}
-                    className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                  <Tooltip
+                    label={
                       generateAudio
-                        ? "border-purple-400/50 bg-purple-500/15 text-white"
-                        : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
-                    }`}
-                    title={generateAudio ? "Audio generation on" : "Audio generation off"}
+                        ? "On — the model generates synced audio (dialogue, SFX, music). Click to make it silent."
+                        : "Off — the video is silent. Click to generate audio (may cost more)."
+                    }
                   >
-                    {generateAudio ? (
-                      <Volume2 className="h-3.5 w-3.5 text-purple-300" />
-                    ) : (
-                      <VolumeX className="h-3.5 w-3.5 text-gray-400" />
-                    )}
-                    Audio
-                  </button>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setGenerateAudio((v) => !v)}
+                      className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                        generateAudio
+                          ? "border-purple-400/50 bg-purple-500/15 text-white"
+                          : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
+                      }`}
+                    >
+                      {generateAudio ? (
+                        <Volume2 className="h-3.5 w-3.5 text-purple-300" />
+                      ) : (
+                        <VolumeX className="h-3.5 w-3.5 text-gray-400" />
+                      )}
+                      Audio
+                    </button>
+                  </Tooltip>
                 )}
               </div>
 
@@ -959,6 +1206,14 @@ function MotionControlComposer({
   );
   const [videoDurationSec, setVideoDurationSec] = useState<number | null>(null);
 
+  // Character source: upload your own, or pick one created in Photo → Character.
+  const [charSource, setCharSource] = useState<CharacterSource>("upload");
+  const [libraryChar, setLibraryChar] = useState<LibraryCharacter | null>(null);
+
+  // The prompt is optional (Kling generates from just the image + motion video),
+  // so it lives in a collapsed "Advanced" section to keep the form uncluttered.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -999,9 +1254,22 @@ function MotionControlComposer({
   const pricingKey = model.pricingKey(mode);
   const cost = videoCredits(pricingKey, billedDuration);
 
-  const imageReady = charImage.done.length > 0;
+  // Resolve the character image from whichever source is active. A library
+  // character is a permanent creation (public URL), so it carries no temp path —
+  // the server only sweeps temp upload paths, never library items.
+  const resolvedCharacter: { url: string; path: string } | null =
+    charSource === "library"
+      ? libraryChar
+        ? { url: libraryChar.url, path: "" }
+        : null
+      : charImage.done[0]
+        ? { url: charImage.done[0].url, path: charImage.done[0].path }
+        : null;
+
+  const imageReady = resolvedCharacter !== null;
   const videoReady = motionVideo.done.length > 0;
-  const anyUploading = charImage.uploading || motionVideo.uploading;
+  const anyUploading =
+    motionVideo.uploading || (charSource === "upload" && charImage.uploading);
   const canGenerate = !loading && !anyUploading && imageReady && videoReady;
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -1018,9 +1286,7 @@ function MotionControlComposer({
         characterOrientation: orientation,
         keepOriginalSound,
         refVideoDurationSec: videoDurationSec,
-        image: charImage.done[0]
-          ? { url: charImage.done[0].url, path: charImage.done[0].path }
-          : null,
+        image: resolvedCharacter,
         video: motionVideo.done[0]
           ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
           : null,
@@ -1051,6 +1317,7 @@ function MotionControlComposer({
       onGenerated();
       charImage.reset();
       motionVideo.reset();
+      setLibraryChar(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -1059,7 +1326,7 @@ function MotionControlComposer({
   };
 
   const orientationLabel =
-    orientation === "video" ? "Match video (≤30s)" : "Match image (≤10s)";
+    orientation === "video" ? "Facing: video (≤30s)" : "Facing: photo (≤10s)";
 
   return (
     <>
@@ -1091,14 +1358,13 @@ function MotionControlComposer({
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           {/* Uploads: character image + motion video (both required) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <RefGroup
-              icon={<UserRound className="h-3.5 w-3.5" />}
-              label="Your character"
-              accept={MC_IMAGE_ACCEPT}
-              multiple={false}
+            <CharacterPicker
               group={charImage}
+              source={charSource}
+              onSourceChange={setCharSource}
+              selected={libraryChar}
+              onSelect={setLibraryChar}
               disabled={loading}
-              hint="A clear image with a visible face and body. JPG/PNG."
             />
             <RefGroup
               icon={<Film className="h-3.5 w-3.5" />}
@@ -1115,15 +1381,45 @@ function MotionControlComposer({
             />
           </div>
 
-          {/* Prompt (optional) */}
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            maxLength={model.promptMaxChars}
-            placeholder="Optional — add elements to the scene or describe extra motion effects."
-            rows={2}
-            className="mt-3 min-h-[48px] w-full resize-none rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-base text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
-          />
+          {/* Advanced settings (collapsed by default). The prompt is optional —
+              Kling generates from just the character image + motion video — so we
+              tuck it away here. Motion still comes from the reference video; the
+              prompt only adds background/scene details. */}
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              aria-expanded={advancedOpen}
+              className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 transition-colors hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5 text-purple-300" />
+              Advanced settings
+              {!advancedOpen && prompt.trim() && (
+                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-200">
+                  prompt added
+                </span>
+              )}
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {advancedOpen && (
+              <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-200">Prompt</span>
+                  <span className="text-[11px] font-medium text-gray-500">optional</span>
+                </div>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  maxLength={model.promptMaxChars}
+                  placeholder={'Describe background and scene details \u2013 e.g., "A corgi runs in" or "Snowy park setting". Motion is controlled by your reference video.'}
+                  rows={3}
+                  className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+                />
+              </div>
+            )}
+          </div>
 
           {/* Controls row */}
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1134,6 +1430,7 @@ function MotionControlComposer({
                 icon={<Maximize2 className="h-3.5 w-3.5" />}
                 value={`${mode === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(mode)}`}
                 activeId={mode}
+                tooltip="Output quality. Standard renders at 720p; Pro is sharper 1080p but costs more credits."
                 options={model.modes.map((m) => ({
                   id: m,
                   label: `${m === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(m)}`,
@@ -1148,31 +1445,39 @@ function MotionControlComposer({
                 icon={<Repeat className="h-3.5 w-3.5" />}
                 value={orientationLabel}
                 activeId={orientation}
+                tooltip="Which way your character faces in the result. “Photo” keeps the angle from your character image (clips up to 10s). “Video” makes the character follow the angles in your motion clip (clips up to 30s). This does not change the background."
                 options={[
-                  { id: "image", label: "Match image (≤10s)" },
-                  { id: "video", label: "Match video (≤30s)" },
+                  { id: "image", label: "Facing: photo (≤10s)" },
+                  { id: "video", label: "Facing: video (≤30s)" },
                 ]}
                 onSelect={(id) => setOrientation(id as CharacterOrientation)}
                 disabled={loading}
               />
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => setKeepOriginalSound((v) => !v)}
-                className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+              <Tooltip
+                label={
                   keepOriginalSound
-                    ? "border-purple-400/50 bg-purple-500/15 text-white"
-                    : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
-                }`}
-                title={keepOriginalSound ? "Keeping the reference video's sound" : "Dropping the reference video's sound"}
+                    ? "On — your result keeps the reference video's original audio. Click to mute it."
+                    : "Off — the reference video's audio is removed. Click to keep it."
+                }
               >
-                {keepOriginalSound ? (
-                  <Volume2 className="h-3.5 w-3.5 text-purple-300" />
-                ) : (
-                  <VolumeX className="h-3.5 w-3.5 text-gray-400" />
-                )}
-                Original sound
-              </button>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setKeepOriginalSound((v) => !v)}
+                  className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                    keepOriginalSound
+                      ? "border-purple-400/50 bg-purple-500/15 text-white"
+                      : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
+                  }`}
+                >
+                  {keepOriginalSound ? (
+                    <Volume2 className="h-3.5 w-3.5 text-purple-300" />
+                  ) : (
+                    <VolumeX className="h-3.5 w-3.5 text-gray-400" />
+                  )}
+                  Original sound
+                </button>
+              </Tooltip>
             </div>
 
             <div className="flex items-center gap-3">
