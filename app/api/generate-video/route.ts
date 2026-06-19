@@ -46,7 +46,7 @@ import {
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-const PROMPT_MAX_CHARS = 2000;
+const PROMPT_MAX_CHARS = 4000;
 
 /** A reference attachment as sent by the client: a public URL + its temp storage path. */
 type RefAttachment = { url: string; path: string };

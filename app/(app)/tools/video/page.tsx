@@ -445,6 +445,17 @@ export default function VideoOmniPage() {
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>(model.defaultAspectRatio);
   const [generateAudio, setGenerateAudio] = useState<boolean>(model.defaultGenerateAudio);
 
+  // When the model changes, keep the parameters valid for the newly-selected model
+  // (e.g. switching away from Seedance 2 — which supports 1080p — back to the Fast
+  // variant must drop 1080p down to a supported resolution).
+  useEffect(() => {
+    const m = getVideoModel(modelId);
+    setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
+    setDuration((d) => (m.durations.includes(d) ? d : m.defaultDuration));
+    setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
+    if (!m.supportsAudio) setGenerateAudio(false);
+  }, [modelId]);
+
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

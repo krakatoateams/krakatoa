@@ -115,6 +115,33 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 16, enabled: true,
     provider_cost_usd: 0.17, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p_video_in", currency: "USD",
   },
+  // ---- Seedance 2.0 (full, bytedance/seedance-2.0) rows (015). Pricier than the
+  // Fast variant and adds a 1080p tier. non_video_in (no reference video). ----
+  seedance2_480p_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "480p", currency: "USD",
+  },
+  seedance2_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 17, enabled: true,
+    provider_cost_usd: 0.18, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "720p", currency: "USD",
+  },
+  seedance2_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 41, enabled: true,
+    provider_cost_usd: 0.45, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "1080p", currency: "USD",
+  },
+  // Seedance 2.0 (full) — video_in (a reference video is provided).
+  seedance2_480p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 9, enabled: true,
+    provider_cost_usd: 0.10, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "480p_video_in", currency: "USD",
+  },
+  seedance2_720p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 20, enabled: true,
+    provider_cost_usd: 0.22, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "720p_video_in", currency: "USD",
+  },
+  seedance2_1080p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 50, enabled: true,
+    provider_cost_usd: 0.55, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "1080p_video_in", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",

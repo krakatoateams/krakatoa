@@ -1,4 +1,4 @@
-import { seedance2PricingKey } from "@/lib/pricing-math";
+import { seedanceFastPricingKey, seedance2PricingKey } from "@/lib/pricing-math";
 
 /**
  * Video model registry (Text to Video — omni-composer at /tools/video).
@@ -14,9 +14,9 @@ import { seedance2PricingKey } from "@/lib/pricing-math";
  * model_configs row (admin-editable), whose fallback is bytedance/seedance-2.0-fast.
  */
 
-export type VideoModelId = "seedance2_fast";
+export type VideoModelId = "seedance2_fast" | "seedance2";
 
-export type VideoResolution = "480p" | "720p";
+export type VideoResolution = "480p" | "720p" | "1080p";
 
 export type VideoAspectRatio =
   | "16:9"
@@ -87,6 +87,37 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [5, 10, 15],
     defaultDuration: 5,
     resolutions: ["480p", "720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21", "adaptive"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: true,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 9,
+      referenceVideos: 3,
+      referenceAudios: 3,
+    },
+    pricingKey: (resolution, hasReferenceVideo) =>
+      seedanceFastPricingKey({
+        resolution: resolution ?? undefined,
+        hasReferenceVideo: !!hasReferenceVideo,
+      }),
+  },
+  {
+    id: "seedance2",
+    label: "Seedance 2",
+    modelLabel: "Seedance 2",
+    // Distinct config_key (not reels.video, which is the Fast/Reels pipeline model).
+    // No model_configs row is seeded for it — the resolver falls back to providerModel.
+    modelRole: "video_seedance2",
+    providerModel: "bytedance/seedance-2.0",
+    providerFamily: "seedance2",
+    durations: [5, 10, 15],
+    defaultDuration: 5,
+    // Full model adds a 1080p tier on top of 480p/720p.
+    resolutions: ["480p", "720p", "1080p"],
     defaultResolution: "720p",
     aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21", "adaptive"],
     defaultAspectRatio: "9:16",

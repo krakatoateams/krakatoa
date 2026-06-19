@@ -208,12 +208,12 @@ export function seedancePricingKey(resolution: string | null | undefined): strin
 }
 
 /**
- * Seedance 2 pricing key, variant-aware. Seedance charges a higher per-second
+ * Seedance 2 FAST pricing key, variant-aware. Seedance charges a higher per-second
  * rate when a reference VIDEO is provided ("video_in") vs not ("non_video_in").
- * Used by Text to Video; Reels/Storyboard (no video input) keep
+ * Used by Text to Video (Seedance 2 Fast). Reels/Storyboard (no video input) keep
  * seedancePricingKey() which always resolves to the non_video_in keys.
  */
-export function seedance2PricingKey(params: {
+export function seedanceFastPricingKey(params: {
   resolution: string | null | undefined;
   hasReferenceVideo: boolean;
 }): string {
@@ -222,6 +222,21 @@ export function seedance2PricingKey(params: {
     return is720 ? "seedance_720p_video_in_per_second" : "seedance_480p_video_in_per_second";
   }
   return is720 ? "seedance_720p_per_second" : "seedance_480p_per_second";
+}
+
+/**
+ * Seedance 2.0 (full, bytedance/seedance-2.0) pricing key, variant-aware. Pricier
+ * than the Fast variant and supports a 1080p tier. "video_in" applies when a
+ * reference video is provided.
+ */
+export function seedance2PricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const res =
+    params.resolution === "1080p" ? "1080p" : params.resolution === "720p" ? "720p" : "480p";
+  const suffix = params.hasReferenceVideo ? "_video_in_per_second" : "_per_second";
+  return `seedance2_${res}${suffix}`;
 }
 
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */

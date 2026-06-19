@@ -40,6 +40,15 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // "video_in" variant (a reference video is provided) — Seedance charges more.
   seedance_480p_video_in_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "seedance", variantKey: "480p_video_in" },
   seedance_720p_video_in_per_second: { providerCostUsd: 0.17, costUnit: "per_second", pricingGroup: "seedance", variantKey: "720p_video_in" },
+  // Seedance 2.0 (full, bytedance/seedance-2.0) — pricier than the Fast variant and
+  // adds a 1080p tier. non_video_in (no reference video).
+  seedance2_480p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p" },
+  seedance2_720p_per_second: { providerCostUsd: 0.18, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p" },
+  seedance2_1080p_per_second: { providerCostUsd: 0.45, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p" },
+  // Seedance 2.0 (full) — video_in (a reference video is provided).
+  seedance2_480p_video_in_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p_video_in" },
+  seedance2_720p_video_in_per_second: { providerCostUsd: 0.22, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p_video_in" },
+  seedance2_1080p_video_in_per_second: { providerCostUsd: 0.55, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p_video_in" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },
