@@ -25,6 +25,8 @@ import {
   UserRound,
   SlidersHorizontal,
   Languages,
+  Upload,
+  Pencil,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -52,11 +54,17 @@ import {
   resolveStoryboardAspectRatio,
   storyboardOrientationLabel,
   type StoryboardAspectRatio,
+  STORYBOARD_ASPECT_RATIOS,
+  DEFAULT_STORYBOARD_ASPECT_RATIO,
   STORYBOARD_LANGUAGES,
   DEFAULT_STORYBOARD_LANGUAGE,
   resolveStoryboardLanguage,
   storyboardLanguageLabel,
   type StoryboardLanguageId,
+  STORYBOARD_STYLE_KEYS,
+  STORYBOARD_STYLE_LABELS,
+  DEFAULT_STORYBOARD_STYLE,
+  type StoryboardStyleKey,
 } from "@/lib/storyboard-style";
 
 // One fresh idempotency key per submit (sent as the Idempotency-Key header).
@@ -1597,6 +1605,11 @@ type StoryboardListItem = {
   // Spoken language the storyboard was written in. null for legacy rows; used as
   // the default here but the user may still change it (soft, re-instructable).
   language: StoryboardLanguageId | null;
+  // The stored Seedance prompt — surfaced in the Advanced "edit prompt" panel so
+  // the user can review/tweak it before rendering.
+  seedancePrompt: string;
+  // 'uploaded' for storyboards the user imported, 'generated' otherwise.
+  source: string | null;
 };
 
 function storyboardSeedancePricingKey(resolution: "480p" | "720p"): string {
@@ -1609,6 +1622,240 @@ function storyboardSeedancePricingKey(resolution: "480p" | "720p"): string {
 // heavy lifting (loading the stored seedance_prompt + reference image) happens
 // server-side in /api/generate-storyboard-video, which only needs storyboardId.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
+
+// Modal for importing a user's OWN storyboard image (not generated in Krakatoa).
+// Uploads the file to the transient refs path, then asks /api/storyboards/import
+// to run a GPT-5 vision pass (charged) that synthesizes the seedance_prompt and
+// registers a storyboards row. On success the new board is handed back to the
+// composer, which selects it.
+function ImportStoryboardModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: (item: StoryboardListItem) => void;
+}) {
+  const { imageCredits } = usePricing();
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [description, setDescription] = useState("");
+  const [aspect, setAspect] = useState<StoryboardAspectRatio>(DEFAULT_STORYBOARD_ASPECT_RATIO);
+  const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
+  const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cost = imageCredits("storyboard_import_vision_per_image", 1);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const pickFile = (f: File | null) => {
+    if (!f) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) {
+      setError("Please choose a JPG, PNG, or WebP image.");
+      return;
+    }
+    setError(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setFile(f);
+    setPreviewUrl(URL.createObjectURL(f));
+  };
+
+  const analyze = async () => {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { path } = await uploadRefFile(file);
+      const response = await fetch("/api/storyboards/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
+        body: JSON.stringify({
+          imagePath: path,
+          description: description.trim(),
+          aspectRatio: aspect,
+          language,
+          storyboardStyle: style,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Couldn't import the storyboard.");
+      }
+      onImported({
+        id: String(data.storyboardId),
+        storyboardUrl: String(data.storyboardUrl),
+        theme: description.trim() || "Imported storyboard",
+        hasVideo: false,
+        aspectRatio: resolveStoryboardAspectRatio(data.aspectRatio),
+        language: resolveStoryboardLanguage(data.language),
+        seedancePrompt: typeof data.seedancePrompt === "string" ? data.seedancePrompt : "",
+        source: "uploaded",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={busy ? undefined : onClose}
+      />
+      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#0e0e12] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Upload className="h-4 w-4 text-purple-300" />
+            <h3 className="text-sm font-bold text-white">Upload your own storyboard</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto p-5">
+          {/* File picker / preview */}
+          <label
+            className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-6 text-center transition-colors ${
+              previewUrl ? "border-white/15 bg-black/30" : "border-white/20 hover:border-purple-400/50"
+            } ${busy ? "pointer-events-none opacity-60" : ""}`}
+          >
+            {previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt="Storyboard preview"
+                className="max-h-48 w-auto rounded-lg border border-white/10 object-contain"
+              />
+            ) : (
+              <>
+                <Upload className="h-6 w-6 text-gray-400" />
+                <span className="text-sm text-gray-300">Click to choose an image</span>
+                <span className="text-[11px] text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
+              </>
+            )}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+            />
+            {previewUrl && (
+              <span className="text-[11px] font-semibold text-purple-300">Change image</span>
+            )}
+          </label>
+
+          {/* Optional description */}
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              Description <span className="text-gray-600">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              disabled={busy}
+              placeholder="What should happen in the video? Helps steer the analysis."
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+            />
+          </div>
+
+          {/* Orientation / language / style */}
+          <div className="flex flex-wrap items-center gap-2">
+            <ChipDropdown
+              square
+              showChevron={false}
+              icon={<Crop className="h-3.5 w-3.5" />}
+              value={aspect}
+              activeId={aspect}
+              tooltip="Orientation of the video you'll render from this storyboard."
+              options={STORYBOARD_ASPECT_RATIOS.map((a) => ({
+                id: a,
+                label: a,
+                hint: storyboardOrientationLabel(a),
+              }))}
+              onSelect={(id) => setAspect(id as StoryboardAspectRatio)}
+              disabled={busy}
+            />
+            <ChipDropdown
+              icon={<Languages className="h-3.5 w-3.5" />}
+              value={storyboardLanguageLabel(language)}
+              activeId={language}
+              tooltip="Spoken language for the video's dialogue."
+              options={STORYBOARD_LANGUAGES.map((l) => ({ id: l.id, label: l.label }))}
+              onSelect={(id) => setLanguage(id as StoryboardLanguageId)}
+              disabled={busy}
+            />
+            <ChipDropdown
+              icon={<Sparkles className="h-3.5 w-3.5" />}
+              value={STORYBOARD_STYLE_LABELS[style]}
+              activeId={style}
+              tooltip="Visual style baked into the generated video prompt."
+              options={STORYBOARD_STYLE_KEYS.map((k) => ({
+                id: k,
+                label: STORYBOARD_STYLE_LABELS[k],
+              }))}
+              onSelect={(id) => setStyle(id as StoryboardStyleKey)}
+              disabled={busy}
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
+          <p className="text-[11px] text-gray-500">
+            We analyze the image to write the video prompt — you can edit it before rendering.
+          </p>
+          <button
+            type="button"
+            onClick={analyze}
+            disabled={!file || busy}
+            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <span>Analyze</span>
+                <Wand2 className="h-4 w-4" />
+                <span className="text-sm font-extrabold">{cost}</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StoryboardToVideoComposer({
   initialStoryboardId,
@@ -1635,6 +1882,12 @@ function StoryboardToVideoComposer({
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Upload your own storyboard" modal.
+  const [showUpload, setShowUpload] = useState(false);
+  // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
+  // to the selected storyboard; only sent (and persisted) when actually changed.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
 
   // Load the user's saved storyboards once. Auto-select the deep-linked one (from
   // Photo's "Create video" CTA), otherwise leave selection to the user.
@@ -1660,6 +1913,9 @@ function StoryboardToVideoComposer({
               typeof s.language === "string"
                 ? resolveStoryboardLanguage(s.language)
                 : null,
+            seedancePrompt:
+              typeof s.seedance_prompt === "string" ? s.seedance_prompt : "",
+            source: typeof s.source === "string" ? s.source : null,
           }));
         setItems(list);
         setListState("loaded");
@@ -1695,6 +1951,22 @@ function StoryboardToVideoComposer({
     setLanguage(selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE);
   }, [selectedId, selected?.language]);
 
+  // Reset the editable prompt draft to the selected storyboard's stored prompt
+  // when the selection changes (keyed on id so a user edit isn't clobbered).
+  useEffect(() => {
+    setPromptDraft(selected?.seedancePrompt ?? "");
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const storedPrompt = selected?.seedancePrompt ?? "";
+  const promptDirty = !!selectedId && promptDraft.trim() !== storedPrompt.trim() && promptDraft.trim().length > 0;
+
+  // Splice a freshly imported storyboard into the list and select it.
+  const handleImported = (item: StoryboardListItem) => {
+    setItems((cur) => [item, ...cur.filter((s) => s.id !== item.id)]);
+    setSelectedId(item.id);
+    setShowUpload(false);
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate || !selectedId) return;
@@ -1702,13 +1974,20 @@ function StoryboardToVideoComposer({
     setError(null);
     setResultUrl(null);
     try {
+      const editedPrompt = promptDirty ? promptDraft.trim() : undefined;
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Idempotency-Key": newIdempotencyKey(),
         },
-        body: JSON.stringify({ storyboardId: selectedId, resolution, aspectRatio: aspect, language }),
+        body: JSON.stringify({
+          storyboardId: selectedId,
+          resolution,
+          aspectRatio: aspect,
+          language,
+          ...(editedPrompt ? { seedancePrompt: editedPrompt } : {}),
+        }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -1720,6 +1999,13 @@ function StoryboardToVideoComposer({
         const idemMsg = describeIdempotencyError(response.status, data);
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Generation failed");
+      }
+      // If the prompt was edited it is now the stored prompt — reflect that in
+      // local state so re-selecting the board shows the saved edit.
+      if (editedPrompt) {
+        setItems((cur) =>
+          cur.map((s) => (s.id === selectedId ? { ...s, seedancePrompt: editedPrompt } : s))
+        );
       }
       setResultUrl(data.videoUrl);
       onGenerated();
@@ -1778,17 +2064,37 @@ function StoryboardToVideoComposer({
               <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your storyboards.
             </div>
           ) : items.length === 0 ? (
-            <div className="flex h-24 flex-col justify-center gap-1 text-sm text-gray-500">
-              <span>You don&apos;t have any storyboards yet.</span>
-              <a
-                href="/tools/photo-v2?type=storyboard"
-                className="font-semibold text-purple-300 hover:text-purple-200"
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1 text-sm text-gray-500">
+                <span>You don&apos;t have any storyboards yet.</span>
+                <a
+                  href="/tools/photo-v2?type=storyboard"
+                  className="font-semibold text-purple-300 hover:text-purple-200"
+                >
+                  Create one in Photo → Storyboard →
+                </a>
+              </div>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setShowUpload(true)}
+                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-gray-300 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
               >
-                Create one in Photo → Storyboard →
-              </a>
+                <Upload className="h-4 w-4" />
+                Upload your own storyboard
+              </button>
             </div>
           ) : (
             <div className="grid max-h-[320px] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setShowUpload(true)}
+                className="flex aspect-[3/2] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
+              >
+                <Upload className="h-5 w-5" />
+                <span className="text-[11px] font-semibold">Upload your own</span>
+              </button>
               {items.map((s) => {
                 const active = s.id === selectedId;
                 return (
@@ -1821,6 +2127,11 @@ function StoryboardToVideoComposer({
                     {s.hasVideo && (
                       <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
                         Has video
+                      </span>
+                    )}
+                    {s.source === "uploaded" && (
+                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-300">
+                        Uploaded
                       </span>
                     )}
                     {active && (
@@ -1904,6 +2215,54 @@ function StoryboardToVideoComposer({
             </div>
           </div>
 
+          {/* Advanced: review / edit the Seedance prompt before rendering. */}
+          {selectedId ? (
+            <div className="mt-4 border-t border-white/10 pt-3">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((o) => !o)}
+                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200"
+              >
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                />
+                <Pencil className="h-3.5 w-3.5 text-purple-300" />
+                Advanced — edit prompt
+                {promptDirty && (
+                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[9px] font-bold text-purple-200">
+                    Edited
+                  </span>
+                )}
+              </button>
+              {advancedOpen && (
+                <div className="mt-3">
+                  <textarea
+                    value={promptDraft}
+                    onChange={(e) => setPromptDraft(e.target.value)}
+                    rows={6}
+                    disabled={loading}
+                    placeholder="The video prompt Seedance will follow…"
+                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+                  />
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-500">
+                    <span>
+                      Style, orientation &amp; language are re-applied automatically on render.
+                    </span>
+                    {promptDirty && (
+                      <button
+                        type="button"
+                        onClick={() => setPromptDraft(storedPrompt)}
+                        className="font-semibold text-gray-400 hover:text-gray-200"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {!selectedId && listState === "loaded" && items.length > 0 ? (
             <p className="mt-3 pl-1 text-xs text-amber-300/80">
               Pick a storyboard to turn into a video.
@@ -1911,6 +2270,13 @@ function StoryboardToVideoComposer({
           ) : null}
         </div>
       </form>
+
+      {showUpload && (
+        <ImportStoryboardModal
+          onClose={() => setShowUpload(false)}
+          onImported={handleImported}
+        />
+      )}
 
       {error && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">

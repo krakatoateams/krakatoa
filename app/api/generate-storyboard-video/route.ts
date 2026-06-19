@@ -190,7 +190,15 @@ export async function POST(req: Request) {
       clientLanguage ?? storedLanguage ?? DEFAULT_STORYBOARD_LANGUAGE;
 
     const storyboardUrl = String(row.storyboard_url || "").trim();
-    let seedancePrompt = String(row.seedance_prompt || "").trim();
+    const storedPrompt = String(row.seedance_prompt || "").trim();
+    // Optional edited prompt from the Advanced "edit prompt" UI. Ownership is
+    // already enforced above (row.user_id === userId), so the owner may override
+    // the stored seedance_prompt; the edit is persisted below (after the spend)
+    // so it sticks for future runs. The raw edited text is stored — the
+    // style/aspect/language directives are re-applied transiently per run.
+    const editedPrompt = typeof body.seedancePrompt === "string" ? body.seedancePrompt.trim() : "";
+    const promptEdited = !!editedPrompt && editedPrompt !== storedPrompt;
+    let seedancePrompt = promptEdited ? editedPrompt : storedPrompt;
 
     if (!storyboardUrl.startsWith("https://")) {
       return NextResponse.json(
@@ -242,7 +250,14 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec, aspectRatio, language });
+    const requestHash = computeRequestHash({
+      storyboardId,
+      resolution,
+      durationSec,
+      aspectRatio,
+      language,
+      promptOverride: promptEdited ? editedPrompt : null,
+    });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -346,9 +361,13 @@ export async function POST(req: Request) {
     }
 
     // ---- Storyboard status + processing asset (created AFTER spend succeeds) ----
+    // Persist an edited prompt here (not before the spend) so an insufficient-
+    // credits abort never rewrites the stored prompt. Store the RAW edited text.
+    const statusUpdate: Record<string, unknown> = { status: "video_generating" };
+    if (promptEdited) statusUpdate.seedance_prompt = editedPrompt;
     const { error: statusErr } = await supabase
       .from(STORYBOARDS_TABLE)
-      .update({ status: "video_generating" })
+      .update(statusUpdate)
       .eq("id", storyboardId);
     if (statusErr) {
       console.error("[Storyboard Video] status update:", statusErr);

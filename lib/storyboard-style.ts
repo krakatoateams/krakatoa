@@ -24,6 +24,15 @@ export type StoryboardStyleKey = (typeof STORYBOARD_STYLE_KEYS)[number];
 
 export const DEFAULT_STORYBOARD_STYLE: StoryboardStyleKey = "cinematic_sketch";
 
+/** Human labels for the storyboard style chip (shared by Photo + Video UIs). */
+export const STORYBOARD_STYLE_LABELS: Record<StoryboardStyleKey, string> = {
+  cinematic_sketch: "Cinematic Sketch",
+  painterly_color: "Painterly Color",
+  comic_book: "Comic Book",
+  photorealistic: "Photorealistic",
+  anime_manga: "Anime / Manga",
+};
+
 /** Instruction injected into the storyboard IMAGE prompt (GPT Image). */
 export const STORYBOARD_STYLE_INSTRUCTIONS: Record<StoryboardStyleKey, string> = {
   cinematic_sketch:

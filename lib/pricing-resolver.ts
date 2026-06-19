@@ -305,6 +305,15 @@ export async function getStoryboardImageCredits(params?: {
 }
 
 /**
+ * Storyboard IMPORT cost — the GPT-5 vision pass that turns a user-uploaded
+ * storyboard sheet into a seedance_prompt (no image is generated). Fail-closed
+ * via the v2 chain like every other charged key. Default ~3 cr.
+ */
+export async function getStoryboardImportCredits(): Promise<number> {
+  return computeImageCreditsV2("storyboard_import_vision_per_image", 1);
+}
+
+/**
  * Product Photo cost by model tier + resolution (v2.3).
  *   - basic    -> product_photo_nano_banana_per_image (no resolution)
  *   - balanced -> product_photo_nano_banana_2_{1k,2k,4k}_per_image

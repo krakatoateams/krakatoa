@@ -75,6 +75,11 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },
   storyboard_gpt_image_2_auto_per_image: { providerCostUsd: 0.128, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "auto" },
+  // Storyboard import — GPT-5 vision analysis of a user-UPLOADED storyboard sheet
+  // to synthesize the seedance_prompt. No image is generated (cheaper than a
+  // storyboard image render). Charged once per analyzed sheet. ~0.033 USD → 3 cr
+  // at the current billing knobs (factor 90).
+  storyboard_import_vision_per_image: { providerCostUsd: 0.033, costUnit: "per_image", pricingGroup: "storyboard_import", variantKey: "vision" },
   // Product Photo model tiers (per image) — v2.3.
   //   basic    -> google/nano-banana      (no resolution)
   //   balanced -> google/nano-banana-2     (1K/2K/4K)

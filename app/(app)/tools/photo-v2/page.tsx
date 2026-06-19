@@ -28,6 +28,7 @@ import {
 import type { CreationHistoryItem } from "@/lib/creations";
 import {
   STORYBOARD_STYLE_KEYS,
+  STORYBOARD_STYLE_LABELS,
   DEFAULT_STORYBOARD_STYLE,
   type StoryboardStyleKey,
   STORYBOARD_ASPECT_RATIOS,
@@ -100,16 +101,6 @@ const CREATION_TYPES = [
   { id: "social-post", label: "Social media post", available: false },
 ] as const;
 type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
-
-// Storyboard styles for the Storyboard sub-tool chip. Keys mirror the single
-// source of truth in lib/storyboard-style.ts (labels live here for the UI).
-const STORYBOARD_STYLE_LABELS: Record<StoryboardStyleKey, string> = {
-  cinematic_sketch: "Cinematic Sketch",
-  painterly_color: "Painterly Color",
-  comic_book: "Comic Book",
-  photorealistic: "Photorealistic",
-  anime_manga: "Anime / Manga",
-};
 
 // First reference-capable model — the default we snap to when the user enters a
 // mode that needs a product reference (Product Try-on) with a text-only model selected.
