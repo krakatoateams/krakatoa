@@ -259,6 +259,78 @@ export async function addPurchaseCredits(params: {
   });
 }
 
+export type SetBalanceResult = {
+  wallet: CreditWallet;
+  previousBalance: number;
+  targetBalance: number;
+  /** Signed change applied to reach the target (positive = credit, negative = debit). */
+  delta: number;
+  /** False when the wallet was already at the target (no ledger row written). */
+  applied: boolean;
+};
+
+/**
+ * Set a wallet to an EXACT target balance (admin "reset/top-up" tool).
+ *
+ * Computes the delta from the current balance and applies a single `adjustment`
+ * transaction in the right direction through the idempotent RPC, so the ledger
+ * (billing source of truth) and the cached balance move atomically. When the
+ * wallet is already at the target this is a no-op (no ledger row).
+ *
+ * `targetBalance` must be a non-negative integer. A debit adjustment can never
+ * push the balance below zero because the target is itself >= 0.
+ */
+export async function setWalletBalance(params: {
+  profileId: string;
+  targetBalance: number;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<SetBalanceResult> {
+  if (
+    !Number.isInteger(params.targetBalance) ||
+    params.targetBalance < 0
+  ) {
+    throw new Error("targetBalance must be a non-negative integer.");
+  }
+
+  const wallet = await getOrCreateWallet(params.profileId);
+  const previousBalance = wallet.balance;
+  const delta = params.targetBalance - previousBalance;
+
+  if (delta === 0) {
+    return {
+      wallet,
+      previousBalance,
+      targetBalance: params.targetBalance,
+      delta: 0,
+      applied: false,
+    };
+  }
+
+  const result = await addCreditTransaction({
+    profileId: params.profileId,
+    amount: Math.abs(delta),
+    direction: delta > 0 ? "credit" : "debit",
+    type: "adjustment",
+    description:
+      params.description ?? `Admin set balance to ${params.targetBalance}`,
+    metadata: {
+      source: "admin_set_balance",
+      previous_balance: previousBalance,
+      target_balance: params.targetBalance,
+      ...(params.metadata ?? {}),
+    },
+  });
+
+  return {
+    wallet: result.wallet,
+    previousBalance,
+    targetBalance: params.targetBalance,
+    delta,
+    applied: true,
+  };
+}
+
 /** List a profile's ledger transactions (newest first). */
 export async function listCreditTransactions(
   profileId: string,
