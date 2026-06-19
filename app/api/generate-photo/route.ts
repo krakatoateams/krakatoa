@@ -14,6 +14,7 @@ import {
   buildCharacterSheetPrompt,
   buildPhotoProviderInput,
   getProductPhotoTier,
+  tierSupportsMultiReference,
   isValidPhotoAspectRatio,
   DEFAULT_PHOTO_ASPECT_RATIO,
   CHARACTER_CREATION_KIND,
@@ -337,6 +338,23 @@ export async function POST(req: Request) {
       extraReferenceFiles.push(referenceFile);
     }
 
+    // Product Try-on with a distinct character/model image. The references are sent
+    // as [product, character]; the prompt is made role-aware below so the model
+    // actually uses the selected person. Single-image models (FLUX Kontext) can't
+    // honor a separate character, so reject before any spend rather than silently
+    // dropping it.
+    const hasCharacterReference =
+      requiresProductImage &&
+      (extraReferenceFiles.length > 0 || directReferenceUrls.length > 0);
+    if (hasCharacterReference && !tierSupportsMultiReference(tier)) {
+      return NextResponse.json(
+        {
+          error: `${tier.modelLabel} can only use a single reference image, so it can't apply a separate character. Choose Nano Banana or Seedream 4 for Product Try-on with a character.`,
+        },
+        { status: 400 }
+      );
+    }
+
     const pricingKey = productPhotoPricingKey({ modelTier, resolution });
     const providerResolution = productPhotoProviderResolution(resolution);
 
@@ -538,7 +556,7 @@ export async function POST(req: Request) {
     // mode builds a multi-angle turnaround sheet; image mode uses the prompt verbatim.
     const prompt =
       mode === "product"
-        ? buildProductPhotoPrompt(poseId, styleId, userPrompt)
+        ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
         : mode === "character"
           ? buildCharacterSheetPrompt({
               userPrompt,

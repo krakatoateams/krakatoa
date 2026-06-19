@@ -4,7 +4,7 @@ import {
   CreationHistoryItem,
   CreationTool,
 } from "@/lib/creations";
-import { USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
 
 export type UserCreationRow = {
   id: string;
@@ -170,4 +170,211 @@ export async function listUserCreations(
   }
 
   return (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? [];
+}
+
+export type CreationPageFilters = {
+  tools?: CreationTool[];
+  mediaType?: "image" | "video";
+  /** Restrict to a creation kind stored in metadata (e.g. "character"). */
+  kind?: string;
+  /** Restrict to specific creation ids (used by the client-side Favorites view). */
+  ids?: string[];
+  /**
+   * Trash filter (soft delete lives in metadata.deletedAt):
+   *   - true  → only trashed items (the Trash view)
+   *   - false / undefined → only non-trashed items (every normal view)
+   */
+  trashed?: boolean;
+};
+
+/**
+ * Paginated listing for the library/history UI. Returns the requested window of
+ * creations (newest first) plus the total row count for the same filters, so the
+ * client can render real page controls without loading everything at once.
+ */
+export async function listUserCreationsPage(
+  userId: string,
+  options: CreationPageFilters & { offset: number; limit: number }
+): Promise<{ items: CreationHistoryItem[]; total: number }> {
+  const from = Math.max(0, options.offset);
+  const to = from + Math.max(1, options.limit) - 1;
+
+  let query = supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("*", { count: "exact" })
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (options.tools?.length) query = query.in("tool", options.tools);
+  if (options.mediaType) query = query.eq("media_type", options.mediaType);
+  if (options.kind) query = query.eq("metadata->>creationKind", options.kind);
+  if (options.ids) query = query.in("id", options.ids);
+  query = options.trashed
+    ? query.not("metadata->>deletedAt", "is", null)
+    : query.is("metadata->>deletedAt", null);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    if (tableMissingMessage(error.message)) throw missingTableError();
+    throw new Error(error.message);
+  }
+
+  const items = (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? [];
+  return { items, total: count ?? items.length };
+}
+
+/** Head-count helper for one filter set (no rows returned). */
+async function countCreations(
+  userId: string,
+  filters: {
+    tools?: CreationTool[];
+    mediaType?: "image" | "video";
+    kind?: string;
+    trashed?: boolean;
+  }
+): Promise<number> {
+  let query = supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (filters.tools?.length) query = query.in("tool", filters.tools);
+  if (filters.mediaType) query = query.eq("media_type", filters.mediaType);
+  if (filters.kind) query = query.eq("metadata->>creationKind", filters.kind);
+  query = filters.trashed
+    ? query.not("metadata->>deletedAt", "is", null)
+    : query.is("metadata->>deletedAt", null);
+
+  const { error, count } = await query;
+  if (error) {
+    if (tableMissingMessage(error.message)) throw missingTableError();
+    throw new Error(error.message);
+  }
+  return count ?? 0;
+}
+
+/** Per-tab totals for the library pills (favorites are client-side, excluded). */
+export async function countUserCreationsByTab(
+  userId: string,
+  options?: { tools?: CreationTool[] }
+): Promise<{
+  all: number;
+  image: number;
+  video: number;
+  character: number;
+  trash: number;
+}> {
+  const tools = options?.tools;
+  const [all, image, video, character, trash] = await Promise.all([
+    countCreations(userId, { tools }),
+    countCreations(userId, { tools, mediaType: "image" }),
+    countCreations(userId, { tools, mediaType: "video" }),
+    countCreations(userId, { tools, kind: "character" }),
+    countCreations(userId, { tools, trashed: true }),
+  ]);
+  return { all, image, video, character, trash };
+}
+
+/** Move a creation to Trash (soft delete) by stamping metadata.deletedAt. */
+export async function softDeleteUserCreation(
+  userId: string,
+  id: string
+): Promise<CreationHistoryItem> {
+  return updateUserCreation({
+    userId,
+    id,
+    metadataPatch: { deletedAt: new Date().toISOString() },
+  });
+}
+
+/** Restore a trashed creation by clearing metadata.deletedAt. */
+export async function restoreUserCreation(
+  userId: string,
+  id: string
+): Promise<CreationHistoryItem> {
+  return updateUserCreation({ userId, id, metadataPatch: { deletedAt: null } });
+}
+
+/** Best-effort removal of storage objects; failures are logged, never thrown. */
+async function removeStorageObjects(paths: string[]): Promise<void> {
+  const valid = paths.filter((p): p is string => !!p);
+  if (!valid.length) return;
+  const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(valid);
+  if (error) {
+    console.warn("[creations] storage cleanup failed:", error.message);
+  }
+}
+
+/**
+ * Permanently delete one creation: removes its storage object first (so the
+ * product-photo reconcile can't resurrect it) then deletes the DB row.
+ * Owner-scoped. Returns false if the row does not exist.
+ */
+export async function permanentlyDeleteUserCreation(
+  userId: string,
+  id: string
+): Promise<boolean> {
+  const { data, error: selErr } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("storage_path")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (selErr) {
+    if (tableMissingMessage(selErr.message)) throw missingTableError();
+    throw new Error(selErr.message);
+  }
+  if (!data) return false;
+
+  const storagePath = (data as { storage_path?: string }).storage_path;
+  if (storagePath) await removeStorageObjects([storagePath]);
+
+  const { error } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) {
+    if (tableMissingMessage(error.message)) throw missingTableError();
+    throw new Error(error.message);
+  }
+  return true;
+}
+
+/**
+ * Permanently delete every trashed creation for a user (storage objects + rows).
+ * Returns the number of rows removed.
+ */
+export async function emptyUserTrash(userId: string): Promise<number> {
+  const { data, error } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("id, storage_path")
+    .eq("user_id", userId)
+    .not("metadata->>deletedAt", "is", null);
+
+  if (error) {
+    if (tableMissingMessage(error.message)) throw missingTableError();
+    throw new Error(error.message);
+  }
+
+  const rows = (data as { id: string; storage_path: string }[] | null) ?? [];
+  if (!rows.length) return 0;
+
+  await removeStorageObjects(rows.map((r) => r.storage_path));
+
+  const { error: delErr } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .delete()
+    .eq("user_id", userId)
+    .not("metadata->>deletedAt", "is", null);
+
+  if (delErr) {
+    if (tableMissingMessage(delErr.message)) throw missingTableError();
+    throw new Error(delErr.message);
+  }
+  return rows.length;
 }
