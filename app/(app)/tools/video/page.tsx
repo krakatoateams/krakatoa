@@ -21,6 +21,8 @@ import {
   ImageIcon,
   X,
   Sparkles,
+  Repeat,
+  UserRound,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -35,6 +37,15 @@ import {
   type VideoResolution,
   type VideoAspectRatio,
 } from "@/lib/video-models";
+import {
+  MOTION_CONTROL_MODELS,
+  getMotionControlModel,
+  effectiveMotionControlDuration,
+  motionControlResolutionLabel,
+  type MotionControlModelId,
+  type MotionControlMode,
+  type CharacterOrientation,
+} from "@/lib/motion-control-models";
 
 // One fresh idempotency key per submit (sent as the Idempotency-Key header).
 function newIdempotencyKey(): string {
@@ -57,13 +68,16 @@ function describeIdempotencyError(
   return null;
 }
 
-// Creation types in the top-left chip. Only "text2video" is wired here; the other
-// two deep-link to the existing /tools/reels page until they are ported over.
+// Creation types in the top-left chip. "text2video" and "motion_control" are wired
+// in-page; the other two deep-link to the existing /tools/reels page for now.
 const CREATION_TYPES = [
   { id: "text2video", label: "Text to Video", available: true },
+  { id: "motion_control", label: "Motion Control", available: true },
   { id: "storyboard", label: "Storyboard to Video", available: false, href: "/tools/reels" },
   { id: "reels-creator", label: "Reels Creator", available: false, href: "/tools/reels" },
 ] as const;
+
+type VideoCreationType = "text2video" | "motion_control";
 
 const ASPECT_RATIO_LABELS: Record<VideoAspectRatio, string> = {
   "16:9": "16:9",
@@ -437,6 +451,21 @@ const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio
 export default function VideoOmniPage() {
   const router = useRouter();
 
+  const [creationType, setCreationType] = useState<VideoCreationType>("text2video");
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const { refetch: refetchCredits } = useCreditBalance();
+
+  const handleCreationType = (id: string) => {
+    if (id === "text2video" || id === "motion_control") {
+      setCreationType(id);
+      return;
+    }
+    const target = CREATION_TYPES.find((c) => c.id === id);
+    if (target && !target.available && "href" in target && target.href) {
+      router.push(target.href);
+    }
+  };
+
   const [modelId, setModelId] = useState<VideoModelId>(VIDEO_MODELS[0].id);
   const model = getVideoModel(modelId);
 
@@ -473,9 +502,7 @@ export default function VideoOmniPage() {
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
-  const { refetch: refetchCredits } = useCreditBalance();
   const { videoCredits } = usePricing();
 
   // Reference groups.
@@ -527,13 +554,6 @@ export default function VideoOmniPage() {
 
   const canGenerate =
     !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
-
-  const handleCreationType = (id: string) => {
-    const target = CREATION_TYPES.find((c) => c.id === id);
-    if (target && !target.available && "href" in target && target.href) {
-      router.push(target.href);
-    }
-  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -620,6 +640,7 @@ export default function VideoOmniPage() {
           </p>
         </div>
 
+        {creationType === "text2video" && (
         <form onSubmit={handleGenerate} className="relative z-20 mt-10">
           <style>{`
             @keyframes omniDotDrift { from { background-position: 0 0; } to { background-position: 48px 48px; } }
@@ -846,22 +867,23 @@ export default function VideoOmniPage() {
             <p className="mt-2 pl-1 text-xs text-amber-300/80">{refCheck.error}</p>
           )}
         </form>
+        )}
 
-        {error && (
+        {creationType === "text2video" && error && (
           <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        {loading && (
+        {creationType === "text2video" && loading && (
           <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
             <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
             Generating your video with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
           </div>
         )}
 
-        {resultUrl && !loading && (
+        {creationType === "text2video" && resultUrl && !loading && (
           <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
             <video
               src={resultUrl}
@@ -884,12 +906,22 @@ export default function VideoOmniPage() {
           </div>
         )}
 
+        {creationType === "motion_control" && (
+          <MotionControlComposer
+            onSelectCreation={handleCreationType}
+            onGenerated={() => {
+              setHistoryRefreshKey((k) => k + 1);
+              refetchCredits();
+            }}
+          />
+        )}
+
         {/* Video generation history */}
         <div className="mt-[120px]">
           <CreationsHistory
             title="Generation history"
             description="Every video you create appears here. Click any clip to preview it."
-            tools={["video_text2video"]}
+            tools={["video_text2video", "video_motion_control"]}
             mediaType="video"
             refreshKey={historyRefreshKey}
             showActions
@@ -899,5 +931,313 @@ export default function VideoOmniPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+const MC_IMAGE_ACCEPT = "image/jpeg,image/png";
+const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
+
+// Motion Control sub-tool. Mirrors the Higgsfield UX: upload your character image
+// + the motion video to copy, optionally write a prompt, pick quality/orientation,
+// and keep (or drop) the reference video's audio. The output clip length follows
+// the reference video, so the cost is computed from its measured duration.
+function MotionControlComposer({
+  onSelectCreation,
+  onGenerated,
+}: {
+  onSelectCreation: (id: string) => void;
+  onGenerated: () => void;
+}) {
+  const [modelId, setModelId] = useState<MotionControlModelId>(MOTION_CONTROL_MODELS[0].id);
+  const model = getMotionControlModel(modelId);
+
+  const [prompt, setPrompt] = useState("");
+  const [mode, setMode] = useState<MotionControlMode>(model.defaultMode);
+  const [orientation, setOrientation] = useState<CharacterOrientation>(model.defaultOrientation);
+  const [keepOriginalSound, setKeepOriginalSound] = useState<boolean>(
+    model.defaultKeepOriginalSound
+  );
+  const [videoDurationSec, setVideoDurationSec] = useState<number | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { videoCredits } = usePricing();
+
+  const charImage = useMediaRefs("image", 1);
+  const motionVideo = useMediaRefs("video", 1);
+
+  // Measure the reference video's duration so the cost label matches what the
+  // server will bill (output length follows the reference video).
+  const motionFile = motionVideo.items[0]?.file ?? null;
+  useEffect(() => {
+    if (!motionFile) {
+      setVideoDurationSec(null);
+      return;
+    }
+    const url = URL.createObjectURL(motionFile);
+    const el = document.createElement("video");
+    el.preload = "metadata";
+    el.onloadedmetadata = () => {
+      setVideoDurationSec(Number.isFinite(el.duration) ? el.duration : null);
+      URL.revokeObjectURL(url);
+    };
+    el.onerror = () => {
+      setVideoDurationSec(null);
+      URL.revokeObjectURL(url);
+    };
+    el.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [motionFile]);
+
+  const billedDuration = effectiveMotionControlDuration({
+    model,
+    refVideoDurationSec: videoDurationSec,
+    orientation,
+  });
+  const pricingKey = model.pricingKey(mode);
+  const cost = videoCredits(pricingKey, billedDuration);
+
+  const imageReady = charImage.done.length > 0;
+  const videoReady = motionVideo.done.length > 0;
+  const anyUploading = charImage.uploading || motionVideo.uploading;
+  const canGenerate = !loading && !anyUploading && imageReady && videoReady;
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canGenerate) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const body = {
+        modelId,
+        prompt: prompt.trim(),
+        mode,
+        characterOrientation: orientation,
+        keepOriginalSound,
+        refVideoDurationSec: videoDurationSec,
+        image: charImage.done[0]
+          ? { url: charImage.done[0].url, path: charImage.done[0].path }
+          : null,
+        video: motionVideo.done[0]
+          ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
+          : null,
+      };
+
+      const response = await fetch("/api/generate-motion-control", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Generation failed");
+      }
+
+      setResultUrl(data.videoUrl);
+      onGenerated();
+      charImage.reset();
+      motionVideo.reset();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const orientationLabel =
+    orientation === "video" ? "Match video (≤30s)" : "Match image (≤10s)";
+
+  return (
+    <>
+      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+        {/* Top-left chips: creation type + model */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ChipDropdown
+            icon={<Layers className="h-3.5 w-3.5" />}
+            value="Motion Control"
+            activeId="motion_control"
+            options={CREATION_TYPES.map((c) => ({
+              id: c.id,
+              label: c.label,
+              hint: c.available ? undefined : "Open",
+            }))}
+            onSelect={onSelectCreation}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Cpu className="h-3.5 w-3.5" />}
+            value={model.modelLabel}
+            activeId={modelId}
+            options={MOTION_CONTROL_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+            onSelect={(id) => setModelId(id as MotionControlModelId)}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+          {/* Uploads: character image + motion video (both required) */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <RefGroup
+              icon={<UserRound className="h-3.5 w-3.5" />}
+              label="Your character"
+              accept={MC_IMAGE_ACCEPT}
+              multiple={false}
+              group={charImage}
+              disabled={loading}
+              hint="A clear image with a visible face and body. JPG/PNG."
+            />
+            <RefGroup
+              icon={<Film className="h-3.5 w-3.5" />}
+              label="Motion to copy"
+              accept={MC_VIDEO_ACCEPT}
+              multiple={false}
+              group={motionVideo}
+              disabled={loading}
+              hint={
+                videoDurationSec
+                  ? `Reference video ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s. MP4/MOV.`
+                  : "Reference motion video, 3–30s. The character copies this motion. MP4/MOV."
+              }
+            />
+          </div>
+
+          {/* Prompt (optional) */}
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            maxLength={model.promptMaxChars}
+            placeholder="Optional — add elements to the scene or describe extra motion effects."
+            rows={2}
+            className="mt-3 min-h-[48px] w-full resize-none rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-base text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
+          />
+
+          {/* Controls row */}
+          <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Maximize2 className="h-3.5 w-3.5" />}
+                value={`${mode === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(mode)}`}
+                activeId={mode}
+                options={model.modes.map((m) => ({
+                  id: m,
+                  label: `${m === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(m)}`,
+                  hint: `${videoCredits(model.pricingKey(m), billedDuration)}`,
+                }))}
+                onSelect={(id) => setMode(id as MotionControlMode)}
+                disabled={loading}
+              />
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Repeat className="h-3.5 w-3.5" />}
+                value={orientationLabel}
+                activeId={orientation}
+                options={[
+                  { id: "image", label: "Match image (≤10s)" },
+                  { id: "video", label: "Match video (≤30s)" },
+                ]}
+                onSelect={(id) => setOrientation(id as CharacterOrientation)}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setKeepOriginalSound((v) => !v)}
+                className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                  keepOriginalSound
+                    ? "border-purple-400/50 bg-purple-500/15 text-white"
+                    : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
+                }`}
+                title={keepOriginalSound ? "Keeping the reference video's sound" : "Dropping the reference video's sound"}
+              >
+                {keepOriginalSound ? (
+                  <Volume2 className="h-3.5 w-3.5 text-purple-300" />
+                ) : (
+                  <VolumeX className="h-3.5 w-3.5 text-gray-400" />
+                )}
+                Original sound
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={!canGenerate}
+                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <span>Generate</span>
+                    <Wand2 className="h-4 w-4" />
+                    <span className="text-sm font-extrabold">{cost}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {!imageReady || !videoReady ? (
+            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+              Add both your character image and a motion video to generate.
+            </p>
+          ) : null}
+        </div>
+      </form>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          Generating with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
+        </div>
+      )}
+
+      {resultUrl && !loading && (
+        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
+          <video
+            src={resultUrl}
+            controls
+            playsInline
+            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-black"
+          />
+          <div className="min-w-0">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <Check className="h-3 w-3" />
+              Saved to your library
+            </div>
+            <p className="text-sm text-gray-300">
+              {model.modelLabel} · {mode === "std" ? "Standard" : "Pro"} · {motionControlResolutionLabel(mode)}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Find it in your history below, or generate another.
+            </p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

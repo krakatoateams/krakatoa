@@ -276,3 +276,11 @@ export function klingV3PricingKey(params: {
   // 1080p (pro) is the default tier.
   return params.generateAudio ? "kling3_pro_audio_per_second" : "kling3_pro_per_second";
 }
+
+/**
+ * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
+ * mode: std (720p) vs pro (1080p). Output duration follows the reference video.
+ */
+export function klingV3MotionControlPricingKey(mode: string | null | undefined): string {
+  return mode === "std" ? "kling3mc_std_per_second" : "kling3mc_pro_per_second";
+}

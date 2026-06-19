@@ -487,7 +487,7 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
           <CreationsHistory
             title="Your video assets"
             description="Pick a generated video to schedule — no re-upload needed."
-            tools={["reels_seedance", "reels_veo", "storyboard_video", "video_text2video"]}
+            tools={["reels_seedance", "reels_veo", "storyboard_video", "video_text2video", "video_motion_control"]}
             mediaType="video"
             limit={24}
             selectedUrl={videoUrl}

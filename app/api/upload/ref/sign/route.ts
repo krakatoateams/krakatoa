@@ -17,7 +17,9 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
  *     route after success/failure/insufficient-credits.
  */
 
-const MAX_BYTES = 50 * 1024 * 1024; // 50 MB ceiling
+// 100 MB ceiling — accommodates Motion Control reference videos (Kling allows up
+// to 100 MB). Smaller per-provider limits are enforced by the model schemas.
+const MAX_BYTES = 100 * 1024 * 1024;
 
 const ACCEPTED_MIME_TYPES = new Set([
   // images
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     if (size > MAX_BYTES) {
       return NextResponse.json(
-        { error: "File exceeds the 50 MB limit." },
+        { error: "File exceeds the 100 MB limit." },
         { status: 413 },
       );
     }

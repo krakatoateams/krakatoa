@@ -192,6 +192,16 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 38, enabled: true,
     provider_cost_usd: 0.42, cost_unit: "per_second", pricing_group: "kling3", variant_key: "4k", currency: "USD",
   },
+  // ---- Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) rows (019).
+  // Priced by mode (std=720p / pro=1080p). Duration follows the reference video. ----
+  kling3mc_std_per_second: {
+    pricing_type: "per_second", credit_amount: 7, enabled: true,
+    provider_cost_usd: 0.07, cost_unit: "per_second", pricing_group: "kling3mc", variant_key: "std", currency: "USD",
+  },
+  kling3mc_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 11, enabled: true,
+    provider_cost_usd: 0.12, cost_unit: "per_second", pricing_group: "kling3mc", variant_key: "pro", currency: "USD",
+  },
   storyboard_gpt_image_2_low_per_image: {
     pricing_type: "per_image", credit_amount: 2, enabled: true,
     provider_cost_usd: 0.012, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "low", currency: "USD",
