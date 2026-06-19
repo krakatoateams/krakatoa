@@ -4,6 +4,8 @@ export const CREATION_TOOLS = {
   reels_veo: { label: "Reels (Veo)", mediaType: "video" as const },
   storyboard: { label: "Storyboard", mediaType: "image" as const },
   storyboard_video: { label: "Storyboard Video", mediaType: "video" as const },
+  video_text2video: { label: "Text to Video", mediaType: "video" as const },
+  video_motion_control: { label: "Motion Control", mediaType: "video" as const },
 } as const;
 
 export type CreationTool = keyof typeof CREATION_TOOLS;

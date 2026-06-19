@@ -33,15 +33,53 @@ export type V2PricingDefault = {
 
 export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // Seedance (per second) — also powers Storyboard Video pricing.
+  // "non_video_in" variant (no reference video input): used by Reels/Storyboard
+  // and by Text to Video unless a reference video is attached.
   seedance_480p_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "seedance", variantKey: "480p" },
   seedance_720p_per_second: { providerCostUsd: 0.15, costUnit: "per_second", pricingGroup: "seedance", variantKey: "720p" },
+  // "video_in" variant (a reference video is provided) — Seedance charges more.
+  seedance_480p_video_in_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "seedance", variantKey: "480p_video_in" },
+  seedance_720p_video_in_per_second: { providerCostUsd: 0.17, costUnit: "per_second", pricingGroup: "seedance", variantKey: "720p_video_in" },
+  // Seedance 2.0 (full, bytedance/seedance-2.0) — pricier than the Fast variant and
+  // adds a 1080p tier. non_video_in (no reference video).
+  seedance2_480p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p" },
+  seedance2_720p_per_second: { providerCostUsd: 0.18, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p" },
+  seedance2_1080p_per_second: { providerCostUsd: 0.45, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p" },
+  // Seedance 2.0 (full) — video_in (a reference video is provided).
+  seedance2_480p_video_in_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p_video_in" },
+  seedance2_720p_video_in_per_second: { providerCostUsd: 0.22, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p_video_in" },
+  seedance2_1080p_video_in_per_second: { providerCostUsd: 0.55, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p_video_in" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },
+  // Veo 3.1 Fast (google/veo-3.1-fast, Text to Video). Priced by AUDIO, not
+  // resolution: with audio costs more than without.
+  veo31fast_with_audio_per_second: { providerCostUsd: 0.15, costUnit: "per_second", pricingGroup: "veo31fast", variantKey: "with_audio" },
+  veo31fast_without_audio_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "veo31fast", variantKey: "without_audio" },
+  // Veo 3.1 Lite (google/veo-3.1-lite, Text to Video). No audio; priced by
+  // resolution. Note: 1080p only supports an 8s duration (enforced in the model).
+  veo31lite_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo31lite", variantKey: "720p" },
+  veo31lite_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo31lite", variantKey: "1080p" },
+  // Kling v3 (kwaivgi/kling-v3-video, Text to Video). Priced by mode
+  // (standard=720p / pro=1080p / 4k) × audio. 4k is a flat rate regardless of audio.
+  kling3_standard_per_second: { providerCostUsd: 0.168, costUnit: "per_second", pricingGroup: "kling3", variantKey: "standard" },
+  kling3_standard_audio_per_second: { providerCostUsd: 0.252, costUnit: "per_second", pricingGroup: "kling3", variantKey: "standard_audio" },
+  kling3_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro" },
+  kling3_pro_audio_per_second: { providerCostUsd: 0.336, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro_audio" },
+  kling3_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3", variantKey: "4k" },
+  // Kling v3 Motion Control (kwaivgi/kling-v3-motion-control). Priced by mode
+  // (std=720p / pro=1080p). Output duration follows the reference video.
+  kling3mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "std" },
+  kling3mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "pro" },
   // Storyboard image / GPT Image 2 (per image).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },
   storyboard_gpt_image_2_auto_per_image: { providerCostUsd: 0.128, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "auto" },
+  // Storyboard import — GPT-5 vision analysis of a user-UPLOADED storyboard sheet
+  // to synthesize the seedance_prompt. No image is generated (cheaper than a
+  // storyboard image render). Charged once per analyzed sheet. ~0.033 USD → 3 cr
+  // at the current billing knobs (factor 90).
+  storyboard_import_vision_per_image: { providerCostUsd: 0.033, costUnit: "per_image", pricingGroup: "storyboard_import", variantKey: "vision" },
   // Product Photo model tiers (per image) — v2.3.
   //   basic    -> google/nano-banana      (no resolution)
   //   balanced -> google/nano-banana-2     (1K/2K/4K)

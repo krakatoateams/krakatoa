@@ -30,12 +30,7 @@ import {
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
-
-// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
-// attempt, sent as the Idempotency-Key header (never inside FormData). Not persisted.
-function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
+import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 
 // Translate the idempotency status codes into a user-facing message; null otherwise.
 function describeIdempotencyError(
@@ -68,6 +63,8 @@ export default function ProductPhotoPage() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
+  const { begin: beginSubmit } = useIdempotentSubmit();
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -129,6 +126,23 @@ export default function ProductPhotoPage() {
     if (!productFile) return;
     if (loading) return;
 
+    // Signature mirrors the form settings the server hashes, plus the file
+    // identity (the server hash ignores image bytes) so swapping the product
+    // image rotates the key instead of replaying the previous result. Stable key
+    // + synchronous lock stop a double-click / retry from charging twice.
+    const signature = [
+      "photo",
+      productFile.name,
+      productFile.size,
+      productFile.lastModified,
+      poseId,
+      styleId,
+      modelTier,
+      tier.hasResolution ? resolution : "",
+    ].join(":");
+    const attempt = beginSubmit(signature);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setWarning(null);
@@ -147,7 +161,7 @@ export default function ProductPhotoPage() {
 
       const response = await fetch("/api/generate-photo", {
         method: "POST",
-        headers: { "Idempotency-Key": newIdempotencyKey() },
+        headers: { "Idempotency-Key": attempt.key },
         body: formData,
       });
 
@@ -163,12 +177,14 @@ export default function ProductPhotoPage() {
         throw new Error(data.error || "Generation failed");
       }
 
+      attempt.settle(true);
       setResultUrl(data.imageUrl);
       if (data.warning) setWarning(data.warning);
 
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
     } finally {

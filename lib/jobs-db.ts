@@ -134,6 +134,32 @@ export async function failJob(
   return (data as Job | null) ?? null;
 }
 
+/** Mark a job 'cancelled' with a structured error/reason JSON (ownership-checked). */
+export async function cancelJob(
+  profileId: string,
+  jobId: string,
+  reason?: Record<string, unknown> | string
+): Promise<Job | null> {
+  const patch: Record<string, unknown> = {
+    status: "cancelled",
+    finished_at: new Date().toISOString(),
+  };
+  if (reason !== undefined) {
+    patch.error = typeof reason === "string" ? { message: reason } : reason;
+  }
+
+  const { data, error: dbError } = await supabaseServer
+    .from(JOBS_TABLE)
+    .update(patch)
+    .eq("id", jobId)
+    .eq("profile_id", profileId)
+    .select("*")
+    .maybeSingle();
+
+  handleError(dbError, "Failed to mark job cancelled.");
+  return (data as Job | null) ?? null;
+}
+
 /** List a profile's jobs (newest first). */
 export async function listJobs(
   profileId: string,

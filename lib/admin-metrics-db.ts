@@ -328,6 +328,99 @@ export type TopUser = {
   lifetime_spent: number;
 };
 
+export type AdminWallet = {
+  email: string;
+  role: string;
+  profile_id: string | null;
+  balance: number;
+  lifetime_spent: number;
+};
+
+/**
+ * Active admins with their current credit balances. Used by the admin Credits
+ * tab to expose per-admin reset/top-up of the dummy balance.
+ *
+ * admin_users is keyed by email (not an FK to profiles), so this resolves the
+ * profile id by email when the row has not been linked yet, then reads the
+ * wallet by profile id. An admin who has never signed in has no profile/wallet
+ * and shows a 0 balance with a null profile_id (not resettable until sign-in).
+ */
+export async function getAdminWallets(): Promise<AdminWallet[]> {
+  const { data: adminRows, error: adminErr } = await supabaseServer
+    .from("admin_users")
+    .select("email, role, profile_id, granted_at")
+    .eq("status", "active")
+    .order("role", { ascending: true })
+    .order("granted_at", { ascending: true });
+  if (adminErr) throw new Error(adminErr.message);
+
+  const admins =
+    (adminRows as {
+      email: string;
+      role: string;
+      profile_id: string | null;
+    }[] | null) ?? [];
+  if (admins.length === 0) return [];
+
+  const emails = admins.map((a) => a.email.toLowerCase());
+
+  // Resolve profile ids by email (covers admin rows not yet linked to a profile).
+  const { data: profRows, error: profErr } = await supabaseServer
+    .from("profiles")
+    .select("id, email")
+    .in("email", emails);
+  if (profErr) throw new Error(profErr.message);
+
+  const profileIdByEmail = new Map<string, string>();
+  for (const p of (profRows as { id: string; email: string | null }[] | null) ??
+    []) {
+    if (p.email) profileIdByEmail.set(p.email.toLowerCase(), p.id);
+  }
+
+  const resolved = admins.map((a) => ({
+    email: a.email,
+    role: a.role,
+    profile_id: a.profile_id ?? profileIdByEmail.get(a.email.toLowerCase()) ?? null,
+  }));
+
+  const profileIds = resolved
+    .map((r) => r.profile_id)
+    .filter((x): x is string => Boolean(x));
+
+  const walletByProfile = new Map<
+    string,
+    { balance: number; lifetime_spent: number }
+  >();
+  if (profileIds.length > 0) {
+    const { data: walletRows, error: walletErr } = await supabaseServer
+      .from("credit_wallets")
+      .select("profile_id, balance, lifetime_spent")
+      .in("profile_id", profileIds);
+    if (walletErr) throw new Error(walletErr.message);
+    for (const w of (walletRows as {
+      profile_id: string;
+      balance: number;
+      lifetime_spent: number;
+    }[] | null) ?? []) {
+      walletByProfile.set(w.profile_id, {
+        balance: w.balance ?? 0,
+        lifetime_spent: w.lifetime_spent ?? 0,
+      });
+    }
+  }
+
+  return resolved.map((r) => {
+    const wallet = r.profile_id ? walletByProfile.get(r.profile_id) : undefined;
+    return {
+      email: r.email,
+      role: r.role,
+      profile_id: r.profile_id,
+      balance: wallet?.balance ?? 0,
+      lifetime_spent: wallet?.lifetime_spent ?? 0,
+    };
+  });
+}
+
 /** Recent credit transactions + top users by lifetime spend. */
 export async function getAdminCredits(options?: { limit?: number }): Promise<{
   recentTransactions: LedgerEntry[];

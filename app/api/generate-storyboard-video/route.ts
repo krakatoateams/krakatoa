@@ -7,9 +7,10 @@ import {
   STORYBOARDS_TABLE,
   videosStoryboardPath,
 } from "@/lib/storage-buckets";
-import { extractMediaUrl, runReplicateWithRetry } from "@/lib/replicate-server";
+import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
+import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed, findStoryboardImageAsset } from "@/lib/assets-db";
 import { createAssetRelation } from "@/lib/asset-relations-db";
@@ -34,6 +35,16 @@ import {
 import {
   resolveStoryboardStyle,
   storyboardVideoStyleDirective,
+  resolveStoryboardAspectRatio,
+  storyboardVideoAspectDirective,
+  storyboardVideoDimensions,
+  resolveStoryboardLanguage,
+  storyboardLanguageDirective,
+  fitSeedancePrompt,
+  SEEDANCE_PROMPT_MAX_CHARS,
+  DEFAULT_STORYBOARD_LANGUAGE,
+  type StoryboardAspectRatio,
+  type StoryboardLanguageId,
 } from "@/lib/storyboard-style";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
@@ -47,13 +58,6 @@ const UUID_RE =
 // (480p → ~95 cr, 720p → ~203 cr). Default 480p keeps internal-testing cost low.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 type StoryboardVideoResolution = "480p" | "720p";
-const STORYBOARD_VIDEO_DIMENSIONS: Record<
-  StoryboardVideoResolution,
-  { width: number; height: number }
-> = {
-  "480p": { width: 854, height: 480 },
-  "720p": { width: 1280, height: 720 },
-};
 
 export async function POST(req: Request) {
   // Platform-observability trackers — declared before the try so the catch block
@@ -67,6 +71,10 @@ export async function POST(req: Request) {
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
   let generationRequestId: string | null = null;
+  // Cleanup handles so the catch can reset a stuck storyboard out of
+  // 'video_generating' on cancellation/failure (declared before the try).
+  let storyboardIdForCleanup: string | null = null;
+  let supabaseForCleanup: ReturnType<typeof getSupabase> | null = null;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -149,7 +157,7 @@ export async function POST(req: Request) {
 
     const { data: row, error: fetchError } = await supabase
       .from(STORYBOARDS_TABLE)
-      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style")
+      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style, aspect_ratio, language")
       .eq("id", storyboardId)
       .single();
 
@@ -164,8 +172,40 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Storyboard not found." }, { status: 404 });
     }
 
+    // Aspect ratio is OWNED by the storyboard so the video matches its orientation
+    // (a vertical storyboard must never produce a horizontal video). The stored
+    // value wins; a client-sent aspectRatio is only a fallback for legacy rows
+    // saved before the column existed.
+    const storedAspect: StoryboardAspectRatio | null = row.aspect_ratio
+      ? resolveStoryboardAspectRatio(row.aspect_ratio)
+      : null;
+    const aspectRatio: StoryboardAspectRatio =
+      storedAspect ?? resolveStoryboardAspectRatio(body.aspectRatio);
+
+    // Spoken language. Unlike aspect ratio, language is a SOFT property: the model
+    // can be re-instructed to speak another language, so a client-sent value wins
+    // (lets the user change it at video time). Otherwise inherit the storyboard's
+    // stored language, then fall back to the default (English).
+    const clientLanguage: StoryboardLanguageId | null =
+      typeof body.language === "string" && body.language.trim()
+        ? resolveStoryboardLanguage(body.language)
+        : null;
+    const storedLanguage: StoryboardLanguageId | null = row.language
+      ? resolveStoryboardLanguage(row.language)
+      : null;
+    const language: StoryboardLanguageId =
+      clientLanguage ?? storedLanguage ?? DEFAULT_STORYBOARD_LANGUAGE;
+
     const storyboardUrl = String(row.storyboard_url || "").trim();
-    let seedancePrompt = String(row.seedance_prompt || "").trim();
+    const storedPrompt = String(row.seedance_prompt || "").trim();
+    // Optional edited prompt from the Advanced "edit prompt" UI. Ownership is
+    // already enforced above (row.user_id === userId), so the owner may override
+    // the stored seedance_prompt; the edit is persisted below (after the spend)
+    // so it sticks for future runs. The raw edited text is stored — the
+    // style/aspect/language directives are re-applied transiently per run.
+    const editedPrompt = typeof body.seedancePrompt === "string" ? body.seedancePrompt.trim() : "";
+    const promptEdited = !!editedPrompt && editedPrompt !== storedPrompt;
+    let seedancePrompt = promptEdited ? editedPrompt : storedPrompt;
 
     if (!storyboardUrl.startsWith("https://")) {
       return NextResponse.json(
@@ -185,8 +225,13 @@ export async function POST(req: Request) {
     // 'video_generating'. The status remains whatever it was on the
     // insufficient-credits / pre-spend infra-failure paths.
 
-    if (!/\[Image1\]/i.test(seedancePrompt)) {
-      seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
+    // ---- Assemble the final Seedance prompt within the 2000-char limit ----
+    // The descriptive BODY (the stored/edited seedance_prompt, plus the [Image1]
+    // composition reference) carries the scene beats and dialogue; the PREFIX
+    // carries the framing directives that must survive.
+    let promptBody = seedancePrompt;
+    if (!/\[Image1\]/i.test(promptBody)) {
+      promptBody = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${promptBody}`;
     }
 
     // Honor the storyboard's chosen visual style in the VIDEO, not just the sheet.
@@ -195,7 +240,19 @@ export async function POST(req: Request) {
     // render in the picked aesthetic. The storyboard image stays the primary
     // composition reference; this directive sets the rendering style.
     const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
-    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n\n${seedancePrompt}`;
+    const promptPrefix = `${storyboardVideoStyleDirective(storyboardStyle)}\n${storyboardVideoAspectDirective(aspectRatio)}\n${storyboardLanguageDirective(language)}`;
+
+    // Seedance 2.0 hard-truncates prompts over 2000 chars FROM THE END, which
+    // would silently drop the closing scene beats + dialogue. Build the prompt
+    // ourselves so the framing directives are preserved and only the body is
+    // trimmed at a clean sentence/word boundary when it would overflow.
+    const fitted = fitSeedancePrompt(promptPrefix, promptBody);
+    seedancePrompt = fitted.prompt;
+    if (fitted.truncated) {
+      console.warn(
+        `[Storyboard Video] Seedance prompt trimmed from ${fitted.originalLength} to ${seedancePrompt.length} chars to fit the ${SEEDANCE_PROMPT_MAX_CHARS}-char limit (storyboard ${storyboardId}). Consider shortening the prompt for full fidelity.`
+      );
+    }
 
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,
@@ -217,7 +274,14 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec });
+    const requestHash = computeRequestHash({
+      storyboardId,
+      resolution,
+      durationSec,
+      aspectRatio,
+      language,
+      promptOverride: promptEdited ? editedPrompt : null,
+    });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -253,7 +317,7 @@ export async function POST(req: Request) {
       jobType: "storyboard_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      input: { storyboardId, resolution, durationSec, style: storyboardStyle },
+      input: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
     if (job) {
       jobId = job.id;
@@ -281,6 +345,8 @@ export async function POST(req: Request) {
           storyboardId,
           resolution,
           durationSec,
+          aspectRatio,
+          language,
           style: storyboardStyle,
         },
       });
@@ -319,9 +385,17 @@ export async function POST(req: Request) {
     }
 
     // ---- Storyboard status + processing asset (created AFTER spend succeeds) ----
+    // Persist an edited prompt here (not before the spend) so an insufficient-
+    // credits abort never rewrites the stored prompt. Store the RAW edited text.
+    const statusUpdate: Record<string, unknown> = { status: "video_generating" };
+    if (promptEdited) statusUpdate.seedance_prompt = editedPrompt;
+    // Arm cleanup: from here the storyboard is in 'video_generating', so a later
+    // cancel/failure must reset it (see catch) to avoid a stuck spinner.
+    storyboardIdForCleanup = storyboardId;
+    supabaseForCleanup = supabase;
     const { error: statusErr } = await supabase
       .from(STORYBOARDS_TABLE)
-      .update({ status: "video_generating" })
+      .update(statusUpdate)
       .eq("id", storyboardId);
     if (statusErr) {
       console.error("[Storyboard Video] status update:", statusErr);
@@ -336,7 +410,7 @@ export async function POST(req: Request) {
       role: "final_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
+      metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -361,7 +435,20 @@ export async function POST(req: Request) {
     };
 
     await beginStep("video_generation", "Seedance video from storyboard reference");
-    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, 16:9, audio, reference)...`);
+    // If the user already hit Cancel between spend and provider call, abort now so
+    // we never start (and pay for) a provider run we're about to throw away.
+    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
+    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`);
+    // Record each Replicate prediction id so POST /api/generations/cancel can stop
+    // this run mid-flight (the SDK progress callback fires on create + each poll).
+    const recordPredictionTick = makePredictionRecorder({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "storyboard_video",
+    });
     const videoResult = await runReplicateWithRetry(
       replicate,
       videoModelRef,
@@ -372,10 +459,20 @@ export async function POST(req: Request) {
           duration: durationSec,
           generate_audio: true,
           resolution,
-          aspect_ratio: "16:9",
+          aspect_ratio: aspectRatio,
         },
-      }
+      },
+      10,
+      { onPrediction: recordPredictionTick }
     );
+
+    // Post-run cancel safety net: if the user cancelled while the prediction was
+    // still in the provider's initial (pre-poll) window — before its id was
+    // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
+    // refunding and NOT delivering the result, rather than charging for an unwanted clip.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
 
     const videoRemoteUrl = extractMediaUrl(videoResult);
     if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
@@ -437,10 +534,10 @@ export async function POST(req: Request) {
         publicUrl: videoUrl,
         mimeType: "video/mp4",
         durationSec,
-        width: STORYBOARD_VIDEO_DIMENSIONS[resolution].width,
-        height: STORYBOARD_VIDEO_DIMENSIONS[resolution].height,
+        width: storyboardVideoDimensions(resolution, aspectRatio).width,
+        height: storyboardVideoDimensions(resolution, aspectRatio).height,
         costCredits: creditsAmount,
-        metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
+        metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -459,7 +556,7 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, style: storyboardStyle },
+        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
         costCredits: creditsAmount,
       }));
     }
@@ -475,7 +572,7 @@ export async function POST(req: Request) {
       unitType: "video_seconds",
       units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, style: storyboardStyle },
+      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
 
     let historyItem;
@@ -489,6 +586,8 @@ export async function POST(req: Request) {
         title: String(row.theme || "Storyboard video").slice(0, 200),
         metadata: {
           storyboardId,
+          aspectRatio,
+          language,
           ...(row.theme ? { prompt: String(row.theme) } : {}),
         },
       });
@@ -496,7 +595,7 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    const successResponse = { videoUrl, historyItem };
+    const successResponse = { videoUrl, aspectRatio, language, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,
@@ -507,16 +606,25 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : String(error ?? "Unknown error");
-    console.error("[Storyboard Video] Error:", error);
+    // User-initiated cancellation is a normal outcome, not a failure: the job is
+    // marked 'cancelled' (not 'failed') and credits are refunded below.
+    const cancelled = isCancellation(error);
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error ?? "Unknown error");
+    if (cancelled) console.log("[Storyboard Video] Cancelled by user.");
+    else console.error("[Storyboard Video] Error:", error);
     // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
     // and any provider call, so no credits were charged and no provider ran.
     const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -524,11 +632,27 @@ export async function POST(req: Request) {
     if (videoAssetId && profileId) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
+    // Reset the storyboard out of 'video_generating' back to 'ready' so a
+    // cancelled/failed run does not leave it stuck spinning, and the user can
+    // immediately retry video generation.
+    if (storyboardIdForCleanup && supabaseForCleanup) {
+      await safe("resetStoryboardStatus", async () => {
+        await supabaseForCleanup!
+          .from(STORYBOARDS_TABLE)
+          .update({ status: "ready" })
+          .eq("id", storyboardIdForCleanup!);
+      });
+    }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when spendCredits actually succeeded.
+    // Best-effort refund. Fires whenever spendCredits succeeded — covers both
+    // failures and user cancellations (the user must not pay for a cancelled run).
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -537,8 +661,10 @@ export async function POST(req: Request) {
           ? `refund:storyboard_video:${jobId}`
           : `refund:storyboard_video:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after generation failure",
-        metadata: { reason: "generation_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after generation failure",
+        metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
       }));
     }
 
@@ -550,6 +676,12 @@ export async function POST(req: Request) {
       }));
     }
 
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
       { status: 500 }

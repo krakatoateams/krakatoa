@@ -42,6 +42,9 @@ export const VIDEOS_FOLDER = "videos";
 /** Ephemeral ReelsGen assets (e.g. .ass passed to Rendi, then deleted) */
 export const VIDEOS_TEMP_SEGMENT = "temp";
 
+/** Transient generation reference uploads (first/last frame, ref images/videos/audios). */
+export const VIDEOS_TEMP_REFS_SEGMENT = "refs";
+
 /** Storyboard tab: GPT Image outputs + Seedance finals under `videos/storyboard/` */
 export const VIDEOS_STORYBOARD_SEGMENT = "storyboard";
 
@@ -56,6 +59,23 @@ export function videosStoragePath(filename: string): string {
 /** Transient ReelsGen files under `videos/temp/` (captions, scratch uploads). */
 export function videosTempStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/${filename}`;
+}
+
+/** Prefix for transient generation reference uploads (`videos/temp/refs/`). */
+export const VIDEOS_TEMP_REFS_PREFIX = `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/${VIDEOS_TEMP_REFS_SEGMENT}/`;
+
+/**
+ * Transient generation reference uploads under `videos/temp/refs/<filename>`.
+ * Covered by the `videos/temp/` storage sweep, and explicitly removed by the
+ * generation route's `finally` cleanup after success/failure/insufficient-credits.
+ */
+export function videosTempRefPath(filename: string): string {
+  return `${VIDEOS_TEMP_REFS_PREFIX}${filename}`;
+}
+
+/** Whether a storage path lives under the transient reference-uploads prefix. */
+export function isVideosTempRefPath(path: string): boolean {
+  return typeof path === "string" && path.startsWith(VIDEOS_TEMP_REFS_PREFIX);
 }
 
 /** Storyboard tab assets: `videos/storyboard/<filename>` */

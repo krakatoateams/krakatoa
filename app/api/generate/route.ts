@@ -5,9 +5,11 @@ import { insertUserCreation } from '@/lib/creations-db';
 import { supabase } from '@/lib/supabase';
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
 import { requireCurrentProfile } from '@/lib/profiles-db';
-import { createJob, startJob, finishJob, failJob } from '@/lib/jobs-db';
+import { createJob, startJob, finishJob, failJob, cancelJob } from '@/lib/jobs-db';
 import { createJobStep, finishJobStep, failJobStep } from '@/lib/job-steps-db';
 import { createProcessingAsset, markAssetReady, markAssetFailed } from '@/lib/assets-db';
+import { ReplicateCancellationError, isCancellation } from '@/lib/replicate-server';
+import { recordPrediction, isCancelRequested } from '@/lib/generation-cancel';
 import {
   spendCredits,
   refundCredits,
@@ -142,9 +144,35 @@ export async function POST(req: Request) {
 
     const runWithRetry = async (model: any, options: any, maxRetries = 10) => {
       for (let i = 0; i < maxRetries; i++) {
+        // Per-attempt status tracking: an external cancellation makes replicate.run
+        // resolve with status 'canceled' (it only THROWS on 'failed'), so we detect
+        // it here and surface a ReplicateCancellationError. The progress callback
+        // also records every prediction id so POST /api/generations/cancel can stop
+        // this run (and every parallel scene run) mid-flight.
+        let lastStatus: string | undefined;
+        const progress = (prediction: any) => {
+          if (!prediction || typeof prediction !== 'object') return;
+          lastStatus = prediction.status;
+          const id = prediction.id;
+          if (generationRequestId && profileId && typeof id === 'string' && id) {
+            void recordPrediction({
+              generationRequestId,
+              profileId,
+              jobId,
+              predictionId: id,
+              kind: 'reels_seedance',
+              status: String(prediction.status ?? ''),
+            });
+          }
+        };
         try {
-          return await replicate.run(model, options);
+          const result = await replicate.run(model, options, progress);
+          if (lastStatus === 'canceled' || lastStatus === 'aborted') {
+            throw new ReplicateCancellationError();
+          }
+          return result;
         } catch (e: any) {
+          if (e instanceof ReplicateCancellationError) throw e;
           const errMsg = e.message || String(e);
           if (errMsg.includes('429')) {
             let delayMs = 15000; // default 15 seconds
@@ -700,6 +728,11 @@ Return ONLY raw JSON array, nothing else.`;
     // Each scene's video is exactly DURATION_PER_SCENE seconds (user's choice).
     // Total reel = SCENE_COUNT * DURATION_PER_SCENE.
     await beginStep('video_generation', 'Parallel Seedance scene videos', { scenes: SCENE_COUNT, perSceneDuration: DURATION_PER_SCENE, resolution: RESOLUTION });
+    // If the user cancelled during the (cheap) LLM/TTS steps, abort before kicking
+    // off the expensive parallel Seedance runs.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
     console.log(`[Step 5] Parallel Seedance video generation (${DURATION_PER_SCENE}s per scene)...`);
     const videoPromises = scenes.map(scene => {
       console.log(`[Seedance] Scene ${scene.scene_id}: requesting ${DURATION_PER_SCENE}s`);
@@ -716,6 +749,12 @@ Return ONLY raw JSON array, nothing else.`;
     });
 
     const videoResponses = await Promise.all(videoPromises);
+    // Post-run cancel safety net: honor a cancel that landed before any scene
+    // prediction id was recorded (refund + no delivery, skipping the costly Rendi
+    // stitch) instead of charging for an unwanted reel.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
     const sceneVideoUrls: string[] = videoResponses.map((res, i) => {
       const url = extractMediaUrl(res);
       if (!url || !url.startsWith('http')) {
@@ -1084,15 +1123,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return NextResponse.json(successResponse);
 
   } catch (error: any) {
-    console.error('Generate pipeline error:', error);
+    // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
+    const cancelled = isCancellation(error);
+    if (cancelled) console.log('[reels] Cancelled by user.');
+    else console.error('Generate pipeline error:', error);
 
     // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
     // and any provider call, so no credits were charged and no provider ran.
     const pricingMissing = error instanceof PricingConfigError;
+    const message = cancelled ? 'Generation cancelled.' : (error?.message || String(error));
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message: error?.message || String(error), code: 'PRICING_CONFIG_MISSING' }
-      : { message: error?.message || String(error) };
+    const errJson = cancelled
+      ? { message, code: 'GENERATION_CANCELLED' }
+      : pricingMissing
+        ? { message, code: 'PRICING_CONFIG_MISSING' }
+        : { message };
     if (currentStepId && profileId) {
       await safe('failStep', () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -1101,14 +1146,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       await safe('failAsset', () => markAssetFailed(profileId!, finalAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe('failJob', () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe('cancelJob', () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe('failJob', () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when a spend actually succeeded (the
-    // InsufficientCreditsError path never sets creditsSpent=true, and a 500
-    // before the spend block also leaves it false). Wrapped in safe() so a
-    // refund failure cannot mask the original generation error — the spend
-    // ledger row stays in the DB and can be reconciled manually.
+    // Best-effort refund. Fires whenever a spend actually succeeded — covering
+    // both failures AND user cancellations (the user must not pay for a cancelled
+    // run). The InsufficientCreditsError path never sets creditsSpent=true.
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe('refundCredits', () => refundCredits({
         profileId: profileId!,
@@ -1117,8 +1164,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           ? `refund:reels_seedance:${jobId}`
           : `refund:reels_seedance:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: 'Best-effort refund after generation failure',
-        metadata: { reason: 'generation_failed', originalError: errJson },
+        description: cancelled
+          ? 'Refund after user cancellation'
+          : 'Best-effort refund after generation failure',
+        metadata: { reason: cancelled ? 'generation_cancelled' : 'generation_failed', originalError: errJson },
       }));
     }
 
@@ -1132,10 +1181,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       }));
     }
 
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: 'GENERATION_CANCELLED', refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       pricingMissing
-        ? { error: error.message || String(error), code: 'PRICING_CONFIG_MISSING' }
-        : { error: error.message || String(error) },
+        ? { error: message, code: 'PRICING_CONFIG_MISSING' }
+        : { error: message },
       { status: 500 }
     );
   }

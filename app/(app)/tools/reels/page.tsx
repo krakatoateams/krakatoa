@@ -1,19 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, LayoutGrid, X, CalendarClock } from "lucide-react";
+import { ArrowLeft, Video, Settings, Play, Download, Sparkles, AlertCircle, Loader2, RefreshCw, Layers, Clock, Monitor, Mic, Smile, CalendarClock, X } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { seedancePricingKey, veoPricingKey } from "@/lib/pricing-math";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
-
-// Generation idempotency (Double-Charge Protection v1): one fresh key per submit
-// attempt, sent as the Idempotency-Key header. Not persisted anywhere — a browser/
-// network retry of the SAME in-flight request reuses it; a new submit gets a new key.
-function newIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
+import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 
 // Translate the idempotency status codes into a user-facing message. Returns null
 // when the response is not an idempotency signal (so callers fall through).
@@ -89,34 +83,6 @@ const humanizeVoice = (id: string) =>
 
 const humanizeEmotion = (e: string) => e === "auto" ? "Auto (let AI decide)" : e.charAt(0).toUpperCase() + e.slice(1);
 
-type StoryboardRow = {
-  id: string;
-  created_at: string;
-  theme: string;
-  storyboard_url: string;
-  seedance_prompt: string;
-  scene_breakdown: unknown;
-  status: string | null;
-  video_url: string | null;
-  storyboard_style?: string | null;
-};
-
-const STORYBOARD_STYLE_OPTIONS = [
-  { value: "cinematic_sketch", label: "Cinematic Sketch" },
-  { value: "painterly_color", label: "Painterly Color" },
-  { value: "comic_book", label: "Comic Book" },
-  { value: "photorealistic", label: "Photorealistic" },
-  { value: "anime_manga", label: "Anime / Manga" },
-] as const;
-
-function storyboardStyleDisplayName(
-  style: string | null | undefined
-): string {
-  const key = style ?? "cinematic_sketch";
-  const found = STORYBOARD_STYLE_OPTIONS.find((o) => o.value === key);
-  return found?.label ?? "Cinematic Sketch";
-}
-
 export default function ReelsPage() {
   const [theme, setTheme] = useState("");
   const [numScenes, setNumScenes] = useState(1);
@@ -128,6 +94,9 @@ export default function ReelsPage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts). One
+  // instance covers both engines — they share `loading` and are mutually exclusive.
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   
   const [testAudioPredictionId, setTestAudioPredictionId] = useState("g99vpsrf3hrmr0cy1jvtwy72cw");
   const [testVideoPredictionId, setTestVideoPredictionId] = useState("qxhe8d8dqhrmr0cy1jvryg745r");
@@ -143,19 +112,7 @@ export default function ReelsPage() {
     highlightOnly: true
   });
 
-  const [engineTab, setEngineTab] = useState<"storyboard" | "veo" | "seedance">("storyboard");
-  const [storyboardTheme, setStoryboardTheme] = useState("");
-  const [storyboardStyle, setStoryboardStyle] = useState<string>("cinematic_sketch");
-  const [storyboardStyleFilter, setStoryboardStyleFilter] = useState<string>("all");
-  const [storyboardUrl, setStoryboardUrl] = useState<string | null>(null);
-  const [storyboardId, setStoryboardId] = useState<string | null>(null);
-  const [storyboards, setStoryboards] = useState<StoryboardRow[]>([]);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [videoJobStoryboardId, setVideoJobStoryboardId] = useState<string | null>(null);
-  const [storyboardLoading, setStoryboardLoading] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
-  /** Last successful `videoUrl` is 16:9 storyboard Seedance (not vertical Reels). */
-  const [resultIsStoryboardFormat, setResultIsStoryboardFormat] = useState(false);
+  const [engineTab, setEngineTab] = useState<"veo" | "seedance">("seedance");
   const [veoMode, setVeoMode] = useState<"single" | "perScene">("single");
   const [veoDuration, setVeoDuration] = useState<4 | 6 | 8>(6);
   const [veoResolution, setVeoResolution] = useState<"720p" | "1080p">("720p");
@@ -163,22 +120,11 @@ export default function ReelsPage() {
   const [veoNumScenes, setVeoNumScenes] = useState(1);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
-  // Effective pricing (Pricing Config v2.2): the resolver-backed billing settings
-  // and per-tier provider costs are fetched once on mount. Labels compute through
-  // the SAME shared pricing math the server bills with (videoCredits/imageCredits),
-  // so the on-screen cost matches the charge within the ~60s cache window. For any
-  // key not yet fetched the context falls back to the built-in v2 defaults.
-  const { videoCredits, imageCredits } = usePricing();
-
-  // Storyboard-to-video resolution (Pricing Config v2.2). Drives the Seedance
-  // per-second pricing tier for the fixed 15s clip. Default 480p (lower cost).
-  // This one is for the ACTIVE storyboard preview (single, just-generated board).
-  const [storyboardVideoResolution, setStoryboardVideoResolution] = useState<"480p" | "720p">("480p");
-  // Per-card resolution for the Storyboard GALLERY (each saved card chooses its
-  // own 480p/720p independently). Keyed by storyboard id; missing = default 480p.
-  const [galleryVideoResolution, setGalleryVideoResolution] = useState<
-    Record<string, "480p" | "720p">
-  >({});
+  // Effective pricing (Pricing Config v2.2): per-tier provider costs are fetched
+  // once on mount. Labels compute through the SAME shared pricing math the server
+  // bills with (videoCredits), so the on-screen cost matches the charge within the
+  // ~60s cache window. Storyboard creation now lives in the Photo + Video menus.
+  const { videoCredits } = usePricing();
 
   // Credit cost previews — provider-cost based. Video totals the duration first,
   // then converts to credits with a single final ceil (no per-second rounding).
@@ -199,48 +145,6 @@ export default function ReelsPage() {
     // by the (clamped) scene count.
     return videoCredits(veoPricingKey(veoResolution), dur * sceneCount);
   }, [veoMode, veoDuration, veoNumScenes, veoResolution, videoCredits]);
-  const storyboardImageCost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
-  // 15s fixed clip priced via the Seedance tier for the selected resolution.
-  const storyboardVideoCost = videoCredits(
-    seedancePricingKey(storyboardVideoResolution),
-    15
-  );
-
-  const fetchStoryboards = useCallback(async () => {
-    try {
-      const res = await fetch("/api/storyboards");
-      const data = await res.json();
-      if (!res.ok) {
-        console.error("[Storyboard gallery]", data.error);
-        return;
-      }
-      setStoryboards((data.storyboards as StoryboardRow[]) ?? []);
-    } catch (err) {
-      console.error("[Storyboard gallery]", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchStoryboards();
-  }, [fetchStoryboards]);
-
-  useEffect(() => {
-    if (engineTab !== "storyboard") setLightboxUrl(null);
-  }, [engineTab]);
-
-  const filteredStoryboardGalleryRows = useMemo(() => {
-    if (storyboardStyleFilter === "all") return storyboards;
-    return storyboards.filter(
-      (r) =>
-        (r.storyboard_style ?? "cinematic_sketch") === storyboardStyleFilter
-    );
-  }, [storyboards, storyboardStyleFilter]);
-
-  const playStoryboardVideo = (videoUrl: string) => {
-    setVideoUrl(videoUrl);
-    setResultIsStoryboardFormat(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
 
   const resolveEmotionForVeo = () => (emotion === "auto" ? "neutral" : emotion);
 
@@ -249,10 +153,22 @@ export default function ReelsPage() {
     if (!theme.trim()) return;
     if (loading) return;
 
+    const body = {
+      theme,
+      numScenes: Number(numScenes),
+      durationPerScene: Number(durationPerScene),
+      resolution,
+      voiceId,
+      emotion,
+      captionStyle,
+    };
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`reels-seedance:${JSON.stringify(body)}`);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setVideoUrl(null);
-    setResultIsStoryboardFormat(false);
     setLogs(["Starting generation pipeline..."]);
 
     try {
@@ -260,22 +176,22 @@ export default function ReelsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
-        body: JSON.stringify({
-          theme,
-          numScenes: Number(numScenes),
-          durationPerScene: Number(durationPerScene),
-          resolution,
-          voiceId,
-          emotion,
-          captionStyle
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          refetchCredits();
+          setLogs((prev) => [...prev, "Generation cancelled — credits refunded."]);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? seedanceCost}, current: ${data.currentBalance ?? 0}.`
@@ -286,11 +202,13 @@ export default function ReelsPage() {
         throw new Error(data.error || "Failed to generate video");
       }
 
+      attempt.settle(true);
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
       setLogs((prev) => [...prev, "Video generated successfully!"]);
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
       setLogs((prev) => [...prev, `Error: ${message}`]);
@@ -304,42 +222,54 @@ export default function ReelsPage() {
     if (!theme.trim()) return;
     if (loading) return;
 
+    if (veoResolution === "1080p" && veoDuration !== 8) {
+      setError("1080p requires 8 second duration.");
+      return;
+    }
+    const emotionForApi = resolveEmotionForVeo();
+    const payload: Record<string, unknown> = {
+      theme,
+      captionStyle,
+      voiceId,
+      emotion: emotionForApi,
+      duration: veoDuration,
+      resolution: veoResolution,
+      mode: veoMode === "single" ? "single" : "perScene",
+    };
+    if (veoMode === "single") {
+      payload.singlePromptScenes = singlePromptScenes;
+    } else {
+      payload.numScenes = Number(veoNumScenes);
+    }
+
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`reels-veo:${JSON.stringify(payload)}`);
+    if (!attempt) return;
+
     setLoading(true);
     setError(null);
     setVideoUrl(null);
-    setResultIsStoryboardFormat(false);
     setLogs(["Starting Veo generation pipeline..."]);
 
     try {
-      if (veoResolution === "1080p" && veoDuration !== 8) {
-        throw new Error("1080p requires 8 second duration.");
-      }
-      const emotionForApi = resolveEmotionForVeo();
-      const payload: Record<string, unknown> = {
-        theme,
-        captionStyle,
-        voiceId,
-        emotion: emotionForApi,
-        duration: veoDuration,
-        resolution: veoResolution,
-        mode: veoMode === "single" ? "single" : "perScene",
-      };
-      if (veoMode === "single") {
-        payload.singlePromptScenes = singlePromptScenes;
-      } else {
-        payload.numScenes = Number(veoNumScenes);
-      }
-
       const response = await fetch("/api/generate-veo", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
+          "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          refetchCredits();
+          setLogs((prev) => [...prev, "Generation cancelled — credits refunded."]);
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? veoCost}, current: ${data.currentBalance ?? 0}.`
@@ -349,11 +279,13 @@ export default function ReelsPage() {
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(data.error || "Failed to generate video");
       }
+      attempt.settle(true);
       setVideoUrl(data.videoUrl);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
       setLogs((prev) => [...prev, "Veo pipeline completed successfully!"]);
     } catch (err: unknown) {
+      attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
       setLogs((prev) => [...prev, `Error: ${message}`]);
@@ -363,119 +295,11 @@ export default function ReelsPage() {
   };
 
   const onFormSubmit = (e: React.FormEvent) => {
-    if (engineTab === "storyboard") {
-      e.preventDefault();
-      return;
-    }
     if (engineTab === "seedance") {
       void handleGenerate(e);
     } else {
       void handleVeoGenerate(e);
     }
-  };
-
-  const handleGenerateStoryboard = async () => {
-    if (!storyboardTheme.trim()) return;
-    if (storyboardLoading || videoLoading) return;
-    setStoryboardLoading(true);
-    setError(null);
-    setVideoUrl(null);
-    setResultIsStoryboardFormat(false);
-    setStoryboardId(null);
-    setLogs(["GPT-5: 6-scene breakdown + Seedance prompt, then storyboard image (GPT Image 2)..."]);
-    try {
-      const response = await fetch("/api/generate-storyboard", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
-        },
-        body: JSON.stringify({ theme: storyboardTheme, storyboardStyle }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if (response.status === 402) {
-          throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? storyboardImageCost}, current: ${data.currentBalance ?? 0}.`
-          );
-        }
-        const idemMsg = describeIdempotencyError(response.status, data);
-        if (idemMsg) throw new Error(idemMsg);
-        throw new Error(data.error || "Failed to generate storyboard");
-      }
-      setStoryboardUrl(
-        typeof data.storyboardUrl === "string" ? data.storyboardUrl : null
-      );
-      setStoryboardId(typeof data.storyboardId === "string" ? data.storyboardId : null);
-      setLogs((prev) => [...prev, "Storyboard saved — Create Video when ready."]);
-      setHistoryRefreshKey((k) => k + 1);
-      refetchCredits();
-      await fetchStoryboards();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "An unexpected error occurred";
-      setError(message);
-      setLogs((prev) => [...prev, `Error: ${message}`]);
-    } finally {
-      setStoryboardLoading(false);
-    }
-  };
-
-  const runStoryboardVideoJob = async (id: string, resolution: "480p" | "720p") => {
-    if (videoLoading) return;
-    setVideoLoading(true);
-    setVideoJobStoryboardId(id);
-    setError(null);
-    setVideoUrl(null);
-    setResultIsStoryboardFormat(false);
-    setLogs((prev) => [
-      ...prev,
-      `Starting Seedance (${resolution}) for storyboard ${id.slice(0, 8)}…`,
-    ]);
-    // Cost preview for THIS job's resolution — used only in the 402 fallback msg.
-    const requiredFallback = videoCredits(seedancePricingKey(resolution), 15);
-    try {
-      const response = await fetch("/api/generate-storyboard-video", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": newIdempotencyKey(),
-        },
-        body: JSON.stringify({ storyboardId: id, resolution }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if (response.status === 402) {
-          throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? requiredFallback}, current: ${data.currentBalance ?? 0}.`
-          );
-        }
-        const idemMsg = describeIdempotencyError(response.status, data);
-        if (idemMsg) throw new Error(idemMsg);
-        throw new Error(data.error || "Failed to generate video");
-      }
-      setVideoUrl(data.videoUrl);
-      setResultIsStoryboardFormat(true);
-      setLogs((prev) => [...prev, "Storyboard video saved — playback ready."]);
-      setHistoryRefreshKey((k) => k + 1);
-      refetchCredits();
-      await fetchStoryboards();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "An unexpected error occurred";
-      setError(message);
-      setLogs((prev) => [...prev, `Error: ${message}`]);
-    } finally {
-      setVideoLoading(false);
-      setVideoJobStoryboardId(null);
-    }
-  };
-
-  const handleCreateStoryboardVideo = async () => {
-    if (!storyboardId) return;
-    await runStoryboardVideoJob(storyboardId, storyboardVideoResolution);
-  };
-
-  const handleGalleryCreateVideo = (id: string) => {
-    void runStoryboardVideoJob(id, galleryVideoResolution[id] ?? "480p");
   };
 
   return (
@@ -514,20 +338,6 @@ export default function ReelsPage() {
             <div className="mt-8 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => setEngineTab("storyboard")}
-                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
-                  engineTab === "storyboard"
-                    ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                    : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20"
-                }`}
-              >
-                <span className="inline-flex items-center gap-2">
-                  <LayoutGrid className="w-4 h-4 shrink-0" />
-                  Storyboard
-                </span>
-              </button>
-              <button
-                type="button"
                 onClick={() => setEngineTab("veo")}
                 className={`px-6 py-3 rounded-xl font-bold text-sm transition-all border ${
                   engineTab === "veo"
@@ -559,145 +369,18 @@ export default function ReelsPage() {
                 <div className="space-y-4">
                   <label className="block text-sm font-bold uppercase tracking-widest text-indigo-400">Video Theme</label>
                   <div className="relative group">
-                    {engineTab === "storyboard" ? (
-                      <input
-                        type="text"
-                        value={storyboardTheme}
-                        onChange={(e) => setStoryboardTheme(e.target.value)}
-                        placeholder="e.g., A coffee shop reunion — 15s cinematic beat"
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
-                        disabled={storyboardLoading || videoLoading}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={theme}
-                        onChange={(e) => setTheme(e.target.value)}
-                        placeholder="e.g., The history of space exploration in 60 seconds"
-                        required
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
-                        disabled={loading}
-                      />
-                    )}
+                    <input
+                      type="text"
+                      value={theme}
+                      onChange={(e) => setTheme(e.target.value)}
+                      placeholder="e.g., The history of space exploration in 60 seconds"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all placeholder:text-slate-600 group-hover:bg-white/[0.08]"
+                      disabled={loading}
+                    />
                     <Sparkles className="absolute right-5 top-5 w-6 h-6 text-indigo-500/50 group-hover:text-indigo-400 transition-colors" />
                   </div>
                 </div>
-
-                {engineTab === "storyboard" && (
-                  <div className="space-y-3">
-                    <label className="block text-sm font-bold uppercase tracking-widest text-emerald-400/90">
-                      Storyboard Style
-                    </label>
-                    <select
-                      value={storyboardStyle}
-                      onChange={(e) => setStoryboardStyle(e.target.value)}
-                      disabled={storyboardLoading || videoLoading}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer text-slate-200"
-                    >
-                      {STORYBOARD_STYLE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value} className="bg-[#030712]">
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {engineTab === "storyboard" && (
-                  <div className="space-y-6 bg-white/[0.03] border border-emerald-500/20 rounded-[2rem] p-8">
-                    <p className="text-sm text-slate-400 leading-relaxed">
-                      Generate a six-panel storyboard image, review it, then create a <strong className="text-slate-200">15s 16:9</strong> clip with native audio (Seedance + GPT-5 prompt).
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void handleGenerateStoryboard()}
-                      disabled={storyboardLoading || videoLoading || !storyboardTheme.trim()}
-                      className="w-full py-4 rounded-2xl text-lg font-bold transition-all shadow-xl flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:scale-[1.01] shadow-emerald-500/20 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
-                    >
-                      {storyboardLoading ? (
-                        <>
-                          <Loader2 className="w-6 h-6 animate-spin" />
-                          Creating your storyboard...
-                        </>
-                      ) : (
-                        <>
-                          <LayoutGrid className="w-6 h-6" />
-                          Generate Storyboard · {storyboardImageCost} credits
-                        </>
-                      )}
-                    </button>
-                    {storyboardUrl && (
-                      <div className="space-y-4">
-                        <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/40">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={storyboardUrl}
-                            alt="Generated storyboard"
-                            className="w-full h-auto object-contain max-h-[480px] mx-auto"
-                          />
-                        </div>
-                        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                          <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
-                            <Monitor className="w-4 h-4 text-emerald-400" />
-                            Video quality
-                          </div>
-                          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
-                            {(["480p", "720p"] as const).map((res) => (
-                              <button
-                                key={res}
-                                type="button"
-                                onClick={() => setStoryboardVideoResolution(res)}
-                                disabled={videoLoading}
-                                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all disabled:opacity-40 ${
-                                  storyboardVideoResolution === res
-                                    ? "bg-emerald-600 text-white"
-                                    : "text-slate-400 hover:text-white"
-                                }`}
-                              >
-                                {res}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-3">
-                          <button
-                            type="button"
-                            onClick={() => void handleGenerateStoryboard()}
-                            disabled={storyboardLoading || videoLoading || !storyboardTheme.trim()}
-                            className="flex-1 py-4 rounded-xl font-bold border border-white/15 bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
-                          >
-                            <RefreshCw className={`w-5 h-5 ${storyboardLoading ? "animate-spin" : ""}`} />
-                            Generate Again · {storyboardImageCost} credits
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleCreateStoryboardVideo()}
-                            disabled={storyboardLoading || videoLoading || !storyboardId}
-                            className="flex-1 py-4 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-40"
-                          >
-                            {videoLoading && videoJobStoryboardId === storyboardId ? (
-                              <>
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                                Working...
-                              </>
-                            ) : (
-                              <>
-                                <Play className="w-5 h-5" />
-                                Create Video {storyboardVideoResolution} · {storyboardVideoCost} credits
-                              </>
-                            )}
-                          </button>
-                        </div>
-                        {videoLoading && videoJobStoryboardId === storyboardId && (
-                          <p className="text-sm text-emerald-400/95 flex items-center gap-2 justify-center text-center">
-                            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                            Generating video with audio, this may take up to 2 minutes...
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Grid Settings — Seedance */}
                 {engineTab === "seedance" && (
@@ -864,7 +547,6 @@ export default function ReelsPage() {
                   </div>
                 </div>
                 )}
-                {engineTab !== "storyboard" && (
                 <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xl font-bold flex items-center gap-2">
@@ -914,10 +596,7 @@ export default function ReelsPage() {
                     </div>
                   </div>
                 </div>
-                )}
 
-                {engineTab !== "storyboard" && (
-                <>
                 {/* Caption Styler Card */}
                 <div className="bg-white/[0.03] border border-white/10 rounded-[2.5rem] p-8 space-y-8">
                   <div className="flex items-center justify-between">
@@ -1021,10 +700,6 @@ export default function ReelsPage() {
                     </div>
                   </div>
                 </div>
-                </>
-                )}
-
-                {engineTab !== "storyboard" && (
                 <button 
                   type="submit" 
                   disabled={loading}
@@ -1052,6 +727,25 @@ export default function ReelsPage() {
                     </>
                   )}
                 </button>
+                {loading && (
+                  <button
+                    type="button"
+                    onClick={() => cancelSubmit()}
+                    disabled={cancelling}
+                    className="w-full mt-3 py-3 rounded-2xl text-base font-bold transition-all flex items-center justify-center gap-2 border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Cancelling…
+                      </>
+                    ) : (
+                      <>
+                        <X className="w-5 h-5" />
+                        Cancel generation
+                      </>
+                    )}
+                  </button>
                 )}
               </form>
 
@@ -1132,8 +826,6 @@ export default function ReelsPage() {
 
             </div>
             <div className="lg:col-span-5 space-y-8">
-              {engineTab !== "storyboard" && (
-              <>
               {/* 9:16 Preview Box */}
               <div className="bg-black border border-white/10 rounded-[3rem] p-8 pb-12 shadow-2xl relative overflow-hidden group">
                 <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none"></div>
@@ -1207,8 +899,6 @@ export default function ReelsPage() {
                   })()}
                 </div>
               </div>
-              </>
-              )}
 
               {/* Status / Results Card */}
               <div className="space-y-6">
@@ -1242,11 +932,7 @@ export default function ReelsPage() {
                       <video 
                         src={videoUrl} 
                         controls 
-                        className={
-                          resultIsStoryboardFormat
-                            ? "aspect-video w-full max-w-3xl max-h-[480px] object-contain bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
-                            : "aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
-                        }
+                        className="aspect-[9/16] max-h-[500px] w-auto object-cover bg-black rounded-3xl border border-white/10 shadow-2xl shadow-indigo-500/10"
                       ></video>
                     </div>
                     <a 
@@ -1278,7 +964,7 @@ export default function ReelsPage() {
                 <div className="bg-black/40 border border-white/5 rounded-3xl p-6 font-mono text-[10px] md:text-xs">
                   <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
                     <span className="text-slate-500 uppercase tracking-widest font-bold">Process Logs</span>
-                    {loading || storyboardLoading || videoLoading ? (
+                    {loading ? (
                     <div className="flex items-center gap-2 text-indigo-400 animate-pulse">
                       <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
                       Processing...
@@ -1302,188 +988,15 @@ export default function ReelsPage() {
             </div>
           </div>
 
-          {engineTab === "storyboard" && (
-            <>
-            <div className="mt-16 space-y-16 border-t border-white/10 pt-16 pb-8">
-              <div>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setStoryboardStyleFilter("all")}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      storyboardStyleFilter === "all"
-                        ? "bg-emerald-600 text-white border border-emerald-500"
-                        : "bg-transparent text-slate-400 border border-white/15 hover:border-white/30"
-                    }`}
-                  >
-                    All Styles
-                  </button>
-                  {STORYBOARD_STYLE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setStoryboardStyleFilter(opt.value)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                        storyboardStyleFilter === opt.value
-                          ? "bg-emerald-600 text-white border border-emerald-500"
-                          : "bg-transparent text-slate-400 border border-white/15 hover:border-white/30"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <h2 className="text-2xl font-black tracking-tight mb-2">Storyboard Gallery</h2>
-                <p className="text-sm text-slate-500 mb-6">
-                  Your saved storyboards (newest first). Sign in to see only your work.
-                </p>
-                {storyboards.length === 0 ? (
-                  <p className="text-slate-600 text-sm">No storyboards yet.</p>
-                ) : filteredStoryboardGalleryRows.length === 0 ? (
-                  <p className="text-slate-600 text-sm">No storyboards match this filter.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredStoryboardGalleryRows.map((row) => {
-                      const cardRes = galleryVideoResolution[row.id] ?? "480p";
-                      const cardCost = videoCredits(seedancePricingKey(cardRes), 15);
-                      const cardProcessing =
-                        videoLoading && videoJobStoryboardId === row.id;
-                      return (
-                      <div
-                        key={row.id}
-                        className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden flex flex-col"
-                      >
-                        <div className="aspect-[3/2] bg-black/50 border-b border-white/5">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={row.storyboard_url}
-                            alt=""
-                            className="w-full h-full object-contain cursor-pointer"
-                            onClick={() => setLightboxUrl(row.storyboard_url)}
-                          />
-                        </div>
-                        <div className="p-4 flex flex-col gap-2 flex-1">
-                          <p className="text-sm text-slate-200 line-clamp-2 font-medium">{row.theme}</p>
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-slate-400 font-medium">
-                              {storyboardStyleDisplayName(row.storyboard_style)}
-                            </span>
-                            <span className="text-slate-500">
-                              {new Date(row.created_at).toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="mt-auto pt-2">
-                            {!row.video_url ? (
-                              <div className="flex flex-col gap-2">
-                                {/* Per-card resolution selector — drives the Seedance
-                                    pricing tier + provider resolution for this board. */}
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                                    Video resolution
-                                  </span>
-                                  <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
-                                    {(["480p", "720p"] as const).map((res) => {
-                                      const resCost = videoCredits(seedancePricingKey(res), 15);
-                                      return (
-                                        <button
-                                          key={res}
-                                          type="button"
-                                          onClick={() =>
-                                            setGalleryVideoResolution((prev) => ({
-                                              ...prev,
-                                              [row.id]: res,
-                                            }))
-                                          }
-                                          disabled={videoLoading}
-                                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all disabled:opacity-40 ${
-                                            cardRes === res
-                                              ? "bg-emerald-600 text-white"
-                                              : "text-slate-400 hover:text-white"
-                                          }`}
-                                        >
-                                          {res} · {resCost} cr
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleGalleryCreateVideo(row.id)}
-                                  disabled={videoLoading}
-                                  className="w-full py-2.5 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 flex items-center justify-center gap-2"
-                                >
-                                  {cardProcessing ? (
-                                    <>
-                                      <Loader2 className="w-4 h-4 animate-spin" />
-                                      Generating…
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="w-4 h-4" />
-                                      Create Video {cardRes} · {cardCost} credits
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => row.video_url && playStoryboardVideo(row.video_url)}
-                                className="w-full py-2.5 rounded-xl font-bold text-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-                              >
-                                View Video
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-            </div>
-            {lightboxUrl && (
-              <div
-                className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4"
-                role="presentation"
-                onClick={() => setLightboxUrl(null)}
-              >
-                <button
-                  type="button"
-                  className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white z-[201] border-0 cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setLightboxUrl(null);
-                  }}
-                  aria-label="Close"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={lightboxUrl}
-                  alt="Storyboard full size"
-                  className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </div>
-            )}
-            </>
-          )}
-
           <CreationsHistory
             title="Your video generations"
-            description="Reels (Seedance & Veo) and storyboard videos — saved to your account."
-            tools={["reels_seedance", "reels_veo", "storyboard_video"]}
+            description="Reels (Seedance & Veo) — saved to your account."
+            tools={["reels_seedance", "reels_veo"]}
             mediaType="video"
             refreshKey={historyRefreshKey}
             selectedUrl={videoUrl}
             onSelect={(item) => {
               setVideoUrl(item.mediaUrl);
-              setResultIsStoryboardFormat(item.tool === "storyboard_video");
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
           />

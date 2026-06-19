@@ -207,7 +207,80 @@ export function seedancePricingKey(resolution: string | null | undefined): strin
   return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
 }
 
+/**
+ * Seedance 2 FAST pricing key, variant-aware. Seedance charges a higher per-second
+ * rate when a reference VIDEO is provided ("video_in") vs not ("non_video_in").
+ * Used by Text to Video (Seedance 2 Fast). Reels/Storyboard (no video input) keep
+ * seedancePricingKey() which always resolves to the non_video_in keys.
+ */
+export function seedanceFastPricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const is720 = params.resolution === "720p";
+  if (params.hasReferenceVideo) {
+    return is720 ? "seedance_720p_video_in_per_second" : "seedance_480p_video_in_per_second";
+  }
+  return is720 ? "seedance_720p_per_second" : "seedance_480p_per_second";
+}
+
+/**
+ * Seedance 2.0 (full, bytedance/seedance-2.0) pricing key, variant-aware. Pricier
+ * than the Fast variant and supports a 1080p tier. "video_in" applies when a
+ * reference video is provided.
+ */
+export function seedance2PricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const res =
+    params.resolution === "1080p" ? "1080p" : params.resolution === "720p" ? "720p" : "480p";
+  const suffix = params.hasReferenceVideo ? "_video_in_per_second" : "_per_second";
+  return `seedance2_${res}${suffix}`;
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";
+}
+
+/**
+ * Veo 3.1 Fast (google/veo-3.1-fast) pricing key. Unlike Seedance/Veo above, this
+ * model is priced by AUDIO, not resolution: generating audio costs more.
+ */
+export function veo31FastPricingKey(params: { generateAudio: boolean }): string {
+  return params.generateAudio
+    ? "veo31fast_with_audio_per_second"
+    : "veo31fast_without_audio_per_second";
+}
+
+/** Veo 3.1 Lite (google/veo-3.1-lite) pricing key. No audio; priced by resolution. */
+export function veo31LitePricingKey(resolution: string | null | undefined): string {
+  return resolution === "1080p" ? "veo31lite_1080p_per_second" : "veo31lite_720p_per_second";
+}
+
+/**
+ * Kling v3 (kwaivgi/kling-v3-video) pricing key. Priced by mode (standard=720p /
+ * pro=1080p / 4k) × audio. 4k is a flat rate regardless of audio.
+ */
+export function klingV3PricingKey(params: {
+  resolution: string | null | undefined;
+  generateAudio: boolean;
+}): string {
+  if (params.resolution === "4k") return "kling3_4k_per_second";
+  if (params.resolution === "720p") {
+    return params.generateAudio
+      ? "kling3_standard_audio_per_second"
+      : "kling3_standard_per_second";
+  }
+  // 1080p (pro) is the default tier.
+  return params.generateAudio ? "kling3_pro_audio_per_second" : "kling3_pro_per_second";
+}
+
+/**
+ * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
+ * mode: std (720p) vs pro (1080p). Output duration follows the reference video.
+ */
+export function klingV3MotionControlPricingKey(mode: string | null | undefined): string {
+  return mode === "std" ? "kling3mc_std_per_second" : "kling3mc_pro_per_second";
 }

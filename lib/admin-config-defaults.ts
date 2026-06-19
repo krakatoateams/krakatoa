@@ -105,6 +105,43 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 14, enabled: true,
     provider_cost_usd: 0.15, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p", currency: "USD",
   },
+  // Seedance "video_in" variant (a reference video is provided) — pricier tier
+  // (migration 014). Used by Text to Video when a reference video is attached.
+  seedance_480p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "seedance", variant_key: "480p_video_in", currency: "USD",
+  },
+  seedance_720p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 16, enabled: true,
+    provider_cost_usd: 0.17, cost_unit: "per_second", pricing_group: "seedance", variant_key: "720p_video_in", currency: "USD",
+  },
+  // ---- Seedance 2.0 (full, bytedance/seedance-2.0) rows (015). Pricier than the
+  // Fast variant and adds a 1080p tier. non_video_in (no reference video). ----
+  seedance2_480p_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "480p", currency: "USD",
+  },
+  seedance2_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 17, enabled: true,
+    provider_cost_usd: 0.18, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "720p", currency: "USD",
+  },
+  seedance2_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 41, enabled: true,
+    provider_cost_usd: 0.45, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "1080p", currency: "USD",
+  },
+  // Seedance 2.0 (full) — video_in (a reference video is provided).
+  seedance2_480p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 9, enabled: true,
+    provider_cost_usd: 0.10, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "480p_video_in", currency: "USD",
+  },
+  seedance2_720p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 20, enabled: true,
+    provider_cost_usd: 0.22, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "720p_video_in", currency: "USD",
+  },
+  seedance2_1080p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 50, enabled: true,
+    provider_cost_usd: 0.55, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "1080p_video_in", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
@@ -112,6 +149,58 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
   veo_1080p_per_second: {
     pricing_type: "per_second", credit_amount: 8, enabled: true,
     provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "veo", variant_key: "1080p", currency: "USD",
+  },
+  // ---- Veo 3.1 Fast (google/veo-3.1-fast, Text to Video) rows (016). Priced by
+  // AUDIO, not resolution. ----
+  veo31fast_with_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_second", pricing_group: "veo31fast", variant_key: "with_audio", currency: "USD",
+  },
+  veo31fast_without_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 9, enabled: true,
+    provider_cost_usd: 0.10, cost_unit: "per_second", pricing_group: "veo31fast", variant_key: "without_audio", currency: "USD",
+  },
+  // ---- Veo 3.1 Lite (google/veo-3.1-lite, Text to Video) rows (017). No audio;
+  // priced by resolution. ----
+  veo31lite_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo31lite", variant_key: "720p", currency: "USD",
+  },
+  veo31lite_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "veo31lite", variant_key: "1080p", currency: "USD",
+  },
+  // ---- Kling v3 (kwaivgi/kling-v3-video, Text to Video) rows (018). Priced by
+  // mode (standard=720p / pro=1080p / 4k) × audio. 4k is flat regardless of audio. ----
+  kling3_standard_per_second: {
+    pricing_type: "per_second", credit_amount: 16, enabled: true,
+    provider_cost_usd: 0.168, cost_unit: "per_second", pricing_group: "kling3", variant_key: "standard", currency: "USD",
+  },
+  kling3_standard_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 23, enabled: true,
+    provider_cost_usd: 0.252, cost_unit: "per_second", pricing_group: "kling3", variant_key: "standard_audio", currency: "USD",
+  },
+  kling3_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 21, enabled: true,
+    provider_cost_usd: 0.224, cost_unit: "per_second", pricing_group: "kling3", variant_key: "pro", currency: "USD",
+  },
+  kling3_pro_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 31, enabled: true,
+    provider_cost_usd: 0.336, cost_unit: "per_second", pricing_group: "kling3", variant_key: "pro_audio", currency: "USD",
+  },
+  kling3_4k_per_second: {
+    pricing_type: "per_second", credit_amount: 38, enabled: true,
+    provider_cost_usd: 0.42, cost_unit: "per_second", pricing_group: "kling3", variant_key: "4k", currency: "USD",
+  },
+  // ---- Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) rows (019).
+  // Priced by mode (std=720p / pro=1080p). Duration follows the reference video. ----
+  kling3mc_std_per_second: {
+    pricing_type: "per_second", credit_amount: 7, enabled: true,
+    provider_cost_usd: 0.07, cost_unit: "per_second", pricing_group: "kling3mc", variant_key: "std", currency: "USD",
+  },
+  kling3mc_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 11, enabled: true,
+    provider_cost_usd: 0.12, cost_unit: "per_second", pricing_group: "kling3mc", variant_key: "pro", currency: "USD",
   },
   storyboard_gpt_image_2_low_per_image: {
     pricing_type: "per_image", credit_amount: 2, enabled: true,

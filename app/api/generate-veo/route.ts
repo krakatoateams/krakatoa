@@ -24,8 +24,10 @@ import { supabase } from "@/lib/supabase";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from "@/lib/storage-buckets";
 import { extractJson, hexToAssColor, formatAssTime, runWithRetry } from "@/lib/reels-helpers";
 import { extractMediaUrl } from "@/lib/replicate-utils";
+import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
+import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import {
@@ -662,6 +664,9 @@ ${promptInstruction}`,
       await endStep({ promptChars: veoPrompt.length });
 
       await beginStep("video_generation", "Veo single-clip generation");
+      if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+        throw new ReplicateCancellationError();
+      }
       const veoRes = await runWithRetry(replicate, videoRef, {
         input: {
           prompt: veoPrompt,
@@ -669,7 +674,19 @@ ${promptInstruction}`,
           duration,
           resolution,
         },
+      }, 10, {
+        onPrediction: makePredictionRecorder({
+          generationRequestId,
+          profileId,
+          jobId,
+          kind: "veo_single",
+        }),
       });
+      // Post-run cancel safety net (see app/api/generate route): honor a cancel
+      // that landed in the provider's pre-poll window with a refund + no delivery.
+      if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+        throw new ReplicateCancellationError();
+      }
       const veoVideoUrl = extractMediaUrl(veoRes);
       if (!veoVideoUrl.startsWith("http")) {
         throw new Error("Veo did not return a valid video URL.");
@@ -911,6 +928,17 @@ Return ONLY raw JSON array, nothing else.`;
       return { audioUrl, words, audioEndTotal, audioSpeedFactor };
     };
 
+    // Abort before kicking off the expensive parallel Veo runs if the user
+    // already cancelled during the (cheap) LLM step.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
+    const recordVeoPrediction = makePredictionRecorder({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "veo_perscene",
+    });
     const videoPromises = scenes.map((scene: any) =>
       runWithRetry(replicate, videoRef, {
         input: {
@@ -919,7 +947,7 @@ Return ONLY raw JSON array, nothing else.`;
           duration: DURATION,
           resolution,
         },
-      })
+      }, 10, { onPrediction: recordVeoPrediction })
     );
     // Veo scene videos and the TTS+Whisper pipeline run concurrently. We wrap the
     // wall-clock of the parallel block as a single video_generation step, then
@@ -927,6 +955,11 @@ Return ONLY raw JSON array, nothing else.`;
     // observability — without restructuring the generation pipeline.
     await beginStep("video_generation", "Parallel Veo scene videos (with concurrent TTS pipeline)", { scenes: SCENE_COUNT, perSceneDuration: DURATION, resolution });
     const [videoResponses, ttsPack] = await Promise.all([Promise.all(videoPromises), runTtsPipeline()]);
+    // Post-run cancel safety net: honor a cancel that landed before any scene
+    // prediction id was recorded (refund + no delivery), skipping Rendi stitching.
+    if (generationRequestId && profileId && (await isCancelRequested(profileId, generationRequestId))) {
+      throw new ReplicateCancellationError();
+    }
     const fullAudioUrl = ttsPack.audioUrl;
     const whisperWords = ttsPack.words;
     const audioEndTotal = ttsPack.audioEndTotal;
@@ -1119,15 +1152,24 @@ Return ONLY raw JSON array, nothing else.`;
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    console.error("[generate-veo]", error);
-    const message = error instanceof Error ? error.message : String(error);
+    // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
+    const cancelled = isCancellation(error);
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    if (cancelled) console.log("[generate-veo] Cancelled by user.");
+    else console.error("[generate-veo]", error);
     // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
     // and any provider call, so no credits were charged and no provider ran.
     const pricingMissing = error instanceof PricingConfigError;
     // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -1136,12 +1178,16 @@ Return ONLY raw JSON array, nothing else.`;
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when spendCredits actually succeeded.
-    // The InsufficientCreditsError branch returns 402 directly and never
-    // reaches this catch, so creditsSpent is the right gate.
+    // Best-effort refund. Fires whenever spendCredits succeeded — covering both
+    // failures and user cancellations. The InsufficientCreditsError branch
+    // returns 402 directly and never reaches this catch.
     if (creditsSpent && profileId && creditsAmount > 0 && creditJobKind) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -1150,8 +1196,10 @@ Return ONLY raw JSON array, nothing else.`;
           ? `refund:${creditJobKind}:${jobId}`
           : `refund:${creditJobKind}:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after generation failure",
-        metadata: { reason: "generation_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after generation failure",
+        metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
       }));
     }
 
@@ -1163,6 +1211,12 @@ Return ONLY raw JSON array, nothing else.`;
       }));
     }
 
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
       { status: 500 }
