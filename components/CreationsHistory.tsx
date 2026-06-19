@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Loader2,
   Star,
+  User,
   Video,
   X,
   type LucideIcon,
@@ -33,9 +34,21 @@ type Props = {
   showMeta?: boolean;
 };
 
-type LibraryTab = "all" | "video" | "image" | "favorite";
+type LibraryTab = "all" | "video" | "image" | "character" | "favorite";
 
 const FAVORITES_KEY = "krakatoa:library:favorites";
+
+/** A creation tagged as a Character creation (turnaround sheet) in the omni-form. */
+function isCharacterItem(item: CreationHistoryItem): boolean {
+  return item.metadata?.creationKind === "character";
+}
+
+/** Display name for a character creation (its given name, falling back to title). */
+function characterDisplayName(item: CreationHistoryItem): string {
+  const name = item.metadata?.characterName;
+  if (typeof name === "string" && name.trim()) return name.trim();
+  return item.title || "Character";
+}
 
 function loadFavorites(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -86,6 +99,9 @@ export default function CreationsHistory({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<CreationHistoryItem | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const downloadItem = useCallback(async (item: CreationHistoryItem) => {
     setDownloadingId(item.id);
@@ -117,6 +133,41 @@ export default function CreationsHistory({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [previewItem]);
+
+  // Seed the rename field whenever a new item opens in the preview.
+  useEffect(() => {
+    if (previewItem) {
+      setNameDraft(characterDisplayName(previewItem));
+      setNameError(null);
+    }
+  }, [previewItem]);
+
+  const saveCharacterName = useCallback(async () => {
+    if (!previewItem) return;
+    const name = nameDraft.trim();
+    if (!name) {
+      setNameError("Enter a name.");
+      return;
+    }
+    setSavingName(true);
+    setNameError(null);
+    try {
+      const res = await fetch(`/api/creations/${previewItem.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save name");
+      const updated = data.item as CreationHistoryItem;
+      setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
+      setPreviewItem(updated);
+    } catch (err: unknown) {
+      setNameError(err instanceof Error ? err.message : "Failed to save name");
+    } finally {
+      setSavingName(false);
+    }
+  }, [previewItem, nameDraft]);
 
   useEffect(() => {
     if (enableTabs) setFavorites(loadFavorites());
@@ -170,6 +221,7 @@ export default function CreationsHistory({
       all: items.length,
       video: items.filter((i) => i.mediaType === "video").length,
       image: items.filter((i) => i.mediaType === "image").length,
+      character: items.filter(isCharacterItem).length,
       favorite: items.filter((i) => favorites.has(i.id)).length,
     }),
     [items, favorites]
@@ -178,6 +230,7 @@ export default function CreationsHistory({
   const visibleItems = useMemo(() => {
     if (!enableTabs || activeTab === "all") return items;
     if (activeTab === "favorite") return items.filter((i) => favorites.has(i.id));
+    if (activeTab === "character") return items.filter(isCharacterItem);
     return items.filter((i) => i.mediaType === activeTab);
   }, [items, enableTabs, activeTab, favorites]);
 
@@ -185,6 +238,7 @@ export default function CreationsHistory({
     { id: "all", label: "All", icon: LayoutGrid },
     { id: "video", label: "Videos", icon: Video },
     { id: "image", label: "Photos", icon: ImageIcon },
+    { id: "character", label: "Characters", icon: User },
     { id: "favorite", label: "Favorites", icon: Star },
   ];
 
@@ -325,18 +379,30 @@ export default function CreationsHistory({
                     unoptimized
                   />
                 )}
+                {isCharacterItem(item) && (
+                  <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                    <User className="h-3 w-3" />
+                    Character
+                  </span>
+                )}
               </div>
             );
 
             const footer = (
               <div className="p-3 bg-white/[0.04]">
-                {showMeta && (
+                {showMeta ? (
                   <>
                     <p className="text-xs font-medium text-white truncate">
                       {item.title || item.toolLabel}
                     </p>
                     <p className="text-[10px] text-gray-500 mt-0.5">{item.toolLabel}</p>
                   </>
+                ) : (
+                  isCharacterItem(item) && (
+                    <p className="text-xs font-medium text-white truncate">
+                      {characterDisplayName(item)}
+                    </p>
+                  )
                 )}
                 <p className="text-[10px] text-gray-500 mt-1">
                   {new Date(item.createdAt).toLocaleDateString()}
@@ -459,6 +525,33 @@ export default function CreationsHistory({
                   />
                 )}
               </div>
+
+              {enableTabs && isCharacterItem(previewItem) && (
+                <div className="border-b border-white/10 px-4 py-4">
+                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                    Character name
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      maxLength={80}
+                      placeholder="Name this character"
+                      className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveCharacterName}
+                      disabled={savingName}
+                      className="flex h-9 items-center gap-1.5 rounded-xl bg-purple-500/20 px-4 text-sm font-medium text-purple-200 transition-colors hover:bg-purple-500/30 disabled:opacity-50"
+                    >
+                      {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                    </button>
+                  </div>
+                  {nameError && <p className="mt-1.5 text-xs text-red-400">{nameError}</p>}
+                </div>
+              )}
 
               {hasPreviewDetails && (
                 <div className="space-y-4 px-4 py-4">

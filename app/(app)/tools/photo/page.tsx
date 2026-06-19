@@ -340,7 +340,7 @@ export default function ProductPhotoPage() {
                 Model tier
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {PRODUCT_PHOTO_TIERS.map((t) => {
+                {PRODUCT_PHOTO_TIERS.filter((t) => t.legacyPicker).map((t) => {
                   const active = modelTier === t.id;
                   return (
                     <button

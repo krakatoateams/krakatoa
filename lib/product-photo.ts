@@ -55,8 +55,33 @@ export type PhotoStyleId = (typeof PHOTO_STYLES)[number]["id"];
  * ("1K"/"2K"/"4K"). Basic sends no resolution. We never invent unsupported params.
  */
 
-export type ProductPhotoModelTier = "basic" | "balanced" | "pro";
+export type ProductPhotoModelTier =
+  | "basic"
+  | "balanced"
+  | "pro"
+  | "seedream4"
+  | "flux_kontext"
+  | "flux11"
+  | "imagen4"
+  | "ideogram3"
+  | "seedream3"
+  | "flux_schnell";
 export type ProductPhotoResolution = "1k" | "2k" | "4k";
+
+/**
+ * Provider input "family" — describes how to build the Replicate input for a
+ * model, since each model family accepts different parameters (reference image
+ * param name, resolution support, extra flags). Used by buildPhotoProviderInput.
+ */
+export type PhotoProviderFamily =
+  | "nano_basic"
+  | "nano_balanced"
+  | "nano_pro"
+  | "seedream"
+  | "flux_kontext"
+  | "flux_t2i"
+  | "imagen"
+  | "ideogram";
 
 export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";
 export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
@@ -111,16 +136,28 @@ export type ProductPhotoTier = {
   id: ProductPhotoModelTier;
   label: string;
   subtitle: string;
+  /** Friendly model name shown in the omni-form model chip. */
+  modelLabel: string;
   /** model_configs config_key for this tier. */
   modelRole: string;
   /** Provider model id (display/metadata only; resolved via model_configs). */
   providerModel: string;
   hasResolution: boolean;
-  /** Single pricing key for a no-resolution tier (basic). */
+  /** Single pricing key for a no-resolution tier (basic + extended models). */
   basicPricingKey?: string;
   basicFallbackCredits?: number;
   /** Per-resolution pricing keys (balanced/pro). */
   resolutions: ProductPhotoResolutionOption[];
+  /** Provider input family — how to build the Replicate input for this model. */
+  providerFamily: PhotoProviderFamily;
+  /** Whether the model accepts a product reference image (usable in Product Try-on). */
+  supportsReference: boolean;
+  /** Replicate input param for the reference image (only when supportsReference). */
+  referenceParam?: "image_input" | "input_image";
+  /** Subset of aspect ratios the provider accepts; undefined = all are supported. */
+  supportedAspectRatios?: PhotoAspectRatio[];
+  /** Show this tier in the legacy /tools/photo "Photo backup" tier grid. */
+  legacyPicker?: boolean;
 };
 
 export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
@@ -128,17 +165,23 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     id: "basic",
     label: "Basic",
     subtitle: "Fast · Nano Banana",
+    modelLabel: "Nano Banana",
     modelRole: "image_basic",
     providerModel: "google/nano-banana",
     hasResolution: false,
     basicPricingKey: "product_photo_nano_banana_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
+    providerFamily: "nano_basic",
+    supportsReference: true,
+    referenceParam: "image_input",
+    legacyPicker: true,
   },
   {
     id: "balanced",
     label: "Balanced",
     subtitle: "Best value · Nano Banana 2",
+    modelLabel: "Nano Banana 2",
     modelRole: "image_balanced",
     providerModel: "google/nano-banana-2",
     hasResolution: true,
@@ -147,11 +190,16 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
       { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_2_2k_per_image", fallbackCredits: 10 },
       { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_2_4k_per_image", fallbackCredits: 14 },
     ],
+    providerFamily: "nano_balanced",
+    supportsReference: true,
+    referenceParam: "image_input",
+    legacyPicker: true,
   },
   {
     id: "pro",
     label: "Pro",
     subtitle: "Highest quality · Nano Banana Pro",
+    modelLabel: "Nano Banana Pro",
     modelRole: "image_pro",
     providerModel: "google/nano-banana-pro",
     hasResolution: true,
@@ -160,6 +208,114 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
       { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_pro_2k_per_image", fallbackCredits: 14 },
       { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_pro_4k_per_image", fallbackCredits: 27 },
     ],
+    providerFamily: "nano_pro",
+    supportsReference: true,
+    referenceParam: "image_input",
+    legacyPicker: true,
+  },
+  // --- Extended models (omni-form /tools/photo-v2). No resolution tiers; single
+  // per-image price each. Reference-capable models also work in Product Try-on. ---
+  {
+    id: "seedream4",
+    label: "Seedream 4",
+    subtitle: "Reference + text-to-image",
+    modelLabel: "Seedream 4",
+    modelRole: "image_seedream4",
+    providerModel: "bytedance/seedream-4",
+    hasResolution: false,
+    basicPricingKey: "product_photo_seedream_4_per_image",
+    basicFallbackCredits: 3,
+    resolutions: [],
+    providerFamily: "seedream",
+    supportsReference: true,
+    referenceParam: "image_input",
+  },
+  {
+    id: "flux_kontext",
+    label: "FLUX Kontext Pro",
+    subtitle: "Reference image editing",
+    modelLabel: "FLUX Kontext Pro",
+    modelRole: "image_flux_kontext",
+    providerModel: "black-forest-labs/flux-kontext-pro",
+    hasResolution: false,
+    basicPricingKey: "product_photo_flux_kontext_pro_per_image",
+    basicFallbackCredits: 4,
+    resolutions: [],
+    providerFamily: "flux_kontext",
+    supportsReference: true,
+    referenceParam: "input_image",
+  },
+  {
+    id: "flux11",
+    label: "FLUX 1.1 Pro",
+    subtitle: "Text-to-image",
+    modelLabel: "FLUX 1.1 Pro",
+    modelRole: "image_flux_1_1_pro",
+    providerModel: "black-forest-labs/flux-1.1-pro",
+    hasResolution: false,
+    basicPricingKey: "product_photo_flux_1_1_pro_per_image",
+    basicFallbackCredits: 4,
+    resolutions: [],
+    providerFamily: "flux_t2i",
+    supportsReference: false,
+  },
+  {
+    id: "imagen4",
+    label: "Imagen 4",
+    subtitle: "Text-to-image",
+    modelLabel: "Imagen 4",
+    modelRole: "image_imagen_4",
+    providerModel: "google/imagen-4",
+    hasResolution: false,
+    basicPricingKey: "product_photo_imagen_4_per_image",
+    basicFallbackCredits: 4,
+    resolutions: [],
+    providerFamily: "imagen",
+    supportsReference: false,
+    supportedAspectRatios: ["1:1", "9:16", "16:9", "3:4", "4:3"],
+  },
+  {
+    id: "ideogram3",
+    label: "Ideogram v3 Turbo",
+    subtitle: "Great text rendering",
+    modelLabel: "Ideogram v3",
+    modelRole: "image_ideogram_v3_turbo",
+    providerModel: "ideogram-ai/ideogram-v3-turbo",
+    hasResolution: false,
+    basicPricingKey: "product_photo_ideogram_v3_turbo_per_image",
+    basicFallbackCredits: 3,
+    resolutions: [],
+    providerFamily: "ideogram",
+    supportsReference: false,
+    supportedAspectRatios: ["1:1", "9:16", "16:9", "3:4", "4:3", "2:3", "3:2"],
+  },
+  {
+    id: "seedream3",
+    label: "Seedream 3",
+    subtitle: "Text-to-image",
+    modelLabel: "Seedream 3",
+    modelRole: "image_seedream3",
+    providerModel: "bytedance/seedream-3",
+    hasResolution: false,
+    basicPricingKey: "product_photo_seedream_3_per_image",
+    basicFallbackCredits: 3,
+    resolutions: [],
+    providerFamily: "seedream",
+    supportsReference: false,
+  },
+  {
+    id: "flux_schnell",
+    label: "FLUX Schnell",
+    subtitle: "Fastest · lowest cost",
+    modelLabel: "FLUX Schnell",
+    modelRole: "image_flux_schnell",
+    providerModel: "black-forest-labs/flux-schnell",
+    hasResolution: false,
+    basicPricingKey: "product_photo_flux_schnell_per_image",
+    basicFallbackCredits: 1,
+    resolutions: [],
+    providerFamily: "flux_t2i",
+    supportsReference: false,
   },
 ];
 
@@ -172,7 +328,7 @@ export function getProductPhotoTier(modelTier: ProductPhotoModelTier): ProductPh
 }
 
 export function isValidProductPhotoTier(id: string): id is ProductPhotoModelTier {
-  return id === "basic" || id === "balanced" || id === "pro";
+  return PRODUCT_PHOTO_TIERS.some((t) => t.id === id);
 }
 
 export function isValidProductPhotoResolution(id: string): id is ProductPhotoResolution {
@@ -279,6 +435,205 @@ export function buildProductPhotoPrompt(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+/** Metadata flag marking a creation as a Character creation (omni-form). */
+export const CHARACTER_CREATION_KIND = "character";
+
+// --- Character creation options (omni-form "Character creation" mode) ---------
+
+export type CharacterStyleId =
+  | "realistic"
+  | "3d"
+  | "anime"
+  | "pixel"
+  | "cartoon"
+  | "digital-art";
+export const CHARACTER_STYLES: { id: CharacterStyleId; label: string; prompt: string }[] = [
+  { id: "realistic", label: "Realistic", prompt: "photorealistic, lifelike detail, natural lighting" },
+  { id: "3d", label: "3D", prompt: "stylized 3D render, soft global illumination, Pixar-like" },
+  { id: "anime", label: "Anime", prompt: "anime illustration, clean linework, cel shading" },
+  { id: "pixel", label: "Pixel art", prompt: "retro pixel art, crisp pixels, limited color palette" },
+  { id: "cartoon", label: "Cartoon", prompt: "flat cartoon illustration, bold outlines, vibrant colors" },
+  { id: "digital-art", label: "Digital art", prompt: "painterly digital concept art, high detail" },
+];
+export const DEFAULT_CHARACTER_STYLE: CharacterStyleId = "realistic";
+export function isValidCharacterStyle(id: string): id is CharacterStyleId {
+  return CHARACTER_STYLES.some((s) => s.id === id);
+}
+
+export type CharacterGenderId = "any" | "female" | "male" | "androgynous";
+export const CHARACTER_GENDERS: { id: CharacterGenderId; label: string; prompt: string }[] = [
+  { id: "any", label: "Any", prompt: "" },
+  { id: "female", label: "Female", prompt: "female" },
+  { id: "male", label: "Male", prompt: "male" },
+  { id: "androgynous", label: "Androgynous", prompt: "androgynous" },
+];
+export const DEFAULT_CHARACTER_GENDER: CharacterGenderId = "any";
+export function isValidCharacterGender(id: string): id is CharacterGenderId {
+  return CHARACTER_GENDERS.some((g) => g.id === id);
+}
+
+// Age expressed as life-stage words (never numbers) so the model gets a clear,
+// safe descriptor rather than an exact age.
+export type CharacterAgeId =
+  | "baby"
+  | "child"
+  | "teen"
+  | "young-adult"
+  | "adult"
+  | "middle-aged"
+  | "senior";
+export const CHARACTER_AGES: { id: CharacterAgeId; label: string; prompt: string }[] = [
+  { id: "baby", label: "Baby", prompt: "baby" },
+  { id: "child", label: "Child", prompt: "young child" },
+  { id: "teen", label: "Teen", prompt: "teenage" },
+  { id: "young-adult", label: "Young adult", prompt: "young adult" },
+  { id: "adult", label: "Adult", prompt: "adult" },
+  { id: "middle-aged", label: "Middle-aged", prompt: "middle-aged" },
+  { id: "senior", label: "Senior", prompt: "elderly" },
+];
+export const DEFAULT_CHARACTER_AGE: CharacterAgeId = "young-adult";
+export function isValidCharacterAge(id: string): id is CharacterAgeId {
+  return CHARACTER_AGES.some((a) => a.id === id);
+}
+
+const CHARACTER_STYLE_BY_ID = Object.fromEntries(CHARACTER_STYLES.map((s) => [s.id, s]));
+const CHARACTER_GENDER_BY_ID = Object.fromEntries(CHARACTER_GENDERS.map((g) => [g.id, g]));
+const CHARACTER_AGE_BY_ID = Object.fromEntries(CHARACTER_AGES.map((a) => [a.id, a]));
+
+/**
+ * Build a turnaround "character sheet" prompt so a SINGLE generated image shows
+ * the same character from multiple angles (front, 3/4, side, back). Used by the
+ * omni-form "Character creation" mode. The user's description (and any reference
+ * image passed separately as image_input) defines the character; the optional
+ * style / gender / age descriptors and the multi-angle framing are layered in so
+ * one generation conveys how the character looks all around.
+ */
+export function buildCharacterSheetPrompt(params: {
+  userPrompt?: string;
+  styleId?: CharacterStyleId;
+  genderId?: CharacterGenderId;
+  ageId?: CharacterAgeId;
+}): string {
+  const desc = (params.userPrompt ?? "").trim();
+  const subject = desc || "the character in the reference image";
+
+  const style = params.styleId ? CHARACTER_STYLE_BY_ID[params.styleId] : undefined;
+  const gender = params.genderId ? CHARACTER_GENDER_BY_ID[params.genderId] : undefined;
+  const age = params.ageId ? CHARACTER_AGE_BY_ID[params.ageId] : undefined;
+  const who = [age?.prompt, gender?.prompt].filter(Boolean).join(" ").trim();
+
+  return [
+    `Character reference turnaround sheet of ${subject}.`,
+    who ? `The character is a ${who}.` : "",
+    style ? `Art style: ${style.prompt}.` : "",
+    "Show the SAME character from four angles in one image, evenly spaced left to right: front view, three-quarter view, side profile, and back view.",
+    "Keep identical face, hair, outfit, colors, proportions, and art style across every angle.",
+    "Full body, consistent soft studio lighting, clean neutral background, no text, no labels, no watermark.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+// Fallback chains for ratios a given model may not support — pick the closest
+// supported orientation rather than silently snapping everything to square.
+const ASPECT_FALLBACK: Record<PhotoAspectRatio, PhotoAspectRatio[]> = {
+  "1:1": ["1:1"],
+  "3:4": ["3:4", "9:16"],
+  "2:3": ["2:3", "3:4", "9:16"],
+  "9:16": ["9:16", "3:4"],
+  "3:2": ["3:2", "4:3", "16:9"],
+  "4:3": ["4:3", "16:9"],
+  "16:9": ["16:9", "4:3"],
+  "21:9": ["21:9", "16:9"],
+};
+
+/** Clamp a requested aspect ratio to one the tier's provider actually accepts. */
+export function clampAspectRatioForTier(
+  tier: ProductPhotoTier,
+  aspectRatio: PhotoAspectRatio
+): PhotoAspectRatio {
+  const supported = tier.supportedAspectRatios;
+  if (!supported || supported.includes(aspectRatio)) return aspectRatio;
+  for (const candidate of ASPECT_FALLBACK[aspectRatio] ?? []) {
+    if (supported.includes(candidate)) return candidate;
+  }
+  return supported[0] ?? "1:1";
+}
+
+/**
+ * Build the Replicate provider input for a Product Photo / omni-form generation.
+ * Each model family accepts different params, so we only send what each supports
+ * and never invent unsupported fields. The reference image is included only when
+ * present and the model is reference-capable (param name varies per family).
+ */
+export function buildPhotoProviderInput(params: {
+  tier: ProductPhotoTier;
+  prompt: string;
+  aspectRatio: PhotoAspectRatio;
+  imageInput?: string[] | null;
+  providerResolution: string | null;
+}): Record<string, unknown> {
+  const { tier, prompt, providerResolution } = params;
+  const aspectRatio = clampAspectRatioForTier(tier, params.aspectRatio);
+  const ref = params.imageInput && params.imageInput.length ? params.imageInput : null;
+  const useRef = ref && tier.supportsReference;
+
+  switch (tier.providerFamily) {
+    case "nano_basic":
+      return {
+        prompt,
+        ...(useRef ? { image_input: ref } : {}),
+        aspect_ratio: aspectRatio,
+        output_format: "png",
+      };
+    case "nano_balanced":
+      return {
+        prompt,
+        resolution: providerResolution,
+        ...(useRef ? { image_input: ref } : {}),
+        aspect_ratio: aspectRatio,
+        google_search: false,
+        image_search: false,
+        output_format: "png",
+      };
+    case "nano_pro":
+      return {
+        prompt,
+        resolution: providerResolution,
+        ...(useRef ? { image_input: ref } : {}),
+        aspect_ratio: aspectRatio,
+        output_format: "png",
+        allow_fallback_model: false,
+      };
+    case "seedream":
+      return {
+        prompt,
+        ...(useRef ? { image_input: ref } : {}),
+        aspect_ratio: aspectRatio,
+      };
+    case "flux_kontext":
+      return {
+        prompt,
+        ...(useRef ? { input_image: ref![0] } : {}),
+        aspect_ratio: aspectRatio,
+        output_format: "png",
+      };
+    case "flux_t2i":
+      return {
+        prompt,
+        aspect_ratio: aspectRatio,
+        output_format: "png",
+      };
+    case "imagen":
+    case "ideogram":
+    default:
+      return {
+        prompt,
+        aspect_ratio: aspectRatio,
+      };
+  }
 }
 
 /** Filename: {timestamp}__{poseId}__{styleId}.png */

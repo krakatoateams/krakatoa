@@ -1,6 +1,6 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
 import {
-  productPhotoModelRole,
+  getProductPhotoTier,
   type ProductPhotoModelTier,
 } from "@/lib/product-photo";
 
@@ -233,23 +233,23 @@ export async function getPhotoModels(): Promise<{ image: ResolvedModel }> {
 }
 
 /**
- * Resolve the Product Photo provider model for a tier (v2.3).
- *   basic -> photo.image_basic (google/nano-banana)
- *   balanced -> photo.image_balanced (google/nano-banana-2)
- *   pro -> photo.image_pro (google/nano-banana-pro)
- * Falls back to the built-in per-tier model id when the DB row is missing/disabled.
+ * Resolve the Product Photo provider model for a tier (v2.3+).
+ *
+ * Each tier declares its own model_configs config_key (modelRole) and canonical
+ * Replicate model id (providerModel). The fallback is built straight from the
+ * tier definition, so adding a new model in lib/product-photo.ts automatically
+ * resolves here — no per-role switch to maintain. An admin can still override any
+ * tier via a model_configs row keyed on its modelRole.
  */
 export async function getPhotoModel(
   modelTier: ProductPhotoModelTier
 ): Promise<ResolvedModel> {
-  const role = productPhotoModelRole(modelTier);
-  const fallback =
-    role === "image_pro"
-      ? FALLBACKS.photo.image_pro
-      : role === "image_balanced"
-        ? FALLBACKS.photo.image_balanced
-        : FALLBACKS.photo.image_basic;
-  return resolveModel({ toolKey: "photo", configKey: role, fallback: fb(fallback) });
+  const tier = getProductPhotoTier(modelTier);
+  return resolveModel({
+    toolKey: "photo",
+    configKey: tier.modelRole,
+    fallback: { provider: REPLICATE, model: tier.providerModel, parameters: {} },
+  });
 }
 
 /** Resolved Rendi render config (informational; routes keep the hardcoded URL). */

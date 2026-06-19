@@ -11,13 +11,24 @@ import {
   productPhotoProviderResolution,
   buildGeneratedFilename,
   buildProductPhotoPrompt,
+  buildCharacterSheetPrompt,
+  buildPhotoProviderInput,
+  getProductPhotoTier,
   isValidPhotoAspectRatio,
   DEFAULT_PHOTO_ASPECT_RATIO,
+  CHARACTER_CREATION_KIND,
+  isValidCharacterStyle,
+  isValidCharacterGender,
+  isValidCharacterAge,
+  DEFAULT_CHARACTER_STYLE,
+  DEFAULT_CHARACTER_GENDER,
+  DEFAULT_CHARACTER_AGE,
 } from "@/lib/product-photo";
 import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { requireCurrentProfile } from "@/lib/profiles-db";
+import { getUserCreationForUser } from "@/lib/creations-db";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
@@ -28,6 +39,8 @@ import {
   InsufficientCreditsError,
 } from "@/lib/credits-db";
 import { getProductPhotoCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { getPhotoFeatureEnablement } from "@/lib/feature-model-configs-db";
+import { getPhotoFeature } from "@/lib/creation-features";
 import { getPhotoModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
@@ -55,6 +68,17 @@ function isValidPose(id: string): id is ModelPoseId {
 
 function isValidStyle(id: string): id is PhotoStyleId {
   return PHOTO_STYLES.some((s) => s.id === id);
+}
+
+/** Shared upload validation (type + size). Returns an error message or null. */
+function validateImageUpload(file: File): string | null {
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return "Only JPEG, PNG, or WebP images are supported";
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    return "Image must be 10MB or smaller";
+  }
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -146,6 +170,17 @@ export async function POST(req: Request) {
 
     const formData = await req.formData();
     const file = formData.get("image");
+    // Optional extra reference images (omni-form /tools/photo-v2):
+    //   - Product Try-on: `character` — an optional model/person image alongside
+    //     the required product image.
+    //   - Generate any image: `reference` — an optional reference image used only
+    //     by reference-capable models.
+    const characterFile = formData.get("character");
+    const referenceFile = formData.get("reference");
+    // Product Try-on can use a previously generated character (by creation id)
+    // instead of an uploaded character image. Resolved to the creation's image URL
+    // (owner-scoped) and passed as an extra reference — no re-upload needed.
+    const characterCreationId = String(formData.get("characterCreationId") || "").trim();
     const poseId = String(formData.get("poseId") || "").trim();
     const styleId = String(formData.get("styleId") || "").trim();
     // Product Photo v2.3: model tier + optional resolution.
@@ -158,11 +193,33 @@ export async function POST(req: Request) {
     const userPrompt = String(formData.get("prompt") || "")
       .trim()
       .slice(0, PROMPT_MAX_CHARS);
-    // Generation mode: "product" (default — requires a product reference image and
-    // wraps the prompt in product-photography scaffolding) or "image" (text-to-image:
-    // no reference image, the prompt is required and used verbatim). Surfaced by the
-    // omni-form's "Generate any image" creation type at /tools/photo-v2.
-    const isImageMode = String(formData.get("mode") || "product").trim() === "image";
+    // Generation mode (omni-form /tools/photo-v2):
+    //   - "product"   (default): requires a product reference image; the prompt is
+    //                  wrapped in product-photography scaffolding.
+    //   - "image"     : text-to-image; prompt required, used verbatim; no product.
+    //   - "character" : text-to-image turnaround sheet (one image, multiple angles);
+    //                  prompt or reference required; optional character name.
+    const modeRaw = String(formData.get("mode") || "product").trim();
+    const mode: "product" | "image" | "character" =
+      modeRaw === "image" || modeRaw === "character" ? modeRaw : "product";
+    const requiresProductImage = mode === "product";
+    const isCharacterMode = mode === "character";
+    // Optional character name (Character creation). Trimmed + capped.
+    const characterName = String(formData.get("characterName") || "").trim().slice(0, 80);
+    // Character creation descriptors (validated; fall back to defaults). Style =
+    // art style (realistic / 3D / pixel / …); gender + age (life-stage words).
+    const characterStyleRaw = String(formData.get("style") || "").trim();
+    const characterGenderRaw = String(formData.get("gender") || "").trim();
+    const characterAgeRaw = String(formData.get("age") || "").trim();
+    const characterStyle = isValidCharacterStyle(characterStyleRaw)
+      ? characterStyleRaw
+      : DEFAULT_CHARACTER_STYLE;
+    const characterGender = isValidCharacterGender(characterGenderRaw)
+      ? characterGenderRaw
+      : DEFAULT_CHARACTER_GENDER;
+    const characterAge = isValidCharacterAge(characterAgeRaw)
+      ? characterAgeRaw
+      : DEFAULT_CHARACTER_AGE;
     // Aspect ratio chip (omni-form). Validated against the provider-supported enum;
     // anything unknown falls back to the default so a bad client value can't error.
     const aspectRatioRaw = String(formData.get("aspectRatio") || "").trim();
@@ -170,28 +227,30 @@ export async function POST(req: Request) {
       ? aspectRatioRaw
       : DEFAULT_PHOTO_ASPECT_RATIO;
 
-    if (isImageMode) {
-      // Text-to-image: no product reference; the prompt carries the full intent.
+    if (requiresProductImage) {
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
+      }
+      const fileErr = validateImageUpload(file);
+      if (fileErr) {
+        return NextResponse.json({ error: fileErr }, { status: 400 });
+      }
+    } else if (isCharacterMode) {
+      // Character creation: need a description and/or a reference image to define
+      // the character.
+      if (!userPrompt && !(referenceFile instanceof File)) {
+        return NextResponse.json(
+          { error: "Describe your character or attach a reference image." },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Text-to-image: the prompt carries the full intent.
       if (!userPrompt) {
         return NextResponse.json(
           { error: "A prompt is required to generate an image." },
           { status: 400 }
         );
-      }
-    } else {
-      if (!(file instanceof File)) {
-        return NextResponse.json({ error: "Product image file is required" }, { status: 400 });
-      }
-
-      if (!ALLOWED_TYPES.has(file.type)) {
-        return NextResponse.json(
-          { error: "Only JPEG, PNG, or WebP images are supported" },
-          { status: 400 }
-        );
-      }
-
-      if (file.size > MAX_FILE_BYTES) {
-        return NextResponse.json({ error: "Image must be 10MB or smaller" }, { status: 400 });
       }
     }
 
@@ -217,6 +276,67 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: normalized.error }, { status: 400 });
     }
     const { modelTier, resolution } = normalized;
+    const tier = getProductPhotoTier(modelTier);
+    // Product Try-on requires a reference-capable model. Text-to-image-only models
+    // (e.g. Imagen 4, FLUX 1.1 Pro) can't consume the uploaded product image, so
+    // reject before any job/spend/provider work. The omni-form already hides these
+    // in product mode; this guards a stale/forged client value.
+    if (requiresProductImage && !tier.supportsReference) {
+      return NextResponse.json(
+        {
+          error: `${tier.modelLabel} doesn't support a product reference image. Choose a reference-capable model or use "Generate any image".`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Per-feature model enablement (Admin Config v3). An admin can disable a model
+    // for a specific feature; reject a disabled/ineligible tier before any
+    // job/spend/provider work. The omni-form already hides disabled models; this
+    // guards a stale or forged client value. Never throws — falls back to code
+    // defaults (all eligible tiers enabled) when the DB is unavailable.
+    const enablement = await getPhotoFeatureEnablement();
+    if (!enablement[mode].enabledTiers.includes(modelTier)) {
+      return NextResponse.json(
+        {
+          error: `${tier.modelLabel} isn't available for ${getPhotoFeature(mode).label}. Choose another model.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Optional extra reference images. Product Try-on can pass a character/model
+    // image alongside the product; Generate any image / Character creation can pass a
+    // single reference image (only for reference-capable models). Validated BEFORE any
+    // job/spend so a bad file never charges credits. Text-only models ignore any
+    // reference entirely.
+    const extraReferenceFiles: File[] = [];
+    // Reference image URLs that already exist (e.g. a saved character) and don't need
+    // re-uploading — appended to the reference list after any uploaded files.
+    const directReferenceUrls: string[] = [];
+    if (requiresProductImage) {
+      if (characterFile instanceof File) {
+        const err = validateImageUpload(characterFile);
+        if (err) return NextResponse.json({ error: err }, { status: 400 });
+        extraReferenceFiles.push(characterFile);
+      } else if (characterCreationId && userId) {
+        // Use a previously generated character. Owner-scoped lookup prevents using
+        // someone else's (or an arbitrary) image as a reference.
+        const creation = await getUserCreationForUser(userId, characterCreationId);
+        if (!creation) {
+          return NextResponse.json(
+            { error: "Selected character could not be found." },
+            { status: 400 }
+          );
+        }
+        directReferenceUrls.push(creation.mediaUrl);
+      }
+    } else if (tier.supportsReference && referenceFile instanceof File) {
+      const err = validateImageUpload(referenceFile);
+      if (err) return NextResponse.json({ error: err }, { status: 400 });
+      extraReferenceFiles.push(referenceFile);
+    }
+
     const pricingKey = productPhotoPricingKey({ modelTier, resolution });
     const providerResolution = productPhotoProviderResolution(resolution);
 
@@ -250,8 +370,16 @@ export async function POST(req: Request) {
       providerModel: photoModel.model,
       providerResolution,
       userPrompt,
-      mode: isImageMode ? "image" : "product",
+      mode,
+      characterName,
+      characterStyle,
+      characterGender,
+      characterAge,
       aspectRatio,
+      // Distinguish requests that add an optional character/reference image so a
+      // retry with a different attachment set isn't treated as a replay.
+      extraRefCount: extraReferenceFiles.length + directReferenceUrls.length,
+      characterRef: characterCreationId,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -291,7 +419,7 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId, modelTier, resolution, pricingKey, mode: isImageMode ? "image" : "product" },
+      input: { poseId, styleId, modelTier, resolution, pricingKey, mode },
     }));
     if (job) {
       jobId = job.id;
@@ -384,56 +512,54 @@ export async function POST(req: Request) {
     // Provider client is created only after the spend has succeeded.
     const replicate = createReplicateClient();
 
-    // Product mode uploads the reference image; image mode skips it entirely.
-    let productImageUrl: string | null = null;
-    if (!isImageMode) {
-      await beginStep("reference_upload", "Upload product reference image to Replicate");
-      console.log("[Product Photo] Uploading product image to Replicate...");
-      productImageUrl = await uploadProductImageToReplicate(replicate, file as File);
-      await endStep({ productImageUrl });
+    // Upload all reference images. Product mode leads with the required product
+    // image, then any optional character image. Image mode uploads only an optional
+    // reference (for reference-capable models). The first URL is the primary
+    // reference; models that take a single reference image use it.
+    const filesToUpload: File[] = requiresProductImage
+      ? [file as File, ...extraReferenceFiles]
+      : extraReferenceFiles;
+    const referenceUrls: string[] = [];
+    if (filesToUpload.length > 0) {
+      await beginStep(
+        "reference_upload",
+        `Upload ${filesToUpload.length} reference image(s) to Replicate`
+      );
+      console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
+      for (const f of filesToUpload) {
+        referenceUrls.push(await uploadProductImageToReplicate(replicate, f));
+      }
+      await endStep({ referenceUrls });
     }
+    // Existing-image references (e.g. a saved character) need no upload.
+    referenceUrls.push(...directReferenceUrls);
 
-    // Product mode wraps the prompt in product-photography scaffolding; image mode
-    // (text-to-image) uses the user's prompt verbatim.
-    const prompt = isImageMode ? userPrompt : buildProductPhotoPrompt(poseId, styleId, userPrompt);
+    // Product mode wraps the prompt in product-photography scaffolding; character
+    // mode builds a multi-angle turnaround sheet; image mode uses the prompt verbatim.
+    const prompt =
+      mode === "product"
+        ? buildProductPhotoPrompt(poseId, styleId, userPrompt)
+        : mode === "character"
+          ? buildCharacterSheetPrompt({
+              userPrompt,
+              styleId: characterStyle,
+              genderId: characterGender,
+              ageId: characterAge,
+            })
+          : userPrompt;
 
-    // Aspect ratio comes from the chip (validated above); image mode omits
-    // image_input, product mode includes the uploaded reference.
-    const imageInput = productImageUrl ? [productImageUrl] : undefined;
-
-    // Build the provider input per tier. We only send parameters each model
-    // actually supports — Basic (google/nano-banana) has NO resolution param;
-    // Balanced (google/nano-banana-2) and Pro (google/nano-banana-pro) take the
-    // resolution enum. We never invent unsupported params.
-    let providerInput: Record<string, unknown>;
-    if (modelTier === "basic") {
-      providerInput = {
-        prompt,
-        ...(imageInput ? { image_input: imageInput } : {}),
-        aspect_ratio: aspectRatio,
-        output_format: "png",
-      };
-    } else if (modelTier === "balanced") {
-      providerInput = {
-        prompt,
-        resolution: providerResolution,
-        ...(imageInput ? { image_input: imageInput } : {}),
-        aspect_ratio: aspectRatio,
-        google_search: false,
-        image_search: false,
-        output_format: "png",
-      };
-    } else {
-      // pro
-      providerInput = {
-        prompt,
-        resolution: providerResolution,
-        ...(imageInput ? { image_input: imageInput } : {}),
-        aspect_ratio: aspectRatio,
-        output_format: "png",
-        allow_fallback_model: false,
-      };
-    }
+    // Aspect ratio comes from the chip (validated above). The builder sends only the
+    // params each model family supports (reference param name + resolution vary by
+    // model), passes multiple reference images where supported, and clamps the
+    // aspect ratio to what the provider accepts.
+    const imageInput = referenceUrls.length > 0 ? referenceUrls : undefined;
+    const providerInput = buildPhotoProviderInput({
+      tier,
+      prompt,
+      aspectRatio,
+      imageInput,
+      providerResolution,
+    });
 
     await beginStep("image_generation", "Nano Banana product photo generation");
     console.log(`[Product Photo] Running ${photoModelRef} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
@@ -468,9 +594,16 @@ export async function POST(req: Request) {
       styleId,
       contentType: "image/png",
       prompt,
-      // Image-mode items aren't pose/style shots, so give the library a prompt-based
+      // Non-product items aren't pose/style shots, so give the library a meaningful
       // title instead of the misleading "Standing · Minimalist Studio".
-      title: isImageMode ? userPrompt.slice(0, 60) || "Generated image" : undefined,
+      title: isCharacterMode
+        ? characterName || "Character"
+        : mode === "image"
+          ? userPrompt.slice(0, 60) || "Generated image"
+          : undefined,
+      // Tag character creations so the library can group/badge them.
+      creationKind: isCharacterMode ? CHARACTER_CREATION_KIND : undefined,
+      characterName: isCharacterMode && characterName ? characterName : undefined,
     });
     await endStep({ storagePath: saved.storagePath, publicUrl: saved.publicUrl });
 

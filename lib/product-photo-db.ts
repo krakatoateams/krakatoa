@@ -36,6 +36,10 @@ export async function insertProductPhotoGeneration(params: {
   styleId: PhotoStyleId;
   prompt?: string;
   title?: string;
+  /** Tags the creation kind (e.g. "character") so the library can group/filter it. */
+  creationKind?: string;
+  /** User-given character name (Character creation mode). */
+  characterName?: string;
 }): Promise<ProductPhotoHistoryItem> {
   const pose = POSE_BY_ID[params.poseId];
   const style = STYLE_BY_ID[params.styleId];
@@ -52,6 +56,8 @@ export async function insertProductPhotoGeneration(params: {
       poseLabel: pose?.label,
       styleLabel: style?.label,
       ...(params.prompt ? { prompt: params.prompt } : {}),
+      ...(params.creationKind ? { creationKind: params.creationKind } : {}),
+      ...(params.characterName ? { characterName: params.characterName } : {}),
     },
   });
   return creationToProductPhotoItem(item);
