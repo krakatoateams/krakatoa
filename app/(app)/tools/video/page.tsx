@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   Plus,
   Wand2,
@@ -27,6 +27,12 @@ import {
   Languages,
   Upload,
   Pencil,
+  Mic,
+  Smile,
+  CalendarClock,
+  Download,
+  Type,
+  Minus,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -68,6 +74,14 @@ import {
   type StoryboardStyleKey,
   SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
 } from "@/lib/storyboard-style";
+import {
+  reelsPricingKey,
+  reelsTotalDurationSec,
+  DEFAULT_VOICE_ID,
+  type SeedanceResolution,
+  type VeoResolution,
+} from "@/lib/reels-models";
+import type { ReelsEngine, ReelsVeoMode } from "@/lib/reels-pipeline/types";
 
 function describeIdempotencyError(
   status: number,
@@ -85,16 +99,19 @@ function describeIdempotencyError(
   return null;
 }
 
-// Creation types in the top-left chip. "text2video" and "motion_control" are wired
-// in-page; the other two deep-link to the existing /tools/reels page for now.
+// Creation types in the top-left chip. All four are now wired in-page.
 const CREATION_TYPES = [
   { id: "text2video", label: "Text to Video", available: true },
   { id: "motion_control", label: "Motion Control", available: true },
   { id: "storyboard", label: "Storyboard to Video", available: true },
-  { id: "reels-creator", label: "Reels Creator", available: false, href: "/tools/reels" },
+  { id: "reels-creator", label: "Reels Creator", available: true },
 ] as const;
 
-type VideoCreationType = "text2video" | "motion_control" | "storyboard";
+type VideoCreationType =
+  | "text2video"
+  | "motion_control"
+  | "storyboard"
+  | "reels-creator";
 
 // Motion Control character source: an uploaded file, or one previously created
 // in Photo → Character (stored as a product_photo creation, kind "character").
@@ -702,13 +719,20 @@ const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm";
 const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/webm";
 
 function VideoOmniPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // Deep-link support: the Photo → Storyboard "Create video" CTA navigates here
-  // with ?type=storyboard&storyboardId=... so we open that sub-tool preselected.
+  // with ?type=storyboard&storyboardId=...; the dashboard reels links use
+  // ?type=reels-creator. Any known subtool can be preselected via ?type=.
+  const typeParam = searchParams.get("type");
   const initialType: VideoCreationType =
-    searchParams.get("type") === "storyboard" ? "storyboard" : "text2video";
+    typeParam === "storyboard"
+      ? "storyboard"
+      : typeParam === "motion_control"
+        ? "motion_control"
+        : typeParam === "reels-creator"
+          ? "reels-creator"
+          : "text2video";
   const initialStoryboardId = searchParams.get("storyboardId") || null;
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
@@ -716,13 +740,13 @@ function VideoOmniPage() {
   const { refetch: refetchCredits } = useCreditBalance();
 
   const handleCreationType = (id: string) => {
-    if (id === "text2video" || id === "motion_control" || id === "storyboard") {
+    if (
+      id === "text2video" ||
+      id === "motion_control" ||
+      id === "storyboard" ||
+      id === "reels-creator"
+    ) {
       setCreationType(id);
-      return;
-    }
-    const target = CREATION_TYPES.find((c) => c.id === id);
-    if (target && !target.available && "href" in target && target.href) {
-      router.push(target.href);
     }
   };
 
@@ -1233,12 +1257,28 @@ function VideoOmniPage() {
           />
         )}
 
+        {creationType === "reels-creator" && (
+          <ReelsCreatorComposer
+            onSelectCreation={handleCreationType}
+            onGenerated={() => {
+              setHistoryRefreshKey((k) => k + 1);
+              refetchCredits();
+            }}
+          />
+        )}
+
         {/* Video generation history */}
         <div className="mt-[120px]">
           <CreationsHistory
             title="Generation history"
             description="Every video you create appears here. Click any clip to preview it."
-            tools={["video_text2video", "video_motion_control", "storyboard_video"]}
+            tools={[
+              "video_text2video",
+              "video_motion_control",
+              "storyboard_video",
+              "reels_seedance",
+              "reels_veo",
+            ]}
             mediaType="video"
             refreshKey={historyRefreshKey}
             showActions
@@ -2455,6 +2495,879 @@ function StoryboardToVideoComposer({
             <p className="mt-1 text-xs text-gray-500">
               Find it in your history below, or render another resolution.
             </p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reels Creator sub-tool. Consolidates the legacy ReelsGen Veo + Seedance page
+// into one composer that POSTs to the unified /api/generate-reels route. Engine
+// (Seedance | Veo) is the "model" chip; Veo adds a Mode chip (Single | Per
+// scene). Adaptive controls + narrator + caption styler + a live caption preview
+// whose 480x854 math mirrors the ASS MarginV math on the server.
+// ---------------------------------------------------------------------------
+
+// MiniMax speech-02-turbo English voice catalogue (storytelling voices first).
+const REELS_ENGLISH_VOICES = [
+  "English_CaptivatingStoryteller",
+  "English_WiseScholar",
+  "English_Wiselady",
+  "English_Steadymentor",
+  "English_MaturePartner",
+  "English_Trustworth_Man",
+  "English_Deep-VoicedGentleman",
+  "English_ManWithDeepVoice",
+  "English_Gentle-voiced_man",
+  "English_Diligent_Man",
+  "English_PatientMan",
+  "English_DecentYoungMan",
+  "English_ReservedYoungMan",
+  "English_FriendlyPerson",
+  "English_MatureBoss",
+  "English_BossyLeader",
+  "English_Debator",
+  "English_ImposingManner",
+  "English_PassionateWarrior",
+  "English_Comedian",
+  "English_Jovialman",
+  "English_Aussie_Bloke",
+  "English_ConfidentWoman",
+  "English_AssertiveQueen",
+  "English_Graceful_Lady",
+  "English_CalmWoman",
+  "English_SereneWoman",
+  "English_SentimentalLady",
+  "English_StressedLady",
+  "English_LovelyGirl",
+  "English_Kind-heartedGirl",
+  "English_Soft-spokenGirl",
+  "English_PlayfulGirl",
+  "English_WhimsicalGirl",
+  "English_Whispering_girl",
+  "English_UpsetGirl",
+  "English_SadTeen",
+  "English_Strong-WilledBoy",
+  "English_AnimeCharacter",
+];
+
+const REELS_EMOTIONS = [
+  "auto",
+  "happy",
+  "sad",
+  "angry",
+  "fearful",
+  "disgusted",
+  "surprised",
+  "calm",
+  "fluent",
+  "neutral",
+];
+
+const REELS_CAPTION_FONTS = ["Arial", "Poppins", "Montserrat", "Bangers"];
+
+const humanizeReelsVoice = (id: string) =>
+  id
+    .replace(/^English_/, "")
+    .replace(/[_-]/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const humanizeReelsEmotion = (e: string) =>
+  e === "auto" ? "Auto (let AI decide)" : e.charAt(0).toUpperCase() + e.slice(1);
+
+type ReelsCaptionStyle = {
+  fontname: string;
+  fontsize: number;
+  primaryColor: string;
+  highlightColor: string;
+  outlineColor: string;
+  outlineThickness: number;
+  marginV: number;
+  highlightOnly: boolean;
+};
+
+// Themed dropdown replacing the native <select> in the caption styler. Matches
+// the studio's dark/glass aesthetic and previews each font in its own typeface.
+function ThemedSelect({
+  value,
+  options,
+  onChange,
+  disabled,
+  previewFont = false,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  previewFont?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-black/30 p-2.5 text-left text-sm text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+          open ? "border-purple-400/50 bg-purple-500/10" : "border-white/10 hover:border-white/25"
+        }`}
+      >
+        <span style={previewFont ? { fontFamily: `"${value}", sans-serif` } : undefined}>
+          {value}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+          {options.map((opt) => {
+            const active = opt === value;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  active ? "bg-purple-500/20 text-white" : "text-gray-300 hover:bg-white/5"
+                }`}
+                style={previewFont ? { fontFamily: `"${opt}", sans-serif` } : undefined}
+              >
+                {opt}
+                {active && <Check className="h-4 w-4 shrink-0 text-purple-400" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Themed numeric stepper replacing the native number input (whose spin buttons
+// don't respect the app theme). Keeps the field typeable; −/+ clamp to min/max.
+function NumberStepper({
+  value,
+  onChange,
+  min = 0,
+  max = 999,
+  step = 1,
+  disabled,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+}) {
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  const set = (n: number) => {
+    if (!Number.isNaN(n)) onChange(clamp(n));
+  };
+  return (
+    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-black/30 transition-colors focus-within:border-purple-400/40">
+      <button
+        type="button"
+        disabled={disabled || value <= min}
+        onClick={() => set(value - step)}
+        aria-label="Decrease"
+        className="flex w-10 shrink-0 items-center justify-center text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        <Minus className="h-4 w-4" />
+      </button>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={(e) => set(Number(e.target.value))}
+        className="w-full min-w-0 border-x border-white/10 bg-transparent p-2.5 text-center text-sm font-semibold text-white focus:outline-none disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <button
+        type="button"
+        disabled={disabled || value >= max}
+        onClick={() => set(value + step)}
+        aria-label="Increase"
+        className="flex w-10 shrink-0 items-center justify-center text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function ReelsCreatorComposer({
+  onSelectCreation,
+  onGenerated,
+}: {
+  onSelectCreation: (id: string) => void;
+  onGenerated: () => void;
+}) {
+  const { videoCredits } = usePricing();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+
+  // Engine + (Veo-only) mode.
+  const [engine, setEngine] = useState<ReelsEngine>("seedance");
+  const [veoMode, setVeoMode] = useState<ReelsVeoMode>("single");
+
+  // Shared.
+  const [theme, setTheme] = useState("");
+  const [voiceId, setVoiceId] = useState<string>(DEFAULT_VOICE_ID);
+  const [emotion, setEmotion] = useState("auto");
+
+  // Seedance controls.
+  const [numScenes, setNumScenes] = useState(1);
+  const [durationPerScene, setDurationPerScene] = useState(5);
+  const [resolution, setResolution] = useState<SeedanceResolution>("480p");
+
+  // Veo controls.
+  const [veoDuration, setVeoDuration] = useState<4 | 6 | 8>(6);
+  const [veoResolution, setVeoResolution] = useState<VeoResolution>("720p");
+  const [singlePromptScenes, setSinglePromptScenes] = useState<1 | 2>(1);
+  const [veoNumScenes, setVeoNumScenes] = useState(1);
+
+  const [captionStyle, setCaptionStyle] = useState<ReelsCaptionStyle>({
+    fontname: "Poppins",
+    fontsize: 60,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#FFFF00",
+    outlineColor: "#000000",
+    outlineThickness: 4,
+    marginV: 15,
+    highlightOnly: true,
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 1080p forces an 8s clip (Veo 3.1 Lite constraint) — keep state valid.
+  const onVeoResolution = (r: VeoResolution) => {
+    setVeoResolution(r);
+    if (r === "1080p") setVeoDuration(8);
+  };
+
+  const totalDuration = reelsTotalDurationSec({
+    engine,
+    mode: veoMode,
+    durationPerScene,
+    numScenes: engine === "seedance" ? numScenes : veoNumScenes,
+    veoDuration,
+  });
+  const pricingKey = reelsPricingKey(
+    engine,
+    engine === "seedance" ? resolution : veoResolution
+  );
+  const cost = videoCredits(pricingKey, totalDuration);
+
+  const canGenerate = !loading && theme.trim().length > 0;
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canGenerate) return;
+
+    const body: Record<string, unknown> =
+      engine === "seedance"
+        ? {
+            engine: "seedance",
+            theme: theme.trim(),
+            numScenes: Number(numScenes),
+            durationPerScene: Number(durationPerScene),
+            resolution,
+            voiceId,
+            emotion,
+            captionStyle,
+          }
+        : {
+            engine: "veo",
+            mode: veoMode,
+            theme: theme.trim(),
+            duration: veoDuration,
+            resolution: veoResolution,
+            voiceId,
+            emotion,
+            captionStyle,
+            ...(veoMode === "single"
+              ? { singlePromptScenes }
+              : { numScenes: Number(veoNumScenes) }),
+          };
+
+    // Stable key per attempt + synchronous in-flight lock (see hook docs).
+    const attempt = beginSubmit(`reels-${engine}:${JSON.stringify(body)}`);
+    if (!attempt) return;
+
+    setLoading(true);
+    setError(null);
+    setResultUrl(null);
+
+    try {
+      const response = await fetch("/api/generate-reels", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": attempt.key,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        // User cancellation → back to idle (credits refunded), not a red error.
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          onGenerated();
+          return;
+        }
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Failed to generate video");
+      }
+
+      attempt.settle(true);
+      setResultUrl(data.videoUrl);
+      onGenerated();
+    } catch (err: unknown) {
+      attempt.settle(false);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Adaptive control chips per engine/mode.
+  const veoDurations = veoResolution === "1080p" ? [8] : [4, 6, 8];
+
+  return (
+    <>
+      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+        {/* Top-left chips: creation type + engine (+ Veo mode) */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ChipDropdown
+            icon={<Layers className="h-3.5 w-3.5" />}
+            value="Reels Creator"
+            activeId="reels-creator"
+            options={CREATION_TYPES.map((c) => ({ id: c.id, label: c.label }))}
+            onSelect={onSelectCreation}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Cpu className="h-3.5 w-3.5" />}
+            value={engine === "veo" ? "Veo" : "Seedance"}
+            activeId={engine}
+            options={[
+              { id: "seedance", label: "Seedance" },
+              { id: "veo", label: "Veo" },
+            ]}
+            onSelect={(id) => setEngine(id as ReelsEngine)}
+            disabled={loading}
+          />
+          {engine === "veo" && (
+            <ChipDropdown
+              icon={<Film className="h-3.5 w-3.5" />}
+              value={veoMode === "single" ? "Single video" : "Per scene"}
+              activeId={veoMode}
+              options={[
+                { id: "single", label: "Single video" },
+                { id: "perScene", label: "Per scene" },
+              ]}
+              onSelect={(id) => setVeoMode(id as ReelsVeoMode)}
+              disabled={loading}
+            />
+          )}
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+          {/* Theme */}
+          <textarea
+            value={theme}
+            onChange={(e) => setTheme(e.target.value)}
+            placeholder="Describe your reel — e.g., The history of space exploration in 60 seconds. Our AI writes the script, scenes, narration, and captions."
+            rows={3}
+            disabled={loading}
+            className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+          />
+
+          {/* Controls row */}
+          <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {engine === "seedance" ? (
+                <>
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Layers className="h-3.5 w-3.5" />}
+                    value={`${numScenes} scene${numScenes > 1 ? "s" : ""}`}
+                    activeId={String(numScenes)}
+                    tooltip="How many scenes to break the story into. More scenes = a longer reel."
+                    options={[1, 2, 3].map((n) => ({
+                      id: String(n),
+                      label: `${n} scene${n > 1 ? "s" : ""}`,
+                      hint: `${videoCredits(reelsPricingKey("seedance", resolution), n * durationPerScene)}`,
+                    }))}
+                    onSelect={(id) => setNumScenes(Number(id))}
+                    disabled={loading}
+                  />
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    value={`${durationPerScene}s / scene`}
+                    activeId={String(durationPerScene)}
+                    tooltip="Seconds per scene. Total reel length = scenes × this."
+                    options={[5, 10].map((d) => ({
+                      id: String(d),
+                      label: `${d} seconds / scene`,
+                      hint: `${videoCredits(reelsPricingKey("seedance", resolution), numScenes * d)}`,
+                    }))}
+                    onSelect={(id) => setDurationPerScene(Number(id))}
+                    disabled={loading}
+                  />
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Maximize2 className="h-3.5 w-3.5" />}
+                    value={resolution}
+                    activeId={resolution}
+                    tooltip="Video resolution. 720p is crisper but costs more credits."
+                    options={(["480p", "720p"] as const).map((r) => ({
+                      id: r,
+                      label: r === "480p" ? "480p (Fast)" : "720p (HD)",
+                      hint: `${videoCredits(reelsPricingKey("seedance", r), totalDuration)}`,
+                    }))}
+                    onSelect={(id) => setResolution(id as SeedanceResolution)}
+                    disabled={loading}
+                  />
+                </>
+              ) : (
+                <>
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    value={
+                      veoMode === "perScene"
+                        ? `${veoDuration}s / scene`
+                        : `${veoDuration}s clip`
+                    }
+                    activeId={String(veoDuration)}
+                    tooltip={
+                      veoMode === "perScene"
+                        ? "Seconds per scene. Total ≈ scenes × this."
+                        : "Length of the single Veo clip."
+                    }
+                    options={veoDurations.map((d) => ({
+                      id: String(d),
+                      label:
+                        veoMode === "perScene"
+                          ? `${d} seconds / scene`
+                          : `${d} seconds`,
+                    }))}
+                    onSelect={(id) => setVeoDuration(Number(id) as 4 | 6 | 8)}
+                    disabled={loading || veoResolution === "1080p"}
+                  />
+                  <ChipDropdown
+                    square
+                    showChevron={false}
+                    icon={<Maximize2 className="h-3.5 w-3.5" />}
+                    value={veoResolution}
+                    activeId={veoResolution}
+                    tooltip="Video resolution. 1080p requires an 8s clip (Veo 3.1 Lite constraint)."
+                    options={(["720p", "1080p"] as const).map((r) => ({
+                      id: r,
+                      label: r === "1080p" ? "1080p (8s only)" : "720p",
+                    }))}
+                    onSelect={(id) => onVeoResolution(id as VeoResolution)}
+                    disabled={loading}
+                  />
+                  {veoMode === "single" ? (
+                    <ChipDropdown
+                      square
+                      showChevron={false}
+                      icon={<Film className="h-3.5 w-3.5" />}
+                      value={singlePromptScenes === 2 ? "2 scenes / prompt" : "1 scene"}
+                      activeId={String(singlePromptScenes)}
+                      tooltip="How Gemini structures the single Veo prompt — still one generated video."
+                      options={[
+                        { id: "1", label: "1 continuous scene" },
+                        { id: "2", label: "2 scenes + cut (one call)" },
+                      ]}
+                      onSelect={(id) => setSinglePromptScenes(Number(id) as 1 | 2)}
+                      disabled={loading}
+                    />
+                  ) : (
+                    <ChipDropdown
+                      square
+                      showChevron={false}
+                      icon={<Layers className="h-3.5 w-3.5" />}
+                      value={`${veoNumScenes} scene${veoNumScenes > 1 ? "s" : ""}`}
+                      activeId={String(veoNumScenes)}
+                      tooltip="Scene count multiplies with seconds-per-scene for total run time."
+                      options={[1, 2, 3].map((n) => ({
+                        id: String(n),
+                        label: `${n} scene${n > 1 ? "s" : ""}`,
+                      }))}
+                      onSelect={(id) => setVeoNumScenes(Number(id))}
+                      disabled={loading}
+                    />
+                  )}
+                </>
+              )}
+
+              {/* Narrator: voice + emotion (shared) */}
+              <ChipDropdown
+                icon={<Mic className="h-3.5 w-3.5" />}
+                value={humanizeReelsVoice(voiceId)}
+                activeId={voiceId}
+                tooltip="The narrator's MiniMax voice."
+                options={REELS_ENGLISH_VOICES.map((v) => ({
+                  id: v,
+                  label: humanizeReelsVoice(v),
+                }))}
+                onSelect={(id) => setVoiceId(id)}
+                disabled={loading}
+              />
+              <ChipDropdown
+                icon={<Smile className="h-3.5 w-3.5" />}
+                value={humanizeReelsEmotion(emotion)}
+                activeId={emotion}
+                tooltip={
+                  engine === "veo"
+                    ? 'Spoken delivery mood. "Auto" maps to neutral for Veo.'
+                    : 'Spoken delivery mood. "Auto" lets the AI pick a mood for the theme.'
+                }
+                options={REELS_EMOTIONS.map((em) => ({
+                  id: em,
+                  label: humanizeReelsEmotion(em),
+                }))}
+                onSelect={(id) => setEmotion(id)}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={!canGenerate}
+                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <span>Generate</span>
+                    <Wand2 className="h-4 w-4" />
+                    <span className="text-sm font-extrabold">{cost}</span>
+                  </>
+                )}
+              </button>
+              {loading && (
+                <button
+                  type="button"
+                  onClick={() => cancelSubmit()}
+                  disabled={cancelling}
+                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <span>Cancel</span>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Caption styler + live preview */}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400">
+              <Type className="h-3.5 w-3.5 text-purple-300" />
+              Caption style
+            </div>
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    Font family
+                  </label>
+                  <ThemedSelect
+                    value={captionStyle.fontname}
+                    options={REELS_CAPTION_FONTS}
+                    onChange={(v) => setCaptionStyle({ ...captionStyle, fontname: v })}
+                    disabled={loading}
+                    previewFont
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    Font size
+                  </label>
+                  <NumberStepper
+                    value={captionStyle.fontsize}
+                    onChange={(v) => setCaptionStyle({ ...captionStyle, fontsize: v })}
+                    min={8}
+                    max={200}
+                    step={2}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                      Text color
+                    </label>
+                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
+                      <input
+                        type="color"
+                        value={captionStyle.highlightColor}
+                        onChange={(e) =>
+                          setCaptionStyle({ ...captionStyle, highlightColor: e.target.value })
+                        }
+                        disabled={loading}
+                        className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
+                      />
+                      <span className="font-mono text-[11px] text-gray-300">
+                        {captionStyle.highlightColor}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                      Outline
+                    </label>
+                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
+                      <input
+                        type="color"
+                        value={captionStyle.outlineColor}
+                        onChange={(e) =>
+                          setCaptionStyle({ ...captionStyle, outlineColor: e.target.value })
+                        }
+                        disabled={loading}
+                        className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
+                      />
+                      <span className="font-mono text-[11px] text-gray-300">
+                        {captionStyle.outlineColor}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    Outline thickness
+                  </label>
+                  <NumberStepper
+                    value={captionStyle.outlineThickness}
+                    onChange={(v) =>
+                      setCaptionStyle({ ...captionStyle, outlineThickness: v })
+                    }
+                    min={0}
+                    max={20}
+                    step={1}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                      Vertical position
+                    </label>
+                    <span className="text-[11px] font-bold text-purple-300">
+                      {captionStyle.marginV}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={captionStyle.marginV}
+                    onChange={(e) =>
+                      setCaptionStyle({ ...captionStyle, marginV: Number(e.target.value) })
+                    }
+                    disabled={loading}
+                    className="w-full accent-purple-500"
+                  />
+                </div>
+                <label className="flex cursor-pointer items-center gap-3 pt-1">
+                  <input
+                    type="checkbox"
+                    checked={captionStyle.highlightOnly}
+                    onChange={(e) =>
+                      setCaptionStyle({ ...captionStyle, highlightOnly: e.target.checked })
+                    }
+                    disabled={loading}
+                    className="h-4 w-4 cursor-pointer rounded border-white/10 bg-black/30 accent-purple-600"
+                  />
+                  <span className="text-sm font-semibold text-gray-300">
+                    Highlight only mode
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Caption Preview — 480x854 math mirrors the server ASS MarginV. */}
+          <div className="rounded-3xl border border-white/10 bg-black/40 p-4 sm:p-5">
+            <div className="mb-3 text-center text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500">
+              Live caption preview
+            </div>
+            {engine === "veo" && (
+              <p className="mx-auto mb-3 max-w-[240px] text-center text-[10px] leading-relaxed text-amber-400/80">
+                Preview uses 480×854 math; Veo outputs 720p/1080p so vertical caption
+                position may differ slightly.
+              </p>
+            )}
+            <style
+              dangerouslySetInnerHTML={{
+                __html:
+                  "@import url('https://fonts.googleapis.com/css2?family=Bangers&family=Montserrat:wght@700&family=Poppins:wght@800&display=swap');",
+              }}
+            />
+            {(() => {
+              const FONT_METRIC_SCALES: Record<string, number> = {
+                Arial: 0.87,
+                Poppins: 0.86,
+                Montserrat: 0.86,
+                Bangers: 0.65,
+              };
+              const DESCENDER_OFFSET_SCALES: Record<string, number> = {
+                Arial: 0.08,
+                Poppins: 0.08,
+                Montserrat: 0.08,
+                Bangers: 0.12,
+              };
+              const metricScale = FONT_METRIC_SCALES[captionStyle.fontname] || 0.85;
+              const offsetScale = DESCENDER_OFFSET_SCALES[captionStyle.fontname] || 0.08;
+              return (
+                <div className="relative mx-auto aspect-[9/16] w-[220px] overflow-hidden rounded-[2rem] border-[6px] border-white/10 bg-slate-900 shadow-inner">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60" />
+                  <div
+                    className="pointer-events-none absolute left-0 flex w-full justify-center px-4 transition-all duration-300"
+                    style={{
+                      bottom: `calc(${(captionStyle.marginV * (854 - captionStyle.fontsize * 1.5)) / 854}% + ${captionStyle.fontsize * (220 / 480) * offsetScale}px)`,
+                    }}
+                  >
+                    <div
+                      className="relative text-center font-extrabold uppercase leading-none tracking-tight"
+                      style={{
+                        fontFamily: `"${captionStyle.fontname}", sans-serif`,
+                        fontSize: `${captionStyle.fontsize * (220 / 480) * metricScale}px`,
+                      }}
+                    >
+                      <div
+                        className="absolute inset-0 z-0"
+                        style={{
+                          WebkitTextStroke: `${captionStyle.outlineThickness * (220 / 480) * 1.5}px ${captionStyle.outlineColor}`,
+                          color: captionStyle.outlineColor,
+                        }}
+                      >
+                        BREATHTAKING
+                      </div>
+                      <div className="relative z-10" style={{ color: captionStyle.highlightColor }}>
+                        BREATHTAKING
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </form>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          Writing the script, generating scenes, narration &amp; captions — this can take a
+          few minutes. It will appear below when ready.
+        </div>
+      )}
+
+      {resultUrl && !loading && (
+        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
+          <video
+            src={resultUrl}
+            controls
+            playsInline
+            className="w-full max-w-[260px] shrink-0 rounded-2xl border border-white/10 bg-black"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <Check className="h-3 w-3" />
+              Saved to your library
+            </div>
+            <p className="text-sm text-gray-300">
+              {engine === "veo"
+                ? `Veo · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
+                : `Seedance · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href={resultUrl}
+                download
+                className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </a>
+              <a
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                  theme.trim() ? `&title=${encodeURIComponent(theme.trim())}` : ""
+                }`}
+                className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+              >
+                <CalendarClock className="h-4 w-4" />
+                Schedule to YouTube
+              </a>
+            </div>
           </div>
         </div>
       )}

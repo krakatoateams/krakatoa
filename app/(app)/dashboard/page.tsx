@@ -8,9 +8,9 @@ import ToolCard from "./ToolCard";
 
 const TOOLS = [
   {
-    name: "ReelsGen",
+    name: "Reels Creator",
     description: "Generate faceless video reels with AI narration and captions.",
-    href: "/tools/reels",
+    href: "/tools/video?type=reels-creator",
     icon: <Video className="h-5 w-5 text-indigo-400" />,
     accent: "bg-indigo-500/10",
   },

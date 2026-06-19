@@ -205,7 +205,7 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let imageAssetId: string | null = null;
-  // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
+  // Credit-spend trackers — see app/api/generate-reels/route.ts for the pattern.
   let creditsSpent = false;
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
@@ -224,7 +224,7 @@ export async function POST(req: Request) {
 
   try {
     // STRICT profile resolution — this route now charges credits. See
-    // app/api/generate/route.ts for the rationale; non-auth failures now
+    // app/api/generate-reels/route.ts for the rationale; non-auth failures now
     // surface as 500 rather than silently allowing free generation.
     //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy storyboards.user_id + user_creations (= users.id)

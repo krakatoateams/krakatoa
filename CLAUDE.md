@@ -1,7 +1,7 @@
 # Krakatoa Monorepo & AI Tools
 
 ## Project Overview
-Krakatoa is a premium AI-powered platform tailored for content creators. It features a modern, high-conversion landing page and hosts multiple AI tools under one monorepo. Flagship tools include **ReelsGen** (`app/(app)/tools/reels/page.tsx`, URL `/tools/reels`), an autonomous pipeline for vertical videos (Reels/TikToks) with burned-in styled captions; **Product Photo** (`app/(app)/tools/photo/page.tsx`); **Scheduler** (`app/(app)/tools/scheduler/`) with Google Calendar/YouTube integrations; and **IG** (`app/(app)/tools/ig/page.tsx`).
+Krakatoa is a premium AI-powered platform tailored for content creators. It features a modern, high-conversion landing page and hosts multiple AI tools under one monorepo. Flagship tools include the **Reels Creator** (a subtool of the Video studio at `app/(app)/tools/video/page.tsx`, URL `/tools/video`), an autonomous pipeline for vertical videos (Reels/TikToks) with burned-in styled captions across the Seedance and Veo engines; **Product Photo** (`app/(app)/tools/photo/page.tsx`); **Scheduler** (`app/(app)/tools/scheduler/`) with Google Calendar/YouTube integrations; and **IG** (`app/(app)/tools/ig/page.tsx`).
 
 The platform foundation (profiles, projects, jobs, job_steps, assets, asset_relations, posts platform linkage, credit_wallets, credit_transactions, usage_events) is complete (Phase 1–7). The Dummy Credit Integration is live for internal testing — every existing profile holds 500 dummy credits and the four credit-charged generation routes spend/refund through the ledger RPC before any provider call. No payment gateway/Xendit/subscription system is wired yet.
 
@@ -27,18 +27,19 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - `app/`: Next.js App Router root.
   - `page.tsx`: Main Krakatoa landing page.
   - `dashboard/`: Authenticated hub (uses NextAuth + Supabase patterns as implemented).
-  - `api/generate/route.ts`: Core ReelsGen AI video generation pipeline (`maxDuration = 300`).
+  - `api/generate-reels/route.ts`: Unified Reels Creator AI video pipeline — dispatches by engine (`seedance` | `veo`) and Veo mode (`single` | `perScene`) over the shared `lib/reels-pipeline/` modules (`maxDuration = 300`). Replaces the legacy `api/generate` (Seedance) + `api/generate-veo` (Veo) routes.
   - `api/test-stitch/route.ts`: Developer utility to test Whisper → Rendi stitching from existing Replicate prediction IDs (`maxDuration = 300`).
   - `api/generate-photo/route.ts`: Product Photo generation.
   - `api/generate-caption/route.ts`: Short-form caption helper (Llama 3 8B on Replicate).
   - `api/auth/[...nextauth]/route.ts`: NextAuth handler.
   - `api/cron/route.ts`, `api/posts/`, `api/product-photo/`: Scheduling and product-photo support routes.
   - `api/upload/route.ts`: MP4 upload endpoint (verify bucket/path against your Supabase setup).
-  - `tools/reels/`: ReelsGen frontend.
+  - `tools/video/`: Video studio frontend — hosts the **Reels Creator** subtool (Seedance + Veo) plus Text-to-Video, Motion Control, and Storyboard-to-Video.
   - `tools/photo/`: Product Photo frontend.
   - `tools/scheduler/`, `tools/scheduler/calendar/`: Scheduler UI.
   - `tools/ig/`: Instagram-related tool surface.
 - `lib/`: Shared utilities (`supabase.ts`, `supabase-server.ts`, `storage-buckets.ts`, `auth.ts`, `youtube.ts`, etc.).
+  - **Reels Creator pipeline**: `reels-models.ts` (engine/schema registry + `validateReelsRequest`), `reels-pipeline/` (shared `llm`, `tts-whisper`, `ass`, `rendi-stitch`, `storage`, `seedance`, `veo`, `types`).
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
 - `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
 - `public/`: Static assets (images, fonts, icons).
@@ -69,9 +70,9 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 
 | Tool / route | Cost rule |
 |---|---|
-| ReelsGen / Seedance (`api/generate`) | `estimateSeedanceCredits({ sceneCount, durationPerScene })` — 2 credits/sec of total video |
-| Veo single (`api/generate-veo`, mode `single`) | `estimateVeoCredits({ durationSec })` — 8 s = 16, 6 s = 12, 4 s = 8 |
-| Veo per-scene (`api/generate-veo`, mode `perScene`) | `estimateVeoCredits({ durationSec: sceneCount × durationPerScene })` |
+| Reels Creator / Seedance (`api/generate-reels`, engine `seedance`) | `estimateSeedanceCredits({ sceneCount, durationPerScene })` — 2 credits/sec of total video |
+| Reels Creator / Veo single (`api/generate-reels`, engine `veo` mode `single`) | `estimateVeoCredits({ durationSec })` — 8 s = 16, 6 s = 12, 4 s = 8 |
+| Reels Creator / Veo per-scene (`api/generate-reels`, engine `veo` mode `perScene`) | `estimateVeoCredits({ durationSec: sceneCount × durationPerScene })` |
 | Storyboard image (`api/generate-storyboard`) | fixed 2 credits |
 | Storyboard video (`api/generate-storyboard-video`) | fixed 30 credits |
 | Photo Studio (`api/generate-photo`) | **not wired yet** — Photo Studio remains free during dummy phase by design |
@@ -94,8 +95,8 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 - Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
 
-## ReelsGen AI Pipeline Architecture
-The pipeline in `app/api/generate/route.ts` orchestrates LLM scripting, one continuous voiceover, transcription, parallel scene video generation, ASS subtitles, Rendi stitching, and Supabase upload of the final MP4.
+## Reels Creator AI Pipeline Architecture
+The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contract (profile, tool gate, idempotency, spend/refund, jobs/assets, history) and dispatches by engine/mode into `lib/reels-pipeline/` (`runSeedancePipeline`, `runVeoSinglePipeline`, `runVeoPerScenePipeline`). The Seedance pipeline below orchestrates LLM scripting, one continuous voiceover, transcription, parallel scene video generation, ASS subtitles, Rendi stitching, and Supabase upload of the final MP4. The Veo pipelines reuse the same shared modules — Veo `single` uses the model's native audio (extract → Whisper → burn-in); Veo `perScene` runs Seedance-style continuous TTS mapped onto the concatenated timeline.
 
 ### 1. Two-Step LLM (`google/gemini-2.5-flash` on Replicate)
 - **Model:** `google/gemini-2.5-flash` via Replicate for strong creative copy and structured JSON.
@@ -115,7 +116,7 @@ The pipeline in `app/api/generate/route.ts` orchestrates LLM scripting, one cont
 ### 3. Subtitles (ASS)
 - Word-level timestamps from Whisper are written to **Advanced SubStation Alpha** (`.ass`).
 - Timestamps are scaled by the final `audioSpeedFactor` (`atempo`) so on-screen text matches time-stretched audio.
-- **MarginV:** `Math.floor((marginV / 100) * (854 - (fontsize * 1.5)))` for 480×854 base (720p uses parallel target height in the Rendi filter graph). Must stay in sync with the ReelsGen live caption preview CSS (`bottom: calc(...)`) for WYSIWYG.
+- **MarginV:** `Math.floor((marginV / 100) * (854 - (fontsize * 1.5)))` for 480×854 base (720p uses parallel target height in the Rendi filter graph). Must stay in sync with the Reels Creator live caption preview CSS (`bottom: calc(...)` in `app/(app)/tools/video/page.tsx`) for WYSIWYG. Implemented in `lib/reels-pipeline/ass.ts`.
 
 ### 4. Rendi Cloud Stitching (FFmpeg)
 - Avoids local FFmpeg / Vercel timeout limits via **Rendi** (`https://api.rendi.dev/v1/run-ffmpeg-command`).
@@ -125,16 +126,16 @@ The pipeline in `app/api/generate/route.ts` orchestrates LLM scripting, one cont
 - **Merge:** Combined video + TTS audio + `.ass` + optional Google Font TTF (remote font URLs pinned to a specific `google/fonts` commit in code for stable TTF paths) → `merged.mkv`.
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
-### 5. Supabase Storage (ReelsGen)
+### 5. Supabase Storage (Reels Creator)
 - **Canonical paths:** `lib/storage-buckets.ts` — bucket name `STORAGE_BUCKET` from `SUPABASE_STORAGE_BUCKET` or default **`krakatoa`**.
-- **Final deliverable:** `videos/reels_<timestamp>.mp4` — public URL returned as `videoUrl` to the client for preview and download.
-- **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** for Rendi to fetch; deleted after a successful run.
+- **Final deliverable:** `videos/reels_<timestamp>.mp4` (Seedance) or `videos/reels_veo_<timestamp>.mp4` (Veo) — public URL returned as `videoUrl` to the client for preview and download.
+- **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** (Veo uses `captions_veo_<timestamp>.ass`) for Rendi to fetch; deleted after a successful run.
 - **Product Photo** uses **`photos/`** in the same bucket — never under `videos/`.
 
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
-2. **ReelsGen UI:** Keep Live Caption Preview math aligned with the ASS `maxMarginV` / margin logic in `app/api/generate/route.ts`.
-3. **Long-running routes & Vercel plan limits:** `maxDuration` is set on the heavy routes; handle Rendi polling timeouts gracefully. **Vercel's Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds** (deployment fails outright with `Builder returned invalid maxDuration value ... must have a maxDuration between 1 and 300 for plan hobby` if a route exceeds it). All heavy routes (`api/generate`, `api/generate-veo`, `api/generate-storyboard-video`) are therefore pinned to `300`. **Trade-off:** real generations that run longer than 5 minutes will be killed by Vercel's function timeout at runtime. The Pro plan raises the ceiling to 800s — if/when upgraded, these routes can be raised back to `600` (search the codebase for the `Vercel Hobby plan caps` comments). Never set a route above `300` while the project is on Hobby.
+2. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.
+3. **Long-running routes & Vercel plan limits:** `maxDuration` is set on the heavy routes; handle Rendi polling timeouts gracefully. **Vercel's Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds** (deployment fails outright with `Builder returned invalid maxDuration value ... must have a maxDuration between 1 and 300 for plan hobby` if a route exceeds it). All heavy routes (`api/generate-reels`, `api/generate-storyboard-video`) are therefore pinned to `300`. **Trade-off:** real generations that run longer than 5 minutes will be killed by Vercel's function timeout at runtime. The Pro plan raises the ceiling to 800s — if/when upgraded, these routes can be raised back to `600` (search the codebase for the `Vercel Hobby plan caps` comments). Never set a route above `300` while the project is on Hobby.
 4. **LLM prompts:** Always interpolate concrete strings (e.g. `style_anchor`) into prompts; never rely on “the provided X” placeholders — add post-parse safety nets.
 5. **FFmpeg concat:** Always normalize fps/scale/SAR/pixel format before `concat` when inputs come from generative video models.
 6. **Environment variables (common):**

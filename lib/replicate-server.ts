@@ -41,7 +41,7 @@ export type ReplicateRunHooks = {
   onPrediction?: (tick: PredictionTick) => void;
 };
 
-/** Shared Replicate 429 backoff — matches `app/api/generate/route.ts` behavior. */
+/** Shared Replicate 429 backoff used across the generation routes. */
 export async function runReplicateWithRetry(
   replicate: Replicate,
   model: `${string}/${string}` | string,

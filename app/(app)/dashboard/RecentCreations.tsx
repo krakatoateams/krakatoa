@@ -40,7 +40,10 @@ export default function RecentCreations() {
       ) : items.length === 0 ? (
         <p className="text-sm text-gray-500">
           No generations yet. Try{" "}
-          <Link href="/tools/reels" className="text-indigo-400 hover:underline">
+          <Link
+            href="/tools/video?type=reels-creator"
+            className="text-indigo-400 hover:underline"
+          >
             Reels
           </Link>{" "}
           or{" "}
@@ -54,7 +57,7 @@ export default function RecentCreations() {
           {items.map((item) => (
             <Link
               key={item.id}
-              href={item.tool === "product_photo" ? "/tools/photo" : "/tools/reels"}
+              href={item.tool === "product_photo" ? "/tools/photo" : "/tools/video"}
               className="rounded-xl overflow-hidden border border-white/10 bg-white/[0.03] hover:border-white/20 transition-colors"
             >
               <div

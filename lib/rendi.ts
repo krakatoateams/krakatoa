@@ -7,8 +7,9 @@
  *
  * Requires the RENDI_API_KEY environment variable.
  *
- * Existing routes (generate, generate-veo, test-stitch) have their own inline
- * copies of this logic; they can migrate to these helpers over time.
+ * The unified Reels Creator route (generate-reels) uses these helpers via the
+ * lib/reels-pipeline/rendi-stitch.ts wrappers. The dev-only test-stitch route
+ * still keeps its own inline copy of this logic.
  */
 
 const RENDI_BASE = "https://api.rendi.dev/v1";
