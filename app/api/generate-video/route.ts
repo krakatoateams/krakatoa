@@ -26,10 +26,11 @@ import {
   isValidVideoModelId,
   isValidVideoResolution,
   isValidVideoAspectRatio,
-  isValidVideoDuration,
+  getAllowedDurations,
   validateVideoReferences,
   buildVideoProviderInput,
   type VideoReferenceInputs,
+  type VideoResolution,
 } from "@/lib/video-models";
 import {
   readIdempotencyKey,
@@ -180,12 +181,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (!Number.isFinite(duration) || !isValidVideoDuration(model, duration)) {
-      return NextResponse.json(
-        { error: `Duration must be one of: ${model.durations.join(", ")} seconds.` },
-        { status: 400 }
-      );
-    }
     if (!isValidVideoResolution(model, resolution)) {
       return NextResponse.json(
         { error: `Resolution must be one of: ${model.resolutions.join(", ")}.` },
@@ -194,6 +189,17 @@ export async function POST(req: Request) {
     }
     if (!isValidVideoAspectRatio(model, aspectRatio)) {
       return NextResponse.json({ error: "Unsupported aspect ratio." }, { status: 400 });
+    }
+    // Duration is validated against the resolution (some models restrict durations
+    // at certain resolutions — e.g. Veo 3.1 Lite only allows 8s at 1080p).
+    const allowedDurations = getAllowedDurations(model, resolution as VideoResolution);
+    if (!Number.isFinite(duration) || !allowedDurations.includes(duration)) {
+      return NextResponse.json(
+        {
+          error: `Duration must be one of: ${allowedDurations.join(", ")} seconds for ${resolution}.`,
+        },
+        { status: 400 }
+      );
     }
 
     // ---- Parse reference attachments + collect their temp paths for cleanup ----

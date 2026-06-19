@@ -29,6 +29,7 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   VIDEO_MODELS,
   getVideoModel,
+  getAllowedDurations,
   validateVideoReferences,
   type VideoModelId,
   type VideoResolution,
@@ -451,10 +452,23 @@ export default function VideoOmniPage() {
   useEffect(() => {
     const m = getVideoModel(modelId);
     setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
-    setDuration((d) => (m.durations.includes(d) ? d : m.defaultDuration));
     setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
     if (!m.supportsAudio) setGenerateAudio(false);
   }, [modelId]);
+
+  // Keep duration valid for the current model + resolution. Some models restrict
+  // durations at certain resolutions (e.g. Veo 3.1 Lite only allows 8s at 1080p).
+  useEffect(() => {
+    const m = getVideoModel(modelId);
+    const allowed = getAllowedDurations(m, resolution);
+    setDuration((d) =>
+      allowed.includes(d)
+        ? d
+        : allowed.includes(m.defaultDuration)
+          ? m.defaultDuration
+          : allowed[allowed.length - 1]
+    );
+  }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -670,7 +684,7 @@ export default function VideoOmniPage() {
                   icon={<Clock className="h-3.5 w-3.5" />}
                   value={`${duration}s`}
                   activeId={String(duration)}
-                  options={model.durations.map((d) => ({
+                  options={getAllowedDurations(model, resolution).map((d) => ({
                     id: String(d),
                     label: `${d} seconds`,
                     hint: `${videoCredits(pricingKey, d)}`,

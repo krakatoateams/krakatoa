@@ -253,3 +253,8 @@ export function veo31FastPricingKey(params: { generateAudio: boolean }): string 
     ? "veo31fast_with_audio_per_second"
     : "veo31fast_without_audio_per_second";
 }
+
+/** Veo 3.1 Lite (google/veo-3.1-lite) pricing key. No audio; priced by resolution. */
+export function veo31LitePricingKey(resolution: string | null | undefined): string {
+  return resolution === "1080p" ? "veo31lite_1080p_per_second" : "veo31lite_720p_per_second";
+}

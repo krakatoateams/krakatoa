@@ -2,6 +2,7 @@ import {
   seedanceFastPricingKey,
   seedance2PricingKey,
   veo31FastPricingKey,
+  veo31LitePricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -18,7 +19,7 @@ import {
  * model_configs row (admin-editable), whose fallback is bytedance/seedance-2.0-fast.
  */
 
-export type VideoModelId = "seedance2_fast" | "seedance2" | "veo31_fast";
+export type VideoModelId = "seedance2_fast" | "seedance2" | "veo31_fast" | "veo31_lite";
 
 export type VideoResolution = "480p" | "720p" | "1080p";
 
@@ -32,7 +33,7 @@ export type VideoAspectRatio =
   | "9:21"
   | "adaptive";
 
-export type VideoProviderFamily = "seedance2" | "veo31fast";
+export type VideoProviderFamily = "seedance2" | "veo31fast" | "veo31lite";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -72,6 +73,12 @@ export type VideoModel = {
   providerFamily: VideoProviderFamily;
   durations: number[];
   defaultDuration: number;
+  /**
+   * Optional resolution-dependent duration constraint. When set, it returns the
+   * allowed durations for a given resolution (e.g. Veo 3.1 Lite only allows 8s at
+   * 1080p). When omitted, all `durations` are valid at every resolution.
+   */
+  durationsFor?: (resolution: VideoResolution) => number[];
   resolutions: VideoResolution[];
   defaultResolution: VideoResolution;
   aspectRatios: VideoAspectRatio[];
@@ -177,6 +184,34 @@ export const VIDEO_MODELS: VideoModel[] = [
     // Priced by audio, not resolution.
     pricingKey: (ctx) => veo31FastPricingKey({ generateAudio: ctx.generateAudio ?? true }),
   },
+  {
+    id: "veo31_lite",
+    label: "Veo 3.1 Lite",
+    modelLabel: "Veo 3.1 Lite",
+    modelRole: "video_veo31_lite",
+    providerModel: "google/veo-3.1-lite",
+    providerFamily: "veo31lite",
+    durations: [4, 6, 8],
+    defaultDuration: 8,
+    // 1080p only supports an 8s clip; 720p allows the full set.
+    durationsFor: (resolution) => (resolution === "1080p" ? [8] : [4, 6, 8]),
+    resolutions: ["720p", "1080p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16"],
+    defaultAspectRatio: "9:16",
+    // Veo 3.1 Lite has no audio generation.
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      // First/last frame only — no reference image/video/audio arrays.
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => veo31LitePricingKey(ctx.resolution),
+  },
 ];
 
 const MODEL_BY_ID = Object.fromEntries(
@@ -209,6 +244,17 @@ export function isValidVideoAspectRatio(
 
 export function isValidVideoDuration(model: VideoModel, duration: number): boolean {
   return model.durations.includes(duration);
+}
+
+/**
+ * Allowed durations for a given resolution, honoring any resolution-dependent
+ * constraint (durationsFor). Falls back to the flat `durations` envelope.
+ */
+export function getAllowedDurations(
+  model: VideoModel,
+  resolution: VideoResolution
+): number[] {
+  return model.durationsFor ? model.durationsFor(resolution) : model.durations;
 }
 
 /** Reference inputs as resolved (public) URLs, ready for the provider. */
@@ -316,6 +362,20 @@ export function buildVideoProviderInput(params: {
       };
       if (hasSeed) input.seed = params.seed;
       if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.image = refs.firstFrame;
+      if (refs.lastFrame) input.last_frame = refs.lastFrame;
+      return input;
+    }
+    case "veo31lite": {
+      // google/veo-3.1-lite: prompt + duration/resolution/aspect_ratio, optional
+      // first frame (image) / last_frame, seed. No audio, no negative_prompt.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (hasSeed) input.seed = params.seed;
       if (refs.firstFrame) input.image = refs.firstFrame;
       if (refs.lastFrame) input.last_frame = refs.lastFrame;
       return input;

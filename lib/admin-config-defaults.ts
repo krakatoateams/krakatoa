@@ -160,6 +160,16 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 9, enabled: true,
     provider_cost_usd: 0.10, cost_unit: "per_second", pricing_group: "veo31fast", variant_key: "without_audio", currency: "USD",
   },
+  // ---- Veo 3.1 Lite (google/veo-3.1-lite, Text to Video) rows (017). No audio;
+  // priced by resolution. ----
+  veo31lite_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo31lite", variant_key: "720p", currency: "USD",
+  },
+  veo31lite_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "veo31lite", variant_key: "1080p", currency: "USD",
+  },
   storyboard_gpt_image_2_low_per_image: {
     pricing_type: "per_image", credit_amount: 2, enabled: true,
     provider_cost_usd: 0.012, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "low", currency: "USD",
