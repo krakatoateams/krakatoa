@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   Wand2,
@@ -24,6 +24,7 @@ import {
   Repeat,
   UserRound,
   SlidersHorizontal,
+  Languages,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -47,6 +48,16 @@ import {
   type MotionControlMode,
   type CharacterOrientation,
 } from "@/lib/motion-control-models";
+import {
+  resolveStoryboardAspectRatio,
+  storyboardOrientationLabel,
+  type StoryboardAspectRatio,
+  STORYBOARD_LANGUAGES,
+  DEFAULT_STORYBOARD_LANGUAGE,
+  resolveStoryboardLanguage,
+  storyboardLanguageLabel,
+  type StoryboardLanguageId,
+} from "@/lib/storyboard-style";
 
 // One fresh idempotency key per submit (sent as the Idempotency-Key header).
 function newIdempotencyKey(): string {
@@ -74,11 +85,11 @@ function describeIdempotencyError(
 const CREATION_TYPES = [
   { id: "text2video", label: "Text to Video", available: true },
   { id: "motion_control", label: "Motion Control", available: true },
-  { id: "storyboard", label: "Storyboard to Video", available: false, href: "/tools/reels" },
+  { id: "storyboard", label: "Storyboard to Video", available: true },
   { id: "reels-creator", label: "Reels Creator", available: false, href: "/tools/reels" },
 ] as const;
 
-type VideoCreationType = "text2video" | "motion_control";
+type VideoCreationType = "text2video" | "motion_control" | "storyboard";
 
 // Motion Control character source: an uploaded file, or one previously created
 // in Photo → Character (stored as a product_photo creation, kind "character").
@@ -685,15 +696,22 @@ const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm";
 const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/webm";
 
-export default function VideoOmniPage() {
+function VideoOmniPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [creationType, setCreationType] = useState<VideoCreationType>("text2video");
+  // Deep-link support: the Photo → Storyboard "Create video" CTA navigates here
+  // with ?type=storyboard&storyboardId=... so we open that sub-tool preselected.
+  const initialType: VideoCreationType =
+    searchParams.get("type") === "storyboard" ? "storyboard" : "text2video";
+  const initialStoryboardId = searchParams.get("storyboardId") || null;
+
+  const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const { refetch: refetchCredits } = useCreditBalance();
 
   const handleCreationType = (id: string) => {
-    if (id === "text2video" || id === "motion_control") {
+    if (id === "text2video" || id === "motion_control" || id === "storyboard") {
       setCreationType(id);
       return;
     }
@@ -1163,12 +1181,23 @@ export default function VideoOmniPage() {
           />
         )}
 
+        {creationType === "storyboard" && (
+          <StoryboardToVideoComposer
+            initialStoryboardId={initialStoryboardId}
+            onSelectCreation={handleCreationType}
+            onGenerated={() => {
+              setHistoryRefreshKey((k) => k + 1);
+              refetchCredits();
+            }}
+          />
+        )}
+
         {/* Video generation history */}
         <div className="mt-[120px]">
           <CreationsHistory
             title="Generation history"
             description="Every video you create appears here. Click any clip to preview it."
-            tools={["video_text2video", "video_motion_control"]}
+            tools={["video_text2video", "video_motion_control", "storyboard_video"]}
             mediaType="video"
             refreshKey={historyRefreshKey}
             showActions
@@ -1178,6 +1207,16 @@ export default function VideoOmniPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary in the App Router. Wrap the page
+// so the storyboard deep-link (?type=storyboard&storyboardId=...) reads cleanly.
+export default function VideoOmniPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <VideoOmniPage />
+    </Suspense>
   );
 }
 
@@ -1539,6 +1578,375 @@ function MotionControlComposer({
             </p>
             <p className="mt-1 text-xs text-gray-500">
               Find it in your history below, or generate another.
+            </p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+type StoryboardListItem = {
+  id: string;
+  storyboardUrl: string;
+  theme: string;
+  hasVideo: boolean;
+  // The orientation the storyboard was created in. null only for legacy rows
+  // saved before the aspect_ratio column existed (then the user may pick it).
+  aspectRatio: StoryboardAspectRatio | null;
+  // Spoken language the storyboard was written in. null for legacy rows; used as
+  // the default here but the user may still change it (soft, re-instructable).
+  language: StoryboardLanguageId | null;
+};
+
+function storyboardSeedancePricingKey(resolution: "480p" | "720p"): string {
+  return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
+}
+
+// Storyboard to Video sub-tool. The storyboard itself is created in Photo →
+// Storyboard; here the user picks one of their saved storyboards, a resolution,
+// and a model (Seedance 2 Fast for now), then renders the 15s 16:9 clip. The
+// heavy lifting (loading the stored seedance_prompt + reference image) happens
+// server-side in /api/generate-storyboard-video, which only needs storyboardId.
+const STORYBOARD_VIDEO_DURATION_SEC = 15;
+
+function StoryboardToVideoComposer({
+  initialStoryboardId,
+  onSelectCreation,
+  onGenerated,
+}: {
+  initialStoryboardId: string | null;
+  onSelectCreation: (id: string) => void;
+  onGenerated: () => void;
+}) {
+  const { videoCredits } = usePricing();
+
+  const [items, setItems] = useState<StoryboardListItem[]>([]);
+  const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
+  const [selectedId, setSelectedId] = useState<string | null>(initialStoryboardId);
+  const [resolution, setResolution] = useState<"480p" | "720p">("480p");
+  // Aspect mirrors the selected storyboard's stored orientation (locked) so the
+  // clip never flips. Only editable for legacy storyboards that have no ratio.
+  const [aspect, setAspect] = useState<StoryboardAspectRatio>("16:9");
+  // Language defaults to the storyboard's language but stays EDITABLE — the user
+  // can re-voice the same storyboard in another language at video time.
+  const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
+
+  const [loading, setLoading] = useState(false);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load the user's saved storyboards once. Auto-select the deep-linked one (from
+  // Photo's "Create video" CTA), otherwise leave selection to the user.
+  useEffect(() => {
+    let cancelled = false;
+    setListState("loading");
+    fetch("/api/storyboards")
+      .then((r) => r.json())
+      .then((d: { storyboards?: Array<Record<string, unknown>> }) => {
+        if (cancelled) return;
+        const list: StoryboardListItem[] = (d.storyboards ?? [])
+          .filter((s) => typeof s.storyboard_url === "string" && s.storyboard_url)
+          .map((s) => ({
+            id: String(s.id),
+            storyboardUrl: String(s.storyboard_url),
+            theme: typeof s.theme === "string" ? s.theme : "Storyboard",
+            hasVideo: typeof s.video_url === "string" && !!s.video_url,
+            aspectRatio:
+              typeof s.aspect_ratio === "string"
+                ? resolveStoryboardAspectRatio(s.aspect_ratio)
+                : null,
+            language:
+              typeof s.language === "string"
+                ? resolveStoryboardLanguage(s.language)
+                : null,
+          }));
+        setItems(list);
+        setListState("loaded");
+        setSelectedId((cur) => {
+          if (cur && list.some((s) => s.id === cur)) return cur;
+          return list[0]?.id ?? null;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setListState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const pricingKey = storyboardSeedancePricingKey(resolution);
+  const cost = videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
+  const selected = items.find((s) => s.id === selectedId) ?? null;
+  const canGenerate = !loading && !!selectedId;
+  // When the selected storyboard carries an orientation, the video MUST match it
+  // (lock the chip). Legacy boards without one let the user choose.
+  const aspectLocked = !!selected?.aspectRatio;
+
+  useEffect(() => {
+    if (selected?.aspectRatio) setAspect(selected.aspectRatio);
+  }, [selected?.aspectRatio]);
+
+  // Sync language to the selected storyboard (default English) whenever the
+  // selection or its stored language changes. Manual overrides persist until the
+  // board changes again, since neither dependency moves on a user edit.
+  useEffect(() => {
+    setLanguage(selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE);
+  }, [selectedId, selected?.language]);
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canGenerate || !selectedId) return;
+    setLoading(true);
+    setError(null);
+    setResultUrl(null);
+    try {
+      const response = await fetch("/api/generate-storyboard-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
+        body: JSON.stringify({ storyboardId: selectedId, resolution, aspectRatio: aspect, language }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Generation failed");
+      }
+      setResultUrl(data.videoUrl);
+      onGenerated();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+        {/* Top-left chips: creation type + model */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ChipDropdown
+            icon={<Layers className="h-3.5 w-3.5" />}
+            value="Storyboard to Video"
+            activeId="storyboard"
+            options={CREATION_TYPES.map((c) => ({
+              id: c.id,
+              label: c.label,
+              hint: c.available ? undefined : "Open",
+            }))}
+            onSelect={onSelectCreation}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Cpu className="h-3.5 w-3.5" />}
+            value="Seedance 2 Fast"
+            activeId="seedance2_fast"
+            options={[{ id: "seedance2_fast", label: "Seedance 2 Fast" }]}
+            onSelect={() => {}}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+          {/* Storyboard picker */}
+          <div className="mb-1 flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              <span className="text-purple-300">
+                <ImageIcon className="h-3.5 w-3.5" />
+              </span>
+              Choose a storyboard
+            </span>
+          </div>
+
+          {listState === "loading" ? (
+            <div className="flex h-24 items-center gap-2 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
+              Loading your storyboards…
+            </div>
+          ) : listState === "error" ? (
+            <div className="flex h-24 items-center gap-2 text-sm text-red-300">
+              <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your storyboards.
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex h-24 flex-col justify-center gap-1 text-sm text-gray-500">
+              <span>You don&apos;t have any storyboards yet.</span>
+              <a
+                href="/tools/photo-v2?type=storyboard"
+                className="font-semibold text-purple-300 hover:text-purple-200"
+              >
+                Create one in Photo → Storyboard →
+              </a>
+            </div>
+          ) : (
+            <div className="grid max-h-[320px] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+              {items.map((s) => {
+                const active = s.id === selectedId;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setSelectedId(s.id)}
+                    title={s.theme}
+                    className={`group relative overflow-hidden rounded-xl border text-left transition-colors disabled:opacity-40 ${
+                      active
+                        ? "border-purple-400 ring-2 ring-purple-400/40"
+                        : "border-white/10 hover:border-white/30"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={s.storyboardUrl}
+                      alt={s.theme}
+                      className="aspect-[3/2] w-full object-cover"
+                    />
+                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-gray-300">
+                      {s.aspectRatio && (
+                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[9px] font-semibold text-gray-200">
+                          {s.aspectRatio}
+                        </span>
+                      )}
+                      <span className="truncate">{s.theme}</span>
+                    </span>
+                    {s.hasVideo && (
+                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+                        Has video
+                      </span>
+                    )}
+                    {active && (
+                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-white">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Controls row */}
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Maximize2 className="h-3.5 w-3.5" />}
+                value={resolution}
+                activeId={resolution}
+                tooltip="Video resolution. 720p is crisper but costs more credits. Clips are 15s."
+                options={(["480p", "720p"] as const).map((r) => ({
+                  id: r,
+                  label: r,
+                  hint: `${videoCredits(storyboardSeedancePricingKey(r), STORYBOARD_VIDEO_DURATION_SEC)}`,
+                }))}
+                onSelect={(id) => setResolution(id as "480p" | "720p")}
+                disabled={loading}
+              />
+              <ChipDropdown
+                square
+                showChevron={!aspectLocked}
+                icon={<Crop className="h-3.5 w-3.5" />}
+                value={aspect}
+                activeId={aspect}
+                tooltip={
+                  aspectLocked
+                    ? "Locked to your storyboard's orientation so the video can't flip vertical/horizontal."
+                    : "Output orientation for this clip."
+                }
+                options={(["16:9", "9:16"] as const).map((a) => ({
+                  id: a,
+                  label: a,
+                  hint: storyboardOrientationLabel(a),
+                }))}
+                onSelect={(id) => setAspect(id as StoryboardAspectRatio)}
+                disabled={loading || aspectLocked}
+              />
+              <ChipDropdown
+                icon={<Languages className="h-3.5 w-3.5" />}
+                value={storyboardLanguageLabel(language)}
+                activeId={language}
+                tooltip="Spoken language for the video's dialogue. Defaults to the storyboard's language — change it to re-voice this storyboard in another language."
+                options={STORYBOARD_LANGUAGES.map((l) => ({
+                  id: l.id,
+                  label: l.label,
+                }))}
+                onSelect={(id) => setLanguage(id as StoryboardLanguageId)}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={!canGenerate}
+                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <span>Create video</span>
+                    <Wand2 className="h-4 w-4" />
+                    <span className="text-sm font-extrabold">{cost}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {!selectedId && listState === "loaded" && items.length > 0 ? (
+            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+              Pick a storyboard to turn into a video.
+            </p>
+          ) : null}
+        </div>
+      </form>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          Rendering your storyboard into a 15s clip — it will appear below when ready.
+        </div>
+      )}
+
+      {resultUrl && !loading && (
+        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
+          <video
+            src={resultUrl}
+            controls
+            playsInline
+            className={`shrink-0 rounded-2xl border border-white/10 bg-black ${
+              aspect === "9:16" ? "w-full max-w-[260px]" : "w-full max-w-md"
+            }`}
+          />
+          <div className="min-w-0">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <Check className="h-3 w-3" />
+              Saved to your library
+            </div>
+            <p className="text-sm text-gray-300">
+              Seedance 2 Fast · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
+              {selected ? ` · ${selected.theme}` : ""}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Find it in your history below, or render another resolution.
             </p>
           </div>
         </div>

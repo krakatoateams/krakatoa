@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Camera,
   Plus,
@@ -20,8 +21,24 @@ import {
   Palette,
   VenusAndMars,
   Cake,
+  Clapperboard,
+  ArrowRight,
+  Languages,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
+import {
+  STORYBOARD_STYLE_KEYS,
+  DEFAULT_STORYBOARD_STYLE,
+  type StoryboardStyleKey,
+  STORYBOARD_ASPECT_RATIOS,
+  DEFAULT_STORYBOARD_ASPECT_RATIO,
+  storyboardOrientationLabel,
+  type StoryboardAspectRatio,
+  STORYBOARD_LANGUAGES,
+  DEFAULT_STORYBOARD_LANGUAGE,
+  storyboardLanguageLabel,
+  type StoryboardLanguageId,
+} from "@/lib/storyboard-style";
 import {
   MODEL_POSES,
   PHOTO_STYLES,
@@ -79,9 +96,20 @@ const CREATION_TYPES = [
   { id: "generate-any-image", label: "Generate any image", available: true },
   { id: "product-tryon", label: "Product Try-on", available: true },
   { id: "character", label: "Character creation", available: true },
+  { id: "storyboard", label: "Storyboard", available: true },
   { id: "social-post", label: "Social media post", available: false },
 ] as const;
 type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
+
+// Storyboard styles for the Storyboard sub-tool chip. Keys mirror the single
+// source of truth in lib/storyboard-style.ts (labels live here for the UI).
+const STORYBOARD_STYLE_LABELS: Record<StoryboardStyleKey, string> = {
+  cinematic_sketch: "Cinematic Sketch",
+  painterly_color: "Painterly Color",
+  comic_book: "Comic Book",
+  photorealistic: "Photorealistic",
+  anime_manga: "Anime / Manga",
+};
 
 // First reference-capable model — the default we snap to when the user enters a
 // mode that needs a product reference (Product Try-on) with a text-only model selected.
@@ -379,7 +407,235 @@ function CharacterTile({
   );
 }
 
-export default function PhotoOmniPage() {
+// Storyboard sub-tool. Generates one six-panel storyboard sheet from a theme +
+// style, then hands the user off to the Video studio (Storyboard to Video) to
+// turn it into a clip. Self-contained so it doesn't tangle with the product /
+// image / character form's interdependent state.
+function StoryboardComposer({
+  onSelectCreation,
+}: {
+  onSelectCreation: (id: string) => void;
+}) {
+  const router = useRouter();
+  const { imageCredits } = usePricing();
+  const { refetch: refetchCredits } = useCreditBalance();
+
+  const [theme, setTheme] = useState("");
+  const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
+  // Orientation chosen here is stored on the storyboard and re-used (locked) when
+  // turning it into a video, so the clip never flips orientation on the user.
+  const [aspect, setAspect] = useState<StoryboardAspectRatio>(DEFAULT_STORYBOARD_ASPECT_RATIO);
+  // Spoken language for the dialogue/narration — default English. Stored on the
+  // storyboard and re-used as the default when generating the video.
+  const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ url: string; id: string } | null>(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  const cost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
+  const canGenerate = !loading && theme.trim().length > 0;
+
+  const goToVideo = (id: string) => {
+    if (!id) return;
+    router.push(`/tools/video?type=storyboard&storyboardId=${encodeURIComponent(id)}`);
+  };
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canGenerate) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/generate-storyboard", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey(),
+        },
+        body: JSON.stringify({ theme: theme.trim(), storyboardStyle: style, aspectRatio: aspect, language }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Failed to generate storyboard");
+      }
+      setResult({
+        url: typeof data.storyboardUrl === "string" ? data.storyboardUrl : "",
+        id: typeof data.storyboardId === "string" ? data.storyboardId : "",
+      });
+      setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <form onSubmit={handleGenerate} className="relative z-20 mt-[200px]">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ChipDropdown
+            icon={<Layers className="h-3.5 w-3.5" />}
+            value="Storyboard"
+            activeId="storyboard"
+            options={CREATION_TYPES.map((c) => ({
+              id: c.id,
+              label: c.label,
+              hint: c.available ? undefined : "Soon",
+            }))}
+            onSelect={onSelectCreation}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Palette className="h-3.5 w-3.5" />}
+            value={STORYBOARD_STYLE_LABELS[style]}
+            activeId={style}
+            options={STORYBOARD_STYLE_KEYS.map((k) => ({
+              id: k,
+              label: STORYBOARD_STYLE_LABELS[k],
+            }))}
+            onSelect={(id) => setStyle(id as StoryboardStyleKey)}
+            disabled={loading}
+          />
+          <ChipDropdown
+            square
+            showChevron={false}
+            icon={<Crop className="h-3.5 w-3.5" />}
+            value={aspect}
+            activeId={aspect}
+            options={STORYBOARD_ASPECT_RATIOS.map((a) => ({
+              id: a,
+              label: a,
+              hint: storyboardOrientationLabel(a),
+            }))}
+            onSelect={(id) => setAspect(id as StoryboardAspectRatio)}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Languages className="h-3.5 w-3.5" />}
+            value={storyboardLanguageLabel(language)}
+            activeId={language}
+            options={STORYBOARD_LANGUAGES.map((l) => ({
+              id: l.id,
+              label: l.label,
+            }))}
+            onSelect={(id) => setLanguage(id as StoryboardLanguageId)}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+          <textarea
+            value={theme}
+            onChange={(e) => setTheme(e.target.value)}
+            placeholder="Describe your video concept — e.g. “A barista's morning routine opening a cozy café”. We'll storyboard it into 6 cinematic panels."
+            rows={2}
+            className="min-h-[48px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+          />
+
+          <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <p className="pl-1 text-xs text-gray-500">
+              Generates one six-panel storyboard sheet — turn it into a video next.
+            </p>
+            <button
+              type="submit"
+              disabled={!canGenerate}
+              className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {loading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <>
+                  <span>Generate</span>
+                  <Wand2 className="h-4 w-4" />
+                  <span className="text-sm font-extrabold">{cost}</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          Drafting your six-panel storyboard — it will appear below when ready.
+        </div>
+      )}
+
+      {result && result.url && !loading && (
+        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={result.url}
+            alt="Storyboard sheet"
+            className="w-full max-w-md shrink-0 rounded-2xl border border-white/10 bg-black object-contain"
+          />
+          <div className="flex min-w-0 flex-col">
+            <div className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <Check className="h-3 w-3" />
+              Saved to your library
+            </div>
+            <p className="text-sm text-gray-300">
+              {STORYBOARD_STYLE_LABELS[style]} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)} · six panels
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Happy with it? Turn this storyboard into a video.
+            </p>
+            <button
+              type="button"
+              onClick={() => goToVideo(result.id)}
+              disabled={!result.id}
+              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Clapperboard className="h-4 w-4" />
+              <span>Create video</span>
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Storyboard history */}
+      <div className="mt-[120px]">
+        <CreationsHistory
+          title="Your storyboards"
+          description="Every storyboard sheet you create appears here. Head to the Video studio to turn one into a clip."
+          tools={["storyboard"]}
+          mediaType="image"
+          refreshKey={historyRefreshKey}
+          showActions
+          showMeta={false}
+          limit={20}
+        />
+      </div>
+    </>
+  );
+}
+
+function PhotoOmniPage() {
+  const searchParams = useSearchParams();
+  // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
+  // so we open the storyboard sub-tool preselected.
+  const initialCreationType: CreationTypeId =
+    searchParams.get("type") === "storyboard" ? "storyboard" : "generate-any-image";
+
   const product = useImageUpload();
   const character = useImageUpload();
   const reference = useImageUpload();
@@ -394,7 +650,7 @@ export default function PhotoOmniPage() {
   const [charactersLoading, setCharactersLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [characterName, setCharacterName] = useState("");
-  const [creationType, setCreationType] = useState<CreationTypeId>("generate-any-image");
+  const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
   const [poseId, setPoseId] = useState<ModelPoseId>("standing");
   const [styleId, setStyleId] = useState<PhotoStyleId>("minimalist-studio");
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(DEFAULT_PRODUCT_PHOTO_TIER);
@@ -630,6 +886,12 @@ export default function PhotoOmniPage() {
           </h1>
         </div>
 
+        {creationType === "storyboard" ? (
+          <StoryboardComposer
+            onSelectCreation={(id) => setCreationType(id as CreationTypeId)}
+          />
+        ) : (
+          <>
         <input
           ref={product.inputRef}
           type="file"
@@ -972,6 +1234,8 @@ export default function PhotoOmniPage() {
             limit={20}
           />
         </div>
+          </>
+        )}
       </div>
 
       {characterPickerOpen && (
@@ -1082,5 +1346,15 @@ export default function PhotoOmniPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary in the App Router. Wrap the page
+// so the storyboard deep-link (?type=storyboard) reads cleanly.
+export default function PhotoOmniPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <PhotoOmniPage />
+    </Suspense>
   );
 }

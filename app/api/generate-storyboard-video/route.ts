@@ -34,6 +34,14 @@ import {
 import {
   resolveStoryboardStyle,
   storyboardVideoStyleDirective,
+  resolveStoryboardAspectRatio,
+  storyboardVideoAspectDirective,
+  storyboardVideoDimensions,
+  resolveStoryboardLanguage,
+  storyboardLanguageDirective,
+  DEFAULT_STORYBOARD_LANGUAGE,
+  type StoryboardAspectRatio,
+  type StoryboardLanguageId,
 } from "@/lib/storyboard-style";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
@@ -47,13 +55,6 @@ const UUID_RE =
 // (480p → ~95 cr, 720p → ~203 cr). Default 480p keeps internal-testing cost low.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 type StoryboardVideoResolution = "480p" | "720p";
-const STORYBOARD_VIDEO_DIMENSIONS: Record<
-  StoryboardVideoResolution,
-  { width: number; height: number }
-> = {
-  "480p": { width: 854, height: 480 },
-  "720p": { width: 1280, height: 720 },
-};
 
 export async function POST(req: Request) {
   // Platform-observability trackers — declared before the try so the catch block
@@ -149,7 +150,7 @@ export async function POST(req: Request) {
 
     const { data: row, error: fetchError } = await supabase
       .from(STORYBOARDS_TABLE)
-      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style")
+      .select("id, user_id, theme, storyboard_url, seedance_prompt, storyboard_style, aspect_ratio, language")
       .eq("id", storyboardId)
       .single();
 
@@ -163,6 +164,30 @@ export async function POST(req: Request) {
     if (row.user_id && row.user_id !== userId) {
       return NextResponse.json({ error: "Storyboard not found." }, { status: 404 });
     }
+
+    // Aspect ratio is OWNED by the storyboard so the video matches its orientation
+    // (a vertical storyboard must never produce a horizontal video). The stored
+    // value wins; a client-sent aspectRatio is only a fallback for legacy rows
+    // saved before the column existed.
+    const storedAspect: StoryboardAspectRatio | null = row.aspect_ratio
+      ? resolveStoryboardAspectRatio(row.aspect_ratio)
+      : null;
+    const aspectRatio: StoryboardAspectRatio =
+      storedAspect ?? resolveStoryboardAspectRatio(body.aspectRatio);
+
+    // Spoken language. Unlike aspect ratio, language is a SOFT property: the model
+    // can be re-instructed to speak another language, so a client-sent value wins
+    // (lets the user change it at video time). Otherwise inherit the storyboard's
+    // stored language, then fall back to the default (English).
+    const clientLanguage: StoryboardLanguageId | null =
+      typeof body.language === "string" && body.language.trim()
+        ? resolveStoryboardLanguage(body.language)
+        : null;
+    const storedLanguage: StoryboardLanguageId | null = row.language
+      ? resolveStoryboardLanguage(row.language)
+      : null;
+    const language: StoryboardLanguageId =
+      clientLanguage ?? storedLanguage ?? DEFAULT_STORYBOARD_LANGUAGE;
 
     const storyboardUrl = String(row.storyboard_url || "").trim();
     let seedancePrompt = String(row.seedance_prompt || "").trim();
@@ -195,7 +220,7 @@ export async function POST(req: Request) {
     // render in the picked aesthetic. The storyboard image stays the primary
     // composition reference; this directive sets the rendering style.
     const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
-    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n\n${seedancePrompt}`;
+    seedancePrompt = `${storyboardVideoStyleDirective(storyboardStyle)}\n${storyboardVideoAspectDirective(aspectRatio)}\n${storyboardLanguageDirective(language)}\n\n${seedancePrompt}`;
 
     const replicate = new Replicate({
       auth: process.env.REPLICATE_API_TOKEN,
@@ -217,7 +242,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec });
+    const requestHash = computeRequestHash({ storyboardId, resolution, durationSec, aspectRatio, language });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -253,7 +278,7 @@ export async function POST(req: Request) {
       jobType: "storyboard_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      input: { storyboardId, resolution, durationSec, style: storyboardStyle },
+      input: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
     if (job) {
       jobId = job.id;
@@ -281,6 +306,8 @@ export async function POST(req: Request) {
           storyboardId,
           resolution,
           durationSec,
+          aspectRatio,
+          language,
           style: storyboardStyle,
         },
       });
@@ -336,7 +363,7 @@ export async function POST(req: Request) {
       role: "final_video",
       provider: videoModel.provider,
       model: videoModel.model,
-      metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
+      metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -361,7 +388,7 @@ export async function POST(req: Request) {
     };
 
     await beginStep("video_generation", "Seedance video from storyboard reference");
-    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, 16:9, audio, reference)...`);
+    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`);
     const videoResult = await runReplicateWithRetry(
       replicate,
       videoModelRef,
@@ -372,7 +399,7 @@ export async function POST(req: Request) {
           duration: durationSec,
           generate_audio: true,
           resolution,
-          aspect_ratio: "16:9",
+          aspect_ratio: aspectRatio,
         },
       }
     );
@@ -437,10 +464,10 @@ export async function POST(req: Request) {
         publicUrl: videoUrl,
         mimeType: "video/mp4",
         durationSec,
-        width: STORYBOARD_VIDEO_DIMENSIONS[resolution].width,
-        height: STORYBOARD_VIDEO_DIMENSIONS[resolution].height,
+        width: storyboardVideoDimensions(resolution, aspectRatio).width,
+        height: storyboardVideoDimensions(resolution, aspectRatio).height,
         costCredits: creditsAmount,
-        metadata: { storyboardId, resolution, durationSec, style: storyboardStyle },
+        metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -459,7 +486,7 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, style: storyboardStyle },
+        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
         costCredits: creditsAmount,
       }));
     }
@@ -475,7 +502,7 @@ export async function POST(req: Request) {
       unitType: "video_seconds",
       units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, style: storyboardStyle },
+      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
     }));
 
     let historyItem;
@@ -489,6 +516,8 @@ export async function POST(req: Request) {
         title: String(row.theme || "Storyboard video").slice(0, 200),
         metadata: {
           storyboardId,
+          aspectRatio,
+          language,
           ...(row.theme ? { prompt: String(row.theme) } : {}),
         },
       });
@@ -496,7 +525,7 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    const successResponse = { videoUrl, historyItem };
+    const successResponse = { videoUrl, aspectRatio, language, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,

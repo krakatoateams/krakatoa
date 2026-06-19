@@ -39,6 +39,12 @@ import {
   resolveStoryboardStyle,
   STORYBOARD_STYLE_INSTRUCTIONS,
   storyboardVideoStyleDirective,
+  resolveStoryboardAspectRatio,
+  storyboardImageAspectDirective,
+  storyboardVideoAspectDirective,
+  resolveStoryboardLanguage,
+  storyboardLanguageLabel,
+  type StoryboardAspectRatio,
 } from "@/lib/storyboard-style";
 
 export const maxDuration = 300;
@@ -57,7 +63,13 @@ type SceneBreakdown = {
   mood: string;
 };
 
-const GPT5_SCENE_SYSTEM = `You are a film pre-visualization writer. Reply with ONLY valid JSON (no markdown code fences, no text before or after the JSON).
+function buildSceneSystemPrompt(
+  aspectRatio: StoryboardAspectRatio,
+  languageLabel: string
+): string {
+  const orientation =
+    aspectRatio === "9:16" ? "vertical/portrait" : "widescreen/landscape";
+  return `You are a film pre-visualization writer. Reply with ONLY valid JSON (no markdown code fences, no text before or after the JSON).
 
 The JSON object MUST have exactly this shape:
 {
@@ -75,8 +87,9 @@ The JSON object MUST have exactly this shape:
 
 Rules:
 - "scenes" MUST be an array of exactly 6 objects, scene_id 1 through 6 in order. Timestamp ranges must partition a 15-second video (0:00 through 0:15) with no gaps or overlap.
-- Each scene: concrete visual_description, character_dialogue (can be Indonesian or mixed as fits the theme), mood.
-- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, 16:9, native audio). It MUST refer to the storyboard as [Image1] and align beats to the six scenes. Include overall cinematic style, lighting, atmosphere, camera language, pacing. For spoken lines use Indonesian in double quotes as Seedance expects (e.g. Dia berkata: "..." ). Describe ambient sound and music mood.`;
+- Each scene: concrete visual_description, character_dialogue written in ${languageLabel}, mood. Frame every visual_description for a ${orientation} ${aspectRatio} video.
+- "seedance_prompt": one plain-text prompt for Seedance 2.0 Fast (15s, ${aspectRatio} ${orientation}, native audio). It MUST refer to the storyboard as [Image1] and align beats to the six scenes. Include overall cinematic style, lighting, atmosphere, camera language, pacing. Write ALL spoken lines in ${languageLabel}, placed in double quotes as Seedance expects (e.g. the character says: "..."). Describe ambient sound and music mood.`;
+}
 
 function extractJson(raw: string): unknown {
   const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
@@ -158,7 +171,8 @@ function parseScenePayload(raw: string): {
 function buildStoryboardImagePrompt(
   theme: string,
   scenes: SceneBreakdown[],
-  styleInstruction: string
+  styleInstruction: string,
+  aspectDirective: string
 ): string {
   const blocks = scenes.map(
     (s) =>
@@ -174,6 +188,7 @@ ${blocks.join("\n\n")}
 
 Layout requirements:
 - Exactly SIX panels in a clear grid (e.g. 2×3 or 3×2) on one canvas.
+- ${aspectDirective}
 - Each panel labeled with scene number, its timestamp range, visual description, and dialogue as on-set storyboard annotations.
 - ${styleInstruction}
 - Keep characters and setting consistent across panels where the story continues.
@@ -246,6 +261,14 @@ export async function POST(req: Request) {
     const theme = typeof body.theme === "string" ? body.theme.trim() : "";
     const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
     const styleInstruction = STORYBOARD_STYLE_INSTRUCTIONS[storyboardStyle];
+    // Chosen orientation (default 16:9). Threaded into the scene LLM, the panel
+    // framing, AND stored on the row so the video step renders the same ratio.
+    const aspectRatio = resolveStoryboardAspectRatio(body.aspectRatio);
+    const aspectDirective = storyboardImageAspectDirective(aspectRatio);
+    // Spoken language for the dialogue/narration (default English). Drives the
+    // scene LLM and is stored so the video step can reuse (or override) it.
+    const language = resolveStoryboardLanguage(body.language);
+    const languageLabel = storyboardLanguageLabel(language);
     // Same chosen style, phrased for the eventual Seedance VIDEO so the
     // seedance_prompt GPT-5 writes is rendered in that aesthetic (not just the sheet).
     const videoStyleDirective = storyboardVideoStyleDirective(storyboardStyle);
@@ -286,7 +309,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ theme, storyboardStyle });
+    const requestHash = computeRequestHash({ theme, storyboardStyle, aspectRatio, language });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -322,7 +345,7 @@ export async function POST(req: Request) {
       jobType: "storyboard_image",
       provider: imageModel.provider,
       model: imageModel.model,
-      input: { theme: theme.slice(0, 500), storyboardStyle },
+      input: { theme: theme.slice(0, 500), storyboardStyle, aspectRatio, language },
     }));
     if (job) {
       jobId = job.id;
@@ -347,6 +370,8 @@ export async function POST(req: Request) {
           tool: "storyboard",
           jobType: "storyboard_image",
           storyboardStyle,
+          aspectRatio,
+          language,
         },
       });
       creditsSpent = true;
@@ -392,7 +417,7 @@ export async function POST(req: Request) {
       role: "storyboard_image",
       provider: imageModel.provider,
       model: imageModel.model,
-      metadata: { storyboardStyle, theme: theme.slice(0, 200) },
+      metadata: { storyboardStyle, aspectRatio, language, theme: theme.slice(0, 200) },
     }));
     if (asset) imageAssetId = asset.id;
 
@@ -426,7 +451,7 @@ export async function POST(req: Request) {
       console.log(`[Storyboard] Scene breakdown via ${sceneLlmRef} (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
       const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
         input: {
-          system_prompt: GPT5_SCENE_SYSTEM,
+          system_prompt: buildSceneSystemPrompt(aspectRatio, languageLabel),
           prompt: `Video theme: ${theme}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
           reasoning_effort: "low",
           verbosity: "high",
@@ -456,8 +481,16 @@ export async function POST(req: Request) {
     if (!/\[Image1\]/i.test(seedancePrompt)) {
       seedancePrompt = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${seedancePrompt}`;
     }
+    // Persist the orientation into the stored prompt so the video step renders the
+    // chosen ratio even if it relied solely on seedance_prompt.
+    seedancePrompt = `${storyboardVideoAspectDirective(aspectRatio)}\n\n${seedancePrompt}`;
 
-    const imagePrompt = buildStoryboardImagePrompt(theme, scenes, styleInstruction);
+    const imagePrompt = buildStoryboardImagePrompt(
+      theme,
+      scenes,
+      styleInstruction,
+      aspectDirective
+    );
 
     await beginStep("image_generation", "GPT Image storyboard sheet");
     console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
@@ -528,6 +561,8 @@ export async function POST(req: Request) {
         seedance_prompt: seedancePrompt,
         scene_breakdown,
         storyboard_style: storyboardStyle,
+        aspect_ratio: aspectRatio,
+        language,
         status: "ready",
         user_id: userId,
       })
@@ -548,7 +583,7 @@ export async function POST(req: Request) {
         publicUrl: storyboardUrl,
         mimeType: "image/png",
         costCredits: creditsAmount,
-        metadata: { storyboardId: inserted.id, storyboardStyle, theme: theme.slice(0, 200) },
+        metadata: { storyboardId: inserted.id, storyboardStyle, aspectRatio, language, theme: theme.slice(0, 200) },
       }));
     }
     if (jobId && profileId) {
@@ -569,7 +604,7 @@ export async function POST(req: Request) {
       unitType: "images",
       units: 1,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_image", storyboardStyle, storyboardId: inserted.id },
+      metadata: { jobType: "storyboard_image", storyboardStyle, aspectRatio, language, storyboardId: inserted.id },
     }));
 
     let historyItem;
@@ -584,6 +619,8 @@ export async function POST(req: Request) {
         metadata: {
           storyboardId: inserted.id,
           storyboardStyle,
+          aspectRatio,
+          language,
           prompt: imagePrompt,
         },
       });
@@ -595,6 +632,8 @@ export async function POST(req: Request) {
     const successResponse = {
       storyboardId: inserted.id,
       storyboardUrl,
+      aspectRatio,
+      language,
       historyItem,
     };
     if (generationRequestId) {
