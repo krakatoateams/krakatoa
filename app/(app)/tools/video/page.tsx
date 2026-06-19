@@ -670,6 +670,7 @@ export default function VideoOmniPage() {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              maxLength={model.promptMaxChars}
               placeholder='Describe the scene — camera moves, subject, mood. Use double quotes for spoken dialogue, and [Image1]/[Video1]/[Audio1] to reference attachments.'
               rows={3}
               className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"

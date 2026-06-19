@@ -170,6 +170,28 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 8, enabled: true,
     provider_cost_usd: 0.08, cost_unit: "per_second", pricing_group: "veo31lite", variant_key: "1080p", currency: "USD",
   },
+  // ---- Kling v3 (kwaivgi/kling-v3-video, Text to Video) rows (018). Priced by
+  // mode (standard=720p / pro=1080p / 4k) × audio. 4k is flat regardless of audio. ----
+  kling3_standard_per_second: {
+    pricing_type: "per_second", credit_amount: 16, enabled: true,
+    provider_cost_usd: 0.168, cost_unit: "per_second", pricing_group: "kling3", variant_key: "standard", currency: "USD",
+  },
+  kling3_standard_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 23, enabled: true,
+    provider_cost_usd: 0.252, cost_unit: "per_second", pricing_group: "kling3", variant_key: "standard_audio", currency: "USD",
+  },
+  kling3_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 21, enabled: true,
+    provider_cost_usd: 0.224, cost_unit: "per_second", pricing_group: "kling3", variant_key: "pro", currency: "USD",
+  },
+  kling3_pro_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 31, enabled: true,
+    provider_cost_usd: 0.336, cost_unit: "per_second", pricing_group: "kling3", variant_key: "pro_audio", currency: "USD",
+  },
+  kling3_4k_per_second: {
+    pricing_type: "per_second", credit_amount: 38, enabled: true,
+    provider_cost_usd: 0.42, cost_unit: "per_second", pricing_group: "kling3", variant_key: "4k", currency: "USD",
+  },
   storyboard_gpt_image_2_low_per_image: {
     pricing_type: "per_image", credit_amount: 2, enabled: true,
     provider_cost_usd: 0.012, cost_unit: "per_image", pricing_group: "storyboard_image", variant_key: "low", currency: "USD",

@@ -60,6 +60,13 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // resolution. Note: 1080p only supports an 8s duration (enforced in the model).
   veo31lite_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo31lite", variantKey: "720p" },
   veo31lite_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo31lite", variantKey: "1080p" },
+  // Kling v3 (kwaivgi/kling-v3-video, Text to Video). Priced by mode
+  // (standard=720p / pro=1080p / 4k) × audio. 4k is a flat rate regardless of audio.
+  kling3_standard_per_second: { providerCostUsd: 0.168, costUnit: "per_second", pricingGroup: "kling3", variantKey: "standard" },
+  kling3_standard_audio_per_second: { providerCostUsd: 0.252, costUnit: "per_second", pricingGroup: "kling3", variantKey: "standard_audio" },
+  kling3_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro" },
+  kling3_pro_audio_per_second: { providerCostUsd: 0.336, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro_audio" },
+  kling3_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3", variantKey: "4k" },
   // Storyboard image / GPT Image 2 (per image).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },

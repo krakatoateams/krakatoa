@@ -159,7 +159,7 @@ export async function POST(req: Request) {
     }
     const b = body as Record<string, unknown>;
 
-    const prompt = String(b.prompt ?? "").trim().slice(0, PROMPT_MAX_CHARS);
+    const promptRaw = String(b.prompt ?? "").trim();
     const modelId = String(b.modelId ?? "").trim();
     const duration = Number(b.duration ?? NaN);
     const resolution = String(b.resolution ?? "").trim();
@@ -174,6 +174,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
     const model = getVideoModel(modelId);
+
+    // Cap the prompt to the selected model's limit (e.g. Kling v3 = 2500 chars).
+    const prompt = promptRaw.slice(0, model.promptMaxChars ?? PROMPT_MAX_CHARS);
 
     if (!prompt) {
       return NextResponse.json(

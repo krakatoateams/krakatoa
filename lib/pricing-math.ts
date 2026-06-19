@@ -258,3 +258,21 @@ export function veo31FastPricingKey(params: { generateAudio: boolean }): string 
 export function veo31LitePricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo31lite_1080p_per_second" : "veo31lite_720p_per_second";
 }
+
+/**
+ * Kling v3 (kwaivgi/kling-v3-video) pricing key. Priced by mode (standard=720p /
+ * pro=1080p / 4k) × audio. 4k is a flat rate regardless of audio.
+ */
+export function klingV3PricingKey(params: {
+  resolution: string | null | undefined;
+  generateAudio: boolean;
+}): string {
+  if (params.resolution === "4k") return "kling3_4k_per_second";
+  if (params.resolution === "720p") {
+    return params.generateAudio
+      ? "kling3_standard_audio_per_second"
+      : "kling3_standard_per_second";
+  }
+  // 1080p (pro) is the default tier.
+  return params.generateAudio ? "kling3_pro_audio_per_second" : "kling3_pro_per_second";
+}

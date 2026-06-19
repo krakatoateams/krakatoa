@@ -3,6 +3,7 @@ import {
   seedance2PricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
+  klingV3PricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -19,9 +20,14 @@ import {
  * model_configs row (admin-editable), whose fallback is bytedance/seedance-2.0-fast.
  */
 
-export type VideoModelId = "seedance2_fast" | "seedance2" | "veo31_fast" | "veo31_lite";
+export type VideoModelId =
+  | "seedance2_fast"
+  | "seedance2"
+  | "veo31_fast"
+  | "veo31_lite"
+  | "kling_v3";
 
-export type VideoResolution = "480p" | "720p" | "1080p";
+export type VideoResolution = "480p" | "720p" | "1080p" | "4k";
 
 export type VideoAspectRatio =
   | "16:9"
@@ -33,7 +39,7 @@ export type VideoAspectRatio =
   | "9:21"
   | "adaptive";
 
-export type VideoProviderFamily = "seedance2" | "veo31fast" | "veo31lite";
+export type VideoProviderFamily = "seedance2" | "veo31fast" | "veo31lite" | "klingv3";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -85,6 +91,8 @@ export type VideoModel = {
   defaultAspectRatio: VideoAspectRatio;
   supportsAudio: boolean;
   defaultGenerateAudio: boolean;
+  /** Max prompt length (chars) the provider accepts. Omitted = platform default. */
+  promptMaxChars?: number;
   references: VideoReferenceCaps;
   /**
    * Per-second pricing key, variant-aware. Seedance keys off resolution + whether
@@ -211,6 +219,40 @@ export const VIDEO_MODELS: VideoModel[] = [
       referenceAudios: 0,
     },
     pricingKey: (ctx) => veo31LitePricingKey(ctx.resolution),
+  },
+  {
+    id: "kling_v3",
+    label: "Kling v3",
+    modelLabel: "Kling v3",
+    modelRole: "video_kling_v3",
+    providerModel: "kwaivgi/kling-v3-video",
+    providerFamily: "klingv3",
+    // Provider accepts any integer 3–15s; we surface a discrete set.
+    durations: [5, 10, 15],
+    defaultDuration: 5,
+    // Kling's `mode` maps to a resolution: standard=720p, pro=1080p, 4k=4K. We
+    // present it as a resolution chip and translate to `mode` in the builder.
+    resolutions: ["720p", "1080p", "4k"],
+    defaultResolution: "1080p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: false,
+    promptMaxChars: 2500,
+    references: {
+      // start_image / end_image only — no reference arrays.
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    // Priced by mode (resolution tier) × audio.
+    pricingKey: (ctx) =>
+      klingV3PricingKey({
+        resolution: ctx.resolution,
+        generateAudio: ctx.generateAudio ?? false,
+      }),
   },
 ];
 
@@ -378,6 +420,24 @@ export function buildVideoProviderInput(params: {
       if (hasSeed) input.seed = params.seed;
       if (refs.firstFrame) input.image = refs.firstFrame;
       if (refs.lastFrame) input.last_frame = refs.lastFrame;
+      return input;
+    }
+    case "klingv3": {
+      // kwaivgi/kling-v3-video: uses `mode` (standard/pro/4k) instead of a
+      // resolution field; start_image/end_image for frames. No seed; multi_prompt
+      // is not surfaced.
+      const mode =
+        params.resolution === "4k" ? "4k" : params.resolution === "720p" ? "standard" : "pro";
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        mode,
+        duration: params.duration,
+        aspect_ratio: params.aspectRatio,
+        generate_audio: params.generateAudio,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
       return input;
     }
     case "seedance2":
