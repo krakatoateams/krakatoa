@@ -1,5 +1,7 @@
 /**
- * Shared helpers copied from `app/api/generate/route.ts` (Seedance route left unchanged).
+ * Shared Reels Creator helpers (JSON extraction, ASS color/time formatting,
+ * Replicate retry). Used by the unified `app/api/generate-reels/route.ts` and the
+ * `lib/reels-pipeline/` modules.
  */
 import Replicate from "replicate";
 import {

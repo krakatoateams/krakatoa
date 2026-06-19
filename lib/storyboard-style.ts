@@ -8,8 +8,8 @@
  *   - VIDEO directive     -> shapes the Seedance video aesthetic so the clip
  *                            matches the storyboard's look (not just composition).
  *
- * Keys/labels mirror the frontend STORYBOARD_STYLE_OPTIONS in
- * app/(app)/tools/reels/page.tsx.
+ * Keys/labels mirror the frontend storyboard style options in the Video studio
+ * (app/(app)/tools/video/page.tsx).
  */
 
 export const STORYBOARD_STYLE_KEYS = [

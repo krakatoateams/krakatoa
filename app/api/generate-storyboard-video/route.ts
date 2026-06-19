@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let videoAssetId: string | null = null;
-  // Credit-spend trackers — see app/api/generate/route.ts for the pattern.
+  // Credit-spend trackers — see app/api/generate-reels/route.ts for the pattern.
   let creditsSpent = false;
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
