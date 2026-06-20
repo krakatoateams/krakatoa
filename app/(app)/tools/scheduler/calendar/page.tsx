@@ -12,6 +12,9 @@ import {
   Tag,
   ExternalLink,
   RefreshCw,
+  Pencil,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 
@@ -27,7 +30,8 @@ interface Post {
   description: string;
   tags: string;
   scheduled_time: string;
-  status: "draft" | "scheduled" | "published" | "failed";
+  format?: string | null;
+  status: "draft" | "scheduled" | "published" | "failed" | "canceled";
   last_error?: string | null;
   publish_started_at?: string | null;
   created_at: string;
@@ -82,6 +86,13 @@ const STATUS_CFG = {
     chip: "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20",
     stat: "text-red-400",
   },
+  canceled: {
+    label: "Canceled",
+    dot: "bg-gray-600",
+    badge: "border-gray-700 bg-gray-800 text-gray-500",
+    chip: "border-gray-700/60 bg-gray-800/60 text-gray-500 line-through hover:bg-gray-700/60",
+    stat: "text-gray-500",
+  },
   draft: {
     label: "Draft",
     dot: "bg-gray-500",
@@ -132,6 +143,13 @@ function fmtDateTime(isoString: string) {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
+}
+
+// ISO → value for <input type="datetime-local"> (local wall-clock, no tz suffix).
+function toDateTimeLocalValue(isoString: string): string {
+  const d = new Date(isoString);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ─── YoutubeIcon ─────────────────────────────────────────────────────────────
@@ -201,15 +219,113 @@ function YouTubeStatusBadge() {
 
 // ─── Post Detail Modal ────────────────────────────────────────────────────────
 
-function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
+interface PostModalProps {
+  post: Post;
+  onClose: () => void;
+  onUpdated: (post: Post) => void;
+  onToast: (toast: ToastState) => void;
+}
+
+function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
   const cfg = STATUS_CFG[derivePostDisplayStatus(post)] ?? STATUS_CFG.draft;
   const tags = post.tags ? post.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+
+  // Edit/cancel are only allowed before a post goes live and while it isn't being
+  // published right now. (published / publishing / canceled / draft are locked.)
+  const display = derivePostDisplayStatus(post);
+  const canEdit =
+    (post.status === "scheduled" || post.status === "failed") && display !== "publishing";
+
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  const [fTitle, setFTitle] = useState(post.title);
+  const [fDescription, setFDescription] = useState(post.description ?? "");
+  const [fTags, setFTags] = useState(post.tags ?? "");
+  const [fWhen, setFWhen] = useState(toDateTimeLocalValue(post.scheduled_time));
+  const [fFormat, setFFormat] = useState<"" | "short" | "video">(
+    post.format === "short" || post.format === "video" ? post.format : "",
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  const startEdit = () => {
+    setFTitle(post.title);
+    setFDescription(post.description ?? "");
+    setFTags(post.tags ?? "");
+    setFWhen(toDateTimeLocalValue(post.scheduled_time));
+    setFFormat(post.format === "short" || post.format === "video" ? post.format : "");
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    const title = fTitle.trim();
+    if (!title) {
+      onToast({ type: "error", message: "Title can't be empty." });
+      return;
+    }
+
+    const body: Record<string, unknown> = {};
+    if (title !== post.title) body.title = title;
+    if (fDescription !== (post.description ?? "")) body.description = fDescription;
+    if (fTags !== (post.tags ?? "")) body.tags = fTags;
+    const newIso = fWhen ? new Date(fWhen).toISOString() : post.scheduled_time;
+    if (newIso !== post.scheduled_time) body.scheduled_time = newIso;
+    if (fFormat && fFormat !== post.format) body.format = fFormat;
+
+    if (Object.keys(body).length === 0) {
+      setEditing(false);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/posts/${post.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Save failed.");
+      onUpdated(data.post as Post);
+      onToast({ type: "success", message: "Post updated! ✓" });
+      setEditing(false);
+    } catch (err) {
+      onToast({ type: "error", message: err instanceof Error ? err.message : "Save failed." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelPost = async () => {
+    setCanceling(true);
+    try {
+      const res = await fetch(`/api/posts/${post.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Cancel failed.");
+      onUpdated(data.post as Post);
+      onToast({ type: "success", message: "Post canceled." });
+      onClose();
+    } catch (err) {
+      onToast({ type: "error", message: err instanceof Error ? err.message : "Cancel failed." });
+    } finally {
+      setCanceling(false);
+      setConfirmingCancel(false);
+    }
+  };
+
+  const inputCls =
+    "w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none transition-colors focus:border-violet-500";
 
   return (
     <div
@@ -219,7 +335,7 @@ function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900 shadow-2xl">
         <div className="flex items-start justify-between border-b border-gray-800 p-5">
           <div className="flex items-center gap-2.5">
             <YoutubeIcon className="h-5 w-5 text-red-400" />
@@ -236,65 +352,161 @@ function PostModal({ post, onClose }: { post: Post; onClose: () => void }) {
           </div>
         </div>
 
-        <div className="space-y-4 p-5">
-          <h3 className="text-base font-semibold leading-snug text-white">{post.title}</h3>
-
-          <div className="flex items-center gap-1.5 text-sm text-gray-400">
-            <Clock className="h-3.5 w-3.5 text-gray-600" />
-            {fmtDateTime(post.scheduled_time)}
-          </div>
-
-          {post.status === "failed" && post.last_error && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="leading-relaxed">{post.last_error}</span>
-            </div>
-          )}
-
-          {post.description && (
+        {editing ? (
+          <div className="space-y-4 p-5">
             <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-600">Description</p>
-              <p className="text-sm leading-relaxed text-gray-300">{post.description}</p>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Title</label>
+              <input className={inputCls} value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="Video title" />
             </div>
-          )}
-
-          {tags.length > 0 && (
             <div>
-              <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-gray-600">
-                <Tag className="h-3 w-3" /> Tags
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {tags.map((tag) => (
-                  <span key={tag} className="rounded-full border border-gray-700 bg-gray-800 px-2.5 py-0.5 text-xs text-gray-400">
-                    #{tag}
-                  </span>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Scheduled date &amp; time</label>
+              <input type="datetime-local" className={inputCls} value={fWhen} onChange={(e) => setFWhen(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Format</label>
+              <div className="flex gap-2">
+                {(["short", "video"] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setFFormat(opt)}
+                    className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                      fFormat === opt
+                        ? "border-violet-500 bg-violet-500/15 text-violet-300"
+                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                    }`}
+                  >
+                    {opt === "short" ? "Short" : "Video"}
+                  </button>
                 ))}
               </div>
             </div>
-          )}
-        </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Description</label>
+              <textarea className={`${inputCls} min-h-[96px] resize-y`} value={fDescription} onChange={(e) => setFDescription(e.target.value)} placeholder="Caption / description" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Tags (comma-separated)</label>
+              <input className={inputCls} value={fTags} onChange={(e) => setFTags(e.target.value)} placeholder="tag1, tag2, tag3" />
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            <h3 className="text-base font-semibold leading-snug text-white">{post.title}</h3>
+
+            <div className="flex items-center gap-1.5 text-sm text-gray-400">
+              <Clock className="h-3.5 w-3.5 text-gray-600" />
+              {fmtDateTime(post.scheduled_time)}
+            </div>
+
+            {post.status === "failed" && post.last_error && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="leading-relaxed">{post.last_error}</span>
+              </div>
+            )}
+
+            {post.description && (
+              <div>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-600">Description</p>
+                <p className="text-sm leading-relaxed text-gray-300">{post.description}</p>
+              </div>
+            )}
+
+            {tags.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-gray-600">
+                  <Tag className="h-3 w-3" /> Tags
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {tags.map((tag) => (
+                    <span key={tag} className="rounded-full border border-gray-700 bg-gray-800 px-2.5 py-0.5 text-xs text-gray-400">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-2 border-t border-gray-800 p-5">
-          {post.status === "published" && post.youtube_video_id && (
-            <a
-              href={`https://www.youtube.com/watch?v=${post.youtube_video_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500"
-            >
-              <YoutubeIcon className="h-4 w-4" />
-              View on YouTube
-            </a>
+          {editing ? (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Save changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              {canEdit && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={startEdit}
+                    className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit post
+                  </button>
+                  {confirmingCancel ? (
+                    <button
+                      type="button"
+                      onClick={handleCancelPost}
+                      disabled={canceling}
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                    >
+                      {canceling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      Confirm cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingCancel(true)}
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-300"
+                      aria-label="Cancel this post"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {post.status === "published" && post.youtube_video_id && (
+                <a
+                  href={`https://www.youtube.com/watch?v=${post.youtube_video_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500"
+                >
+                  <YoutubeIcon className="h-4 w-4" />
+                  View on YouTube
+                </a>
+              )}
+              <a
+                href={post.video_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View source video
+              </a>
+            </>
           )}
-          <a
-            href={post.video_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
-          >
-            <ExternalLink className="h-4 w-4" />
-            View source video
-          </a>
         </div>
       </div>
     </div>
@@ -501,6 +713,12 @@ export default function SchedulerCalendarPage() {
     }
   }, [draggingId, posts]);
 
+  // Reflect an edit/cancel into both the calendar grid and the open modal.
+  const handlePostUpdated = useCallback((updated: Post) => {
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+    setSelectedPost((cur) => (cur && cur.id === updated.id ? { ...cur, ...updated } : cur));
+  }, []);
+
   const calendarDays = buildCalendarDays(year, month);
   const todayKey = toLocalDateKey(now);
 
@@ -645,7 +863,7 @@ export default function SchedulerCalendarPage() {
         {/* Legend */}
         <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-gray-600">
           <span className="font-medium text-gray-500">Legend:</span>
-          {(["scheduled", "published", "failed", "draft"] as const).map((s) => (
+          {(["scheduled", "published", "failed", "canceled", "draft"] as const).map((s) => (
             <span key={s} className="flex items-center gap-1.5">
               <span className={`h-2 w-2 rounded-full ${STATUS_CFG[s].dot}`} />
               {STATUS_CFG[s].label}
@@ -656,7 +874,12 @@ export default function SchedulerCalendarPage() {
       </main>
 
       {selectedPost && (
-        <PostModal post={selectedPost} onClose={() => setSelectedPost(null)} />
+        <PostModal
+          post={selectedPost}
+          onClose={() => setSelectedPost(null)}
+          onUpdated={handlePostUpdated}
+          onToast={setToast}
+        />
       )}
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>

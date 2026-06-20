@@ -54,7 +54,7 @@ interface ToastState {
 interface Post {
   id: string;
   title: string;
-  status: "draft" | "scheduled" | "published" | "failed";
+  status: "draft" | "scheduled" | "published" | "failed" | "canceled";
   scheduled_time: string;
   youtube_video_id?: string | null;
   platform: string;
@@ -892,6 +892,7 @@ const STATUS_CFG = {
   publishing: { label: "Publishing", badge: "border-violet-500/30 bg-violet-500/10 text-violet-300", dot: "bg-violet-400" },
   published:  { label: "Published",  badge: "border-green-500/30 bg-green-500/10 text-green-400",     dot: "bg-green-400"  },
   failed:     { label: "Failed",     badge: "border-red-500/30 bg-red-500/10 text-red-400",           dot: "bg-red-400"    },
+  canceled:   { label: "Canceled",   badge: "border-gray-700 bg-gray-800 text-gray-500",              dot: "bg-gray-600"   },
   draft:      { label: "Draft",      badge: "border-gray-700 bg-gray-800 text-gray-400",              dot: "bg-gray-500"   },
 } as const;
 

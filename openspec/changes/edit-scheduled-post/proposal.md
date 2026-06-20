@@ -6,9 +6,10 @@ Once a post is scheduled, it's effectively frozen in the UI. The calendar detail
 
 - **Edit content + timing of a scheduled post**: title, description (caption), tags, scheduled date/time, and format. Editable only while the post is `scheduled` or `failed` (never once `published`).
 - **Cancel / delete a scheduled post** (so a mistake can be removed, not just retried).
-- **Extend `PATCH /api/posts/[id]`** to accept `title`, `description`, `tags`, `format` (validated like `POST /api/posts`), in addition to the existing `scheduled_time`/`status`, with a guard that blocks edits to `published` posts.
-- **Add `DELETE /api/posts/[id]`** (ownership-checked; blocked for `published` posts, or soft-cancel via a `canceled` status — see design).
-- **UI**: turn the calendar detail modal (and/or the scheduler recent-posts list) into an editable form with Save / Cancel-post actions.
+- **Extend `PATCH /api/posts/[id]`** to accept `title`, `description`, `tags`, `format` (validated like `POST /api/posts`), in addition to the existing `scheduled_time`/`status`, with a guard that blocks edits to `published` posts **and to posts currently being published** (the `publish_started_at` claim-lock added in `scheduler-cron-reliability`).
+- **Fix the degraded Retry**: re-arming a post to `scheduled` (Retry button or saving an edited `failed` post) must reset `publish_attempts = 0` and clear `last_error`, otherwise the new bounded-retry cron immediately gives up again.
+- **Soft-cancel via `canceled` status** (ownership-checked; blocked for `published`/`publishing`), wired into the `STATUS_CFG` / `derivePostDisplayStatus` display layer so canceled posts show muted.
+- **UI**: turn the calendar detail modal (and/or the scheduler recent-posts list) into an editable form with Save / Cancel-post actions, with Edit/Cancel hidden for `published`/`publishing` posts.
 
 ## Capabilities
 
