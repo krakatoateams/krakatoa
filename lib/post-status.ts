@@ -16,10 +16,11 @@ export type PostDisplayStatus =
   | "overdue"
   | "publishing"
   | "published"
-  | "failed";
+  | "failed"
+  | "canceled";
 
 export interface PostStatusInput {
-  status: "draft" | "scheduled" | "published" | "failed";
+  status: "draft" | "scheduled" | "published" | "failed" | "canceled";
   scheduled_time: string;
   publish_started_at?: string | null;
 }
@@ -34,6 +35,7 @@ export function derivePostDisplayStatus(
 ): PostDisplayStatus {
   if (post.status === "published") return "published";
   if (post.status === "failed") return "failed";
+  if (post.status === "canceled") return "canceled";
   if (post.status === "draft") return "draft";
 
   // status === "scheduled" from here on.
