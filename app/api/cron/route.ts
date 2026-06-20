@@ -5,14 +5,40 @@ import { uploadToYouTube } from "@/lib/youtube";
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
 
-// How many due posts a single invocation will process. The rest drain on the next
-// tick. Kept small so the run finishes well under maxDuration even on slow uploads.
-const MAX_POSTS_PER_RUN = 3;
+// Process exactly one due post per run. YouTube's own quota caps practical
+// throughput at ~6 uploads/day, so we never need batching — and a single
+// download+upload finishes comfortably under maxDuration, shrinking the timeout
+// window that is the only remaining source of duplicate uploads. With a ~1-minute
+// trigger cadence, any realistic backlog still drains quickly.
+const MAX_POSTS_PER_RUN = 1;
 
 // A post claimed (publish_started_at set) but not resolved within this window is
 // treated as abandoned — e.g. the function timed out mid-upload — and may be
 // re-claimed by a later run.
 const CLAIM_STALE_MS = 10 * 60 * 1000;
+
+// Transient failures are retried up to this many attempts before giving up.
+const MAX_PUBLISH_ATTEMPTS = 3;
+
+/**
+ * Classify an upload failure. Permanent failures will not self-heal on retry and
+ * may waste scarce YouTube quota, so they are marked failed immediately.
+ *  - auth/token problems: user must re-authorise (401, missing/invalid token)
+ *  - quota: daily cap hit (403 quotaExceeded) — retrying just burns more quota
+ * Everything else (network blips, 5xx, fetch errors) is treated as transient.
+ */
+function isPermanentFailure(err: unknown, message: string): boolean {
+  const m = message.toLowerCase();
+  if (/re-?authori|refresh token|invalid_grant|sign in again|token for user|access token from google/.test(m)) {
+    return true;
+  }
+  if (/quota|dailylimitexceeded|quotaexceeded/.test(m)) {
+    return true;
+  }
+  const status = (err as { response?: { status?: number } })?.response?.status;
+  if (status === 401 || status === 403) return true;
+  return false;
+}
 
 /**
  * GET /api/cron
@@ -25,14 +51,15 @@ const CLAIM_STALE_MS = 10 * 60 * 1000;
  *  - A claim-lock (publish_started_at) prevents overlapping/retried runs from
  *    uploading the same post twice. Stale claims become re-claimable.
  *  - Posts that already carry a youtube_video_id are never re-uploaded.
- *  - Failures store a human-readable reason in last_error.
+ *  - Transient failures retry up to MAX_PUBLISH_ATTEMPTS; permanent failures
+ *    (auth/quota) fail immediately. Failures store a reason in last_error.
  *
  * Protection: when CRON_SECRET is set in env, requests must include
  *   Authorization: Bearer <CRON_SECRET>
  * When CRON_SECRET is absent (local dev), all requests are allowed.
  *
- * Triggered by an external pinger (GitHub Actions) every few minutes; see
- * .github/workflows/publish-cron.yml.
+ * Triggered by cron-job.org (~1 min, primary) and GitHub Actions (backup); see
+ * .github/workflows/publish-cron.yml. Concurrent triggers are safe (claim-lock).
  */
 export async function GET(req: NextRequest) {
   // ── Auth guard ─────────────────────────────────────────────────────────────
@@ -71,6 +98,7 @@ export async function GET(req: NextRequest) {
 
   let published = 0;
   let failed = 0;
+  let retried = 0;
   let skipped = 0;
 
   for (const post of posts) {
@@ -112,7 +140,7 @@ export async function GET(req: NextRequest) {
       console.log(`[cron] Post ${post.id} already has a YouTube ID — marking published, no re-upload`);
       await supabaseServer
         .from("posts")
-        .update({ status: "published", last_error: null, publish_started_at: null })
+        .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
         .eq("id", post.id);
       published++;
       continue;
@@ -179,6 +207,7 @@ export async function GET(req: NextRequest) {
           youtube_video_id: youtubeId,
           last_error: null,
           publish_started_at: null,
+          publish_attempts: 0,
         })
         .eq("id", post.id);
 
@@ -195,16 +224,33 @@ export async function GET(req: NextRequest) {
         console.error(`[cron] Google API response data:`, JSON.stringify((anyErr.response as Record<string, unknown>)?.data, null, 2));
       }
 
+      // ── Decide retry vs give up ─────────────────────────────────────────────
+      const attempts = (post.publish_attempts ?? 0) + 1;
+      const permanent = isPermanentFailure(err, message);
+      const giveUp = permanent || attempts >= MAX_PUBLISH_ATTEMPTS;
+
+      // Releasing the lock (publish_started_at = null) on a retry lets the next
+      // tick re-claim and retry. A permanent error or an exhausted attempt count
+      // lands the post in "failed".
       await supabaseServer
         .from("posts")
         .update({
-          status: "failed",
+          status: giveUp ? "failed" : "scheduled",
           last_error: message.slice(0, 1000),
           publish_started_at: null,
+          publish_attempts: attempts,
         })
         .eq("id", post.id);
 
-      failed++;
+      if (giveUp) {
+        console.error(
+          `[cron] ✗ Post ${post.id} giving up (${permanent ? "permanent" : `${attempts}/${MAX_PUBLISH_ATTEMPTS} attempts`})`,
+        );
+        failed++;
+      } else {
+        console.warn(`[cron] ↻ Post ${post.id} transient fail, will retry (attempt ${attempts}/${MAX_PUBLISH_ATTEMPTS})`);
+        retried++;
+      }
     }
   }
 
@@ -212,6 +258,7 @@ export async function GET(req: NextRequest) {
     processed: posts.length,
     published,
     failed,
+    retried,
     skipped,
   });
 }
