@@ -1,20 +1,20 @@
 name: Publish scheduled posts
 
-# Vercel Hobby caps cron jobs at once per day, which is too slow for a scheduler.
-# This free GitHub Actions job pings the publisher endpoint every ~5 minutes so
-# due posts go live on time. The endpoint itself is idempotent and bounded, so
-# occasional overlapping or skipped ticks are safe.
+# BACKUP trigger for the publisher. The PRIMARY trigger is cron-job.org (~1 min,
+# more punctual). This workflow runs less often (every ~15 min) as a safety net in
+# case cron-job.org is down. The endpoint is idempotent and bounded, so running
+# both triggers concurrently is safe (claim-lock prevents double uploads).
 #
 # Required repository secrets (Settings → Secrets and variables → Actions):
 #   CRON_TARGET_URL  e.g. https://your-app.vercel.app   (no trailing slash)
 #   CRON_SECRET      same value as the CRON_SECRET env var in Vercel
 #
-# Note: GitHub's scheduled runs are best-effort and can be delayed by a few
-# minutes under load. The manual "Run workflow" button is available for testing.
+# Note: GitHub's scheduled runs are best-effort and can be delayed under load.
+# The manual "Run workflow" button is available for testing.
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 # Don't let a slow run overlap the next scheduled tick.
