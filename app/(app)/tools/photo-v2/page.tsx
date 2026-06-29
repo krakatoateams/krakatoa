@@ -524,17 +524,6 @@ function StoryboardComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-          <ChipDropdown
-            icon={<Palette className="h-3.5 w-3.5" />}
-            value={STORYBOARD_STYLE_LABELS[style]}
-            activeId={style}
-            options={STORYBOARD_STYLE_KEYS.map((k) => ({
-              id: k,
-              label: STORYBOARD_STYLE_LABELS[k],
-            }))}
-            onSelect={(id) => setStyle(id as StoryboardStyleKey)}
-            disabled={loading}
-          />
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
@@ -553,6 +542,19 @@ function StoryboardComposer({
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             {/* Generation properties */}
             <div className="flex flex-wrap items-center gap-2">
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Palette className="h-3.5 w-3.5" />}
+                value={STORYBOARD_STYLE_LABELS[style]}
+                activeId={style}
+                options={STORYBOARD_STYLE_KEYS.map((k) => ({
+                  id: k,
+                  label: STORYBOARD_STYLE_LABELS[k],
+                }))}
+                onSelect={(id) => setStyle(id as StoryboardStyleKey)}
+                disabled={loading}
+              />
               <ChipDropdown
                 square
                 showChevron={false}
