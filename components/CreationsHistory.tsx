@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ChevronLeft,
@@ -107,6 +107,43 @@ function downloadFilename(item: CreationHistoryItem, mimeType?: string): string 
       .replace(/^-+|-+$/g, "")
       .toLowerCase() || "krakatoa";
   return `${base}-${item.id.slice(0, 8)}.${ext}`;
+}
+
+/** Muted hover preview for library video cards (first frame at rest). */
+function HoverPlayVideo({ src, className }: { src: string; className?: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  const play = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.currentTime = 0;
+    void el.play().catch(() => {});
+  };
+
+  const pause = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.pause();
+    el.currentTime = 0;
+  };
+
+  return (
+    <div
+      className="h-full w-full"
+      onMouseEnter={play}
+      onMouseLeave={pause}
+    >
+      <video
+        ref={ref}
+        src={src}
+        className={className}
+        muted
+        playsInline
+        loop
+        preload="metadata"
+      />
+    </div>
+  );
 }
 
 export default function CreationsHistory({
@@ -592,12 +629,9 @@ export default function CreationsHistory({
                 }`}
               >
                 {item.mediaType === "video" ? (
-                  <video
+                  <HoverPlayVideo
                     src={item.mediaUrl}
                     className="w-full h-full object-cover"
-                    muted
-                    playsInline
-                    preload="metadata"
                   />
                 ) : (
                   <Image
