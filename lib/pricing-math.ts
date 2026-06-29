@@ -372,6 +372,13 @@ export function kling25TurboProPricingKey(): string {
   return "kling25turbo_per_second";
 }
 
+/** Kling v2.6 (kwaivgi/kling-v2.6) — priced by generate_audio. */
+export function kling26PricingKey(params: { generateAudio: boolean }): string {
+  return params.generateAudio
+    ? "kling26_with_audio_per_second"
+    : "kling26_without_audio_per_second";
+}
+
 /**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.

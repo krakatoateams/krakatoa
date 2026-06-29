@@ -16,6 +16,7 @@ import {
   kling20PricingKey,
   kling21PricingKey,
   kling25TurboProPricingKey,
+  kling26PricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -46,6 +47,7 @@ export type VideoModelId =
   | "kling20"
   | "kling21"
   | "kling25_turbo_pro"
+  | "kling26"
   | "kling16_standard"
   | "kling16_pro"
   | "kling15_standard"
@@ -83,6 +85,7 @@ export type VideoProviderFamily =
   | "kling20"
   | "kling21"
   | "kling25turbo"
+  | "kling26"
   | "kling16"
   | "kling16pro"
   | "kling15"
@@ -564,6 +567,31 @@ export const VIDEO_MODELS: VideoModel[] = [
     pricingKey: () => kling25TurboProPricingKey(),
   },
   {
+    id: "kling26",
+    label: "Kling v2.6",
+    modelLabel: "Kling v2.6",
+    modelRole: "video_kling26",
+    providerModel: "kwaivgi/kling-v2.6",
+    providerFamily: "kling26",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: true,
+    references: {
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) =>
+      kling26PricingKey({ generateAudio: ctx.generateAudio ?? true }),
+  },
+  {
     id: "kling15_standard",
     label: "Kling v1.5 Standard",
     modelLabel: "Kling v1.5 Standard",
@@ -934,6 +962,18 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
+      return input;
+    }
+    case "kling26": {
+      // kwaivgi/kling-v2.6: t2v / optional i2v via start_image + generate_audio.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        generate_audio: params.generateAudio,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
