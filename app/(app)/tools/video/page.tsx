@@ -43,6 +43,10 @@ import PhotoLibraryPicker, {
 import type { CreationHistoryItem } from "@/lib/creations";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
+import {
+  isCreditBalanceSufficient,
+  insufficientCreditsTooltip,
+} from "@/lib/credit-ui";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
@@ -196,6 +200,58 @@ function Tooltip({ label, children }: { label: string; children: React.ReactNode
       <TooltipBubble label={label} show={show} />
     </div>
   );
+}
+
+const GENERATE_BTN_CLASS =
+  "flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+
+function CreditActionButton({
+  balance,
+  cost,
+  ready,
+  loading,
+  label,
+  type = "submit",
+  onClick,
+  className = GENERATE_BTN_CLASS,
+}: {
+  balance: number | null;
+  cost: number;
+  ready: boolean;
+  loading: boolean;
+  label: string;
+  type?: "submit" | "button";
+  onClick?: () => void;
+  className?: string;
+}) {
+  const canAfford = isCreditBalanceSufficient(balance, cost);
+  const disabled = !ready || !canAfford || loading;
+  const creditHint =
+    ready && !canAfford ? insufficientCreditsTooltip(balance, cost) : null;
+
+  const button = (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={className}
+    >
+      {loading ? (
+        <Loader2 className="h-5 w-5 animate-spin" />
+      ) : (
+        <>
+          <span>{label}</span>
+          <Wand2 className="h-4 w-4" />
+          <span className="text-sm font-extrabold">{cost}</span>
+        </>
+      )}
+    </button>
+  );
+
+  if (creditHint) {
+    return <Tooltip label={creditHint}>{button}</Tooltip>;
+  }
+  return button;
 }
 
 function ChipDropdown({
@@ -622,7 +678,7 @@ function VideoOmniPage() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
-  const { refetch: refetchCredits } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
 
   useEffect(() => {
     void loadMentionAssetsFromApi().then(setMentionAssets);
@@ -1027,21 +1083,13 @@ function VideoOmniPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={!canGenerate}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {loading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <>
-                      <span>Generate</span>
-                      <Wand2 className="h-4 w-4" />
-                      <span className="text-sm font-extrabold">{videoCost}</span>
-                    </>
-                  )}
-                </button>
+                <CreditActionButton
+                  balance={balance}
+                  cost={videoCost}
+                  ready={canGenerate}
+                  loading={loading}
+                  label="Generate"
+                />
                 {loading && (
                   <button
                     type="button"
@@ -1334,6 +1382,7 @@ function ImageToVideoComposer({
   const [error, setError] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
 
   const startImage = useMediaRefs("image", 1);
   const endImage = useMediaRefs("image", 1);
@@ -1641,21 +1690,13 @@ function ImageToVideoComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Generate</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
               {loading && (
                 <button
                   type="button"
@@ -1762,6 +1803,7 @@ function MotionControlComposer({
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
 
   const charImage = useMediaRefs("image", 1);
   const motionVideo = useMediaRefs("video", 1);
@@ -2041,21 +2083,13 @@ function MotionControlComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Generate</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
               {loading && (
                 <button
                   type="button"
@@ -2167,6 +2201,7 @@ function ImportStoryboardModal({
   onImported: (item: StoryboardListItem) => void;
 }) {
   const { imageCredits } = usePricing();
+  const { balance } = useCreditBalance();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -2377,22 +2412,16 @@ function ImportStoryboardModal({
           <p className="text-[11px] text-gray-500">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
-          <button
+          <CreditActionButton
             type="button"
             onClick={analyze}
-            disabled={!file || busy}
+            balance={balance}
+            cost={cost}
+            ready={!!file}
+            loading={busy}
+            label="Analyze"
             className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <>
-                <span>Analyze</span>
-                <Wand2 className="h-4 w-4" />
-                <span className="text-sm font-extrabold">{cost}</span>
-              </>
-            )}
-          </button>
+          />
         </div>
       </div>
     </div>
@@ -2409,6 +2438,7 @@ function StoryboardToVideoComposer({
   onGenerated: () => void;
 }) {
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
 
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
@@ -2783,21 +2813,13 @@ function StoryboardToVideoComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Create video</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Create video"
+              />
               {loading && (
                 <button
                   type="button"
@@ -3172,6 +3194,7 @@ function ReelsCreatorComposer({
   onGenerated: () => void;
 }) {
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Engine + (Veo-only) mode.
@@ -3516,21 +3539,13 @@ function ReelsCreatorComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Generate</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
               {loading && (
                 <button
                   type="button"
