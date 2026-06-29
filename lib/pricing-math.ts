@@ -335,6 +335,11 @@ export function klingV3PricingKey(params: {
   return params.generateAudio ? "kling3_pro_audio_per_second" : "kling3_pro_per_second";
 }
 
+/** Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second rate. */
+export function kling15StandardPricingKey(): string {
+  return "kling15_standard_per_second";
+}
+
 /**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.

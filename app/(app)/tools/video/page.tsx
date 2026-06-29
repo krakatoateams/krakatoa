@@ -1033,6 +1033,7 @@ function VideoOmniPage() {
                   onSelect={(id) => setDuration(Number(id))}
                   disabled={loading}
                 />
+                {model.resolutions.length > 1 && (
                 <ChipDropdown
                   square
                   showChevron={false}
@@ -1050,6 +1051,7 @@ function VideoOmniPage() {
                   onSelect={(id) => setResolution(id as VideoResolution)}
                   disabled={loading}
                 />
+                )}
                 <ChipDropdown
                   square
                   showChevron={false}
@@ -1135,19 +1137,29 @@ function VideoOmniPage() {
             <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500">
               <Sparkles className="h-3.5 w-3.5 text-purple-300" />
               References
-              <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
+              {model.requiresFirstFrame ? (
+                <span className="font-normal normal-case tracking-normal text-amber-300/90">
+                  (start image required)
+                </span>
+              ) : (
+                <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {model.references.firstFrame && (
                 <RefGroup
                   icon={<ImageIcon className="h-3.5 w-3.5" />}
-                  label="First frame"
+                  label={model.requiresFirstFrame ? "Start image" : "First frame"}
                   accept={IMAGE_ACCEPT}
                   multiple={false}
                   group={firstFrame}
                   disabled={loading || hasRefImages}
                   disabledReason={hasRefImages ? "Remove reference images to use a first frame." : undefined}
-                  hint="Image-to-video starting frame."
+                  hint={
+                    model.requiresFirstFrame
+                      ? "Required — this model is image-to-video only."
+                      : "Image-to-video starting frame."
+                  }
                 />
               )}
               {model.references.lastFrame && (

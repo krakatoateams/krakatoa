@@ -9,6 +9,7 @@ import {
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
+  kling15StandardPricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -37,7 +38,8 @@ export type VideoModelId =
   | "seedance1_lite"
   | "veo31_fast"
   | "veo31_lite"
-  | "kling_v3";
+  | "kling_v3"
+  | "kling15_standard";
 
 /** Storyboard to Video — Seedance-family models only. */
 export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast";
@@ -62,7 +64,8 @@ export type VideoProviderFamily =
   | "seedance1lite"
   | "veo31fast"
   | "veo31lite"
-  | "klingv3";
+  | "klingv3"
+  | "kling15";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -117,6 +120,8 @@ export type VideoModel = {
   /** Max prompt length (chars) the provider accepts. Omitted = platform default. */
   promptMaxChars?: number;
   references: VideoReferenceCaps;
+  /** When true, a first-frame / start image must be attached before generation. */
+  requiresFirstFrame?: boolean;
   /**
    * Per-second pricing key, variant-aware. Seedance keys off resolution + whether
    * a reference video is present ("video_in"); Veo 3.1 Fast keys off audio. Drives
@@ -411,6 +416,32 @@ export const VIDEO_MODELS: VideoModel[] = [
         generateAudio: ctx.generateAudio ?? false,
       }),
   },
+  {
+    id: "kling15_standard",
+    label: "Kling v1.5 Standard",
+    modelLabel: "Kling v1.5 Standard",
+    modelRole: "video_kling15_standard",
+    providerModel: "kwaivgi/kling-v1.5-standard",
+    providerFamily: "kling15",
+    durations: [5, 10],
+    defaultDuration: 5,
+    // Flat-rate model — no resolution input; single placeholder for billing/UI typing.
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    requiresFirstFrame: true,
+    references: {
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling15StandardPricingKey(),
+  },
 ];
 
 const MODEL_BY_ID = Object.fromEntries(
@@ -551,6 +582,10 @@ export function validateVideoReferences(
     };
   }
 
+  if (model.requiresFirstFrame && !firstFrame) {
+    return { ok: false, error: "This model requires a start image (first frame)." };
+  }
+
   return { ok: true };
 }
 
@@ -624,6 +659,17 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      return input;
+    }
+    case "kling15": {
+      // kwaivgi/kling-v1.5-standard: image-to-video only (start_image required).
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        start_image: refs.firstFrame,
+        duration: params.duration,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
       return input;
     }
     case "seedance15": {
