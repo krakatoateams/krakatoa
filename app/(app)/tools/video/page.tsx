@@ -2151,7 +2151,7 @@ function storyboardVideoPricingKey(
 
 // Storyboard to Video sub-tool. The storyboard itself is created in Photo →
 // Storyboard; here the user picks one of their saved storyboards, a resolution,
-// and a Seedance model (Mini default, Fast optional), then renders the 15s clip.
+// and a Seedance model (Mini default; Fast or full Seedance 2 optional), then renders the 15s clip.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 
 // Modal for importing a user's OWN storyboard image (not generated in Krakatoa).

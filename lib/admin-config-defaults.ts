@@ -430,6 +430,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "storyboard.image": { provider: "replicate", model: "openai/gpt-image-2", parameters: {}, enabled: true, is_default: true },
   "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance2_mini": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
+  "reels.video_seedance2": { provider: "replicate", model: "bytedance/seedance-2.0", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance15_pro": { provider: "replicate", model: "bytedance/seedance-1.5-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_pro_fast": { provider: "replicate", model: "bytedance/seedance-1-pro-fast", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_pro": { provider: "replicate", model: "bytedance/seedance-1-pro", parameters: {}, enabled: true, is_default: true },

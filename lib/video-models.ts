@@ -54,7 +54,7 @@ export type VideoModelId =
   | "kling15_pro";
 
 /** Storyboard to Video — Seedance-family models only. */
-export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast";
+export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast" | "seedance2";
 
 export type VideoResolution = "480p" | "720p" | "1080p" | "4k";
 
@@ -221,7 +221,6 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     label: "Seedance 2",
     modelLabel: "Seedance 2",
     // Distinct config_key (not reels.video, which is the Fast/Reels pipeline model).
-    // No model_configs row is seeded for it — the resolver falls back to providerModel.
     modelRole: "video_seedance2",
     providerModel: "bytedance/seedance-2.0",
     providerFamily: "seedance2",
@@ -763,6 +762,7 @@ export const DEFAULT_STORYBOARD_VIDEO_MODEL_ID: StoryboardVideoModelId = "seedan
 export const STORYBOARD_VIDEO_MODEL_IDS: StoryboardVideoModelId[] = [
   "seedance2_mini",
   "seedance2_fast",
+  "seedance2",
 ];
 
 export function isStoryboardVideoModelId(id: string): id is StoryboardVideoModelId {
