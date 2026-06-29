@@ -56,6 +56,7 @@ import {
   validateVideoReferences,
   STORYBOARD_VIDEO_MODEL_IDS,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
+  allowsFrameWithReferenceImages,
   type VideoModelId,
   type StoryboardVideoModelId,
   type VideoResolution,
@@ -710,7 +711,7 @@ function VideoOmniPage() {
   const resolution1080pBlockedByRefs =
     model.providerFamily === "seedance1lite" && hasRefImages;
   // Kling v1.6 allows start_image + reference_images together.
-  const blocksFramesWithRefs = model.providerFamily !== "kling16";
+  const blocksFramesWithRefs = !allowsFrameWithReferenceImages(model.providerFamily);
 
   useEffect(() => {
     if (resolution1080pBlockedByRefs && resolution === "1080p") {
@@ -1298,9 +1299,15 @@ function ImageToVideoComposer({
 
   const startImage = useMediaRefs("image", 1);
   const endImage = useMediaRefs("image", 1);
+  const refImages = useMediaRefs("image", model.references.referenceImages);
 
   useEffect(() => {
     if (!getVideoModel(modelId).references.lastFrame) endImage.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
+
+  useEffect(() => {
+    if (getVideoModel(modelId).references.referenceImages === 0) refImages.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId]);
 
@@ -1320,7 +1327,8 @@ function ImageToVideoComposer({
       : startReady;
   const anyUploading =
     (imageSource === "upload" && startImage.uploading) ||
-    (model.references.lastFrame && endImageSource === "upload" && endImage.uploading);
+    (model.references.lastFrame && endImageSource === "upload" && endImage.uploading) ||
+    refImages.uploading;
   const canGenerate = !loading && !anyUploading && frameReady && prompt.trim().length > 0;
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -1347,7 +1355,7 @@ function ImageToVideoComposer({
           model.references.lastFrame && endImageSource === "upload"
             ? (endImage.done[0] ?? null)
             : null,
-        referenceImages: [],
+        referenceImages: refImages.done.map((r) => ({ url: r.url, path: r.path })),
         referenceVideos: [],
         referenceAudios: [],
       },
@@ -1391,6 +1399,7 @@ function ImageToVideoComposer({
       onGenerated();
       startImage.reset();
       endImage.reset();
+      refImages.reset();
       setLibraryImage(null);
       setEndLibraryImage(null);
       setMentions([]);
@@ -1494,6 +1503,20 @@ function ImageToVideoComposer({
               />
             </div>
           </div>
+
+          {model.references.referenceImages > 0 && (
+            <div className="mt-3">
+              <RefGroup
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+                label="Scene references"
+                accept={IMAGE_ACCEPT}
+                multiple
+                group={refImages}
+                disabled={loading}
+                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ or upload.`}
+              />
+            </div>
+          )}
 
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">

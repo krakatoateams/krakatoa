@@ -12,6 +12,7 @@ import {
   kling15StandardPricingKey,
   kling15ProPricingKey,
   kling16StandardPricingKey,
+  kling16ProPricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -40,6 +41,7 @@ export type VideoModelId =
   | "veo31_lite"
   | "kling_v3"
   | "kling16_standard"
+  | "kling16_pro"
   | "kling15_standard"
   | "kling15_pro";
 
@@ -73,6 +75,7 @@ export type VideoProviderFamily =
   | "veo31lite"
   | "klingv3"
   | "kling16"
+  | "kling16pro"
   | "kling15"
   | "kling15pro";
 
@@ -452,6 +455,31 @@ export const VIDEO_MODELS: VideoModel[] = [
     pricingKey: () => kling16StandardPricingKey(),
   },
   {
+    id: "kling16_pro",
+    label: "Kling v1.6 Pro",
+    modelLabel: "Kling v1.6 Pro",
+    modelRole: "video_kling16_pro",
+    providerModel: "kwaivgi/kling-v1.6-pro",
+    providerFamily: "kling16pro",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    subtools: ["image2video"],
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 4,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling16ProPricingKey(),
+  },
+  {
     id: "kling15_standard",
     label: "Kling v1.5 Standard",
     modelLabel: "Kling v1.5 Standard",
@@ -558,6 +586,16 @@ export function getVideoModel(id: string): VideoModel {
   return MODEL_BY_ID[(id as VideoModelId)] ?? MODEL_BY_ID[DEFAULT_VIDEO_MODEL_ID];
 }
 
+/** Kling v1.6 models allow start/end frames alongside reference_images. */
+export function allowsFrameWithReferenceImages(family: VideoProviderFamily): boolean {
+  return family === "kling16" || family === "kling16pro";
+}
+
+/** Kling v1.5/v1.6 Pro allow an end frame without a start frame. */
+export function allowsEndFrameWithoutStart(family: VideoProviderFamily): boolean {
+  return family === "kling15pro" || family === "kling16pro";
+}
+
 export function isValidVideoResolution(
   model: VideoModel,
   resolution: string
@@ -644,14 +682,18 @@ export function validateVideoReferences(
   if (
     referenceImages.length > 0 &&
     (firstFrame || lastFrame) &&
-    model.providerFamily !== "kling16"
+    !allowsFrameWithReferenceImages(model.providerFamily)
   ) {
     return {
       ok: false,
       error: "Reference images can't be combined with first/last frame images.",
     };
   }
-  if (lastFrame && !firstFrame) {
+  if (
+    lastFrame &&
+    !firstFrame &&
+    !allowsEndFrameWithoutStart(model.providerFamily)
+  ) {
     return { ok: false, error: "A last-frame image requires a first-frame image." };
   }
   if (
@@ -681,6 +723,10 @@ export function validateVideoReferences(
   }
 
   if (model.providerFamily === "kling15pro" && !firstFrame && !lastFrame) {
+    return { ok: false, error: "This model requires a start image or end image." };
+  }
+
+  if (model.providerFamily === "kling16pro" && !firstFrame && !lastFrame) {
     return { ok: false, error: "This model requires a start image or end image." };
   }
 
@@ -768,6 +814,20 @@ export function buildVideoProviderInput(params: {
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
+      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
+      if (referenceImages.length) input.reference_images = referenceImages;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
+      return input;
+    }
+    case "kling16pro": {
+      // kwaivgi/kling-v1.6-pro: start/end image required (either) + optional refs.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
       const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
       if (referenceImages.length) input.reference_images = referenceImages;
       if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
