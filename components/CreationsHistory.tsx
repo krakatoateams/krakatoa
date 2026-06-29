@@ -39,6 +39,10 @@ type Props = {
   showMeta?: boolean;
   /** When false, the built-in Refresh button is hidden (parent provides its own). */
   showRefresh?: boolean;
+  /** Skip the title/description header row (parent supplies its own section label). */
+  hideHeader?: boolean;
+  /** Override the asset grid layout classes (defaults to 5 columns on lg). */
+  gridClassName?: string;
 };
 
 /** Windowed page numbers with ellipses, e.g. [1, "…", 4, 5, 6, "…", 12]. */
@@ -160,6 +164,8 @@ export default function CreationsHistory({
   showActions = false,
   showMeta = true,
   showRefresh = true,
+  hideHeader = false,
+  gridClassName,
 }: Props) {
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
@@ -528,7 +534,7 @@ export default function CreationsHistory({
 
   return (
     <section className={`mt-16 pt-12 border-t border-white/10 ${className}`}>
-      {!enableTabs && (
+      {!enableTabs && !hideHeader && (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -612,7 +618,12 @@ export default function CreationsHistory({
         </div>
       ) : (
         <>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div
+          className={
+            gridClassName ??
+            "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
+          }
+        >
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
