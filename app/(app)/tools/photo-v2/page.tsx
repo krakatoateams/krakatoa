@@ -26,6 +26,11 @@ import {
   Languages,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
+import MentionTextarea from "@/components/MentionTextarea";
+import {
+  parseMentionAssetsFromHistory,
+  type MentionAsset,
+} from "@/lib/mention-assets";
 import {
   STORYBOARD_STYLE_KEYS,
   STORYBOARD_STYLE_LABELS,
@@ -103,209 +108,6 @@ const FIRST_REFERENCE_TIER =
   PRODUCT_PHOTO_TIERS.find((t) => t.supportsReference)?.id ?? DEFAULT_PRODUCT_PHOTO_TIER;
 
 type ChipOption = { id: string; label: string; hint?: string };
-
-// An asset the user can tag with "@" inside the prompt. The tagged creation's
-// image is sent to the model as a reference, and its name is woven into the prompt.
-type MentionAsset = {
-  id: string;
-  name: string;
-  url: string;
-  kind: "character" | "storyboard";
-};
-
-// Find the active "@query" the caret is sitting in (the run of non-space chars
-// right after the most recent unescaped "@"). Returns null when not mentioning.
-function activeMentionQuery(value: string, caret: number): string | null {
-  const match = /(?:^|\s)@([^\s@]*)$/.exec(value.slice(0, caret));
-  return match ? match[1] : null;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Render the prompt for the highlight backdrop: plain text with each tagged
-// "@Name" wrapped in an inline pill. The pill uses box-shadow (not padding) so it
-// never changes glyph advance — keeping it pixel-aligned with the transparent
-// textarea on top. Mentions flow and wrap inline with the words.
-function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.ReactNode {
-  if (!mentions.length) return text;
-  // Longest names first so "@Ana Maria" wins over "@Ana".
-  const names = [...mentions].sort((a, b) => b.name.length - a.name.length);
-  const pattern = new RegExp(`@(?:${names.map((m) => escapeRegExp(m.name)).join("|")})`, "g");
-  const nodes: React.ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text)) !== null) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    nodes.push(
-      <span
-        key={key++}
-        className="rounded bg-purple-500/30 text-purple-100 shadow-[0_0_0_2px_rgba(168,85,247,0.30)]"
-      >
-        {m[0]}
-      </span>
-    );
-    last = m.index + m[0].length;
-  }
-  nodes.push(text.slice(last));
-  // A trailing newline isn't rendered by a block element; pad it so the backdrop
-  // height matches the textarea.
-  if (text.endsWith("\n")) nodes.push("\u200b");
-  return nodes;
-}
-
-// A prompt textarea with @-mention support: type "@" to tag a saved character or
-// storyboard. Tagged assets render as inline pills (via a highlight backdrop) that
-// wrap with the text, and are reported to the parent so their images can be sent as
-// references. Self-contained; the prompt value + tagged list live in the parent.
-function MentionTextarea({
-  value,
-  onChange,
-  mentions,
-  onMentionsChange,
-  assets,
-  placeholder,
-  rows = 2,
-  disabled,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  mentions: MentionAsset[];
-  onMentionsChange: (next: MentionAsset[]) => void;
-  assets: MentionAsset[];
-  placeholder?: string;
-  rows?: number;
-  disabled?: boolean;
-}) {
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const bdRef = useRef<HTMLDivElement>(null);
-  const [query, setQuery] = useState<string | null>(null);
-  const [index, setIndex] = useState(0);
-
-  const matches =
-    query === null
-      ? []
-      : assets
-          .filter((a) => {
-            const q = query.toLowerCase();
-            return q === "" || a.name.toLowerCase().includes(q);
-          })
-          .slice(0, 6);
-
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value;
-    onChange(v);
-    // Drop any tagged mention whose "@Name" token the user edited away.
-    onMentionsChange(mentions.filter((m) => v.includes(`@${m.name}`)));
-    setQuery(activeMentionQuery(v, e.target.selectionStart ?? v.length));
-    setIndex(0);
-  };
-
-  const insert = (asset: MentionAsset) => {
-    const el = taRef.current;
-    const caret = el?.selectionStart ?? value.length;
-    const before = value.slice(0, caret);
-    const after = value.slice(caret);
-    const replaced = before.replace(
-      /(^|\s)@([^\s@]*)$/,
-      (_m, lead: string) => `${lead}@${asset.name} `
-    );
-    onChange(replaced + after);
-    if (!mentions.some((m) => m.id === asset.id)) onMentionsChange([...mentions, asset]);
-    setQuery(null);
-    setIndex(0);
-    requestAnimationFrame(() => {
-      const pos = replaced.length;
-      el?.focus();
-      el?.setSelectionRange(pos, pos);
-    });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (query === null || matches.length === 0) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setIndex((i) => (i + 1) % matches.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setIndex((i) => (i - 1 + matches.length) % matches.length);
-    } else if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault();
-      insert(matches[Math.min(index, matches.length - 1)]);
-    } else if (e.key === "Escape") {
-      setQuery(null);
-    }
-  };
-
-  return (
-    <div className="relative flex-1">
-      {/* Highlight backdrop: mirrors the text and renders @mentions as inline pills
-          that wrap with the words. Sits behind the transparent-text textarea. */}
-      <div
-        ref={bdRef}
-        aria-hidden
-        className="pointer-events-none absolute inset-0 min-h-[48px] w-full overflow-hidden whitespace-pre-wrap break-words text-base text-white"
-      >
-        {renderMentionBackdrop(value, mentions)}
-      </div>
-      <textarea
-        ref={taRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        onScroll={(e) => {
-          if (bdRef.current) bdRef.current.scrollTop = e.currentTarget.scrollTop;
-        }}
-        onBlur={() => setTimeout(() => setQuery(null), 120)}
-        placeholder={placeholder}
-        rows={rows}
-        disabled={disabled}
-        className="relative min-h-[48px] w-full resize-none whitespace-pre-wrap break-words bg-transparent text-base text-transparent caret-white placeholder:text-gray-500 focus:outline-none"
-      />
-
-      {query !== null && matches.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
-          {matches.map((asset, i) => (
-            <button
-              key={asset.id}
-              type="button"
-              // onMouseDown fires before the textarea blur, so the insert isn't cancelled.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                insert(asset);
-              }}
-              onMouseEnter={() => setIndex(i)}
-              className={`flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors ${
-                i === index ? "bg-white/10" : "hover:bg-white/5"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={asset.url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-                {asset.name}
-              </span>
-              <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
-                {asset.kind === "character" ? (
-                  <User className="h-3 w-3" />
-                ) : (
-                  <Clapperboard className="h-3 w-3" />
-                )}
-                {asset.kind}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {query !== null && matches.length === 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-xs text-gray-400 shadow-2xl shadow-black/50">
-          No matching characters or storyboards.
-        </div>
-      )}
-    </div>
-  );
-}
 
 function ChipDropdown({
   icon,
@@ -635,26 +437,7 @@ function StoryboardComposer({
         "/api/creations/history?tool=product_photo,storyboard&mediaType=image&limit=50"
       );
       const data = await res.json();
-      const items: CreationHistoryItem[] = data.items || [];
-      const assets: MentionAsset[] = [];
-      for (const it of items) {
-        if (it.metadata?.creationKind === "character") {
-          const name =
-            (typeof it.metadata?.characterName === "string" &&
-              it.metadata.characterName.trim()) ||
-            it.title ||
-            "Character";
-          assets.push({ id: it.id, name, url: it.mediaUrl, kind: "character" });
-        } else if (it.tool === "storyboard") {
-          assets.push({
-            id: it.id,
-            name: it.title || "Storyboard",
-            url: it.mediaUrl,
-            kind: "storyboard",
-          });
-        }
-      }
-      setMentionAssets(assets);
+      setMentionAssets(parseMentionAssetsFromHistory((data.items ?? []) as CreationHistoryItem[]));
     } catch {
       setMentionAssets([]);
     }
@@ -1069,26 +852,7 @@ function PhotoOmniPage() {
         "/api/creations/history?tool=product_photo,storyboard&mediaType=image&limit=50"
       );
       const data = await res.json();
-      const items: CreationHistoryItem[] = data.items || [];
-      const assets: MentionAsset[] = [];
-      for (const it of items) {
-        if (it.metadata?.creationKind === "character") {
-          const name =
-            (typeof it.metadata?.characterName === "string" &&
-              it.metadata.characterName.trim()) ||
-            it.title ||
-            "Character";
-          assets.push({ id: it.id, name, url: it.mediaUrl, kind: "character" });
-        } else if (it.tool === "storyboard") {
-          assets.push({
-            id: it.id,
-            name: it.title || "Storyboard",
-            url: it.mediaUrl,
-            kind: "storyboard",
-          });
-        }
-      }
-      setMentionAssets(assets);
+      setMentionAssets(parseMentionAssetsFromHistory((data.items ?? []) as CreationHistoryItem[]));
     } catch {
       setMentionAssets([]);
     }

@@ -13,19 +13,17 @@ import {
 } from "@/lib/pricing-math";
 
 /**
- * Video model registry (Text to Video — omni-composer at /tools/video).
+ * Video model registry (Text to Video + Image to Video at /tools/video).
  *
  * Analogous to lib/product-photo.ts (PRODUCT_PHOTO_TIERS): each model declares
  * its provider id, the model_configs config_key used to resolve/override it, its
  * capability envelope (durations, resolutions, aspect ratios, audio, reference
- * slots), and the pricing key used by BOTH the client label and the server
- * billing. Adding a new video model later = adding an entry here + a per-family
- * branch in buildVideoProviderInput.
+ * slots), which subtool(s) it belongs to, and the pricing key used by BOTH the
+ * client label and the server billing. Adding a new video model later = adding
+ * an entry here + a per-family branch in buildVideoProviderInput.
  *
- * Starter scope: Seedance 2 Mini (default for Storyboard), Seedance 2 Fast,
- * Seedance 2 (full), Veo 3.1, Kling v3. Each model declares its own
- * model_configs config_key; Mini uses `video_seedance2_mini`, Fast reuses
- * `reels.video`.
+ * Models that require a start image live under the Image to Video subtool only
+ * (`subtools: ["image2video"]`) so Text to Video stays prompt-first.
  */
 
 export type VideoModelId =
@@ -55,6 +53,11 @@ export type VideoAspectRatio =
   | "21:9"
   | "9:21"
   | "adaptive";
+
+/** Which Video Studio composer(s) may offer this model. Defaults to text2video. */
+export type VideoSubtool = "text2video" | "image2video";
+
+export type VideoJobKind = "video_text2video" | "video_image2video";
 
 export type VideoProviderFamily =
   | "seedance2"
@@ -122,6 +125,8 @@ export type VideoModel = {
   references: VideoReferenceCaps;
   /** When true, a first-frame / start image must be attached before generation. */
   requiresFirstFrame?: boolean;
+  /** Subtool(s) that expose this model. Omitted = text2video only. */
+  subtools?: VideoSubtool[];
   /**
    * Per-second pricing key, variant-aware. Seedance keys off resolution + whether
    * a reference video is present ("video_in"); Veo 3.1 Fast keys off audio. Drives
@@ -433,6 +438,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     supportsAudio: false,
     defaultGenerateAudio: false,
     requiresFirstFrame: true,
+    subtools: ["image2video"],
     references: {
       firstFrame: true,
       lastFrame: false,
@@ -449,6 +455,33 @@ const MODEL_BY_ID = Object.fromEntries(
 ) as Record<VideoModelId, VideoModel>;
 
 export const DEFAULT_VIDEO_MODEL_ID: VideoModelId = "seedance2_fast";
+
+export function modelSubtools(model: VideoModel): VideoSubtool[] {
+  return model.subtools ?? ["text2video"];
+}
+
+export function isTextToVideoModel(model: VideoModel): boolean {
+  return modelSubtools(model).includes("text2video");
+}
+
+export function isImageToVideoModel(model: VideoModel): boolean {
+  return modelSubtools(model).includes("image2video");
+}
+
+export const TEXT_TO_VIDEO_MODELS = VIDEO_MODELS.filter(isTextToVideoModel);
+export const IMAGE_TO_VIDEO_MODELS = VIDEO_MODELS.filter(isImageToVideoModel);
+
+export const DEFAULT_IMAGE_TO_VIDEO_MODEL_ID: VideoModelId =
+  IMAGE_TO_VIDEO_MODELS[0]?.id ?? "kling15_standard";
+
+/** Job/history kind derived from subtool membership (image-only → image2video). */
+export function getVideoJobKind(model: VideoModel): VideoJobKind {
+  const subtools = modelSubtools(model);
+  if (subtools.length === 1 && subtools[0] === "image2video") {
+    return "video_image2video";
+  }
+  return "video_text2video";
+}
 
 /** Default Storyboard-to-Video model (cheaper Mini tier). */
 export const DEFAULT_STORYBOARD_VIDEO_MODEL_ID: StoryboardVideoModelId = "seedance2_mini";

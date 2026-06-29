@@ -31,6 +31,8 @@ import {
   getAllowedDurations,
   validateVideoReferences,
   buildVideoProviderInput,
+  getVideoJobKind,
+  type VideoJobKind,
   type VideoReferenceInputs,
   type VideoResolution,
 } from "@/lib/video-models";
@@ -42,6 +44,12 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  buildMentionGuidanceSuffix,
+  mapMentionsToImageTokens,
+  type MentionRef,
+} from "@/lib/mention-assets";
+import { resolveMentionCreations } from "@/lib/mention-assets-server";
 
 // Vercel Hobby plan caps every Serverless Function at maxDuration=300. Raising
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
@@ -74,6 +82,21 @@ function parseRefList(raw: unknown, max: number): RefAttachment[] {
   return out;
 }
 
+function parseCreationIdList(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 export async function POST(req: Request) {
   // Platform-observability + spend trackers — declared before the try so the
   // catch/finally blocks can finalize whatever was created.
@@ -84,6 +107,8 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
+  let jobKind: VideoJobKind = "video_text2video";
+  let jobLabel = "Text to Video";
   // Transient reference uploads to remove once we're done (success/failure/402).
   // Guarded to the videos/temp/refs/ prefix so a forged client path can't make
   // us delete arbitrary objects.
@@ -170,12 +195,17 @@ export async function POST(req: Request) {
     const seedRaw = b.seed;
     const seed =
       typeof seedRaw === "number" && Number.isFinite(seedRaw) ? Math.trunc(seedRaw) : null;
+    const referenceCreationIds = parseCreationIdList(b.referenceCreationIds);
+    const startImageCreationId =
+      typeof b.startImageCreationId === "string" ? b.startImageCreationId.trim() : "";
 
     // ---- Validate model + options (all before any job/spend/provider) ----
     if (!modelId || !isValidVideoModelId(modelId)) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
     const model = getVideoModel(modelId);
+    jobKind = getVideoJobKind(model);
+    jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
     // Cap the prompt to the selected model's limit (e.g. Kling v3 = 2500 chars).
     const prompt = promptRaw.slice(0, model.promptMaxChars ?? PROMPT_MAX_CHARS);
@@ -209,11 +239,43 @@ export async function POST(req: Request) {
 
     // ---- Parse reference attachments + collect their temp paths for cleanup ----
     const refsRaw = (b.references ?? {}) as Record<string, unknown>;
-    const firstFrame = parseRefAttachment(refsRaw.firstFrame);
+    let firstFrame = parseRefAttachment(refsRaw.firstFrame);
     const lastFrame = parseRefAttachment(refsRaw.lastFrame);
     const referenceImages = parseRefList(refsRaw.referenceImages, model.references.referenceImages);
     const referenceVideos = parseRefList(refsRaw.referenceVideos, model.references.referenceVideos);
     const referenceAudios = parseRefList(refsRaw.referenceAudios, model.references.referenceAudios);
+
+    // Library-picked start image (owner-scoped; no temp path to sweep).
+    if (startImageCreationId && userId) {
+      const resolved = await resolveMentionCreations(userId, [startImageCreationId]);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      if (!firstFrame) {
+        firstFrame = { url: resolved.items[0].url, path: "" };
+      }
+    }
+
+    const uploadedRefImageCount = referenceImages.length;
+    let mentionRefs: MentionRef[] = [];
+    if (referenceCreationIds.length && userId) {
+      const resolved = await resolveMentionCreations(userId, referenceCreationIds);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      mentionRefs = resolved.items.map((item) => item.ref);
+      const mentionUrls = resolved.items.map((item) => item.url);
+      if (model.references.referenceImages > 0) {
+        for (const url of mentionUrls) {
+          if (referenceImages.length >= model.references.referenceImages) break;
+          if (!referenceImages.some((r) => r.url === url)) {
+            referenceImages.push({ url, path: "" });
+          }
+        }
+      } else if (model.references.firstFrame && !firstFrame && mentionUrls[0]) {
+        firstFrame = { url: mentionUrls[0], path: "" };
+      }
+    }
 
     for (const ref of [firstFrame, lastFrame, ...referenceImages, ...referenceVideos, ...referenceAudios]) {
       if (ref && ref.path && isVideosTempRefPath(ref.path)) {
@@ -232,6 +294,18 @@ export async function POST(req: Request) {
     const refCheck = validateVideoReferences(model, referenceInputs, { resolution });
     if (!refCheck.ok) {
       return NextResponse.json({ error: refCheck.error }, { status: 400 });
+    }
+
+    let providerPrompt = prompt;
+    if (mentionRefs.length > 0) {
+      if (model.references.referenceImages > 0) {
+        providerPrompt = mapMentionsToImageTokens(
+          providerPrompt,
+          mentionRefs,
+          uploadedRefImageCount
+        );
+      }
+      providerPrompt = `${providerPrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim();
     }
 
     // Variant-aware pricing: Seedance keys off resolution + reference video
@@ -270,6 +344,8 @@ export async function POST(req: Request) {
       referenceImages: referenceInputs.referenceImages,
       referenceVideos: referenceInputs.referenceVideos,
       referenceAudios: referenceInputs.referenceAudios,
+      referenceCreationIds: referenceCreationIds.join(","),
+      startImageCreationId,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -303,7 +379,7 @@ export async function POST(req: Request) {
       createJob({
         profileId: profileId!,
         tool: "reels",
-        jobType: "video_text2video",
+        jobType: jobKind,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
         input: { modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
@@ -322,13 +398,13 @@ export async function POST(req: Request) {
         profileId: profileId!,
         amount: requiredCredits,
         idempotencyKey: jobId
-          ? `spend:video_text2video:${jobId}`
-          : `spend:video_text2video:profile:${profileId}:${Date.now()}`,
+          ? `spend:${jobKind}:${jobId}`
+          : `spend:${jobKind}:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Text to Video generation",
+        description: `${jobLabel} generation`,
         metadata: {
           tool: "reels",
-          jobType: "video_text2video",
+          jobType: jobKind,
           modelId,
           duration,
           resolution,
@@ -383,7 +459,7 @@ export async function POST(req: Request) {
         jobId: jobId ?? undefined,
         tool: "reels",
         assetType: "video",
-        role: "video_text2video",
+        role: jobKind,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
         metadata: { modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
@@ -395,7 +471,7 @@ export async function POST(req: Request) {
     const replicate = createReplicateClient();
     const providerInput = buildVideoProviderInput({
       model,
-      prompt,
+      prompt: providerPrompt,
       duration,
       resolution,
       aspectRatio,
@@ -404,7 +480,7 @@ export async function POST(req: Request) {
       references: referenceInputs,
     });
 
-    await beginStep("video_generation", `${model.modelLabel} text-to-video generation`, {
+    await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {
       duration,
       resolution,
       aspectRatio,
@@ -414,13 +490,13 @@ export async function POST(req: Request) {
       throw new ReplicateCancellationError();
     }
     console.log(
-      `[Text to Video] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
+      `[${jobLabel}] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
     );
     const recordPredictionTick = makePredictionRecorder({
       generationRequestId,
       profileId,
       jobId,
-      kind: "video_text2video",
+      kind: jobKind,
     });
     const output = await runWithRetry(replicate, modelRef, { input: providerInput }, 10, {
       onPrediction: recordPredictionTick,
@@ -459,7 +535,7 @@ export async function POST(req: Request) {
     const publicUrl = urlData.publicUrl;
     await endStep({ storagePath, publicUrl });
 
-    const title = prompt.slice(0, 60) || "Text to Video";
+    const title = prompt.slice(0, 60) || jobLabel;
     const creationMetadata = {
       prompt,
       modelId,
@@ -477,7 +553,7 @@ export async function POST(req: Request) {
       historyItem = await safe("insertUserCreation", () =>
         insertUserCreation({
           userId: userId!,
-          tool: "video_text2video",
+          tool: jobKind,
           mediaType: "video",
           mediaUrl: publicUrl,
           storagePath,
@@ -519,7 +595,7 @@ export async function POST(req: Request) {
         unitType: "video_seconds",
         units: duration,
         creditsCharged: creditsAmount,
-        metadata: { jobType: "video_text2video", modelId, resolution, aspectRatio, pricingKey },
+        metadata: { jobType: jobKind, modelId, resolution, aspectRatio, pricingKey },
       })
     );
 
@@ -547,8 +623,8 @@ export async function POST(req: Request) {
       : error instanceof Error
         ? error.message
         : String(error);
-    if (cancelled) console.log("[Text to Video] Cancelled by user.");
-    else console.error("[Text to Video] Error:", error);
+    if (cancelled) console.log(`[${jobLabel}] Cancelled by user.`);
+    else console.error(`[${jobLabel}] Error:`, error);
     const pricingMissing = error instanceof PricingConfigError;
     const errJson = cancelled
       ? { message, code: "GENERATION_CANCELLED" }
@@ -578,8 +654,8 @@ export async function POST(req: Request) {
           profileId: profileId!,
           amount: creditsAmount,
           idempotencyKey: jobId
-            ? `refund:video_text2video:${jobId}`
-            : `refund:video_text2video:profile:${profileId}:${Date.now()}`,
+            ? `refund:${jobKind}:${jobId}`
+            : `refund:${jobKind}:profile:${profileId}:${Date.now()}`,
           jobId: jobId ?? null,
           description: cancelled
             ? "Refund after user cancellation"
