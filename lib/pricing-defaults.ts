@@ -105,7 +105,6 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   kling15_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling15", variantKey: "pro" },
   kling16_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling16", variantKey: "standard" },
   kling16_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling16", variantKey: "pro" },
-  kling20_per_second: { providerCostUsd: 0.28, costUnit: "per_second", pricingGroup: "kling20", variantKey: "default" },
   kling21_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling21", variantKey: "standard" },
   kling21_pro_per_second: { providerCostUsd: 0.09, costUnit: "per_second", pricingGroup: "kling21", variantKey: "pro" },
   kling25turbo_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling25turbo", variantKey: "default" },

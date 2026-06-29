@@ -374,11 +374,6 @@ export function kling16ProPricingKey(): string {
   return "kling16_pro_per_second";
 }
 
-/** Kling v2.0 (kwaivgi/kling-v2.0) — flat per-second rate. */
-export function kling20PricingKey(): string {
-  return "kling20_per_second";
-}
-
 /** Kling v2.1 (kwaivgi/kling-v2.1) — priced by mode (standard=720p / pro=1080p). */
 export function kling21PricingKey(params: { resolution?: string | null }): string {
   return params.resolution === "1080p"

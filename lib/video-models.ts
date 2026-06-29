@@ -14,7 +14,6 @@ import {
   kling15ProPricingKey,
   kling16StandardPricingKey,
   kling16ProPricingKey,
-  kling20PricingKey,
   kling21PricingKey,
   kling25TurboProPricingKey,
   kling26PricingKey,
@@ -46,7 +45,6 @@ export type VideoModelId =
   | "veo31_lite"
   | "kling_v3"
   | "kling_v3_omni"
-  | "kling20"
   | "kling21"
   | "kling25_turbo_pro"
   | "kling26"
@@ -85,7 +83,6 @@ export type VideoProviderFamily =
   | "veo31lite"
   | "klingv3"
   | "kling3omni"
-  | "kling20"
   | "kling21"
   | "kling25turbo"
   | "kling26"
@@ -159,7 +156,7 @@ export type VideoModel = {
   pricingKey: (ctx: VideoPricingContext) => string;
 };
 
-export const VIDEO_MODELS: VideoModel[] = [
+export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
   {
     id: "seedance2_mini",
     label: "Seedance 2 Mini",
@@ -476,30 +473,6 @@ export const VIDEO_MODELS: VideoModel[] = [
       }),
   },
   {
-    id: "kling20",
-    label: "Kling v2.0",
-    modelLabel: "Kling v2.0",
-    modelRole: "video_kling20",
-    providerModel: "kwaivgi/kling-v2.0",
-    providerFamily: "kling20",
-    durations: [5, 10],
-    defaultDuration: 5,
-    resolutions: ["720p"],
-    defaultResolution: "720p",
-    aspectRatios: ["16:9", "9:16", "1:1"],
-    defaultAspectRatio: "9:16",
-    supportsAudio: false,
-    defaultGenerateAudio: false,
-    references: {
-      firstFrame: true,
-      lastFrame: false,
-      referenceImages: 0,
-      referenceVideos: 0,
-      referenceAudios: 0,
-    },
-    pricingKey: () => kling20PricingKey(),
-  },
-  {
     id: "kling16_standard",
     label: "Kling v1.6 Standard",
     modelLabel: "Kling v1.6 Standard",
@@ -678,9 +651,43 @@ export const VIDEO_MODELS: VideoModel[] = [
   },
 ];
 
-const MODEL_BY_ID = Object.fromEntries(
-  VIDEO_MODELS.map((m) => [m.id, m])
+/**
+ * UI / dropdown order: owner groups (Seedance → Veo → Kling), cheapest min $/s first
+ * within each group. Does not affect defaults or billing — display only.
+ */
+const VIDEO_MODEL_SORT_ORDER: VideoModelId[] = [
+  // ---- Seedance (bytedance/) ----
+  "seedance15_pro", // from $0.013/s
+  "seedance1_pro_fast", // $0.015/s
+  "seedance1_lite", // $0.018/s
+  "seedance1_pro", // $0.03/s
+  "seedance2_mini", // $0.04/s
+  "seedance2_fast", // $0.07/s
+  "seedance2", // $0.08/s
+  // ---- Veo (google/) ----
+  "veo31_lite", // $0.05/s
+  "veo31_fast", // $0.10/s (no audio)
+  // ---- Kling (kwaivgi/) ----
+  "kling15_standard", // $0.05/s
+  "kling16_standard", // $0.05/s
+  "kling21", // $0.05/s (720p)
+  "kling25_turbo_pro", // $0.07/s
+  "kling26", // $0.07/s (no audio)
+  "kling15_pro", // $0.095/s
+  "kling16_pro", // $0.095/s
+  "kling_v3", // $0.168/s (720p, no audio)
+  "kling_v3_omni", // $0.168/s
+];
+
+const VIDEO_MODEL_BY_ID = Object.fromEntries(
+  VIDEO_MODEL_REGISTRY.map((m) => [m.id, m])
 ) as Record<VideoModelId, VideoModel>;
+
+export const VIDEO_MODELS: VideoModel[] = VIDEO_MODEL_SORT_ORDER.map(
+  (id) => VIDEO_MODEL_BY_ID[id]
+);
+
+const MODEL_BY_ID = VIDEO_MODEL_BY_ID;
 
 export const DEFAULT_VIDEO_MODEL_ID: VideoModelId = "seedance2_fast";
 
@@ -701,6 +708,45 @@ export const IMAGE_TO_VIDEO_MODELS = VIDEO_MODELS.filter(isImageToVideoModel);
 
 export const DEFAULT_IMAGE_TO_VIDEO_MODEL_ID: VideoModelId =
   IMAGE_TO_VIDEO_MODELS[0]?.id ?? "kling15_standard";
+
+type VideoCreditsFn = (pricingKey: string, durationSec: number) => number;
+
+/** Min/max credits for a model at a clip length (all resolution/audio/ref tiers). */
+export function videoModelCreditRange(
+  model: VideoModel,
+  videoCredits: VideoCreditsFn,
+  durationSec = model.defaultDuration
+): { min: number; max: number } {
+  const resolutions =
+    model.resolutions.length > 0 ? model.resolutions : [model.defaultResolution];
+  const audioFlags = model.supportsAudio ? [false, true] : [false];
+  const refVideoFlags = model.references.referenceVideos > 0 ? [false, true] : [false];
+
+  let min = Infinity;
+  let max = 0;
+  for (const resolution of resolutions) {
+    for (const generateAudio of audioFlags) {
+      for (const hasReferenceVideo of refVideoFlags) {
+        const key = model.pricingKey({ resolution, generateAudio, hasReferenceVideo });
+        const cr = videoCredits(key, durationSec);
+        if (cr < min) min = cr;
+        if (cr > max) max = cr;
+      }
+    }
+  }
+  return { min: min === Infinity ? 0 : min, max };
+}
+
+/** Dropdown skim label — e.g. `35` or `35+` when tiers differ (matches Photo Studio). */
+export function formatVideoModelCreditHint(
+  model: VideoModel,
+  videoCredits: VideoCreditsFn,
+  durationSec?: number
+): string {
+  const d = durationSec ?? model.defaultDuration;
+  const { min, max } = videoModelCreditRange(model, videoCredits, d);
+  return min === max ? String(min) : `${min}+`;
+}
 
 /** Job/history kind derived from subtool membership (image-only → image2video). */
 export function getVideoJobKind(model: VideoModel): VideoJobKind {
@@ -1002,18 +1048,6 @@ export function buildVideoProviderInput(params: {
       } else if (!refs.firstFrame) {
         input.aspect_ratio = params.aspectRatio;
       }
-      return input;
-    }
-    case "kling20": {
-      // kwaivgi/kling-v2.0: t2v / optional i2v via start_image. aspect_ratio
-      // ignored when start_image is set.
-      const input: Record<string, unknown> = {
-        prompt: params.prompt,
-        duration: params.duration,
-      };
-      if (negativePrompt) input.negative_prompt = negativePrompt;
-      if (refs.firstFrame) input.start_image = refs.firstFrame;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling21": {

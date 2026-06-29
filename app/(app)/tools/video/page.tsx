@@ -57,6 +57,7 @@ import {
   STORYBOARD_VIDEO_MODEL_IDS,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
   allowsFrameWithReferenceImages,
+  formatVideoModelCreditHint,
   type VideoModelId,
   type StoryboardVideoModelId,
   type VideoResolution,
@@ -66,6 +67,7 @@ import {
   MOTION_CONTROL_MODELS,
   getMotionControlModel,
   effectiveMotionControlDuration,
+  formatMotionControlModelCreditHint,
   motionControlResolutionLabel,
   type MotionControlModelId,
   type MotionControlMode,
@@ -271,7 +273,7 @@ function ChipDropdown({
       </button>
 
       {open && (
-        <div className="absolute left-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
           {options.map((opt) => {
             const active = opt.id === activeId;
             return (
@@ -907,7 +909,11 @@ function VideoOmniPage() {
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={TEXT_TO_VIDEO_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+              options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits),
+              }))}
               onSelect={(id) => setModelId(id as VideoModelId)}
               disabled={loading}
             />
@@ -1470,7 +1476,11 @@ function ImageToVideoComposer({
             icon={<Cpu className="h-3.5 w-3.5" />}
             value={model.modelLabel}
             activeId={modelId}
-            options={IMAGE_TO_VIDEO_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+            options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              id: m.id,
+              label: m.modelLabel,
+              hint: formatVideoModelCreditHint(m, videoCredits),
+            }))}
             onSelect={(id) => setModelId(id as VideoModelId)}
             disabled={loading}
           />
@@ -1895,7 +1905,11 @@ function MotionControlComposer({
             icon={<Cpu className="h-3.5 w-3.5" />}
             value={model.modelLabel}
             activeId={modelId}
-            options={MOTION_CONTROL_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+            options={MOTION_CONTROL_MODELS.map((m) => ({
+              id: m.id,
+              label: m.modelLabel,
+              hint: formatMotionControlModelCreditHint(m, videoCredits),
+            }))}
             onSelect={(id) => setModelId(id as MotionControlModelId)}
             disabled={loading}
           />
@@ -2602,14 +2616,14 @@ function StoryboardToVideoComposer({
             icon={<Cpu className="h-3.5 w-3.5" />}
             value={storyboardVideoModel.modelLabel}
             activeId={videoModelId}
-            options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => ({
-              id,
-              label: getVideoModel(id).modelLabel,
-              hint: `${videoCredits(
-                storyboardVideoPricingKey(id, resolution),
-                STORYBOARD_VIDEO_DURATION_SEC
-              )} cr · 15s ${resolution}`,
-            }))}
+            options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
+              const m = getVideoModel(id);
+              return {
+                id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              };
+            })}
             onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
             disabled={loading}
           />

@@ -315,10 +315,6 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 10, enabled: true,
     provider_cost_usd: 0.095, cost_unit: "per_second", pricing_group: "kling16", variant_key: "pro", currency: "USD",
   },
-  kling20_per_second: {
-    pricing_type: "per_second", credit_amount: 28, enabled: true,
-    provider_cost_usd: 0.28, cost_unit: "per_second", pricing_group: "kling20", variant_key: "default", currency: "USD",
-  },
   kling21_standard_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "kling21", variant_key: "standard", currency: "USD",
@@ -443,7 +439,6 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "reels.video_kling_v3_omni": { provider: "replicate", model: "kwaivgi/kling-v3-omni-video", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling26": { provider: "replicate", model: "kwaivgi/kling-v2.6", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling26_motion": { provider: "replicate", model: "kwaivgi/kling-v2.6-motion-control", parameters: {}, enabled: true, is_default: true },
-  "reels.video_kling20": { provider: "replicate", model: "kwaivgi/kling-v2.0", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling16_pro": { provider: "replicate", model: "kwaivgi/kling-v1.6-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling16_standard": { provider: "replicate", model: "kwaivgi/kling-v1.6-standard", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling15_standard": { provider: "replicate", model: "kwaivgi/kling-v1.5-standard", parameters: {}, enabled: true, is_default: true },

@@ -44,7 +44,7 @@ export type MotionControlModel = {
   pricingKey: (mode: MotionControlMode) => string;
 };
 
-export const MOTION_CONTROL_MODELS: MotionControlModel[] = [
+export const MOTION_CONTROL_MODEL_REGISTRY: MotionControlModel[] = [
   {
     id: "kling_v3_motion",
     label: "Kling v3 Motion Control",
@@ -78,9 +78,39 @@ export const MOTION_CONTROL_MODELS: MotionControlModel[] = [
   },
 ];
 
-const MODEL_BY_ID = Object.fromEntries(
-  MOTION_CONTROL_MODELS.map((m) => [m.id, m])
+/** Kling-only; cheapest std tier first ($0.07/s). */
+const MOTION_CONTROL_SORT_ORDER: MotionControlModelId[] = [
+  "kling26_motion",
+  "kling_v3_motion",
+];
+
+const MOTION_CONTROL_BY_ID = Object.fromEntries(
+  MOTION_CONTROL_MODEL_REGISTRY.map((m) => [m.id, m])
 ) as Record<MotionControlModelId, MotionControlModel>;
+
+export const MOTION_CONTROL_MODELS: MotionControlModel[] = MOTION_CONTROL_SORT_ORDER.map(
+  (id) => MOTION_CONTROL_BY_ID[id]
+);
+
+const MODEL_BY_ID = MOTION_CONTROL_BY_ID;
+
+type VideoCreditsFn = (pricingKey: string, durationSec: number) => number;
+
+/** Per-second tiers × duration; `5+` when std/pro modes differ. */
+export function formatMotionControlModelCreditHint(
+  model: MotionControlModel,
+  videoCredits: VideoCreditsFn,
+  durationSec = 5
+): string {
+  let min = Infinity;
+  let max = 0;
+  for (const mode of model.modes) {
+    const cr = videoCredits(model.pricingKey(mode), durationSec);
+    if (cr < min) min = cr;
+    if (cr > max) max = cr;
+  }
+  return min === max ? String(min) : `${min}+`;
+}
 
 export const DEFAULT_MOTION_CONTROL_MODEL_ID: MotionControlModelId = "kling_v3_motion";
 
