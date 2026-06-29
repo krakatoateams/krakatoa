@@ -142,6 +142,24 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 50, enabled: true,
     provider_cost_usd: 0.55, cost_unit: "per_second", pricing_group: "seedance2", variant_key: "1080p_video_in", currency: "USD",
   },
+  // ---- Seedance 2.0 Mini (bytedance/seedance-2.0-mini) rows (025). Storyboard +
+  // Text to Video. non_video_in / video_in at 480p & 720p only. ----
+  seedance2mini_480p_per_second: {
+    pricing_type: "per_second", credit_amount: 4, enabled: true,
+    provider_cost_usd: 0.04, cost_unit: "per_second", pricing_group: "seedance2mini", variant_key: "480p", currency: "USD",
+  },
+  seedance2mini_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 9, enabled: true,
+    provider_cost_usd: 0.09, cost_unit: "per_second", pricing_group: "seedance2mini", variant_key: "720p", currency: "USD",
+  },
+  seedance2mini_480p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "seedance2mini", variant_key: "480p_video_in", currency: "USD",
+  },
+  seedance2mini_720p_video_in_per_second: {
+    pricing_type: "per_second", credit_amount: 10, enabled: true,
+    provider_cost_usd: 0.11, cost_unit: "per_second", pricing_group: "seedance2mini", variant_key: "720p_video_in", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
@@ -277,7 +295,8 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "veo.whisper": { provider: "replicate", model: "vaibhavs10/incredibly-fast-whisper", parameters: { version: WHISPER_VERSION }, enabled: true, is_default: true },
   "storyboard.scene_llm": { provider: "replicate", model: "openai/gpt-5", parameters: {}, enabled: true, is_default: true },
   "storyboard.image": { provider: "replicate", model: "openai/gpt-image-2", parameters: {}, enabled: true, is_default: true },
-  "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-fast", parameters: {}, enabled: true, is_default: true },
+  "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
+  "reels.video_seedance2_mini": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   // Legacy single Product Photo model role — disabled/deprecated in migration 011
   // (replaced by the per-tier roles below). Reset keeps it disabled.
   "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: false, is_default: true },

@@ -239,6 +239,23 @@ export function seedance2PricingKey(params: {
   return `seedance2_${res}${suffix}`;
 }
 
+/**
+ * Seedance 2.0 Mini (bytedance/seedance-2.0-mini) pricing key, variant-aware.
+ * Cheaper than Fast; 480p/720p only (no 1080p tier).
+ */
+export function seedance2MiniPricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const is720 = params.resolution === "720p";
+  if (params.hasReferenceVideo) {
+    return is720
+      ? "seedance2mini_720p_video_in_per_second"
+      : "seedance2mini_480p_video_in_per_second";
+  }
+  return is720 ? "seedance2mini_720p_per_second" : "seedance2mini_480p_per_second";
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";

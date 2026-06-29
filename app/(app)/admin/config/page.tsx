@@ -133,13 +133,23 @@ function isPlatformRow(p: PricingConfig): boolean {
 const PRICING_GROUP_LABELS: Record<string, string> = {
   product_photo: "Product Photo",
   seedance: "ReelsGen / Seedance",
+  seedance2: "Seedance 2",
+  seedance2mini: "Seedance 2 Mini",
   veo: "Veo",
   storyboard_image: "Storyboard Image",
   storyboard: "Storyboard",
 };
 
 // Preferred section order; anything unknown falls to the end, alphabetized.
-const PRICING_GROUP_ORDER = ["product_photo", "seedance", "veo", "storyboard_image", "storyboard"];
+const PRICING_GROUP_ORDER = [
+  "product_photo",
+  "seedance",
+  "seedance2",
+  "seedance2mini",
+  "veo",
+  "storyboard_image",
+  "storyboard",
+];
 
 function pricingGroupLabel(group: string | null): string {
   if (!group) return "Other";
@@ -155,6 +165,8 @@ function pricingGroupLabel(group: string | null): string {
 const PRICING_GROUP_NAME_PREFIX: Record<string, string> = {
   product_photo: "Product Photo",
   seedance: "Seedance",
+  seedance2: "Seedance 2",
+  seedance2mini: "Seedance 2 Mini",
   veo: "Veo",
   storyboard_image: "Storyboard Image",
   storyboard: "Storyboard",

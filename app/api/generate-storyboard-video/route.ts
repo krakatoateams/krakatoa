@@ -20,8 +20,8 @@ import {
   getWallet,
   InsufficientCreditsError,
 } from "@/lib/credits-db";
-import { getSeedanceCredits, PricingConfigError } from "@/lib/pricing-resolver";
-import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
+import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
@@ -46,6 +46,13 @@ import {
   type StoryboardAspectRatio,
   type StoryboardLanguageId,
 } from "@/lib/storyboard-style";
+import {
+  getVideoModel,
+  isStoryboardVideoModelId,
+  buildVideoProviderInput,
+  DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
+  type StoryboardVideoModelId,
+} from "@/lib/video-models";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -54,8 +61,8 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Pricing Config v2.2: the storyboard-to-video clip is a fixed 15s Seedance run,
-// priced via the Seedance per-second provider cost of the chosen resolution
-// (480p → ~95 cr, 720p → ~203 cr). Default 480p keeps internal-testing cost low.
+// priced via the selected model's per-second provider cost (Mini 480p → ~54 cr,
+// Mini 720p → ~122 cr; Fast 480p → ~95 cr, Fast 720p → ~203 cr at v2 settings).
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 type StoryboardVideoResolution = "480p" | "720p";
 
@@ -145,6 +152,13 @@ export async function POST(req: Request) {
       resolution = resolutionRaw;
     }
     const durationSec = STORYBOARD_VIDEO_DURATION_SEC;
+
+    const videoModelIdRaw = typeof body.videoModelId === "string" ? body.videoModelId.trim() : "";
+    const videoModelId: StoryboardVideoModelId = isStoryboardVideoModelId(videoModelIdRaw)
+      ? videoModelIdRaw
+      : DEFAULT_STORYBOARD_VIDEO_MODEL_ID;
+    const videoModel = getVideoModel(videoModelId);
+    const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
@@ -246,11 +260,11 @@ export async function POST(req: Request) {
     // would silently drop the closing scene beats + dialogue. Build the prompt
     // ourselves so the framing directives are preserved and only the body is
     // trimmed at a clean sentence/word boundary when it would overflow.
-    const fitted = fitSeedancePrompt(promptPrefix, promptBody);
+    const fitted = fitSeedancePrompt(promptPrefix, promptBody, promptMaxChars);
     seedancePrompt = fitted.prompt;
     if (fitted.truncated) {
       console.warn(
-        `[Storyboard Video] Seedance prompt trimmed from ${fitted.originalLength} to ${seedancePrompt.length} chars to fit the ${SEEDANCE_PROMPT_MAX_CHARS}-char limit (storyboard ${storyboardId}). Consider shortening the prompt for full fidelity.`
+        `[Storyboard Video] Seedance prompt trimmed from ${fitted.originalLength} to ${seedancePrompt.length} chars to fit the ${promptMaxChars}-char limit (storyboard ${storyboardId}, model ${videoModelId}). Consider shortening the prompt for full fidelity.`
       );
     }
 
@@ -259,10 +273,16 @@ export async function POST(req: Request) {
     });
 
     // ---- Resolve runtime model (Admin Phase 2) ----
-    // DB-backed config with fallback. The SAME resolved model is reused for
-    // createJob, createProcessingAsset, the provider call, and recordUsageEvent.
-    const { video: videoModel } = await getStoryboardModels();
-    const videoModelRef = replicateRef(videoModel);
+    const resolvedVideoModel = await resolveModel({
+      toolKey: "reels",
+      configKey: videoModel.modelRole,
+      fallback: {
+        provider: "replicate",
+        model: videoModel.providerModel,
+        parameters: {},
+      },
+    });
+    const videoModelRef = replicateRef(resolvedVideoModel);
 
     // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
     // MUST run before createJob, spendCredits, the storyboards.status mutation,
@@ -276,6 +296,7 @@ export async function POST(req: Request) {
     }
     const requestHash = computeRequestHash({
       storyboardId,
+      videoModelId,
       resolution,
       durationSec,
       aspectRatio,
@@ -315,9 +336,17 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_video",
-      provider: videoModel.provider,
-      model: videoModel.model,
-      input: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
+      provider: resolvedVideoModel.provider,
+      model: resolvedVideoModel.model,
+      input: {
+        storyboardId,
+        videoModelId,
+        resolution,
+        durationSec,
+        aspectRatio,
+        language,
+        style: storyboardStyle,
+      },
     }));
     if (job) {
       jobId = job.id;
@@ -325,11 +354,10 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard video is priced via the Seedance per-second provider cost for the
-    // chosen resolution over the fixed 15s clip (v2.2: 480p → ~95, 720p → ~203).
-    // The legacy flat-30 path is gone. Insufficient → 402 with no provider call,
-    // no storyboards.status mutation, no processing asset.
-    const requiredCredits = await getSeedanceCredits({ resolution, durationSec });
+    // Storyboard video is priced via the selected model's per-second provider cost
+    // for the chosen resolution over the fixed 15s clip.
+    const pricingKey = videoModel.pricingKey({ resolution, hasReferenceVideo: false });
+    const requiredCredits = await getVideoCredits({ pricingKey, durationSec });
     try {
       await spendCredits({
         profileId: profileId!,
@@ -343,6 +371,7 @@ export async function POST(req: Request) {
           tool: "storyboard",
           jobType: "storyboard_video",
           storyboardId,
+          videoModelId,
           resolution,
           durationSec,
           aspectRatio,
@@ -408,9 +437,17 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "video",
       role: "final_video",
-      provider: videoModel.provider,
-      model: videoModel.model,
-      metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
+      provider: resolvedVideoModel.provider,
+      model: resolvedVideoModel.model,
+      metadata: {
+        storyboardId,
+        videoModelId,
+        resolution,
+        durationSec,
+        aspectRatio,
+        language,
+        style: storyboardStyle,
+      },
     }));
     if (asset) videoAssetId = asset.id;
 
@@ -440,7 +477,9 @@ export async function POST(req: Request) {
     if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
       throw new ReplicateCancellationError();
     }
-    console.log(`[Storyboard Video] Calling Seedance (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`);
+    console.log(
+      `[Storyboard Video] Calling ${videoModel.modelLabel} (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`
+    );
     // Record each Replicate prediction id so POST /api/generations/cancel can stop
     // this run mid-flight (the SDK progress callback fires on create + each poll).
     const recordPredictionTick = makePredictionRecorder({
@@ -449,18 +488,20 @@ export async function POST(req: Request) {
       jobId,
       kind: "storyboard_video",
     });
+    const providerInput = buildVideoProviderInput({
+      model: videoModel,
+      prompt: seedancePrompt,
+      duration: durationSec,
+      resolution,
+      aspectRatio,
+      generateAudio: true,
+      references: { referenceImages: [storyboardUrl] },
+    });
     const videoResult = await runReplicateWithRetry(
       replicate,
       videoModelRef,
       {
-        input: {
-          prompt: seedancePrompt,
-          reference_images: [storyboardUrl],
-          duration: durationSec,
-          generate_audio: true,
-          resolution,
-          aspect_ratio: aspectRatio,
-        },
+        input: providerInput,
       },
       10,
       { onPrediction: recordPredictionTick }
@@ -537,7 +578,15 @@ export async function POST(req: Request) {
         width: storyboardVideoDimensions(resolution, aspectRatio).width,
         height: storyboardVideoDimensions(resolution, aspectRatio).height,
         costCredits: creditsAmount,
-        metadata: { storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
+        metadata: {
+          storyboardId,
+          videoModelId,
+          resolution,
+          durationSec,
+          aspectRatio,
+          language,
+          style: storyboardStyle,
+        },
       }));
 
       const imageAsset = await safe("findStoryboardImageAsset", () =>
@@ -556,7 +605,18 @@ export async function POST(req: Request) {
 
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { videoUrl, storagePath, assetId: videoAssetId, storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
+        output: {
+          videoUrl,
+          storagePath,
+          assetId: videoAssetId,
+          storyboardId,
+          videoModelId,
+          resolution,
+          durationSec,
+          aspectRatio,
+          language,
+          style: storyboardStyle,
+        },
         costCredits: creditsAmount,
       }));
     }
@@ -567,12 +627,21 @@ export async function POST(req: Request) {
       jobId: jobId ?? null,
       assetId: videoAssetId ?? null,
       tool: "storyboard",
-      provider: videoModel.provider,
-      model: videoModel.model,
+      provider: resolvedVideoModel.provider,
+      model: resolvedVideoModel.model,
       unitType: "video_seconds",
       units: durationSec,
       creditsCharged: creditsAmount,
-      metadata: { jobType: "storyboard_video", storyboardId, resolution, durationSec, aspectRatio, language, style: storyboardStyle },
+      metadata: {
+        jobType: "storyboard_video",
+        storyboardId,
+        videoModelId,
+        resolution,
+        durationSec,
+        aspectRatio,
+        language,
+        style: storyboardStyle,
+      },
     }));
 
     let historyItem;

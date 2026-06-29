@@ -19,7 +19,8 @@ import type { CostUnit, PricingRow } from "@/lib/pricing-math";
  * billing knobs (usd_to_idr=18000, credit_value_idr=200, margin=1.0 → factor 90):
  *   product 1K/2K  0.15 → 14 cr/img    product 4K   0.30 → 27 cr/img
  *   storyboard auto 0.128 → 12 cr/img  seedance 480p 0.07 → 95 cr/15s
- *   seedance 720p  0.15 → 203 cr/15s   veo 720p 0.05 → 68 cr/15s
+ *   seedance 720p  0.15 → 203 cr/15s  seedance2mini 480p 0.04 → 54 cr/15s
+ *   seedance2mini 720p 0.09 → 122 cr/15s   veo 720p 0.05 → 68 cr/15s
  *
  * Client-safe: imports only TYPES from lib/pricing-math.ts (no server modules).
  */
@@ -49,6 +50,13 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   seedance2_480p_video_in_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p_video_in" },
   seedance2_720p_video_in_per_second: { providerCostUsd: 0.22, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p_video_in" },
   seedance2_1080p_video_in_per_second: { providerCostUsd: 0.55, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p_video_in" },
+  // Seedance 2.0 Mini (bytedance/seedance-2.0-mini) — Storyboard + Text to Video.
+  // non_video_in (no reference video): 480p $0.04/s · 720p $0.09/s
+  // video_in (reference video):         480p $0.05/s · 720p $0.11/s
+  seedance2mini_480p_per_second: { providerCostUsd: 0.04, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "480p" },
+  seedance2mini_720p_per_second: { providerCostUsd: 0.09, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p" },
+  seedance2mini_480p_video_in_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "480p_video_in" },
+  seedance2mini_720p_video_in_per_second: { providerCostUsd: 0.11, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p_video_in" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },

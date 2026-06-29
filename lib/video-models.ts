@@ -1,6 +1,7 @@
 import {
   seedanceFastPricingKey,
   seedance2PricingKey,
+  seedance2MiniPricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
@@ -16,16 +17,22 @@ import {
  * billing. Adding a new video model later = adding an entry here + a per-family
  * branch in buildVideoProviderInput.
  *
- * Starter scope: Seedance 2 Fast only. It reuses the existing `reels.video`
- * model_configs row (admin-editable), whose fallback is bytedance/seedance-2.0-fast.
+ * Starter scope: Seedance 2 Mini (default for Storyboard), Seedance 2 Fast,
+ * Seedance 2 (full), Veo 3.1, Kling v3. Each model declares its own
+ * model_configs config_key; Mini uses `video_seedance2_mini`, Fast reuses
+ * `reels.video`.
  */
 
 export type VideoModelId =
+  | "seedance2_mini"
   | "seedance2_fast"
   | "seedance2"
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3";
+
+/** Storyboard to Video — Seedance-family models only. */
+export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast";
 
 export type VideoResolution = "480p" | "720p" | "1080p" | "4k";
 
@@ -103,6 +110,35 @@ export type VideoModel = {
 };
 
 export const VIDEO_MODELS: VideoModel[] = [
+  {
+    id: "seedance2_mini",
+    label: "Seedance 2 Mini",
+    modelLabel: "Seedance 2 Mini",
+    modelRole: "video_seedance2_mini",
+    providerModel: "bytedance/seedance-2.0-mini",
+    providerFamily: "seedance2",
+    durations: [5, 10, 15],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21", "adaptive"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: true,
+    promptMaxChars: 4000,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 9,
+      referenceVideos: 3,
+      referenceAudios: 3,
+    },
+    pricingKey: (ctx) =>
+      seedance2MiniPricingKey({
+        resolution: ctx.resolution ?? undefined,
+        hasReferenceVideo: !!ctx.hasReferenceVideo,
+      }),
+  },
   {
     id: "seedance2_fast",
     label: "Seedance 2 Fast",
@@ -261,6 +297,18 @@ const MODEL_BY_ID = Object.fromEntries(
 ) as Record<VideoModelId, VideoModel>;
 
 export const DEFAULT_VIDEO_MODEL_ID: VideoModelId = "seedance2_fast";
+
+/** Default Storyboard-to-Video model (cheaper Mini tier). */
+export const DEFAULT_STORYBOARD_VIDEO_MODEL_ID: StoryboardVideoModelId = "seedance2_mini";
+
+export const STORYBOARD_VIDEO_MODEL_IDS: StoryboardVideoModelId[] = [
+  "seedance2_mini",
+  "seedance2_fast",
+];
+
+export function isStoryboardVideoModelId(id: string): id is StoryboardVideoModelId {
+  return (STORYBOARD_VIDEO_MODEL_IDS as string[]).includes(id);
+}
 
 export function isValidVideoModelId(id: string): id is VideoModelId {
   return id in MODEL_BY_ID;

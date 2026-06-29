@@ -44,7 +44,10 @@ import {
   getVideoModel,
   getAllowedDurations,
   validateVideoReferences,
+  STORYBOARD_VIDEO_MODEL_IDS,
+  DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
   type VideoModelId,
+  type StoryboardVideoModelId,
   type VideoResolution,
   type VideoAspectRatio,
 } from "@/lib/video-models";
@@ -1717,15 +1720,16 @@ type StoryboardListItem = {
   source: string | null;
 };
 
-function storyboardSeedancePricingKey(resolution: "480p" | "720p"): string {
-  return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
+function storyboardVideoPricingKey(
+  modelId: StoryboardVideoModelId,
+  resolution: "480p" | "720p"
+): string {
+  return getVideoModel(modelId).pricingKey({ resolution, hasReferenceVideo: false });
 }
 
 // Storyboard to Video sub-tool. The storyboard itself is created in Photo →
 // Storyboard; here the user picks one of their saved storyboards, a resolution,
-// and a model (Seedance 2 Fast for now), then renders the 15s 16:9 clip. The
-// heavy lifting (loading the stored seedance_prompt + reference image) happens
-// server-side in /api/generate-storyboard-video, which only needs storyboardId.
+// and a Seedance model (Mini default, Fast optional), then renders the 15s clip.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 
 // Modal for importing a user's OWN storyboard image (not generated in Krakatoa).
@@ -1987,6 +1991,9 @@ function StoryboardToVideoComposer({
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
   const [selectedId, setSelectedId] = useState<string | null>(initialStoryboardId);
+  const [videoModelId, setVideoModelId] = useState<StoryboardVideoModelId>(
+    DEFAULT_STORYBOARD_VIDEO_MODEL_ID
+  );
   const [resolution, setResolution] = useState<"480p" | "720p">("480p");
   // Aspect mirrors the selected storyboard's stored orientation (locked) so the
   // clip never flips. Only editable for legacy storyboards that have no ratio.
@@ -2052,7 +2059,8 @@ function StoryboardToVideoComposer({
     };
   }, []);
 
-  const pricingKey = storyboardSeedancePricingKey(resolution);
+  const storyboardVideoModel = getVideoModel(videoModelId);
+  const pricingKey = storyboardVideoPricingKey(videoModelId, resolution);
   const cost = videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
   const selected = items.find((s) => s.id === selectedId) ?? null;
   const canGenerate = !loading && !!selectedId;
@@ -2098,6 +2106,7 @@ function StoryboardToVideoComposer({
     // drops a same-tick double-click before it can fire a second request.
     const signature = JSON.stringify({
       storyboardId: selectedId,
+      videoModelId,
       resolution,
       aspectRatio: aspect,
       language,
@@ -2118,6 +2127,7 @@ function StoryboardToVideoComposer({
         },
         body: JSON.stringify({
           storyboardId: selectedId,
+          videoModelId,
           resolution,
           aspectRatio: aspect,
           language,
@@ -2182,10 +2192,17 @@ function StoryboardToVideoComposer({
           />
           <ChipDropdown
             icon={<Cpu className="h-3.5 w-3.5" />}
-            value="Seedance 2 Fast"
-            activeId="seedance2_fast"
-            options={[{ id: "seedance2_fast", label: "Seedance 2 Fast" }]}
-            onSelect={() => {}}
+            value={storyboardVideoModel.modelLabel}
+            activeId={videoModelId}
+            options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => ({
+              id,
+              label: getVideoModel(id).modelLabel,
+              hint: `${videoCredits(
+                storyboardVideoPricingKey(id, resolution),
+                STORYBOARD_VIDEO_DURATION_SEC
+              )} cr · 15s ${resolution}`,
+            }))}
+            onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
             disabled={loading}
           />
         </div>
@@ -2305,7 +2322,7 @@ function StoryboardToVideoComposer({
                 options={(["480p", "720p"] as const).map((r) => ({
                   id: r,
                   label: r,
-                  hint: `${videoCredits(storyboardSeedancePricingKey(r), STORYBOARD_VIDEO_DURATION_SEC)}`,
+                  hint: `${videoCredits(storyboardVideoPricingKey(videoModelId, r), STORYBOARD_VIDEO_DURATION_SEC)}`,
                 }))}
                 onSelect={(id) => setResolution(id as "480p" | "720p")}
                 disabled={loading}
@@ -2489,7 +2506,7 @@ function StoryboardToVideoComposer({
               Saved to your library
             </div>
             <p className="text-sm text-gray-300">
-              Seedance 2 Fast · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
+              {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
               {selected ? ` · ${selected.theme}` : ""}
             </p>
             <p className="mt-1 text-xs text-gray-500">
