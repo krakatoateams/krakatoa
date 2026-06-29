@@ -688,6 +688,8 @@ export async function POST(req: Request) {
       // Tag character creations so the library can group/badge them.
       creationKind: isCharacterMode ? CHARACTER_CREATION_KIND : undefined,
       characterName: isCharacterMode && characterName ? characterName : undefined,
+      modelTier,
+      modelLabel: tier.modelLabel,
     });
     await endStep({ storagePath: saved.storagePath, publicUrl: saved.publicUrl });
 

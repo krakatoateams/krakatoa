@@ -657,6 +657,8 @@ export async function POST(req: Request) {
           storyboardId,
           aspectRatio,
           language,
+          videoModelId,
+          modelLabel: videoModel.modelLabel,
           ...(row.theme ? { prompt: String(row.theme) } : {}),
         },
       });

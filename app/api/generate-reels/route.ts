@@ -487,6 +487,7 @@ export async function POST(req: Request) {
           reqv.engine === "seedance"
             ? {
                 engine: "seedance",
+                modelLabel: "Seedance 2 Fast",
                 numScenes: reqv.numScenes,
                 durationPerScene: reqv.durationPerScene,
                 resolution: reqv.resolution,
@@ -498,6 +499,7 @@ export async function POST(req: Request) {
               }
             : {
                 engine: "veo",
+                modelLabel: "Veo 3.1 Lite",
                 mode: reqv.mode,
                 duration: reqv.duration,
                 resolution: reqv.resolution,

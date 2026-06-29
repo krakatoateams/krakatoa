@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { CreationHistoryItem, CreationTool } from "@/lib/creations";
+import { getCreationModelLabel } from "@/lib/creation-model-label";
 
 type Props = {
   title?: string;
@@ -520,6 +521,7 @@ export default function CreationsHistory({
     typeof previewMeta.narration === "string" ? previewMeta.narration.trim() : "";
   const hasPreviewDetails =
     !!previewPrompt || previewScenePrompts.length > 0 || !!previewNarration;
+  const previewModelLabel = previewItem ? getCreationModelLabel(previewItem) : null;
 
   const refreshButton = (
     <button
@@ -1024,7 +1026,9 @@ export default function CreationsHistory({
 
             <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
               <p className="text-xs text-gray-400">
-                {new Date(previewItem.createdAt).toLocaleDateString()}
+                {previewItem &&
+                  new Date(previewItem.createdAt).toLocaleDateString()}
+                {previewModelLabel ? ` · ${previewModelLabel}` : ""}
               </p>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {richUI && !isTrashedItem(previewItem) && (

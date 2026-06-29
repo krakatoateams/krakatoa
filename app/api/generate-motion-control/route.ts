@@ -407,6 +407,7 @@ export async function POST(req: Request) {
     const creationMetadata = {
       prompt,
       modelId,
+      modelLabel: model.modelLabel,
       providerModel: resolvedModel.model,
       mode,
       resolution: resolutionLabel,

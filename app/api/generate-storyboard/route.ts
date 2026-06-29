@@ -25,6 +25,7 @@ import {
 } from "@/lib/credits-db";
 import { getStoryboardImageCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
+import { labelForProviderModel } from "@/lib/creation-model-label";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
@@ -680,6 +681,8 @@ export async function POST(req: Request) {
           aspectRatio,
           language,
           prompt: imagePrompt,
+          providerModel: imageModel.model,
+          modelLabel: labelForProviderModel(imageModel.model),
         },
       });
     } catch (historyErr) {
