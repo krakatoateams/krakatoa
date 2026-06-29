@@ -4,6 +4,7 @@ import {
   seedance2MiniPricingKey,
   seedance15PricingKey,
   seedance1ProFastPricingKey,
+  seedance1ProPricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
@@ -31,6 +32,7 @@ export type VideoModelId =
   | "seedance2"
   | "seedance15_pro"
   | "seedance1_pro_fast"
+  | "seedance1_pro"
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3";
@@ -54,6 +56,7 @@ export type VideoProviderFamily =
   | "seedance2"
   | "seedance15"
   | "seedance1fast"
+  | "seedance1pro"
   | "veo31fast"
   | "veo31lite"
   | "klingv3";
@@ -264,6 +267,30 @@ export const VIDEO_MODELS: VideoModel[] = [
       referenceAudios: 0,
     },
     pricingKey: (ctx) => seedance1ProFastPricingKey(ctx.resolution),
+  },
+  {
+    id: "seedance1_pro",
+    label: "Seedance 1 Pro",
+    modelLabel: "Seedance 1 Pro",
+    modelRole: "video_seedance1_pro",
+    providerModel: "bytedance/seedance-1-pro",
+    providerFamily: "seedance1pro",
+    durations: [4, 5, 6, 8, 10, 12],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p", "1080p"],
+    defaultResolution: "1080p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => seedance1ProPricingKey(ctx.resolution),
   },
   {
     id: "veo31_fast",
@@ -577,6 +604,19 @@ export function buildVideoProviderInput(params: {
       };
       if (hasSeed) input.seed = params.seed;
       if (refs.firstFrame) input.image = refs.firstFrame;
+      return input;
+    }
+    case "seedance1pro": {
+      // bytedance/seedance-1-pro: t2v / i2v + optional last frame, silent.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (hasSeed) input.seed = params.seed;
+      if (refs.firstFrame) input.image = refs.firstFrame;
+      if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
       return input;
     }
     case "seedance2":

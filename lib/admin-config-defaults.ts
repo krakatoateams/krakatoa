@@ -200,6 +200,20 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 6, enabled: true,
     provider_cost_usd: 0.06, cost_unit: "per_second", pricing_group: "seedance1fast", variant_key: "1080p", currency: "USD",
   },
+  // ---- Seedance 1 Pro (bytedance/seedance-1-pro) rows (028). Text to Video;
+  // priced by resolution only (no audio). ----
+  seedance1pro_480p_per_second: {
+    pricing_type: "per_second", credit_amount: 3, enabled: true,
+    provider_cost_usd: 0.03, cost_unit: "per_second", pricing_group: "seedance1pro", variant_key: "480p", currency: "USD",
+  },
+  seedance1pro_720p_per_second: {
+    pricing_type: "per_second", credit_amount: 6, enabled: true,
+    provider_cost_usd: 0.06, cost_unit: "per_second", pricing_group: "seedance1pro", variant_key: "720p", currency: "USD",
+  },
+  seedance1pro_1080p_per_second: {
+    pricing_type: "per_second", credit_amount: 14, enabled: true,
+    provider_cost_usd: 0.15, cost_unit: "per_second", pricing_group: "seedance1pro", variant_key: "1080p", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
@@ -339,6 +353,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "reels.video_seedance2_mini": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance15_pro": { provider: "replicate", model: "bytedance/seedance-1.5-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_pro_fast": { provider: "replicate", model: "bytedance/seedance-1-pro-fast", parameters: {}, enabled: true, is_default: true },
+  "reels.video_seedance1_pro": { provider: "replicate", model: "bytedance/seedance-1-pro", parameters: {}, enabled: true, is_default: true },
   // Legacy single Product Photo model role — disabled/deprecated in migration 011
   // (replaced by the per-tier roles below). Reset keeps it disabled.
   "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: false, is_default: true },
