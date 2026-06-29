@@ -160,6 +160,32 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 10, enabled: true,
     provider_cost_usd: 0.11, cost_unit: "per_second", pricing_group: "seedance2mini", variant_key: "720p_video_in", currency: "USD",
   },
+  // ---- Seedance 1.5 Pro (bytedance/seedance-1.5-pro) rows (026). Text to Video.
+  // Priced by resolution × audio. ----
+  seedance15_480p_with_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 3, enabled: true,
+    provider_cost_usd: 0.025, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "480p_with_audio", currency: "USD",
+  },
+  seedance15_720p_with_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.052, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "720p_with_audio", currency: "USD",
+  },
+  seedance15_1080p_with_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 11, enabled: true,
+    provider_cost_usd: 0.12, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "1080p_with_audio", currency: "USD",
+  },
+  seedance15_480p_without_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 2, enabled: true,
+    provider_cost_usd: 0.013, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "480p_without_audio", currency: "USD",
+  },
+  seedance15_720p_without_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 3, enabled: true,
+    provider_cost_usd: 0.026, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "720p_without_audio", currency: "USD",
+  },
+  seedance15_1080p_without_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 6, enabled: true,
+    provider_cost_usd: 0.06, cost_unit: "per_second", pricing_group: "seedance15", variant_key: "1080p_without_audio", currency: "USD",
+  },
   veo_720p_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "veo", variant_key: "720p", currency: "USD",
@@ -297,6 +323,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "storyboard.image": { provider: "replicate", model: "openai/gpt-image-2", parameters: {}, enabled: true, is_default: true },
   "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance2_mini": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
+  "reels.video_seedance15_pro": { provider: "replicate", model: "bytedance/seedance-1.5-pro", parameters: {}, enabled: true, is_default: true },
   // Legacy single Product Photo model role — disabled/deprecated in migration 011
   // (replaced by the per-tier roles below). Reset keeps it disabled.
   "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: false, is_default: true },

@@ -57,6 +57,14 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   seedance2mini_720p_per_second: { providerCostUsd: 0.09, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p" },
   seedance2mini_480p_video_in_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "480p_video_in" },
   seedance2mini_720p_video_in_per_second: { providerCostUsd: 0.11, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p_video_in" },
+  // Seedance 1.5 Pro (bytedance/seedance-1.5-pro) — Text to Video. Priced by
+  // resolution × audio (with_audio / without_audio).
+  seedance15_480p_with_audio_per_second: { providerCostUsd: 0.025, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "480p_with_audio" },
+  seedance15_720p_with_audio_per_second: { providerCostUsd: 0.052, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "720p_with_audio" },
+  seedance15_1080p_with_audio_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "1080p_with_audio" },
+  seedance15_480p_without_audio_per_second: { providerCostUsd: 0.013, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "480p_without_audio" },
+  seedance15_720p_without_audio_per_second: { providerCostUsd: 0.026, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "720p_without_audio" },
+  seedance15_1080p_without_audio_per_second: { providerCostUsd: 0.06, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "1080p_without_audio" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },

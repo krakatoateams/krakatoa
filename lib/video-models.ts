@@ -2,6 +2,7 @@ import {
   seedanceFastPricingKey,
   seedance2PricingKey,
   seedance2MiniPricingKey,
+  seedance15PricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
@@ -27,6 +28,7 @@ export type VideoModelId =
   | "seedance2_mini"
   | "seedance2_fast"
   | "seedance2"
+  | "seedance15_pro"
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3";
@@ -46,7 +48,12 @@ export type VideoAspectRatio =
   | "9:21"
   | "adaptive";
 
-export type VideoProviderFamily = "seedance2" | "veo31fast" | "veo31lite" | "klingv3";
+export type VideoProviderFamily =
+  | "seedance2"
+  | "seedance15"
+  | "veo31fast"
+  | "veo31lite"
+  | "klingv3";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -198,6 +205,36 @@ export const VIDEO_MODELS: VideoModel[] = [
       seedance2PricingKey({
         resolution: ctx.resolution ?? undefined,
         hasReferenceVideo: !!ctx.hasReferenceVideo,
+      }),
+  },
+  {
+    id: "seedance15_pro",
+    label: "Seedance 1.5 Pro",
+    modelLabel: "Seedance 1.5 Pro",
+    modelRole: "video_seedance15_pro",
+    providerModel: "bytedance/seedance-1.5-pro",
+    providerFamily: "seedance15",
+    // Provider accepts any integer 2–12s; discrete set for the UI chips.
+    durations: [4, 5, 6, 8, 10, 12],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p", "1080p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: true,
+    references: {
+      // First/last frame only (image / last_frame_image) — no reference arrays.
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) =>
+      seedance15PricingKey({
+        resolution: ctx.resolution ?? undefined,
+        generateAudio: ctx.generateAudio ?? true,
       }),
   },
   {
@@ -486,6 +523,20 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      return input;
+    }
+    case "seedance15": {
+      // bytedance/seedance-1.5-pro: t2v / i2v with optional last frame + synced audio.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+        generate_audio: params.generateAudio,
+      };
+      if (hasSeed) input.seed = params.seed;
+      if (refs.firstFrame) input.image = refs.firstFrame;
+      if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
       return input;
     }
     case "seedance2":
