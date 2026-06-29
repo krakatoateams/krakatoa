@@ -48,11 +48,67 @@ import {
   SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
   type StoryboardAspectRatio,
 } from "@/lib/storyboard-style";
+import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 
 export const maxDuration = 300;
 
 // Max @-mentioned assets (saved characters / storyboards) used as references.
 const MAX_MENTIONS = 8;
+// gpt-image-2 input_images cap — uploaded theme reference uses one slot.
+const MAX_INPUT_IMAGES = 8;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function validateImageUpload(file: File): string | null {
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return "Only JPEG, PNG, or WebP images are supported";
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    return "Image must be 10MB or smaller";
+  }
+  return null;
+}
+
+type StoryboardRequestInput = {
+  theme: string;
+  storyboardStyle: unknown;
+  aspectRatio: unknown;
+  language: unknown;
+  referenceCreationIds: string[];
+  referenceFile: File | null;
+};
+
+async function parseStoryboardRequest(req: Request): Promise<StoryboardRequestInput> {
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    const referenceRaw = formData.get("reference");
+    return {
+      theme: String(formData.get("theme") || "").trim(),
+      storyboardStyle: formData.get("storyboardStyle"),
+      aspectRatio: formData.get("aspectRatio"),
+      language: formData.get("language"),
+      referenceCreationIds: String(formData.get("referenceCreationIds") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      referenceFile: referenceRaw instanceof File && referenceRaw.size > 0 ? referenceRaw : null,
+    };
+  }
+  const body = await req.json();
+  return {
+    theme: typeof body.theme === "string" ? body.theme.trim() : "",
+    storyboardStyle: body.storyboardStyle,
+    aspectRatio: body.aspectRatio,
+    language: body.language,
+    referenceCreationIds: Array.isArray(body.referenceCreationIds)
+      ? body.referenceCreationIds
+          .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
+          .filter(Boolean)
+      : [],
+    referenceFile: null,
+  };
+}
 
 /*
   Supabase — add storyboard style column (run once in SQL editor):
@@ -263,40 +319,47 @@ export async function POST(req: Request) {
       console.warn("[storyboard] tool guard unexpected error (failing open):", e);
     }
 
-    const body = await req.json();
-    const theme = typeof body.theme === "string" ? body.theme.trim() : "";
-    const storyboardStyle = resolveStoryboardStyle(body.storyboardStyle);
+    const parsed = await parseStoryboardRequest(req);
+    const theme = parsed.theme;
+    const storyboardStyle = resolveStoryboardStyle(parsed.storyboardStyle);
     const styleInstruction = STORYBOARD_STYLE_INSTRUCTIONS[storyboardStyle];
     // Chosen orientation (default 16:9). Threaded into the scene LLM, the panel
     // framing, AND stored on the row so the video step renders the same ratio.
-    const aspectRatio = resolveStoryboardAspectRatio(body.aspectRatio);
+    const aspectRatio = resolveStoryboardAspectRatio(parsed.aspectRatio);
     const aspectDirective = storyboardImageAspectDirective(aspectRatio);
     // Spoken language for the dialogue/narration (default English). Drives the
     // scene LLM and is stored so the video step can reuse (or override) it.
-    const language = resolveStoryboardLanguage(body.language);
+    const language = resolveStoryboardLanguage(parsed.language);
     const languageLabel = storyboardLanguageLabel(language);
     // Same chosen style, phrased for the eventual Seedance VIDEO so the
     // seedance_prompt GPT-5 writes is rendered in that aesthetic (not just the sheet).
     const videoStyleDirective = storyboardVideoStyleDirective(storyboardStyle);
+    const referenceFile = parsed.referenceFile;
+    const hasThemeReference = referenceFile instanceof File;
     if (!theme) {
       return NextResponse.json(
         { error: "Theme is required and cannot be empty." },
         { status: 400 }
       );
     }
+    if (hasThemeReference) {
+      const fileErr = validateImageUpload(referenceFile);
+      if (fileErr) {
+        return NextResponse.json({ error: fileErr }, { status: 400 });
+      }
+    }
 
     // @-mentions: tagged saved characters / storyboards. Resolve each owner-scoped
     // to its image URL (passed to the image model as a reference) and remember its
     // name + kind so the prompt can name what each reference depicts. Validated
     // BEFORE any spend so a bad mention never charges credits.
-    const referenceCreationIds: string[] = Array.isArray(body.referenceCreationIds)
-      ? body.referenceCreationIds
-          .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
-          .filter(Boolean)
-          .slice(0, MAX_MENTIONS)
-      : [];
+    const mentionCap = hasThemeReference ? MAX_MENTIONS - 1 : MAX_MENTIONS;
+    const referenceCreationIds = parsed.referenceCreationIds.slice(0, mentionCap);
     const mentionReferenceUrls: string[] = [];
     const mentionRefs: { name: string; kind: "character" | "storyboard" | "image" }[] = [];
+    if (hasThemeReference) {
+      mentionRefs.push({ name: "Theme", kind: "image" });
+    }
     if (referenceCreationIds.length && userId) {
       for (const mentionId of referenceCreationIds) {
         const creation = await getUserCreationForUser(userId, mentionId);
@@ -359,6 +422,7 @@ export async function POST(req: Request) {
       aspectRatio,
       language,
       mentionRefs: referenceCreationIds.join(","),
+      hasThemeReference,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -492,6 +556,10 @@ export async function POST(req: Request) {
       }
     };
 
+    const themeRefSceneNote = hasThemeReference
+      ? "\n\nA visual theme reference image will be supplied to the storyboard artist. Write visual_descriptions that align with that reference's color palette, mood, lighting, and overall aesthetic."
+      : "";
+
     await beginStep("scene_breakdown", "GPT-5 scene breakdown + seedance prompt");
     const MAX_JSON_ATTEMPTS = 3;
     let breakdown: { scenes: SceneBreakdown[]; seedancePrompt: string } | null =
@@ -502,7 +570,7 @@ export async function POST(req: Request) {
       const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
         input: {
           system_prompt: buildSceneSystemPrompt(aspectRatio, languageLabel),
-          prompt: `Video theme: ${theme}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
+          prompt: `Video theme: ${theme}${themeRefSceneNote}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
           reasoning_effort: "low",
           verbosity: "high",
           max_completion_tokens: 8192,
@@ -541,13 +609,27 @@ export async function POST(req: Request) {
       styleInstruction,
       aspectDirective
     );
+    if (hasThemeReference) {
+      imagePrompt += `\n\nA visual theme reference image is provided as the first reference. Match its color palette, mood, lighting, composition style, and overall aesthetic across all six panels while illustrating the scenes above.`;
+    }
     // @-mention guidance: tell the model the provided reference images depict the
     // named subjects so the storyboard panels feature them consistently.
-    if (mentionRefs.length) {
-      const list = mentionRefs.map((r) => `@${r.name} (${r.kind})`).join(", ");
-      const many = mentionRefs.length > 1;
+    const subjectRefs = mentionRefs.filter((r) => r.name !== "Theme");
+    if (subjectRefs.length) {
+      const list = subjectRefs.map((r) => `@${r.name} (${r.kind})`).join(", ");
+      const many = subjectRefs.length > 1;
       imagePrompt += `\n\nThe theme references ${list}; matching reference image${many ? "s are" : " is"} provided. Use ${many ? "them" : "it"} as the visual reference for ${many ? "those subjects" : "that subject"} across the panels, preserving appearance and identity.`;
     }
+
+    const inputImages: string[] = [];
+    if (hasThemeReference && referenceFile) {
+      await beginStep("reference_upload", "Upload theme reference to Replicate");
+      console.log("[Storyboard] Uploading theme reference image to Replicate...");
+      const themeRefUrl = await uploadProductImageToReplicate(replicate, referenceFile);
+      inputImages.push(themeRefUrl);
+      await endStep({ themeRefUrl });
+    }
+    inputImages.push(...mentionReferenceUrls.slice(0, MAX_INPUT_IMAGES - inputImages.length));
 
     await beginStep("image_generation", "GPT Image storyboard sheet");
     console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
@@ -563,8 +645,8 @@ export async function POST(req: Request) {
           quality: "auto",
           background: "opaque",
           moderation: "auto",
-          // gpt-image-2 reference images for @-mentioned characters / storyboards.
-          ...(mentionReferenceUrls.length ? { input_images: mentionReferenceUrls } : {}),
+          // gpt-image-2 reference images: uploaded theme + @-mentioned assets.
+          ...(inputImages.length ? { input_images: inputImages } : {}),
         },
       }
     );

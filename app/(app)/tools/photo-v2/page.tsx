@@ -427,6 +427,9 @@ function StoryboardComposer({
   // passed to the storyboard image model as references.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
+  // Optional visual theme reference (mood, palette, aesthetic) — same pattern as
+  // Photo studio's reference upload tile.
+  const themeReference = useImageUpload();
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit } = useIdempotentSubmit();
 
@@ -459,28 +462,39 @@ function StoryboardComposer({
     e.preventDefault();
     if (!canGenerate) return;
 
-    const body = {
-      theme: theme.trim(),
-      storyboardStyle: style,
-      aspectRatio: aspect,
+    const fileSig = (f: File | null) =>
+      f ? `${f.name}/${f.size}/${f.lastModified}` : "";
+    const signature = [
+      "storyboard",
+      theme.trim(),
+      style,
+      aspect,
       language,
-      // @-mentioned assets (saved characters / storyboards) → reference images.
-      referenceCreationIds: mentions.map((m) => m.id),
-    };
-    // Stable key per attempt + synchronous in-flight lock (see hook docs).
-    const attempt = beginSubmit(`storyboard:${JSON.stringify(body)}`);
+      fileSig(themeReference.file),
+      mentions.map((m) => m.id).join(","),
+    ].join("|");
+    const attempt = beginSubmit(signature);
     if (!attempt) return;
 
     setLoading(true);
     setError(null);
     try {
+      const formData = new FormData();
+      formData.append("theme", theme.trim());
+      formData.append("storyboardStyle", style);
+      formData.append("aspectRatio", aspect);
+      formData.append("language", language);
+      if (themeReference.file) {
+        formData.append("reference", themeReference.file);
+      }
+      if (mentions.length) {
+        formData.append("referenceCreationIds", mentions.map((m) => m.id).join(","));
+      }
+
       const response = await fetch("/api/generate-storyboard", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": attempt.key,
-        },
-        body: JSON.stringify(body),
+        headers: { "Idempotency-Key": attempt.key },
+        body: formData,
       });
       const data = await response.json();
       if (!response.ok) {
@@ -510,6 +524,13 @@ function StoryboardComposer({
 
   return (
     <>
+      <input
+        ref={themeReference.inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={themeReference.onChange}
+      />
       <form onSubmit={handleGenerate} className="relative z-20 mt-[200px]">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
@@ -537,6 +558,7 @@ function StoryboardComposer({
               disabled={loading}
               placeholder="Describe your video concept — e.g. “A barista's morning routine opening a cozy café”. Type @ to reference a saved character or storyboard."
             />
+            <UploadTile label="Theme" upload={themeReference} disabled={loading} />
           </div>
 
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -601,7 +623,7 @@ function StoryboardComposer({
           </div>
         </div>
         <p className="mt-2 pl-1 text-xs text-gray-500">
-          Generates one six-panel storyboard sheet — turn it into a video next.
+          Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
         </p>
       </form>
 
