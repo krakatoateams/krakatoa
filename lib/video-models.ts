@@ -3,6 +3,7 @@ import {
   seedance2PricingKey,
   seedance2MiniPricingKey,
   seedance15PricingKey,
+  seedance1ProFastPricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
@@ -29,6 +30,7 @@ export type VideoModelId =
   | "seedance2_fast"
   | "seedance2"
   | "seedance15_pro"
+  | "seedance1_pro_fast"
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3";
@@ -51,6 +53,7 @@ export type VideoAspectRatio =
 export type VideoProviderFamily =
   | "seedance2"
   | "seedance15"
+  | "seedance1fast"
   | "veo31fast"
   | "veo31lite"
   | "klingv3";
@@ -236,6 +239,31 @@ export const VIDEO_MODELS: VideoModel[] = [
         resolution: ctx.resolution ?? undefined,
         generateAudio: ctx.generateAudio ?? true,
       }),
+  },
+  {
+    id: "seedance1_pro_fast",
+    label: "Seedance 1 Pro Fast",
+    modelLabel: "Seedance 1 Pro Fast",
+    modelRole: "video_seedance1_pro_fast",
+    providerModel: "bytedance/seedance-1-pro-fast",
+    providerFamily: "seedance1fast",
+    durations: [4, 5, 6, 8, 10, 12],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p", "1080p"],
+    defaultResolution: "1080p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      // First-frame i2v only — no last frame, no reference arrays, no audio.
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => seedance1ProFastPricingKey(ctx.resolution),
   },
   {
     id: "veo31_fast",
@@ -537,6 +565,18 @@ export function buildVideoProviderInput(params: {
       if (hasSeed) input.seed = params.seed;
       if (refs.firstFrame) input.image = refs.firstFrame;
       if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
+      return input;
+    }
+    case "seedance1fast": {
+      // bytedance/seedance-1-pro-fast: t2v / i2v, silent — no audio or last frame.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (hasSeed) input.seed = params.seed;
+      if (refs.firstFrame) input.image = refs.firstFrame;
       return input;
     }
     case "seedance2":

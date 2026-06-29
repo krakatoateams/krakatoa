@@ -270,6 +270,16 @@ export function seedance15PricingKey(params: {
   return `seedance15_${res}_${audio}_per_second`;
 }
 
+/**
+ * Seedance 1 Pro Fast (bytedance/seedance-1-pro-fast) pricing key. Priced by
+ * resolution only (no audio generation). Text to Video only.
+ */
+export function seedance1ProFastPricingKey(resolution: string | null | undefined): string {
+  const res =
+    resolution === "1080p" ? "1080p" : resolution === "720p" ? "720p" : "480p";
+  return `seedance1fast_${res}_per_second`;
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";
