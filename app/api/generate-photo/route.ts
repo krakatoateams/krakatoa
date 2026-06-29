@@ -62,6 +62,8 @@ const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // Optional free-text creative direction (omni-form at /tools/photo-v2). Capped so a
 // runaway client value can't bloat the provider prompt; empty when not supplied.
 const PROMPT_MAX_CHARS = 1500;
+// Max @-mentioned assets (saved characters / storyboards) used as references.
+const MAX_MENTIONS = 8;
 
 function isValidPose(id: string): id is ModelPoseId {
   return MODEL_POSES.some((p) => p.id === id);
@@ -182,6 +184,15 @@ export async function POST(req: Request) {
     // instead of an uploaded character image. Resolved to the creation's image URL
     // (owner-scoped) and passed as an extra reference — no re-upload needed.
     const characterCreationId = String(formData.get("characterCreationId") || "").trim();
+    // @-mentions (omni-form): comma-separated creation ids the user tagged with
+    // "@" in the prompt (saved characters / storyboards). Each is resolved
+    // owner-scoped to its image URL and passed as an extra reference, and the
+    // prompt gets guidance naming them. Capped to keep the provider input sane.
+    const referenceCreationIds = String(formData.get("referenceCreationIds") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, MAX_MENTIONS);
     const poseId = String(formData.get("poseId") || "").trim();
     const styleId = String(formData.get("styleId") || "").trim();
     // Product Photo v2.3: model tier + optional resolution.
@@ -340,16 +351,60 @@ export async function POST(req: Request) {
 
     // Product Try-on with a distinct character/model image. The references are sent
     // as [product, character]; the prompt is made role-aware below so the model
-    // actually uses the selected person. Single-image models (FLUX Kontext) can't
-    // honor a separate character, so reject before any spend rather than silently
-    // dropping it.
+    // actually uses the selected person. (Single-image-model guard below covers the
+    // case where the chosen model can't honor more than one reference.)
     const hasCharacterReference =
       requiresProductImage &&
       (extraReferenceFiles.length > 0 || directReferenceUrls.length > 0);
-    if (hasCharacterReference && !tierSupportsMultiReference(tier)) {
+
+    // @-mentioned assets: resolve each tagged creation (saved character / storyboard)
+    // owner-scoped to its image URL, append as references, and remember its name +
+    // kind so the prompt can tell the model what each reference depicts.
+    const mentionRefs: { name: string; kind: "character" | "storyboard" | "image" }[] = [];
+    if (referenceCreationIds.length && userId) {
+      // A mentioned asset is only usable by reference-capable models.
+      if (!tier.supportsReference) {
+        return NextResponse.json(
+          {
+            error: `${tier.modelLabel} can't use mentioned references. Choose a reference-capable model such as Nano Banana or Seedream 4.`,
+          },
+          { status: 400 }
+        );
+      }
+      for (const mentionId of referenceCreationIds) {
+        const creation = await getUserCreationForUser(userId, mentionId);
+        if (!creation) {
+          return NextResponse.json(
+            { error: "A mentioned asset could not be found." },
+            { status: 400 }
+          );
+        }
+        directReferenceUrls.push(creation.mediaUrl);
+        const metaName =
+          typeof creation.metadata?.characterName === "string"
+            ? creation.metadata.characterName.trim()
+            : "";
+        const kind: "character" | "storyboard" | "image" =
+          creation.metadata?.creationKind === "character"
+            ? "character"
+            : creation.tool === "storyboard"
+              ? "storyboard"
+              : "image";
+        const fallbackName =
+          kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
+        mentionRefs.push({ name: metaName || creation.title || fallbackName, kind });
+      }
+    }
+
+    // Single-image models (e.g. FLUX Kontext) can't honor more than one reference,
+    // whether that's a Product Try-on character or @-mentioned assets. Reject before
+    // any spend rather than silently dropping references.
+    const totalReferenceImages =
+      (requiresProductImage ? 1 : 0) + extraReferenceFiles.length + directReferenceUrls.length;
+    if (totalReferenceImages > 1 && !tierSupportsMultiReference(tier)) {
       return NextResponse.json(
         {
-          error: `${tier.modelLabel} can only use a single reference image, so it can't apply a separate character. Choose Nano Banana or Seedream 4 for Product Try-on with a character.`,
+          error: `${tier.modelLabel} can only use a single reference image. Choose Nano Banana or Seedream 4 to combine multiple references.`,
         },
         { status: 400 }
       );
@@ -398,6 +453,7 @@ export async function POST(req: Request) {
       // retry with a different attachment set isn't treated as a replay.
       extraRefCount: extraReferenceFiles.length + directReferenceUrls.length,
       characterRef: characterCreationId,
+      mentionRefs: referenceCreationIds.join(","),
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -554,7 +610,7 @@ export async function POST(req: Request) {
 
     // Product mode wraps the prompt in product-photography scaffolding; character
     // mode builds a multi-angle turnaround sheet; image mode uses the prompt verbatim.
-    const prompt =
+    const basePrompt =
       mode === "product"
         ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
         : mode === "character"
@@ -565,6 +621,16 @@ export async function POST(req: Request) {
               ageId: characterAge,
             })
           : userPrompt;
+
+    // @-mention guidance: tell the model that the trailing reference images depict the
+    // named subjects from the prompt, so it actually uses them as visual references.
+    const prompt = mentionRefs.length
+      ? `${basePrompt} ${(() => {
+          const list = mentionRefs.map((r) => `@${r.name} (${r.kind})`).join(", ");
+          const many = mentionRefs.length > 1;
+          return `The description references ${list}; matching reference image${many ? "s have" : " has"} been provided. Use ${many ? "them" : "it"} as the visual reference for ${many ? "those subjects" : "that subject"}, preserving appearance and identity.`;
+        })()}`.trim()
+      : basePrompt;
 
     // Aspect ratio comes from the chip (validated above). The builder sends only the
     // params each model family supports (reference param name + resolution vary by
