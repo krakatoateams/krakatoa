@@ -5,6 +5,7 @@ import {
   seedance15PricingKey,
   seedance1ProFastPricingKey,
   seedance1ProPricingKey,
+  seedance1LitePricingKey,
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
@@ -33,6 +34,7 @@ export type VideoModelId =
   | "seedance15_pro"
   | "seedance1_pro_fast"
   | "seedance1_pro"
+  | "seedance1_lite"
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3";
@@ -57,6 +59,7 @@ export type VideoProviderFamily =
   | "seedance15"
   | "seedance1fast"
   | "seedance1pro"
+  | "seedance1lite"
   | "veo31fast"
   | "veo31lite"
   | "klingv3";
@@ -293,6 +296,32 @@ export const VIDEO_MODELS: VideoModel[] = [
     pricingKey: (ctx) => seedance1ProPricingKey(ctx.resolution),
   },
   {
+    id: "seedance1_lite",
+    label: "Seedance 1 Lite",
+    modelLabel: "Seedance 1 Lite",
+    modelRole: "video_seedance1_lite",
+    providerModel: "bytedance/seedance-1-lite",
+    providerFamily: "seedance1lite",
+    // Provider minimum is 4s (not 2s like other Seedance 1.x models).
+    durations: [4, 5, 6, 8, 10, 12],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p", "1080p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      // 1–4 reference images (mutually exclusive with 1080p and first/last frame).
+      referenceImages: 4,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => seedance1LitePricingKey(ctx.resolution),
+  },
+  {
     id: "veo31_fast",
     label: "Veo 3.1 Fast",
     modelLabel: "Veo 3.1 Fast",
@@ -450,17 +479,23 @@ export type VideoReferenceInputs = {
 
 export type VideoReferenceValidation = { ok: true } | { ok: false; error: string };
 
+export type VideoReferenceValidationContext = {
+  resolution?: string | null;
+};
+
 /**
- * Enforce the Seedance 2 reference rules (mirrors the provider schema):
+ * Enforce provider reference rules (mirrors each model's schema):
  *   - reference_images cannot be combined with first/last frame images.
  *   - last_frame_image requires a first frame (image).
  *   - reference_audios require at least one reference image OR reference video.
  *   - per-slot count caps from the model capability envelope.
+ *   - Seedance 1 Lite: reference_images cannot be used at 1080p.
  * Used by BOTH the client (to disable conflicting slots) and the server (400).
  */
 export function validateVideoReferences(
   model: VideoModel,
-  refs: VideoReferenceInputs
+  refs: VideoReferenceInputs,
+  ctx?: VideoReferenceValidationContext
 ): VideoReferenceValidation {
   const caps = model.references;
   const firstFrame = refs.firstFrame || null;
@@ -502,6 +537,17 @@ export function validateVideoReferences(
     return {
       ok: false,
       error: "Reference audio needs at least one reference image or reference video.",
+    };
+  }
+
+  if (
+    model.providerFamily === "seedance1lite" &&
+    referenceImages.length > 0 &&
+    ctx?.resolution === "1080p"
+  ) {
+    return {
+      ok: false,
+      error: "Reference images can't be used at 1080p — pick 480p or 720p.",
     };
   }
 
@@ -617,6 +663,24 @@ export function buildVideoProviderInput(params: {
       if (hasSeed) input.seed = params.seed;
       if (refs.firstFrame) input.image = refs.firstFrame;
       if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
+      return input;
+    }
+    case "seedance1lite": {
+      // bytedance/seedance-1-lite: t2v / i2v / ref images (480p–720p only for refs).
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (hasSeed) input.seed = params.seed;
+      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
+      if (referenceImages.length) {
+        input.reference_images = referenceImages;
+      } else {
+        if (refs.firstFrame) input.image = refs.firstFrame;
+        if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
+      }
       return input;
     }
     case "seedance2":

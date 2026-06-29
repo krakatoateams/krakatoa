@@ -820,6 +820,16 @@ function VideoOmniPage() {
   const hasRefImages = refImages.items.length > 0;
   const firstFrameReady = firstFrame.done.length > 0;
   const hasRefImageOrVideo = refImages.done.length > 0 || refVideos.done.length > 0;
+  const refImagesBlocked1080p =
+    model.providerFamily === "seedance1lite" && resolution === "1080p";
+  const resolution1080pBlockedByRefs =
+    model.providerFamily === "seedance1lite" && hasRefImages;
+
+  useEffect(() => {
+    if (resolution1080pBlockedByRefs && resolution === "1080p") {
+      setResolution("720p");
+    }
+  }, [resolution1080pBlockedByRefs, resolution]);
 
   const anyUploading =
     firstFrame.uploading ||
@@ -841,7 +851,7 @@ function VideoOmniPage() {
     referenceVideos: refVideos.done.map((r) => r.url),
     referenceAudios: refAudios.done.map((r) => r.url),
   };
-  const refCheck = validateVideoReferences(model, referenceInputs);
+  const refCheck = validateVideoReferences(model, referenceInputs, { resolution });
 
   const canGenerate =
     !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
@@ -1030,11 +1040,13 @@ function VideoOmniPage() {
                   value={resolution}
                   activeId={resolution}
                   tooltip="Video resolution. Higher resolution is crisper but costs more credits."
-                  options={model.resolutions.map((r) => ({
-                    id: r,
-                    label: r,
-                    hint: `${videoCredits(model.pricingKey({ resolution: r, hasReferenceVideo, generateAudio }), duration)}`,
-                  }))}
+                  options={model.resolutions
+                    .filter((r) => !(resolution1080pBlockedByRefs && r === "1080p"))
+                    .map((r) => ({
+                      id: r,
+                      label: r,
+                      hint: `${videoCredits(model.pricingKey({ resolution: r, hasReferenceVideo, generateAudio }), duration)}`,
+                    }))}
                   onSelect={(id) => setResolution(id as VideoResolution)}
                   disabled={loading}
                 />
@@ -1163,9 +1175,15 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple
                   group={refImages}
-                  disabled={loading || hasFrames}
-                  disabledReason={hasFrames ? "Remove first/last frame to use reference images." : undefined}
-                  hint="Character / style / composition. Use [Image1]…"
+                  disabled={loading || hasFrames || refImagesBlocked1080p}
+                  disabledReason={
+                    hasFrames
+                      ? "Remove first/last frame to use reference images."
+                      : refImagesBlocked1080p
+                        ? "Reference images are only supported at 480p or 720p."
+                        : undefined
+                  }
+                  hint="Character / style / composition (480p–720p only). Use [Image1]…"
                 />
               )}
               {model.references.referenceVideos > 0 && (

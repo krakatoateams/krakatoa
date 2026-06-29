@@ -290,6 +290,13 @@ export function seedance1ProPricingKey(resolution: string | null | undefined): s
   return `seedance1pro_${res}_per_second`;
 }
 
+/** Seedance 1 Lite (bytedance/seedance-1-lite) — resolution-only, no audio. */
+export function seedance1LitePricingKey(resolution: string | null | undefined): string {
+  const res =
+    resolution === "1080p" ? "1080p" : resolution === "720p" ? "720p" : "480p";
+  return `seedance1lite_${res}_per_second`;
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";

@@ -229,7 +229,7 @@ export async function POST(req: Request) {
       referenceAudios: referenceAudios.map((r) => r.url),
     };
 
-    const refCheck = validateVideoReferences(model, referenceInputs);
+    const refCheck = validateVideoReferences(model, referenceInputs, { resolution });
     if (!refCheck.ok) {
       return NextResponse.json({ error: refCheck.error }, { status: 400 });
     }
