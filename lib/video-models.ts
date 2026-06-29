@@ -9,6 +9,7 @@ import {
   veo31FastPricingKey,
   veo31LitePricingKey,
   klingV3PricingKey,
+  klingV3OmniPricingKey,
   kling15StandardPricingKey,
   kling15ProPricingKey,
   kling16StandardPricingKey,
@@ -44,6 +45,7 @@ export type VideoModelId =
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3"
+  | "kling_v3_omni"
   | "kling20"
   | "kling21"
   | "kling25_turbo_pro"
@@ -82,6 +84,7 @@ export type VideoProviderFamily =
   | "veo31fast"
   | "veo31lite"
   | "klingv3"
+  | "kling3omni"
   | "kling20"
   | "kling21"
   | "kling25turbo"
@@ -443,6 +446,36 @@ export const VIDEO_MODELS: VideoModel[] = [
       }),
   },
   {
+    id: "kling_v3_omni",
+    label: "Kling v3 Omni",
+    modelLabel: "Kling v3 Omni",
+    modelRole: "video_kling_v3_omni",
+    providerModel: "kwaivgi/kling-v3-omni-video",
+    providerFamily: "kling3omni",
+    durations: [5, 10, 15],
+    defaultDuration: 5,
+    resolutions: ["720p", "1080p", "4k"],
+    defaultResolution: "1080p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: true,
+    defaultGenerateAudio: false,
+    promptMaxChars: 2500,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      // Max 7 without reference video, 4 with — enforced in validateVideoReferences.
+      referenceImages: 7,
+      referenceVideos: 1,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) =>
+      klingV3OmniPricingKey({
+        resolution: ctx.resolution,
+        generateAudio: ctx.generateAudio ?? false,
+      }),
+  },
+  {
     id: "kling20",
     label: "Kling v2.0",
     modelLabel: "Kling v2.0",
@@ -700,7 +733,7 @@ export function getVideoModel(id: string): VideoModel {
 
 /** Kling v1.6 models allow start/end frames alongside reference_images. */
 export function allowsFrameWithReferenceImages(family: VideoProviderFamily): boolean {
-  return family === "kling16" || family === "kling16pro";
+  return family === "kling16" || family === "kling16pro" || family === "kling3omni";
 }
 
 /** Kling v1.5/v1.6 Pro allow an end frame without a start frame. */
@@ -750,6 +783,7 @@ export type VideoReferenceValidation = { ok: true } | { ok: false; error: string
 
 export type VideoReferenceValidationContext = {
   resolution?: string | null;
+  generateAudio?: boolean;
 };
 
 /**
@@ -851,6 +885,25 @@ export function validateVideoReferences(
     return { ok: false, error: "End image requires Pro mode (1080p)." };
   }
 
+  if (model.providerFamily === "kling3omni") {
+    const maxRefImages = referenceVideos.length > 0 ? 4 : 7;
+    if (referenceImages.length > maxRefImages) {
+      return {
+        ok: false,
+        error: `Up to ${maxRefImages} reference images are allowed${referenceVideos.length > 0 ? " when a reference video is attached" : ""}.`,
+      };
+    }
+    if (ctx?.resolution === "4k" && referenceVideos.length > 0) {
+      return { ok: false, error: "4K mode does not support reference video." };
+    }
+    if (referenceVideos.length > 0 && ctx?.generateAudio) {
+      return {
+        ok: false,
+        error: "Generated audio can't be used with a reference video — turn audio off or remove the video.",
+      };
+    }
+  }
+
   return { ok: true };
 }
 
@@ -924,6 +977,31 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      return input;
+    }
+    case "kling3omni": {
+      // kwaivgi/kling-v3-omni-video: mode tiers + refs (images/video) + audio.
+      // generate_audio is mutually exclusive with reference_video (validated upstream).
+      const mode =
+        params.resolution === "4k" ? "4k" : params.resolution === "720p" ? "standard" : "pro";
+      const referenceVideo = (refs.referenceVideos ?? []).filter(Boolean)[0] ?? null;
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        mode,
+        duration: params.duration,
+        generate_audio: params.generateAudio,
+      };
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
+      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
+      if (referenceImages.length) input.reference_images = referenceImages;
+      if (referenceVideo) {
+        input.reference_video = referenceVideo;
+        input.keep_original_sound = true;
+        input.video_reference_type = "feature";
+      } else if (!refs.firstFrame) {
+        input.aspect_ratio = params.aspectRatio;
+      }
       return input;
     }
     case "kling20": {

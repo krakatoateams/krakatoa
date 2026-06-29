@@ -710,6 +710,10 @@ function VideoOmniPage() {
     model.providerFamily === "seedance1lite" && resolution === "1080p";
   const resolution1080pBlockedByRefs =
     model.providerFamily === "seedance1lite" && hasRefImages;
+  const refVideoBlocked4k =
+    model.providerFamily === "kling3omni" && resolution === "4k";
+  const audioBlockedByRefVideo =
+    model.providerFamily === "kling3omni" && refVideos.done.length > 0;
   // Kling v1.6 allows start_image + reference_images together.
   const blocksFramesWithRefs = !allowsFrameWithReferenceImages(model.providerFamily);
 
@@ -718,6 +722,18 @@ function VideoOmniPage() {
       setResolution("720p");
     }
   }, [resolution1080pBlockedByRefs, resolution]);
+
+  useEffect(() => {
+    if (refVideoBlocked4k && refVideos.done.length > 0) {
+      refVideos.reset();
+    }
+  }, [refVideoBlocked4k, refVideos]);
+
+  useEffect(() => {
+    if (audioBlockedByRefVideo && generateAudio) {
+      setGenerateAudio(false);
+    }
+  }, [audioBlockedByRefVideo, generateAudio]);
 
   const anyUploading =
     firstFrame.uploading ||
@@ -739,7 +755,10 @@ function VideoOmniPage() {
     referenceVideos: refVideos.done.map((r) => r.url),
     referenceAudios: refAudios.done.map((r) => r.url),
   };
-  const refCheck = validateVideoReferences(model, referenceInputs, { resolution });
+  const refCheck = validateVideoReferences(model, referenceInputs, {
+    resolution,
+    generateAudio,
+  });
 
   const canGenerate =
     !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
@@ -973,14 +992,16 @@ function VideoOmniPage() {
                 {model.supportsAudio && (
                   <Tooltip
                     label={
-                      generateAudio
-                        ? "On — the model generates synced audio (dialogue, SFX, music). Click to make it silent."
-                        : "Off — the video is silent. Click to generate audio (may cost more)."
+                      audioBlockedByRefVideo
+                        ? "Audio is unavailable when a reference video is attached."
+                        : generateAudio
+                          ? "On — the model generates synced audio (dialogue, SFX, music). Click to make it silent."
+                          : "Off — the video is silent. Click to generate audio (may cost more)."
                     }
                   >
                     <button
                       type="button"
-                      disabled={loading}
+                      disabled={loading || audioBlockedByRefVideo}
                       onClick={() => setGenerateAudio((v) => !v)}
                       className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
                         generateAudio
@@ -1093,7 +1114,11 @@ function VideoOmniPage() {
                         ? "Reference images are only supported at 480p or 720p."
                         : undefined
                   }
-                  hint="Scene elements (up to 4). Tag with @ or upload."
+                  hint={
+                    model.providerFamily === "kling3omni"
+                      ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
+                      : "Scene elements (up to 4). Tag with @ or upload."
+                  }
                 />
               )}
               {model.references.referenceVideos > 0 && (
@@ -1101,10 +1126,17 @@ function VideoOmniPage() {
                   icon={<Film className="h-3.5 w-3.5" />}
                   label="Reference videos"
                   accept={VIDEO_ACCEPT}
-                  multiple
+                  multiple={model.references.referenceVideos > 1}
                   group={refVideos}
-                  disabled={loading}
-                  hint="Motion / style transfer. Use [Video1] or upload."
+                  disabled={loading || refVideoBlocked4k}
+                  disabledReason={
+                    refVideoBlocked4k ? "Reference video isn't supported at 4K." : undefined
+                  }
+                  hint={
+                    model.providerFamily === "kling3omni"
+                      ? "Motion/style reference (1 clip). Use [Video1] or upload."
+                      : "Motion / style transfer. Use [Video1] or upload."
+                  }
                 />
               )}
               {model.references.referenceAudios > 0 && (

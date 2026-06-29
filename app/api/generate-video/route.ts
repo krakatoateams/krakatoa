@@ -303,7 +303,7 @@ export async function POST(req: Request) {
       referenceAudios: referenceAudios.map((r) => r.url),
     };
 
-    const refCheck = validateVideoReferences(model, referenceInputs, { resolution });
+    const refCheck = validateVideoReferences(model, referenceInputs, { resolution, generateAudio });
     if (!refCheck.ok) {
       return NextResponse.json({ error: refCheck.error }, { status: 400 });
     }

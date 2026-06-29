@@ -95,6 +95,11 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   kling3_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro" },
   kling3_pro_audio_per_second: { providerCostUsd: 0.336, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro_audio" },
   kling3_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3", variantKey: "4k" },
+  kling3omni_standard_per_second: { providerCostUsd: 0.168, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "standard" },
+  kling3omni_standard_audio_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "standard_audio" },
+  kling3omni_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "pro" },
+  kling3omni_pro_audio_per_second: { providerCostUsd: 0.28, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "pro_audio" },
+  kling3omni_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "4k" },
   // Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second, i2v only.
   kling15_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling15", variantKey: "standard" },
   kling15_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling15", variantKey: "pro" },

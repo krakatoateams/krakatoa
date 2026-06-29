@@ -278,6 +278,26 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 38, enabled: true,
     provider_cost_usd: 0.42, cost_unit: "per_second", pricing_group: "kling3", variant_key: "4k", currency: "USD",
   },
+  kling3omni_standard_per_second: {
+    pricing_type: "per_second", credit_amount: 17, enabled: true,
+    provider_cost_usd: 0.168, cost_unit: "per_second", pricing_group: "kling3omni", variant_key: "standard", currency: "USD",
+  },
+  kling3omni_standard_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 22, enabled: true,
+    provider_cost_usd: 0.224, cost_unit: "per_second", pricing_group: "kling3omni", variant_key: "standard_audio", currency: "USD",
+  },
+  kling3omni_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 22, enabled: true,
+    provider_cost_usd: 0.224, cost_unit: "per_second", pricing_group: "kling3omni", variant_key: "pro", currency: "USD",
+  },
+  kling3omni_pro_audio_per_second: {
+    pricing_type: "per_second", credit_amount: 28, enabled: true,
+    provider_cost_usd: 0.28, cost_unit: "per_second", pricing_group: "kling3omni", variant_key: "pro_audio", currency: "USD",
+  },
+  kling3omni_4k_per_second: {
+    pricing_type: "per_second", credit_amount: 42, enabled: true,
+    provider_cost_usd: 0.42, cost_unit: "per_second", pricing_group: "kling3omni", variant_key: "4k", currency: "USD",
+  },
   // ---- Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) rows (030). Flat per-second. ----
   kling15_standard_per_second: {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
@@ -420,6 +440,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "reels.video_seedance1_lite": { provider: "replicate", model: "bytedance/seedance-1-lite", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling21": { provider: "replicate", model: "kwaivgi/kling-v2.1", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling25_turbo_pro": { provider: "replicate", model: "kwaivgi/kling-v2.5-turbo-pro", parameters: {}, enabled: true, is_default: true },
+  "reels.video_kling_v3_omni": { provider: "replicate", model: "kwaivgi/kling-v3-omni-video", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling26": { provider: "replicate", model: "kwaivgi/kling-v2.6", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling26_motion": { provider: "replicate", model: "kwaivgi/kling-v2.6-motion-control", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling20": { provider: "replicate", model: "kwaivgi/kling-v2.0", parameters: {}, enabled: true, is_default: true },

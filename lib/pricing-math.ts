@@ -335,6 +335,25 @@ export function klingV3PricingKey(params: {
   return params.generateAudio ? "kling3_pro_audio_per_second" : "kling3_pro_per_second";
 }
 
+/**
+ * Kling v3 Omni (kwaivgi/kling-v3-omni-video) pricing key. Same mode tiers as v3
+ * but different audio surcharges; 4k is flat regardless of audio.
+ */
+export function klingV3OmniPricingKey(params: {
+  resolution: string | null | undefined;
+  generateAudio: boolean;
+}): string {
+  if (params.resolution === "4k") return "kling3omni_4k_per_second";
+  if (params.resolution === "720p") {
+    return params.generateAudio
+      ? "kling3omni_standard_audio_per_second"
+      : "kling3omni_standard_per_second";
+  }
+  return params.generateAudio
+    ? "kling3omni_pro_audio_per_second"
+    : "kling3omni_pro_per_second";
+}
+
 /** Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second rate. */
 export function kling15StandardPricingKey(): string {
   return "kling15_standard_per_second";
