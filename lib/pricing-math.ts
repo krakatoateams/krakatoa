@@ -360,6 +360,13 @@ export function kling20PricingKey(): string {
   return "kling20_per_second";
 }
 
+/** Kling v2.1 (kwaivgi/kling-v2.1) — priced by mode (standard=720p / pro=1080p). */
+export function kling21PricingKey(params: { resolution?: string | null }): string {
+  return params.resolution === "1080p"
+    ? "kling21_pro_per_second"
+    : "kling21_standard_per_second";
+}
+
 /**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.

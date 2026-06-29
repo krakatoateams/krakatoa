@@ -14,6 +14,7 @@ import {
   kling16StandardPricingKey,
   kling16ProPricingKey,
   kling20PricingKey,
+  kling21PricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -42,6 +43,7 @@ export type VideoModelId =
   | "veo31_lite"
   | "kling_v3"
   | "kling20"
+  | "kling21"
   | "kling16_standard"
   | "kling16_pro"
   | "kling15_standard"
@@ -77,6 +79,7 @@ export type VideoProviderFamily =
   | "veo31lite"
   | "klingv3"
   | "kling20"
+  | "kling21"
   | "kling16"
   | "kling16pro"
   | "kling15"
@@ -507,6 +510,33 @@ export const VIDEO_MODELS: VideoModel[] = [
     pricingKey: () => kling16ProPricingKey(),
   },
   {
+    id: "kling21",
+    label: "Kling v2.1",
+    modelLabel: "Kling v2.1",
+    modelRole: "video_kling21",
+    providerModel: "kwaivgi/kling-v2.1",
+    providerFamily: "kling21",
+    durations: [5, 10],
+    defaultDuration: 5,
+    // Provider `mode`: standard=720p, pro=1080p (no aspect_ratio input).
+    resolutions: ["720p", "1080p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9"],
+    defaultAspectRatio: "16:9",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    requiresFirstFrame: true,
+    subtools: ["image2video"],
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => kling21PricingKey({ resolution: ctx.resolution }),
+  },
+  {
     id: "kling15_standard",
     label: "Kling v1.5 Standard",
     modelLabel: "Kling v1.5 Standard",
@@ -757,6 +787,15 @@ export function validateVideoReferences(
     return { ok: false, error: "This model requires a start image or end image." };
   }
 
+  if (
+    model.providerFamily === "kling21" &&
+    lastFrame &&
+    ctx?.resolution &&
+    ctx.resolution !== "1080p"
+  ) {
+    return { ok: false, error: "End image requires Pro mode (1080p)." };
+  }
+
   return { ok: true };
 }
 
@@ -842,6 +881,20 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
+      return input;
+    }
+    case "kling21": {
+      // kwaivgi/kling-v2.1: i2v only (start_image required). mode=standard|pro;
+      // end_image optional but requires pro (1080p).
+      const mode = params.resolution === "1080p" ? "pro" : "standard";
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        mode,
+        duration: params.duration,
+        start_image: refs.firstFrame,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
       return input;
     }
     case "kling16": {

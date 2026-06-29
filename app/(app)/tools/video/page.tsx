@@ -1325,6 +1325,13 @@ function ImageToVideoComposer({
     : model.references.lastFrame
       ? startReady || endReady
       : startReady;
+
+  // Kling v2.1: end_image requires pro (1080p) mode.
+  useEffect(() => {
+    if (model.providerFamily !== "kling21") return;
+    if (endReady && resolution !== "1080p") setResolution("1080p");
+  }, [model.providerFamily, endReady, resolution]);
+
   const anyUploading =
     (imageSource === "upload" && startImage.uploading) ||
     (model.references.lastFrame && endImageSource === "upload" && endImage.uploading) ||
@@ -1463,7 +1470,7 @@ function ImageToVideoComposer({
                   : "Optional if you provide an end image."
               }
             />
-            {model.references.lastFrame && (
+              {model.references.lastFrame && (
               <PhotoLibraryPicker
                 label="End image (optional)"
                 icon={<ImageIcon className="h-3.5 w-3.5" />}
@@ -1478,7 +1485,11 @@ function ImageToVideoComposer({
                 selected={endLibraryImage}
                 onSelect={setEndLibraryImage}
                 disabled={loading}
-                hint="Optional if you provide a start image — at least one frame is required."
+                hint={
+                  model.providerFamily === "kling21"
+                    ? "Optional — requires Pro (1080p) when set."
+                    : "Optional if you provide a start image — at least one frame is required."
+                }
               />
             )}
             <div
@@ -1540,18 +1551,36 @@ function ImageToVideoComposer({
                   square
                   showChevron={false}
                   icon={<Maximize2 className="h-3.5 w-3.5" />}
-                  value={resolution}
+                  value={
+                    model.providerFamily === "kling21"
+                      ? resolution === "1080p"
+                        ? "Pro · 1080p"
+                        : "Standard · 720p"
+                      : resolution
+                  }
                   activeId={resolution}
-                  tooltip="Output resolution."
-                  options={model.resolutions.map((r) => ({
-                    id: r,
-                    label: r,
-                    hint: `${videoCredits(model.pricingKey({ resolution: r }), duration)}`,
-                  }))}
+                  tooltip={
+                    model.providerFamily === "kling21"
+                      ? "Standard is 720p; Pro is 1080p. End image requires Pro."
+                      : "Output resolution."
+                  }
+                  options={model.resolutions
+                    .filter((r) => !(model.providerFamily === "kling21" && endReady && r === "720p"))
+                    .map((r) => ({
+                      id: r,
+                      label:
+                        model.providerFamily === "kling21"
+                          ? r === "720p"
+                            ? "Standard · 720p"
+                            : "Pro · 1080p"
+                          : r,
+                      hint: `${videoCredits(model.pricingKey({ resolution: r }), duration)}`,
+                    }))}
                   onSelect={(id) => setResolution(id as typeof resolution)}
                   disabled={loading}
                 />
               )}
+              {model.aspectRatios.length > 1 && (
               <ChipDropdown
                 square
                 showChevron={false}
@@ -1566,6 +1595,7 @@ function ImageToVideoComposer({
                 onSelect={(id) => setAspectRatio(id as typeof aspectRatio)}
                 disabled={loading}
               />
+              )}
             </div>
 
             <div className="flex items-center gap-3">
