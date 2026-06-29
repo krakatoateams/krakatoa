@@ -639,7 +639,7 @@ function CharacterPicker({
     <PhotoLibraryPicker
       label="Your character"
       icon={<UserRound className="h-3.5 w-3.5" />}
-      accept="image/jpeg,image/png"
+      accept={MC_IMAGE_ACCEPT}
       group={group}
       source={source}
       onSourceChange={onSourceChange}

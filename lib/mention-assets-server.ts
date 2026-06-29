@@ -1,5 +1,5 @@
 import { getUserCreationForUser } from "@/lib/creations-db";
-import type { MentionAssetKind, MentionRef, ResolvedMentionCreation } from "@/lib/mention-assets";
+import type { MentionAssetKind, ResolvedMentionCreation } from "@/lib/mention-assets";
 
 /** Owner-scoped lookup for @-mentioned or library-picked creations (server only). */
 export async function resolveMentionCreations(
