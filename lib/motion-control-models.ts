@@ -1,4 +1,4 @@
-import { klingV3MotionControlPricingKey } from "@/lib/pricing-math";
+import { klingV3MotionControlPricingKey, kling26MotionControlPricingKey } from "@/lib/pricing-math";
 
 /**
  * Motion Control model registry (Text to Video → Motion Control sub-tool).
@@ -12,7 +12,7 @@ import { klingV3MotionControlPricingKey } from "@/lib/pricing-math";
  * Starter scope: Kling v3 Motion Control (kwaivgi/kling-v3-motion-control).
  */
 
-export type MotionControlModelId = "kling_v3_motion";
+export type MotionControlModelId = "kling_v3_motion" | "kling26_motion";
 
 /** Provider quality mode. std = 720p (cheaper), pro = 1080p. */
 export type MotionControlMode = "std" | "pro";
@@ -44,7 +44,7 @@ export type MotionControlModel = {
   pricingKey: (mode: MotionControlMode) => string;
 };
 
-export const MOTION_CONTROL_MODELS: MotionControlModel[] = [
+export const MOTION_CONTROL_MODEL_REGISTRY: MotionControlModel[] = [
   {
     id: "kling_v3_motion",
     label: "Kling v3 Motion Control",
@@ -61,11 +61,56 @@ export const MOTION_CONTROL_MODELS: MotionControlModel[] = [
     promptMaxChars: 2500,
     pricingKey: (mode) => klingV3MotionControlPricingKey(mode),
   },
+  {
+    id: "kling26_motion",
+    label: "Kling v2.6 Motion Control",
+    modelLabel: "Kling v2.6 Motion Control",
+    modelRole: "video_kling26_motion",
+    providerModel: "kwaivgi/kling-v2.6-motion-control",
+    modes: ["std", "pro"],
+    defaultMode: "std",
+    defaultKeepOriginalSound: true,
+    defaultOrientation: "image",
+    minDurationSec: 3,
+    maxDurationForOrientation: (orientation) => (orientation === "video" ? 30 : 10),
+    promptMaxChars: 2500,
+    pricingKey: (mode) => kling26MotionControlPricingKey(mode),
+  },
 ];
 
-const MODEL_BY_ID = Object.fromEntries(
-  MOTION_CONTROL_MODELS.map((m) => [m.id, m])
+/** Kling-only; cheapest std tier first ($0.07/s). */
+const MOTION_CONTROL_SORT_ORDER: MotionControlModelId[] = [
+  "kling26_motion",
+  "kling_v3_motion",
+];
+
+const MOTION_CONTROL_BY_ID = Object.fromEntries(
+  MOTION_CONTROL_MODEL_REGISTRY.map((m) => [m.id, m])
 ) as Record<MotionControlModelId, MotionControlModel>;
+
+export const MOTION_CONTROL_MODELS: MotionControlModel[] = MOTION_CONTROL_SORT_ORDER.map(
+  (id) => MOTION_CONTROL_BY_ID[id]
+);
+
+const MODEL_BY_ID = MOTION_CONTROL_BY_ID;
+
+type VideoCreditsFn = (pricingKey: string, durationSec: number) => number;
+
+/** Per-second tiers × duration; `5+` when std/pro modes differ. */
+export function formatMotionControlModelCreditHint(
+  model: MotionControlModel,
+  videoCredits: VideoCreditsFn,
+  durationSec = 5
+): string {
+  let min = Infinity;
+  let max = 0;
+  for (const mode of model.modes) {
+    const cr = videoCredits(model.pricingKey(mode), durationSec);
+    if (cr < min) min = cr;
+    if (cr > max) max = cr;
+  }
+  return min === max ? String(min) : `${min}+`;
+}
 
 export const DEFAULT_MOTION_CONTROL_MODEL_ID: MotionControlModelId = "kling_v3_motion";
 
@@ -110,7 +155,7 @@ export function effectiveMotionControlDuration(params: {
   return Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
 }
 
-/** Build the Replicate input for kwaivgi/kling-v3-motion-control. */
+/** Build the Replicate input for Kling Motion Control (v2.6 / v3 — same shape). */
 export function buildMotionControlProviderInput(params: {
   prompt: string;
   mode: MotionControlMode;

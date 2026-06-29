@@ -140,7 +140,7 @@ const FALLBACKS = {
   storyboard: {
     scene_llm: { provider: REPLICATE, model: "openai/gpt-5", parameters: {} },
     image: { provider: REPLICATE, model: "openai/gpt-image-2", parameters: {} },
-    video: { provider: REPLICATE, model: "bytedance/seedance-2.0-fast", parameters: {} },
+    video: { provider: REPLICATE, model: "bytedance/seedance-2.0-mini", parameters: {} },
   },
   photo: {
     // Legacy single-model role (config_key=image). Disabled/deprecated in

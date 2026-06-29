@@ -239,6 +239,64 @@ export function seedance2PricingKey(params: {
   return `seedance2_${res}${suffix}`;
 }
 
+/**
+ * Seedance 2.0 Mini (bytedance/seedance-2.0-mini) pricing key, variant-aware.
+ * Cheaper than Fast; 480p/720p only (no 1080p tier).
+ */
+export function seedance2MiniPricingKey(params: {
+  resolution: string | null | undefined;
+  hasReferenceVideo: boolean;
+}): string {
+  const is720 = params.resolution === "720p";
+  if (params.hasReferenceVideo) {
+    return is720
+      ? "seedance2mini_720p_video_in_per_second"
+      : "seedance2mini_480p_video_in_per_second";
+  }
+  return is720 ? "seedance2mini_720p_per_second" : "seedance2mini_480p_per_second";
+}
+
+/**
+ * Seedance 1.5 Pro (bytedance/seedance-1.5-pro) pricing key. Priced by resolution
+ * × audio (with_audio / without_audio). Text to Video only.
+ */
+export function seedance15PricingKey(params: {
+  resolution: string | null | undefined;
+  generateAudio: boolean;
+}): string {
+  const res =
+    params.resolution === "1080p" ? "1080p" : params.resolution === "720p" ? "720p" : "480p";
+  const audio = params.generateAudio ? "with_audio" : "without_audio";
+  return `seedance15_${res}_${audio}_per_second`;
+}
+
+/**
+ * Seedance 1 Pro Fast (bytedance/seedance-1-pro-fast) pricing key. Priced by
+ * resolution only (no audio generation). Text to Video only.
+ */
+export function seedance1ProFastPricingKey(resolution: string | null | undefined): string {
+  const res =
+    resolution === "1080p" ? "1080p" : resolution === "720p" ? "720p" : "480p";
+  return `seedance1fast_${res}_per_second`;
+}
+
+/**
+ * Seedance 1 Pro (bytedance/seedance-1-pro) pricing key. Priced by resolution only
+ * (no audio). Text to Video only.
+ */
+export function seedance1ProPricingKey(resolution: string | null | undefined): string {
+  const res =
+    resolution === "1080p" ? "1080p" : resolution === "720p" ? "720p" : "480p";
+  return `seedance1pro_${res}_per_second`;
+}
+
+/** Seedance 1 Lite (bytedance/seedance-1-lite) — resolution-only, no audio. */
+export function seedance1LitePricingKey(resolution: string | null | undefined): string {
+  const res =
+    resolution === "1080p" ? "1080p" : resolution === "720p" ? "720p" : "480p";
+  return `seedance1lite_${res}_per_second`;
+}
+
 /** Veo resolution -> v2 pricing key. Anything not 1080p maps to 720p. */
 export function veoPricingKey(resolution: string | null | undefined): string {
   return resolution === "1080p" ? "veo_1080p_per_second" : "veo_720p_per_second";
@@ -278,9 +336,72 @@ export function klingV3PricingKey(params: {
 }
 
 /**
+ * Kling v3 Omni (kwaivgi/kling-v3-omni-video) pricing key. Same mode tiers as v3
+ * but different audio surcharges; 4k is flat regardless of audio.
+ */
+export function klingV3OmniPricingKey(params: {
+  resolution: string | null | undefined;
+  generateAudio: boolean;
+}): string {
+  if (params.resolution === "4k") return "kling3omni_4k_per_second";
+  if (params.resolution === "720p") {
+    return params.generateAudio
+      ? "kling3omni_standard_audio_per_second"
+      : "kling3omni_standard_per_second";
+  }
+  return params.generateAudio
+    ? "kling3omni_pro_audio_per_second"
+    : "kling3omni_pro_per_second";
+}
+
+/** Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second rate. */
+export function kling15StandardPricingKey(): string {
+  return "kling15_standard_per_second";
+}
+
+/** Kling v1.5 Pro (kwaivgi/kling-v1.5-pro) — flat per-second rate. */
+export function kling15ProPricingKey(): string {
+  return "kling15_pro_per_second";
+}
+
+/** Kling v1.6 Standard (kwaivgi/kling-v1.6-standard) — flat per-second rate. */
+export function kling16StandardPricingKey(): string {
+  return "kling16_standard_per_second";
+}
+
+/** Kling v1.6 Pro (kwaivgi/kling-v1.6-pro) — flat per-second rate. */
+export function kling16ProPricingKey(): string {
+  return "kling16_pro_per_second";
+}
+
+/** Kling v2.1 (kwaivgi/kling-v2.1) — priced by mode (standard=720p / pro=1080p). */
+export function kling21PricingKey(params: { resolution?: string | null }): string {
+  return params.resolution === "1080p"
+    ? "kling21_pro_per_second"
+    : "kling21_standard_per_second";
+}
+
+/** Kling v2.5 Turbo Pro (kwaivgi/kling-v2.5-turbo-pro) — flat per-second rate. */
+export function kling25TurboProPricingKey(): string {
+  return "kling25turbo_per_second";
+}
+
+/** Kling v2.6 (kwaivgi/kling-v2.6) — priced by generate_audio. */
+export function kling26PricingKey(params: { generateAudio: boolean }): string {
+  return params.generateAudio
+    ? "kling26_with_audio_per_second"
+    : "kling26_without_audio_per_second";
+}
+
+/**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.
  */
 export function klingV3MotionControlPricingKey(mode: string | null | undefined): string {
   return mode === "std" ? "kling3mc_std_per_second" : "kling3mc_pro_per_second";
+}
+
+/** Kling v2.6 Motion Control — same mode pricing as v3 MC ($0.07 std / $0.12 pro per sec). */
+export function kling26MotionControlPricingKey(mode: string | null | undefined): string {
+  return mode === "std" ? "kling26mc_std_per_second" : "kling26mc_pro_per_second";
 }

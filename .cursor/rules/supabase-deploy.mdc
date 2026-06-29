@@ -1,0 +1,19 @@
+---
+description: Deploy Supabase schema changes via MCP (not blocked Management API tokens)
+alwaysApply: true
+---
+
+# Supabase deploy (Krakatoa)
+
+When a task adds or changes files under `supabase/migrations/`, or the user asks to deploy / sync / migrate Supabase:
+
+1. **Use the Supabase MCP server** (`plugin-supabase-supabase`) — do NOT rely on the user running `npm run db:setup` unless they explicitly want local CLI.
+2. **Project ref:** `ybfmllqcvvexldsteuaw` (also in `.cursor/mcp.json`).
+3. **Before applying:** call `list_migrations` with `project_id: ybfmllqcvvexldsteuaw` and compare names to local `supabase/migrations/*.sql` (use the snake_case name from the filename, e.g. `025_seedance2_mini_pricing.sql` → `seedance2_mini_pricing`).
+4. **Apply missing migrations:** call `apply_migration` with the full SQL file contents. Migrations must stay idempotent (`on conflict do nothing`, etc.).
+5. **Verify:** run `execute_sql` to spot-check critical rows/tables when the change is pricing, model_configs, or RLS.
+6. **Report** what was applied vs already present.
+
+`npm run db:setup` often fails with **Management API 403** when `SUPABASE_ACCESS_TOKEN` lacks owner privileges. MCP bypasses that. Only suggest `DATABASE_URL` + `db:setup` if MCP is unavailable.
+
+Never paste or commit secrets from `.env.local`.

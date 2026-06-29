@@ -60,9 +60,22 @@ export type SeedanceResolution = (typeof SEEDANCE_RESOLUTIONS)[number];
 export type VeoResolution = (typeof VEO_RESOLUTIONS)[number];
 
 export const REELS_ENGINES: { id: ReelsEngine; label: string; blurb: string }[] = [
-  { id: "seedance", label: "Seedance", blurb: "Fast multi-scene reels with AI narration" },
-  { id: "veo", label: "Veo", blurb: "Google Veo with native or per-scene audio" },
+  {
+    id: "seedance",
+    label: "Seedance 2 Fast",
+    blurb: "Multi-scene reels with MiniMax narration (bytedance/seedance-2.0-fast)",
+  },
+  {
+    id: "veo",
+    label: "Veo 3.1 Lite",
+    blurb: "Google Veo with native or per-scene audio (google/veo-3.1-lite)",
+  },
 ];
+
+/** Display label for a Reels Creator engine chip / success summary. */
+export function reelsEngineLabel(engine: ReelsEngine): string {
+  return REELS_ENGINES.find((e) => e.id === engine)?.label ?? engine;
+}
 
 // ---------------------------------------------------------------------------
 // Pricing + duration helpers (shared math so the cost label matches the charge).

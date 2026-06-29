@@ -19,7 +19,8 @@ import type { CostUnit, PricingRow } from "@/lib/pricing-math";
  * billing knobs (usd_to_idr=18000, credit_value_idr=200, margin=1.0 → factor 90):
  *   product 1K/2K  0.15 → 14 cr/img    product 4K   0.30 → 27 cr/img
  *   storyboard auto 0.128 → 12 cr/img  seedance 480p 0.07 → 95 cr/15s
- *   seedance 720p  0.15 → 203 cr/15s   veo 720p 0.05 → 68 cr/15s
+ *   seedance 720p  0.15 → 203 cr/15s  seedance2mini 480p 0.04 → 54 cr/15s
+ *   seedance2mini 720p 0.09 → 122 cr/15s   veo 720p 0.05 → 68 cr/15s
  *
  * Client-safe: imports only TYPES from lib/pricing-math.ts (no server modules).
  */
@@ -49,6 +50,33 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   seedance2_480p_video_in_per_second: { providerCostUsd: 0.10, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "480p_video_in" },
   seedance2_720p_video_in_per_second: { providerCostUsd: 0.22, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "720p_video_in" },
   seedance2_1080p_video_in_per_second: { providerCostUsd: 0.55, costUnit: "per_second", pricingGroup: "seedance2", variantKey: "1080p_video_in" },
+  // Seedance 2.0 Mini (bytedance/seedance-2.0-mini) — Storyboard + Text to Video.
+  // non_video_in (no reference video): 480p $0.04/s · 720p $0.09/s
+  // video_in (reference video):         480p $0.05/s · 720p $0.11/s
+  seedance2mini_480p_per_second: { providerCostUsd: 0.04, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "480p" },
+  seedance2mini_720p_per_second: { providerCostUsd: 0.09, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p" },
+  seedance2mini_480p_video_in_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "480p_video_in" },
+  seedance2mini_720p_video_in_per_second: { providerCostUsd: 0.11, costUnit: "per_second", pricingGroup: "seedance2mini", variantKey: "720p_video_in" },
+  // Seedance 1.5 Pro (bytedance/seedance-1.5-pro) — Text to Video. Priced by
+  // resolution × audio (with_audio / without_audio).
+  seedance15_480p_with_audio_per_second: { providerCostUsd: 0.025, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "480p_with_audio" },
+  seedance15_720p_with_audio_per_second: { providerCostUsd: 0.052, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "720p_with_audio" },
+  seedance15_1080p_with_audio_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "1080p_with_audio" },
+  seedance15_480p_without_audio_per_second: { providerCostUsd: 0.013, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "480p_without_audio" },
+  seedance15_720p_without_audio_per_second: { providerCostUsd: 0.026, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "720p_without_audio" },
+  seedance15_1080p_without_audio_per_second: { providerCostUsd: 0.06, costUnit: "per_second", pricingGroup: "seedance15", variantKey: "1080p_without_audio" },
+  // Seedance 1 Pro Fast (bytedance/seedance-1-pro-fast) — Text to Video, no audio.
+  seedance1fast_480p_per_second: { providerCostUsd: 0.015, costUnit: "per_second", pricingGroup: "seedance1fast", variantKey: "480p" },
+  seedance1fast_720p_per_second: { providerCostUsd: 0.025, costUnit: "per_second", pricingGroup: "seedance1fast", variantKey: "720p" },
+  seedance1fast_1080p_per_second: { providerCostUsd: 0.06, costUnit: "per_second", pricingGroup: "seedance1fast", variantKey: "1080p" },
+  // Seedance 1 Pro (bytedance/seedance-1-pro) — Text to Video, no audio.
+  seedance1pro_480p_per_second: { providerCostUsd: 0.03, costUnit: "per_second", pricingGroup: "seedance1pro", variantKey: "480p" },
+  seedance1pro_720p_per_second: { providerCostUsd: 0.06, costUnit: "per_second", pricingGroup: "seedance1pro", variantKey: "720p" },
+  seedance1pro_1080p_per_second: { providerCostUsd: 0.15, costUnit: "per_second", pricingGroup: "seedance1pro", variantKey: "1080p" },
+  // Seedance 1 Lite (bytedance/seedance-1-lite) — Text to Video, no audio.
+  seedance1lite_480p_per_second: { providerCostUsd: 0.018, costUnit: "per_second", pricingGroup: "seedance1lite", variantKey: "480p" },
+  seedance1lite_720p_per_second: { providerCostUsd: 0.036, costUnit: "per_second", pricingGroup: "seedance1lite", variantKey: "720p" },
+  seedance1lite_1080p_per_second: { providerCostUsd: 0.072, costUnit: "per_second", pricingGroup: "seedance1lite", variantKey: "1080p" },
   // Veo (per second).
   veo_720p_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "veo", variantKey: "720p" },
   veo_1080p_per_second: { providerCostUsd: 0.08, costUnit: "per_second", pricingGroup: "veo", variantKey: "1080p" },
@@ -67,10 +95,27 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   kling3_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro" },
   kling3_pro_audio_per_second: { providerCostUsd: 0.336, costUnit: "per_second", pricingGroup: "kling3", variantKey: "pro_audio" },
   kling3_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3", variantKey: "4k" },
+  kling3omni_standard_per_second: { providerCostUsd: 0.168, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "standard" },
+  kling3omni_standard_audio_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "standard_audio" },
+  kling3omni_pro_per_second: { providerCostUsd: 0.224, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "pro" },
+  kling3omni_pro_audio_per_second: { providerCostUsd: 0.28, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "pro_audio" },
+  kling3omni_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3omni", variantKey: "4k" },
+  // Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second, i2v only.
+  kling15_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling15", variantKey: "standard" },
+  kling15_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling15", variantKey: "pro" },
+  kling16_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling16", variantKey: "standard" },
+  kling16_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling16", variantKey: "pro" },
+  kling21_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling21", variantKey: "standard" },
+  kling21_pro_per_second: { providerCostUsd: 0.09, costUnit: "per_second", pricingGroup: "kling21", variantKey: "pro" },
+  kling25turbo_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling25turbo", variantKey: "default" },
+  kling26_without_audio_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling26", variantKey: "without_audio" },
+  kling26_with_audio_per_second: { providerCostUsd: 0.14, costUnit: "per_second", pricingGroup: "kling26", variantKey: "with_audio" },
   // Kling v3 Motion Control (kwaivgi/kling-v3-motion-control). Priced by mode
   // (std=720p / pro=1080p). Output duration follows the reference video.
   kling3mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "std" },
   kling3mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "pro" },
+  kling26mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "std" },
+  kling26mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "pro" },
   // Storyboard image / GPT Image 2 (per image).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },

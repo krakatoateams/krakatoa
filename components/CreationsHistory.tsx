@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ChevronLeft,
@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { CreationHistoryItem, CreationTool } from "@/lib/creations";
+import { getCreationModelLabel } from "@/lib/creation-model-label";
 
 type Props = {
   title?: string;
@@ -39,6 +40,10 @@ type Props = {
   showMeta?: boolean;
   /** When false, the built-in Refresh button is hidden (parent provides its own). */
   showRefresh?: boolean;
+  /** Skip the title/description header row (parent supplies its own section label). */
+  hideHeader?: boolean;
+  /** Override the asset grid layout classes (defaults to 5 columns on lg). */
+  gridClassName?: string;
 };
 
 /** Windowed page numbers with ellipses, e.g. [1, "…", 4, 5, 6, "…", 12]. */
@@ -109,6 +114,43 @@ function downloadFilename(item: CreationHistoryItem, mimeType?: string): string 
   return `${base}-${item.id.slice(0, 8)}.${ext}`;
 }
 
+/** Muted hover preview for library video cards (first frame at rest). */
+function HoverPlayVideo({ src, className }: { src: string; className?: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  const play = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.currentTime = 0;
+    void el.play().catch(() => {});
+  };
+
+  const pause = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.pause();
+    el.currentTime = 0;
+  };
+
+  return (
+    <div
+      className="h-full w-full"
+      onMouseEnter={play}
+      onMouseLeave={pause}
+    >
+      <video
+        ref={ref}
+        src={src}
+        className={className}
+        muted
+        playsInline
+        loop
+        preload="metadata"
+      />
+    </div>
+  );
+}
+
 export default function CreationsHistory({
   title = "Your generations",
   description = "Every successful generation appears here.",
@@ -123,6 +165,8 @@ export default function CreationsHistory({
   showActions = false,
   showMeta = true,
   showRefresh = true,
+  hideHeader = false,
+  gridClassName,
 }: Props) {
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
@@ -477,6 +521,7 @@ export default function CreationsHistory({
     typeof previewMeta.narration === "string" ? previewMeta.narration.trim() : "";
   const hasPreviewDetails =
     !!previewPrompt || previewScenePrompts.length > 0 || !!previewNarration;
+  const previewModelLabel = previewItem ? getCreationModelLabel(previewItem) : null;
 
   const refreshButton = (
     <button
@@ -491,7 +536,7 @@ export default function CreationsHistory({
 
   return (
     <section className={`mt-16 pt-12 border-t border-white/10 ${className}`}>
-      {!enableTabs && (
+      {!enableTabs && !hideHeader && (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -575,7 +620,12 @@ export default function CreationsHistory({
         </div>
       ) : (
         <>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div
+          className={
+            gridClassName ??
+            "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
+          }
+        >
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
@@ -592,12 +642,9 @@ export default function CreationsHistory({
                 }`}
               >
                 {item.mediaType === "video" ? (
-                  <video
+                  <HoverPlayVideo
                     src={item.mediaUrl}
                     className="w-full h-full object-cover"
-                    muted
-                    playsInline
-                    preload="metadata"
                   />
                 ) : (
                   <Image
@@ -979,7 +1026,9 @@ export default function CreationsHistory({
 
             <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
               <p className="text-xs text-gray-400">
-                {new Date(previewItem.createdAt).toLocaleDateString()}
+                {previewItem &&
+                  new Date(previewItem.createdAt).toLocaleDateString()}
+                {previewModelLabel ? ` · ${previewModelLabel}` : ""}
               </p>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {richUI && !isTrashedItem(previewItem) && (

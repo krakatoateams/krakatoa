@@ -65,6 +65,8 @@ export async function saveGeneratedProductPhoto(params: {
   title?: string;
   creationKind?: string;
   characterName?: string;
+  modelTier?: string;
+  modelLabel?: string;
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
   const storagePath = generatedPath(params.userId, params.filename);
 
@@ -89,6 +91,8 @@ export async function saveGeneratedProductPhoto(params: {
     title: params.title,
     creationKind: params.creationKind,
     characterName: params.characterName,
+    modelTier: params.modelTier,
+    modelLabel: params.modelLabel,
   });
 
   return { storagePath, publicUrl, historyItem };

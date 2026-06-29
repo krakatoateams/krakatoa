@@ -76,6 +76,74 @@ export async function insertUserCreation(params: {
   return rowToCreationItem(data as UserCreationRow);
 }
 
+type AssetModelRow = {
+  storage_path: string | null;
+  model: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Join platform `assets` rows (by storage_path) so library items expose the
+ * canonical provider model from `assets.model` — the same field used at billing time.
+ */
+async function enrichCreationsFromAssets(
+  userId: string,
+  items: CreationHistoryItem[]
+): Promise<CreationHistoryItem[]> {
+  if (!items.length) return items;
+
+  const { data: profile, error: profileErr } = await supabaseServer
+    .from("profiles")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (profileErr || !profile?.id) return items;
+
+  const paths = Array.from(
+    new Set(items.map((i) => i.storagePath).filter((p) => p.length > 0))
+  );
+  if (!paths.length) return items;
+
+  const { data: assetRows, error: assetErr } = await supabaseServer
+    .from("assets")
+    .select("storage_path, model, metadata")
+    .eq("profile_id", profile.id)
+    .in("storage_path", paths)
+    .eq("status", "ready")
+    .is("deleted_at", null);
+
+  if (assetErr || !assetRows?.length) return items;
+
+  const byPath = new Map<string, AssetModelRow>();
+  for (const row of assetRows as AssetModelRow[]) {
+    if (row.storage_path && !byPath.has(row.storage_path)) {
+      byPath.set(row.storage_path, row);
+    }
+  }
+
+  return items.map((item) => {
+    const asset = item.storagePath ? byPath.get(item.storagePath) : undefined;
+    if (!asset?.model?.trim()) return item;
+
+    const assetMeta = asset.metadata ?? {};
+    const patch: Record<string, unknown> = {
+      providerModel: asset.model!.trim(),
+    };
+    if (
+      typeof assetMeta.modelTier === "string" &&
+      !item.metadata.modelTier
+    ) {
+      patch.modelTier = assetMeta.modelTier;
+    }
+
+    return {
+      ...item,
+      metadata: { ...item.metadata, ...patch },
+    };
+  });
+}
+
 /** Fetch a single creation owned by the user, or null if not found. Never throws. */
 export async function getUserCreationForUser(
   userId: string,
@@ -169,7 +237,10 @@ export async function listUserCreations(
     throw new Error(error.message);
   }
 
-  return (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? [];
+  return enrichCreationsFromAssets(
+    userId,
+    (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? []
+  );
 }
 
 export type CreationPageFilters = {
@@ -221,7 +292,10 @@ export async function listUserCreationsPage(
     throw new Error(error.message);
   }
 
-  const items = (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? [];
+  const items = await enrichCreationsFromAssets(
+    userId,
+    (data as UserCreationRow[] | null)?.map(rowToCreationItem) ?? []
+  );
   return { items, total: count ?? items.length };
 }
 

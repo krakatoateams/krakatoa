@@ -68,9 +68,18 @@ async function runQuery(sql, label) {
       }
     );
     const body = await res.text();
-    if (!res.ok) throw new Error(`${label} Management API ${res.status}: ${body}`);
-    console.log(`[ok] ${label} (Management API)`);
-    return true;
+    if (res.ok) {
+      console.log(`[ok] ${label} (Management API)`);
+      return true;
+    }
+    // ponytail: 403 = token lacks Management API scope — fall through to Postgres
+    // instead of failing the whole run when DATABASE_URL is available.
+    if (res.status !== 403) {
+      throw new Error(`${label} Management API ${res.status}: ${body}`);
+    }
+    console.warn(
+      `[warn] ${label} Management API 403 (insufficient token privileges) — trying Postgres…`
+    );
   }
 
   const connectionString =

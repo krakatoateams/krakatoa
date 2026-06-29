@@ -35,16 +35,35 @@ import {
   Minus,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
+import MentionTextarea from "@/components/MentionTextarea";
+import PhotoLibraryPicker, {
+  type LibraryImage,
+  type PhotoLibrarySource,
+} from "@/components/PhotoLibraryPicker";
+import type { CreationHistoryItem } from "@/lib/creations";
+import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
+import {
+  isCreditBalanceSufficient,
+  insufficientCreditsTooltip,
+} from "@/lib/credit-ui";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import {
-  VIDEO_MODELS,
+  TEXT_TO_VIDEO_MODELS,
+  IMAGE_TO_VIDEO_MODELS,
+  DEFAULT_VIDEO_MODEL_ID,
+  DEFAULT_IMAGE_TO_VIDEO_MODEL_ID,
   getVideoModel,
   getAllowedDurations,
   validateVideoReferences,
+  STORYBOARD_VIDEO_MODEL_IDS,
+  DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
+  allowsFrameWithReferenceImages,
+  formatVideoModelCreditHint,
   type VideoModelId,
+  type StoryboardVideoModelId,
   type VideoResolution,
   type VideoAspectRatio,
 } from "@/lib/video-models";
@@ -52,6 +71,7 @@ import {
   MOTION_CONTROL_MODELS,
   getMotionControlModel,
   effectiveMotionControlDuration,
+  formatMotionControlModelCreditHint,
   motionControlResolutionLabel,
   type MotionControlModelId,
   type MotionControlMode,
@@ -77,6 +97,8 @@ import {
 import {
   reelsPricingKey,
   reelsTotalDurationSec,
+  reelsEngineLabel,
+  REELS_ENGINES,
   DEFAULT_VOICE_ID,
   type SeedanceResolution,
   type VeoResolution,
@@ -99,9 +121,22 @@ function describeIdempotencyError(
   return null;
 }
 
+async function loadMentionAssetsFromApi(): Promise<MentionAsset[]> {
+  try {
+    const res = await fetch(
+      "/api/creations/history?tool=product_photo,storyboard&mediaType=image&limit=50"
+    );
+    const data = await res.json();
+    return parseMentionAssetsFromHistory((data.items ?? []) as CreationHistoryItem[]);
+  } catch {
+    return [];
+  }
+}
+
 // Creation types in the top-left chip. All four are now wired in-page.
 const CREATION_TYPES = [
   { id: "text2video", label: "Text to Video", available: true },
+  { id: "image2video", label: "Image to Video", available: true },
   { id: "motion_control", label: "Motion Control", available: true },
   { id: "storyboard", label: "Storyboard to Video", available: true },
   { id: "reels-creator", label: "Reels Creator", available: true },
@@ -109,6 +144,7 @@ const CREATION_TYPES = [
 
 type VideoCreationType =
   | "text2video"
+  | "image2video"
   | "motion_control"
   | "storyboard"
   | "reels-creator";
@@ -164,6 +200,58 @@ function Tooltip({ label, children }: { label: string; children: React.ReactNode
       <TooltipBubble label={label} show={show} />
     </div>
   );
+}
+
+const GENERATE_BTN_CLASS =
+  "flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+
+function CreditActionButton({
+  balance,
+  cost,
+  ready,
+  loading,
+  label,
+  type = "submit",
+  onClick,
+  className = GENERATE_BTN_CLASS,
+}: {
+  balance: number | null;
+  cost: number;
+  ready: boolean;
+  loading: boolean;
+  label: string;
+  type?: "submit" | "button";
+  onClick?: () => void;
+  className?: string;
+}) {
+  const canAfford = isCreditBalanceSufficient(balance, cost);
+  const disabled = !ready || !canAfford || loading;
+  const creditHint =
+    ready && !canAfford ? insufficientCreditsTooltip(balance, cost) : null;
+
+  const button = (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={className}
+    >
+      {loading ? (
+        <Loader2 className="h-5 w-5 animate-spin" />
+      ) : (
+        <>
+          <span>{label}</span>
+          <Wand2 className="h-4 w-4" />
+          <span className="text-sm font-extrabold">{cost}</span>
+        </>
+      )}
+    </button>
+  );
+
+  if (creditHint) {
+    return <Tooltip label={creditHint}>{button}</Tooltip>;
+  }
+  return button;
 }
 
 function ChipDropdown({
@@ -241,7 +329,7 @@ function ChipDropdown({
       </button>
 
       {open && (
-        <div className="absolute left-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
           {options.map((opt) => {
             const active = opt.id === activeId;
             return (
@@ -531,9 +619,7 @@ function RefGroup({
   );
 }
 
-// Motion Control "Your character" input. Lets the user either upload an image OR
-// pick a character they previously generated in Photo → Character creation
-// (stored as a product_photo creation with metadata.creationKind === "character").
+// Motion Control "Your character" — upload or pick any saved Photo Studio image.
 function CharacterPicker({
   group,
   source,
@@ -549,168 +635,19 @@ function CharacterPicker({
   onSelect: (c: LibraryCharacter | null) => void;
   disabled?: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [items, setItems] = useState<LibraryCharacter[]>([]);
-  const [loadState, setLoadState] = useState<"idle" | "loading" | "loaded" | "error">(
-    "idle"
-  );
-  // Guards the fetch so it runs exactly once. We intentionally do NOT cancel the
-  // request on cleanup: tying cancellation to a state/dep change here would abort
-  // the in-flight fetch the instant we flip to "loading" and leave it stuck.
-  const startedRef = useRef(false);
-
-  const loadCharacters = useCallback(() => {
-    startedRef.current = true;
-    setLoadState("loading");
-    fetch(
-      "/api/creations/history?tool=product_photo&mediaType=image&kind=character&limit=60"
-    )
-      .then((r) => r.json())
-      .then((d: { items?: { id: string; mediaUrl?: string; title?: string }[] }) => {
-        const list: LibraryCharacter[] = (d.items ?? [])
-          .filter((it) => !!it.mediaUrl)
-          .map((it) => ({ id: it.id, url: it.mediaUrl as string, title: it.title || "Character" }));
-        setItems(list);
-        setLoadState("loaded");
-      })
-      .catch(() => setLoadState("error"));
-  }, []);
-
-  // Lazily load saved characters the first time the user opens the library tab.
-  useEffect(() => {
-    if (source !== "library" || startedRef.current) return;
-    loadCharacters();
-  }, [source, loadCharacters]);
-
-  const uploaded = group.items[0];
-
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-          <span className="text-purple-300">
-            <UserRound className="h-3.5 w-3.5" />
-          </span>
-          Your character
-        </span>
-        <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
-          {([
-            { id: "upload", label: "Upload" },
-            { id: "library", label: "My characters" },
-          ] as const).map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              disabled={disabled}
-              onClick={() => onSourceChange(opt.id)}
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${
-                source === opt.id
-                  ? "bg-purple-500/25 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {source === "upload" ? (
-        <>
-          <div className="flex flex-wrap gap-2">
-            {uploaded ? (
-              <RefTile item={uploaded} onRemove={() => group.remove(uploaded.id)} />
-            ) : (
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => inputRef.current?.click()}
-                className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add</span>
-              </button>
-            )}
-          </div>
-          <p className="mt-2 text-[10px] text-gray-600">
-            A clear image with a visible face and body. JPG/PNG.
-          </p>
-          <input
-            ref={inputRef}
-            type="file"
-            accept={MC_IMAGE_ACCEPT}
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.length) group.add(e.target.files);
-              if (inputRef.current) inputRef.current.value = "";
-            }}
-          />
-        </>
-      ) : loadState === "loading" || loadState === "idle" ? (
-        <div className="flex h-16 items-center gap-2 text-[11px] text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
-          Loading your characters…
-        </div>
-      ) : loadState === "error" ? (
-        <div className="flex h-16 items-center gap-2 text-[11px] text-red-300">
-          <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your characters.
-          <button
-            type="button"
-            onClick={loadCharacters}
-            className="font-semibold text-purple-300 underline-offset-2 hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="flex h-16 flex-col justify-center gap-1 text-[11px] text-gray-500">
-          <span>No saved characters yet.</span>
-          <a
-            href="/tools/photo-v2"
-            className="font-semibold text-purple-300 hover:text-purple-200"
-          >
-            Create one in Photo → Character →
-          </a>
-        </div>
-      ) : (
-        <>
-          <div className="grid max-h-44 grid-cols-3 gap-2 overflow-y-auto pr-1">
-            {items.map((c) => {
-              const active = selected?.id === c.id;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onSelect(active ? null : c)}
-                  title={c.title}
-                  className={`relative aspect-square overflow-hidden rounded-[6px] border transition-colors disabled:opacity-40 ${
-                    active
-                      ? "border-purple-400 ring-2 ring-purple-400/40"
-                      : "border-white/10 hover:border-white/30"
-                  }`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={c.url}
-                    alt={c.title}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  {active && (
-                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-white">
-                      <Check className="h-2.5 w-2.5" />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-[10px] text-gray-600">
-            {selected ? `Selected: ${selected.title}` : "Tap a character to animate."}
-          </p>
-        </>
-      )}
-    </div>
+    <PhotoLibraryPicker
+      label="Your character"
+      icon={<UserRound className="h-3.5 w-3.5" />}
+      accept={MC_IMAGE_ACCEPT}
+      group={group}
+      source={source}
+      onSourceChange={onSourceChange}
+      selected={selected}
+      onSelect={onSelect}
+      disabled={disabled}
+      hint="A clear image with a visible face and body. JPG/PNG."
+    />
   );
 }
 
@@ -730,18 +667,27 @@ function VideoOmniPage() {
       ? "storyboard"
       : typeParam === "motion_control"
         ? "motion_control"
-        : typeParam === "reels-creator"
-          ? "reels-creator"
-          : "text2video";
+        : typeParam === "image2video"
+          ? "image2video"
+          : typeParam === "reels-creator"
+            ? "reels-creator"
+            : "text2video";
   const initialStoryboardId = searchParams.get("storyboardId") || null;
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const { refetch: refetchCredits } = useCreditBalance();
+  const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
+  const [mentions, setMentions] = useState<MentionAsset[]>([]);
+  const { balance, refetch: refetchCredits } = useCreditBalance();
+
+  useEffect(() => {
+    void loadMentionAssetsFromApi().then(setMentionAssets);
+  }, [historyRefreshKey]);
 
   const handleCreationType = (id: string) => {
     if (
       id === "text2video" ||
+      id === "image2video" ||
       id === "motion_control" ||
       id === "storyboard" ||
       id === "reels-creator"
@@ -750,8 +696,10 @@ function VideoOmniPage() {
     }
   };
 
-  const [modelId, setModelId] = useState<VideoModelId>(VIDEO_MODELS[0].id);
+  const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
+  const supportsMentions =
+    model.references.referenceImages > 0 || model.references.firstFrame;
 
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState<number>(model.defaultDuration);
@@ -807,6 +755,7 @@ function VideoOmniPage() {
     if (caps.referenceImages === 0) refImages.reset();
     if (caps.referenceVideos === 0) refVideos.reset();
     if (caps.referenceAudios === 0) refAudios.reset();
+    setMentions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId]);
 
@@ -815,6 +764,34 @@ function VideoOmniPage() {
   const hasRefImages = refImages.items.length > 0;
   const firstFrameReady = firstFrame.done.length > 0;
   const hasRefImageOrVideo = refImages.done.length > 0 || refVideos.done.length > 0;
+  const refImagesBlocked1080p =
+    model.providerFamily === "seedance1lite" && resolution === "1080p";
+  const resolution1080pBlockedByRefs =
+    model.providerFamily === "seedance1lite" && hasRefImages;
+  const refVideoBlocked4k =
+    model.providerFamily === "kling3omni" && resolution === "4k";
+  const audioBlockedByRefVideo =
+    model.providerFamily === "kling3omni" && refVideos.done.length > 0;
+  // Kling v1.6 allows start_image + reference_images together.
+  const blocksFramesWithRefs = !allowsFrameWithReferenceImages(model.providerFamily);
+
+  useEffect(() => {
+    if (resolution1080pBlockedByRefs && resolution === "1080p") {
+      setResolution("720p");
+    }
+  }, [resolution1080pBlockedByRefs, resolution]);
+
+  useEffect(() => {
+    if (refVideoBlocked4k && refVideos.done.length > 0) {
+      refVideos.reset();
+    }
+  }, [refVideoBlocked4k, refVideos]);
+
+  useEffect(() => {
+    if (audioBlockedByRefVideo && generateAudio) {
+      setGenerateAudio(false);
+    }
+  }, [audioBlockedByRefVideo, generateAudio]);
 
   const anyUploading =
     firstFrame.uploading ||
@@ -836,7 +813,10 @@ function VideoOmniPage() {
     referenceVideos: refVideos.done.map((r) => r.url),
     referenceAudios: refAudios.done.map((r) => r.url),
   };
-  const refCheck = validateVideoReferences(model, referenceInputs);
+  const refCheck = validateVideoReferences(model, referenceInputs, {
+    resolution,
+    generateAudio,
+  });
 
   const canGenerate =
     !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
@@ -855,6 +835,7 @@ function VideoOmniPage() {
       resolution,
       aspectRatio,
       generateAudio,
+      referenceCreationIds: mentions.map((m) => m.id),
       references: {
         firstFrame: firstFrame.done[0] ?? null,
         lastFrame: lastFrame.done[0] ?? null,
@@ -915,6 +896,7 @@ function VideoOmniPage() {
       refImages.reset();
       refVideos.reset();
       refAudios.reset();
+      setMentions([]);
     } catch (err: unknown) {
       attempt.settle(false);
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
@@ -983,22 +965,40 @@ function VideoOmniPage() {
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={VIDEO_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+              options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits),
+              }))}
               onSelect={(id) => setModelId(id as VideoModelId)}
               disabled={loading}
             />
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
-            {/* Prompt */}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              maxLength={model.promptMaxChars}
-              placeholder='Describe the scene — camera moves, subject, mood. Use double quotes for spoken dialogue, and [Image1]/[Video1]/[Audio1] to reference attachments.'
-              rows={3}
-              className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
-            />
+            {supportsMentions ? (
+              <MentionTextarea
+                value={prompt}
+                onChange={setPrompt}
+                mentions={mentions}
+                onMentionsChange={setMentions}
+                assets={mentionAssets}
+                maxLength={model.promptMaxChars}
+                placeholder='Describe the scene — camera moves, subject, mood. Type @ to tag a saved image from your library, or attach references below.'
+                rows={3}
+                disabled={loading}
+                className="min-h-[64px] text-base"
+              />
+            ) : (
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                maxLength={model.promptMaxChars}
+                placeholder="Describe the scene — camera moves, subject, mood."
+                rows={3}
+                className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+              />
+            )}
 
             {/* Controls row */}
             <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1018,6 +1018,7 @@ function VideoOmniPage() {
                   onSelect={(id) => setDuration(Number(id))}
                   disabled={loading}
                 />
+                {model.resolutions.length > 1 && (
                 <ChipDropdown
                   square
                   showChevron={false}
@@ -1025,14 +1026,17 @@ function VideoOmniPage() {
                   value={resolution}
                   activeId={resolution}
                   tooltip="Video resolution. Higher resolution is crisper but costs more credits."
-                  options={model.resolutions.map((r) => ({
-                    id: r,
-                    label: r,
-                    hint: `${videoCredits(model.pricingKey({ resolution: r, hasReferenceVideo, generateAudio }), duration)}`,
-                  }))}
+                  options={model.resolutions
+                    .filter((r) => !(resolution1080pBlockedByRefs && r === "1080p"))
+                    .map((r) => ({
+                      id: r,
+                      label: r,
+                      hint: `${videoCredits(model.pricingKey({ resolution: r, hasReferenceVideo, generateAudio }), duration)}`,
+                    }))}
                   onSelect={(id) => setResolution(id as VideoResolution)}
                   disabled={loading}
                 />
+                )}
                 <ChipDropdown
                   square
                   showChevron={false}
@@ -1050,14 +1054,16 @@ function VideoOmniPage() {
                 {model.supportsAudio && (
                   <Tooltip
                     label={
-                      generateAudio
-                        ? "On — the model generates synced audio (dialogue, SFX, music). Click to make it silent."
-                        : "Off — the video is silent. Click to generate audio (may cost more)."
+                      audioBlockedByRefVideo
+                        ? "Audio is unavailable when a reference video is attached."
+                        : generateAudio
+                          ? "On — the model generates synced audio (dialogue, SFX, music). Click to make it silent."
+                          : "Off — the video is silent. Click to generate audio (may cost more)."
                     }
                   >
                     <button
                       type="button"
-                      disabled={loading}
+                      disabled={loading || audioBlockedByRefVideo}
                       onClick={() => setGenerateAudio((v) => !v)}
                       className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
                         generateAudio
@@ -1077,21 +1083,13 @@ function VideoOmniPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={!canGenerate}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {loading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <>
-                      <span>Generate</span>
-                      <Wand2 className="h-4 w-4" />
-                      <span className="text-sm font-extrabold">{videoCost}</span>
-                    </>
-                  )}
-                </button>
+                <CreditActionButton
+                  balance={balance}
+                  cost={videoCost}
+                  ready={canGenerate}
+                  loading={loading}
+                  label="Generate"
+                />
                 {loading && (
                   <button
                     type="button"
@@ -1128,8 +1126,12 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple={false}
                   group={firstFrame}
-                  disabled={loading || hasRefImages}
-                  disabledReason={hasRefImages ? "Remove reference images to use a first frame." : undefined}
+                  disabled={loading || (blocksFramesWithRefs && hasRefImages)}
+                  disabledReason={
+                    blocksFramesWithRefs && hasRefImages
+                      ? "Remove reference images to use a first frame."
+                      : undefined
+                  }
                   hint="Image-to-video starting frame."
                 />
               )}
@@ -1140,9 +1142,9 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple={false}
                   group={lastFrame}
-                  disabled={loading || hasRefImages || !firstFrameReady}
+                  disabled={loading || (blocksFramesWithRefs && hasRefImages) || !firstFrameReady}
                   disabledReason={
-                    hasRefImages
+                    blocksFramesWithRefs && hasRefImages
                       ? "Remove reference images to use a last frame."
                       : !firstFrameReady
                         ? "Add a first frame first."
@@ -1158,9 +1160,19 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple
                   group={refImages}
-                  disabled={loading || hasFrames}
-                  disabledReason={hasFrames ? "Remove first/last frame to use reference images." : undefined}
-                  hint="Character / style / composition. Use [Image1]…"
+                  disabled={loading || (blocksFramesWithRefs && hasFrames) || refImagesBlocked1080p}
+                  disabledReason={
+                    blocksFramesWithRefs && hasFrames
+                      ? "Remove first/last frame to use reference images."
+                      : refImagesBlocked1080p
+                        ? "Reference images are only supported at 480p or 720p."
+                        : undefined
+                  }
+                  hint={
+                    model.providerFamily === "kling3omni"
+                      ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
+                      : "Scene elements (up to 4). Tag with @ or upload."
+                  }
                 />
               )}
               {model.references.referenceVideos > 0 && (
@@ -1168,10 +1180,17 @@ function VideoOmniPage() {
                   icon={<Film className="h-3.5 w-3.5" />}
                   label="Reference videos"
                   accept={VIDEO_ACCEPT}
-                  multiple
+                  multiple={model.references.referenceVideos > 1}
                   group={refVideos}
-                  disabled={loading}
-                  hint="Motion / style transfer. Use [Video1]…"
+                  disabled={loading || refVideoBlocked4k}
+                  disabledReason={
+                    refVideoBlocked4k ? "Reference video isn't supported at 4K." : undefined
+                  }
+                  hint={
+                    model.providerFamily === "kling3omni"
+                      ? "Motion/style reference (1 clip). Use [Video1] or upload."
+                      : "Motion / style transfer. Use [Video1] or upload."
+                  }
                 />
               )}
               {model.references.referenceAudios > 0 && (
@@ -1236,6 +1255,17 @@ function VideoOmniPage() {
           </div>
         )}
 
+        {creationType === "image2video" && (
+          <ImageToVideoComposer
+            mentionAssets={mentionAssets}
+            onSelectCreation={handleCreationType}
+            onGenerated={() => {
+              setHistoryRefreshKey((k) => k + 1);
+              refetchCredits();
+            }}
+          />
+        )}
+
         {creationType === "motion_control" && (
           <MotionControlComposer
             onSelectCreation={handleCreationType}
@@ -1274,6 +1304,7 @@ function VideoOmniPage() {
             description="Every video you create appears here. Click any clip to preview it."
             tools={[
               "video_text2video",
+              "video_image2video",
               "video_motion_control",
               "storyboard_video",
               "reels_seedance",
@@ -1303,6 +1334,437 @@ export default function VideoOmniPageWrapper() {
 
 const MC_IMAGE_ACCEPT = "image/jpeg,image/png";
 const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
+
+// Image to Video — models that require a reference image (Kling v1.5 family).
+function ImageToVideoComposer({
+  mentionAssets,
+  onSelectCreation,
+  onGenerated,
+}: {
+  mentionAssets: MentionAsset[];
+  onSelectCreation: (id: string) => void;
+  onGenerated: () => void;
+}) {
+  const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_IMAGE_TO_VIDEO_MODEL_ID);
+  const model = getVideoModel(modelId);
+
+  const [prompt, setPrompt] = useState("");
+  const [mentions, setMentions] = useState<MentionAsset[]>([]);
+  const [imageSource, setImageSource] = useState<PhotoLibrarySource>("upload");
+  const [libraryImage, setLibraryImage] = useState<LibraryImage | null>(null);
+  const [endImageSource, setEndImageSource] = useState<PhotoLibrarySource>("upload");
+  const [endLibraryImage, setEndLibraryImage] = useState<LibraryImage | null>(null);
+  const [duration, setDuration] = useState<number>(model.defaultDuration);
+  const [resolution, setResolution] = useState(model.defaultResolution);
+  const [aspectRatio, setAspectRatio] = useState(model.defaultAspectRatio);
+
+  useEffect(() => {
+    const m = getVideoModel(modelId);
+    setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
+    setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
+    if (!m.references.lastFrame) setEndLibraryImage(null);
+  }, [modelId]);
+
+  useEffect(() => {
+    const m = getVideoModel(modelId);
+    const allowed = getAllowedDurations(m, resolution);
+    setDuration((d) =>
+      allowed.includes(d)
+        ? d
+        : allowed.includes(m.defaultDuration)
+          ? m.defaultDuration
+          : allowed[allowed.length - 1]
+    );
+  }, [modelId, resolution]);
+
+  const [loading, setLoading] = useState(false);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
+
+  const startImage = useMediaRefs("image", 1);
+  const endImage = useMediaRefs("image", 1);
+  const refImages = useMediaRefs("image", model.references.referenceImages);
+
+  useEffect(() => {
+    if (!getVideoModel(modelId).references.lastFrame) endImage.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
+
+  useEffect(() => {
+    if (getVideoModel(modelId).references.referenceImages === 0) refImages.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
+
+  const pricingKey = model.pricingKey({ resolution });
+  const cost = videoCredits(pricingKey, duration);
+
+  const startUploadedReady = startImage.done.length > 0;
+  const startLibraryReady = libraryImage !== null;
+  const startReady = imageSource === "upload" ? startUploadedReady : startLibraryReady;
+  const endUploadedReady = endImage.done.length > 0;
+  const endLibraryReady = endLibraryImage !== null;
+  const endReady = endImageSource === "upload" ? endUploadedReady : endLibraryReady;
+  const frameReady = model.requiresFirstFrame
+    ? startReady
+    : model.references.lastFrame
+      ? startReady || endReady
+      : startReady;
+
+  // Kling v2.1: end_image requires pro (1080p) mode.
+  useEffect(() => {
+    if (model.providerFamily !== "kling21") return;
+    if (endReady && resolution !== "1080p") setResolution("1080p");
+  }, [model.providerFamily, endReady, resolution]);
+
+  const anyUploading =
+    (imageSource === "upload" && startImage.uploading) ||
+    (model.references.lastFrame && endImageSource === "upload" && endImage.uploading) ||
+    refImages.uploading;
+  const canGenerate = !loading && !anyUploading && frameReady && prompt.trim().length > 0;
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canGenerate) return;
+
+    const body = {
+      modelId,
+      prompt: prompt.trim(),
+      duration,
+      resolution,
+      aspectRatio,
+      generateAudio: false,
+      startImageCreationId:
+        imageSource === "library" && libraryImage ? libraryImage.id : undefined,
+      endImageCreationId:
+        model.references.lastFrame && endImageSource === "library" && endLibraryImage
+          ? endLibraryImage.id
+          : undefined,
+      referenceCreationIds: mentions.map((m) => m.id),
+      references: {
+        firstFrame: imageSource === "upload" ? (startImage.done[0] ?? null) : null,
+        lastFrame:
+          model.references.lastFrame && endImageSource === "upload"
+            ? (endImage.done[0] ?? null)
+            : null,
+        referenceImages: refImages.done.map((r) => ({ url: r.url, path: r.path })),
+        referenceVideos: [],
+        referenceAudios: [],
+      },
+    };
+
+    const attempt = beginSubmit(JSON.stringify(body));
+    if (!attempt) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": attempt.key,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          setError(null);
+          return;
+        }
+        if (response.status === 402) {
+          throw new Error(
+            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
+          );
+        }
+        const idemMsg = describeIdempotencyError(response.status, data);
+        if (idemMsg) throw new Error(idemMsg);
+        throw new Error(data.error || "Generation failed");
+      }
+
+      attempt.settle(true);
+      setResultUrl(data.videoUrl);
+      onGenerated();
+      startImage.reset();
+      endImage.reset();
+      refImages.reset();
+      setLibraryImage(null);
+      setEndLibraryImage(null);
+      setMentions([]);
+    } catch (err: unknown) {
+      attempt.settle(false);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ChipDropdown
+            icon={<Layers className="h-3.5 w-3.5" />}
+            value="Image to Video"
+            activeId="image2video"
+            options={CREATION_TYPES.map((c) => ({
+              id: c.id,
+              label: c.label,
+              hint: c.available ? undefined : "Open",
+            }))}
+            onSelect={onSelectCreation}
+            disabled={loading}
+          />
+          <ChipDropdown
+            icon={<Cpu className="h-3.5 w-3.5" />}
+            value={model.modelLabel}
+            activeId={modelId}
+            options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              id: m.id,
+              label: m.modelLabel,
+              hint: formatVideoModelCreditHint(m, videoCredits),
+            }))}
+            onSelect={(id) => setModelId(id as VideoModelId)}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+          <div
+            className={`grid grid-cols-1 gap-3 ${
+              model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
+            }`}
+          >
+            <PhotoLibraryPicker
+              label={model.requiresFirstFrame ? "Start image" : "Start image (optional)"}
+              icon={<ImageIcon className="h-3.5 w-3.5" />}
+              accept={IMAGE_ACCEPT}
+              group={startImage}
+              source={imageSource}
+              onSourceChange={(s) => {
+                setImageSource(s);
+                if (s === "upload") setLibraryImage(null);
+                else startImage.reset();
+              }}
+              selected={libraryImage}
+              onSelect={setLibraryImage}
+              disabled={loading}
+              hint={
+                model.requiresFirstFrame
+                  ? "Required — pick from your library or upload."
+                  : "Optional if you provide an end image."
+              }
+            />
+              {model.references.lastFrame && (
+              <PhotoLibraryPicker
+                label="End image (optional)"
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+                accept={IMAGE_ACCEPT}
+                group={endImage}
+                source={endImageSource}
+                onSourceChange={(s) => {
+                  setEndImageSource(s);
+                  if (s === "upload") setEndLibraryImage(null);
+                  else endImage.reset();
+                }}
+                selected={endLibraryImage}
+                onSelect={setEndLibraryImage}
+                disabled={loading}
+                hint={
+                  model.providerFamily === "kling21"
+                    ? "Optional — requires Pro (1080p) when set."
+                    : "Optional if you provide a start image — at least one frame is required."
+                }
+              />
+            )}
+            <div
+              className={`flex min-h-[120px] flex-col rounded-2xl border border-dashed border-white/10 bg-black/20 p-3 ${
+                model.references.lastFrame ? "lg:col-span-1" : "sm:col-span-1"
+              }`}
+            >
+              <label className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">
+                Motion prompt
+              </label>
+              <MentionTextarea
+                value={prompt}
+                onChange={setPrompt}
+                mentions={mentions}
+                onMentionsChange={setMentions}
+                assets={mentionAssets}
+                maxLength={model.promptMaxChars}
+                placeholder="Describe how the scene should move. Type @ to reference a saved image."
+                rows={4}
+                disabled={loading}
+                className="min-h-[80px] text-sm"
+              />
+            </div>
+          </div>
+
+          {model.references.referenceImages > 0 && (
+            <div className="mt-3">
+              <RefGroup
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+                label="Scene references"
+                accept={IMAGE_ACCEPT}
+                multiple
+                group={refImages}
+                disabled={loading}
+                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ or upload.`}
+              />
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Clock className="h-3.5 w-3.5" />}
+                value={`${duration}s`}
+                activeId={String(duration)}
+                tooltip="Clip length in seconds."
+                options={getAllowedDurations(model, resolution).map((d) => ({
+                  id: String(d),
+                  label: `${d} seconds`,
+                  hint: `${videoCredits(pricingKey, d)}`,
+                }))}
+                onSelect={(id) => setDuration(Number(id))}
+                disabled={loading}
+              />
+              {model.resolutions.length > 1 && (
+                <ChipDropdown
+                  square
+                  showChevron={false}
+                  icon={<Maximize2 className="h-3.5 w-3.5" />}
+                  value={
+                    model.providerFamily === "kling21"
+                      ? resolution === "1080p"
+                        ? "Pro · 1080p"
+                        : "Standard · 720p"
+                      : resolution
+                  }
+                  activeId={resolution}
+                  tooltip={
+                    model.providerFamily === "kling21"
+                      ? "Standard is 720p; Pro is 1080p. End image requires Pro."
+                      : "Output resolution."
+                  }
+                  options={model.resolutions
+                    .filter((r) => !(model.providerFamily === "kling21" && endReady && r === "720p"))
+                    .map((r) => ({
+                      id: r,
+                      label:
+                        model.providerFamily === "kling21"
+                          ? r === "720p"
+                            ? "Standard · 720p"
+                            : "Pro · 1080p"
+                          : r,
+                      hint: `${videoCredits(model.pricingKey({ resolution: r }), duration)}`,
+                    }))}
+                  onSelect={(id) => setResolution(id as typeof resolution)}
+                  disabled={loading}
+                />
+              )}
+              {model.aspectRatios.length > 1 && (
+              <ChipDropdown
+                square
+                showChevron={false}
+                icon={<Crop className="h-3.5 w-3.5" />}
+                value={ASPECT_RATIO_LABELS[aspectRatio]}
+                activeId={aspectRatio}
+                tooltip="Frame shape."
+                options={model.aspectRatios.map((a) => ({
+                  id: a,
+                  label: ASPECT_RATIO_LABELS[a],
+                }))}
+                onSelect={(id) => setAspectRatio(id as typeof aspectRatio)}
+                disabled={loading}
+              />
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
+              {loading && (
+                <button
+                  type="button"
+                  onClick={() => cancelSubmit()}
+                  disabled={cancelling}
+                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <span>Cancel</span>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!frameReady ? (
+            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+              {model.requiresFirstFrame
+                ? imageSource === "library"
+                  ? "Pick a start image from your library."
+                  : "Upload a start image to animate."
+                : "Add a start image or end image (at least one)."}
+            </p>
+          ) : null}
+        </div>
+      </form>
+
+      {error && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          Generating with {model.modelLabel} — this can take a couple of minutes.
+        </div>
+      )}
+
+      {resultUrl && !loading && (
+        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
+          <video
+            src={resultUrl}
+            controls
+            playsInline
+            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-black"
+          />
+          <div className="min-w-0">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <Check className="h-3 w-3" />
+              Saved to your library
+            </div>
+            <p className="text-sm text-gray-300">
+              {model.modelLabel} · {duration}s · {ASPECT_RATIO_LABELS[aspectRatio]}
+            </p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Motion Control sub-tool. Mirrors the Higgsfield UX: upload your character image
 // + the motion video to copy, optionally write a prompt, pick quality/orientation,
@@ -1341,6 +1803,7 @@ function MotionControlComposer({
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
 
   const charImage = useMediaRefs("image", 1);
   const motionVideo = useMediaRefs("video", 1);
@@ -1484,7 +1947,11 @@ function MotionControlComposer({
             icon={<Cpu className="h-3.5 w-3.5" />}
             value={model.modelLabel}
             activeId={modelId}
-            options={MOTION_CONTROL_MODELS.map((m) => ({ id: m.id, label: m.modelLabel }))}
+            options={MOTION_CONTROL_MODELS.map((m) => ({
+              id: m.id,
+              label: m.modelLabel,
+              hint: formatMotionControlModelCreditHint(m, videoCredits),
+            }))}
             onSelect={(id) => setModelId(id as MotionControlModelId)}
             disabled={loading}
           />
@@ -1616,21 +2083,13 @@ function MotionControlComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Generate</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
               {loading && (
                 <button
                   type="button"
@@ -1717,15 +2176,16 @@ type StoryboardListItem = {
   source: string | null;
 };
 
-function storyboardSeedancePricingKey(resolution: "480p" | "720p"): string {
-  return resolution === "720p" ? "seedance_720p_per_second" : "seedance_480p_per_second";
+function storyboardVideoPricingKey(
+  modelId: StoryboardVideoModelId,
+  resolution: "480p" | "720p"
+): string {
+  return getVideoModel(modelId).pricingKey({ resolution, hasReferenceVideo: false });
 }
 
 // Storyboard to Video sub-tool. The storyboard itself is created in Photo →
 // Storyboard; here the user picks one of their saved storyboards, a resolution,
-// and a model (Seedance 2 Fast for now), then renders the 15s 16:9 clip. The
-// heavy lifting (loading the stored seedance_prompt + reference image) happens
-// server-side in /api/generate-storyboard-video, which only needs storyboardId.
+// and a Seedance model (Mini default; Fast or full Seedance 2 optional), then renders the 15s clip.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 
 // Modal for importing a user's OWN storyboard image (not generated in Krakatoa).
@@ -1741,6 +2201,7 @@ function ImportStoryboardModal({
   onImported: (item: StoryboardListItem) => void;
 }) {
   const { imageCredits } = usePricing();
+  const { balance } = useCreditBalance();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -1951,22 +2412,16 @@ function ImportStoryboardModal({
           <p className="text-[11px] text-gray-500">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
-          <button
+          <CreditActionButton
             type="button"
             onClick={analyze}
-            disabled={!file || busy}
+            balance={balance}
+            cost={cost}
+            ready={!!file}
+            loading={busy}
+            label="Analyze"
             className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <>
-                <span>Analyze</span>
-                <Wand2 className="h-4 w-4" />
-                <span className="text-sm font-extrabold">{cost}</span>
-              </>
-            )}
-          </button>
+          />
         </div>
       </div>
     </div>
@@ -1983,10 +2438,14 @@ function StoryboardToVideoComposer({
   onGenerated: () => void;
 }) {
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
 
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
   const [selectedId, setSelectedId] = useState<string | null>(initialStoryboardId);
+  const [videoModelId, setVideoModelId] = useState<StoryboardVideoModelId>(
+    DEFAULT_STORYBOARD_VIDEO_MODEL_ID
+  );
   const [resolution, setResolution] = useState<"480p" | "720p">("480p");
   // Aspect mirrors the selected storyboard's stored orientation (locked) so the
   // clip never flips. Only editable for legacy storyboards that have no ratio.
@@ -2052,7 +2511,8 @@ function StoryboardToVideoComposer({
     };
   }, []);
 
-  const pricingKey = storyboardSeedancePricingKey(resolution);
+  const storyboardVideoModel = getVideoModel(videoModelId);
+  const pricingKey = storyboardVideoPricingKey(videoModelId, resolution);
   const cost = videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
   const selected = items.find((s) => s.id === selectedId) ?? null;
   const canGenerate = !loading && !!selectedId;
@@ -2098,6 +2558,7 @@ function StoryboardToVideoComposer({
     // drops a same-tick double-click before it can fire a second request.
     const signature = JSON.stringify({
       storyboardId: selectedId,
+      videoModelId,
       resolution,
       aspectRatio: aspect,
       language,
@@ -2118,6 +2579,7 @@ function StoryboardToVideoComposer({
         },
         body: JSON.stringify({
           storyboardId: selectedId,
+          videoModelId,
           resolution,
           aspectRatio: aspect,
           language,
@@ -2182,10 +2644,17 @@ function StoryboardToVideoComposer({
           />
           <ChipDropdown
             icon={<Cpu className="h-3.5 w-3.5" />}
-            value="Seedance 2 Fast"
-            activeId="seedance2_fast"
-            options={[{ id: "seedance2_fast", label: "Seedance 2 Fast" }]}
-            onSelect={() => {}}
+            value={storyboardVideoModel.modelLabel}
+            activeId={videoModelId}
+            options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
+              const m = getVideoModel(id);
+              return {
+                id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              };
+            })}
+            onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
             disabled={loading}
           />
         </div>
@@ -2305,7 +2774,7 @@ function StoryboardToVideoComposer({
                 options={(["480p", "720p"] as const).map((r) => ({
                   id: r,
                   label: r,
-                  hint: `${videoCredits(storyboardSeedancePricingKey(r), STORYBOARD_VIDEO_DURATION_SEC)}`,
+                  hint: `${videoCredits(storyboardVideoPricingKey(videoModelId, r), STORYBOARD_VIDEO_DURATION_SEC)}`,
                 }))}
                 onSelect={(id) => setResolution(id as "480p" | "720p")}
                 disabled={loading}
@@ -2344,21 +2813,13 @@ function StoryboardToVideoComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Create video</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Create video"
+              />
               {loading && (
                 <button
                   type="button"
@@ -2489,7 +2950,7 @@ function StoryboardToVideoComposer({
               Saved to your library
             </div>
             <p className="text-sm text-gray-300">
-              Seedance 2 Fast · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
+              {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
               {selected ? ` · ${selected.theme}` : ""}
             </p>
             <p className="mt-1 text-xs text-gray-500">
@@ -2505,7 +2966,7 @@ function StoryboardToVideoComposer({
 // ---------------------------------------------------------------------------
 // Reels Creator sub-tool. Consolidates the legacy ReelsGen Veo + Seedance page
 // into one composer that POSTs to the unified /api/generate-reels route. Engine
-// (Seedance | Veo) is the "model" chip; Veo adds a Mode chip (Single | Per
+// (Seedance 2 Fast | Veo 3.1 Lite) is the "model" chip; Veo adds a Mode chip (Single | Per
 // scene). Adaptive controls + narrator + caption styler + a live caption preview
 // whose 480x854 math mirrors the ASS MarginV math on the server.
 // ---------------------------------------------------------------------------
@@ -2733,6 +3194,7 @@ function ReelsCreatorComposer({
   onGenerated: () => void;
 }) {
   const { videoCredits } = usePricing();
+  const { balance } = useCreditBalance();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Engine + (Veo-only) mode.
@@ -2887,12 +3349,9 @@ function ReelsCreatorComposer({
           />
           <ChipDropdown
             icon={<Cpu className="h-3.5 w-3.5" />}
-            value={engine === "veo" ? "Veo" : "Seedance"}
+            value={reelsEngineLabel(engine)}
             activeId={engine}
-            options={[
-              { id: "seedance", label: "Seedance" },
-              { id: "veo", label: "Veo" },
-            ]}
+            options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
             onSelect={(id) => setEngine(id as ReelsEngine)}
             disabled={loading}
           />
@@ -3080,21 +3539,13 @@ function ReelsCreatorComposer({
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={!canGenerate}
-                className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>Generate</span>
-                    <Wand2 className="h-4 w-4" />
-                    <span className="text-sm font-extrabold">{cost}</span>
-                  </>
-                )}
-              </button>
+              <CreditActionButton
+                balance={balance}
+                cost={cost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+              />
               {loading && (
                 <button
                   type="button"
@@ -3346,8 +3797,8 @@ function ReelsCreatorComposer({
             </div>
             <p className="text-sm text-gray-300">
               {engine === "veo"
-                ? `Veo · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
-                : `Seedance · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
+                ? `${reelsEngineLabel("veo")} · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
+                : `${reelsEngineLabel("seedance")} · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a
