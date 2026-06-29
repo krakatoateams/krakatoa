@@ -283,6 +283,14 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 5, enabled: true,
     provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "kling15", variant_key: "standard", currency: "USD",
   },
+  kling15_pro_per_second: {
+    pricing_type: "per_second", credit_amount: 10, enabled: true,
+    provider_cost_usd: 0.095, cost_unit: "per_second", pricing_group: "kling15", variant_key: "pro", currency: "USD",
+  },
+  kling16_standard_per_second: {
+    pricing_type: "per_second", credit_amount: 5, enabled: true,
+    provider_cost_usd: 0.05, cost_unit: "per_second", pricing_group: "kling16", variant_key: "standard", currency: "USD",
+  },
   // ---- Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) rows (019).
   // Priced by mode (std=720p / pro=1080p). Duration follows the reference video. ----
   kling3mc_std_per_second: {
@@ -374,7 +382,9 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "reels.video_seedance1_pro_fast": { provider: "replicate", model: "bytedance/seedance-1-pro-fast", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_pro": { provider: "replicate", model: "bytedance/seedance-1-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_lite": { provider: "replicate", model: "bytedance/seedance-1-lite", parameters: {}, enabled: true, is_default: true },
+  "reels.video_kling16_standard": { provider: "replicate", model: "kwaivgi/kling-v1.6-standard", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling15_standard": { provider: "replicate", model: "kwaivgi/kling-v1.5-standard", parameters: {}, enabled: true, is_default: true },
+  "reels.video_kling15_pro": { provider: "replicate", model: "kwaivgi/kling-v1.5-pro", parameters: {}, enabled: true, is_default: true },
   // Legacy single Product Photo model role — disabled/deprecated in migration 011
   // (replaced by the per-tier roles below). Reset keeps it disabled.
   "photo.image": { provider: "replicate", model: "google/nano-banana", parameters: {}, enabled: false, is_default: true },

@@ -97,6 +97,8 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   kling3_4k_per_second: { providerCostUsd: 0.42, costUnit: "per_second", pricingGroup: "kling3", variantKey: "4k" },
   // Kling v1.5 Standard (kwaivgi/kling-v1.5-standard) — flat per-second, i2v only.
   kling15_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling15", variantKey: "standard" },
+  kling15_pro_per_second: { providerCostUsd: 0.095, costUnit: "per_second", pricingGroup: "kling15", variantKey: "pro" },
+  kling16_standard_per_second: { providerCostUsd: 0.05, costUnit: "per_second", pricingGroup: "kling16", variantKey: "standard" },
   // Kling v3 Motion Control (kwaivgi/kling-v3-motion-control). Priced by mode
   // (std=720p / pro=1080p). Output duration follows the reference video.
   kling3mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "std" },

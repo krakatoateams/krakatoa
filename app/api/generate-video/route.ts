@@ -198,6 +198,8 @@ export async function POST(req: Request) {
     const referenceCreationIds = parseCreationIdList(b.referenceCreationIds);
     const startImageCreationId =
       typeof b.startImageCreationId === "string" ? b.startImageCreationId.trim() : "";
+    const endImageCreationId =
+      typeof b.endImageCreationId === "string" ? b.endImageCreationId.trim() : "";
 
     // ---- Validate model + options (all before any job/spend/provider) ----
     if (!modelId || !isValidVideoModelId(modelId)) {
@@ -240,7 +242,7 @@ export async function POST(req: Request) {
     // ---- Parse reference attachments + collect their temp paths for cleanup ----
     const refsRaw = (b.references ?? {}) as Record<string, unknown>;
     let firstFrame = parseRefAttachment(refsRaw.firstFrame);
-    const lastFrame = parseRefAttachment(refsRaw.lastFrame);
+    let lastFrame = parseRefAttachment(refsRaw.lastFrame);
     const referenceImages = parseRefList(refsRaw.referenceImages, model.references.referenceImages);
     const referenceVideos = parseRefList(refsRaw.referenceVideos, model.references.referenceVideos);
     const referenceAudios = parseRefList(refsRaw.referenceAudios, model.references.referenceAudios);
@@ -253,6 +255,16 @@ export async function POST(req: Request) {
       }
       if (!firstFrame) {
         firstFrame = { url: resolved.items[0].url, path: "" };
+      }
+    }
+
+    if (endImageCreationId && userId) {
+      const resolved = await resolveMentionCreations(userId, [endImageCreationId]);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      if (!lastFrame) {
+        lastFrame = { url: resolved.items[0].url, path: "" };
       }
     }
 
@@ -346,6 +358,7 @@ export async function POST(req: Request) {
       referenceAudios: referenceInputs.referenceAudios,
       referenceCreationIds: referenceCreationIds.join(","),
       startImageCreationId,
+      endImageCreationId,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,

@@ -10,6 +10,8 @@ import {
   veo31LitePricingKey,
   klingV3PricingKey,
   kling15StandardPricingKey,
+  kling15ProPricingKey,
+  kling16StandardPricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -37,7 +39,9 @@ export type VideoModelId =
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3"
-  | "kling15_standard";
+  | "kling16_standard"
+  | "kling15_standard"
+  | "kling15_pro";
 
 /** Storyboard to Video — Seedance-family models only. */
 export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast";
@@ -68,7 +72,9 @@ export type VideoProviderFamily =
   | "veo31fast"
   | "veo31lite"
   | "klingv3"
-  | "kling15";
+  | "kling16"
+  | "kling15"
+  | "kling15pro";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -422,6 +428,30 @@ export const VIDEO_MODELS: VideoModel[] = [
       }),
   },
   {
+    id: "kling16_standard",
+    label: "Kling v1.6 Standard",
+    modelLabel: "Kling v1.6 Standard",
+    modelRole: "video_kling16_standard",
+    providerModel: "kwaivgi/kling-v1.6-standard",
+    providerFamily: "kling16",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 4,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling16StandardPricingKey(),
+  },
+  {
     id: "kling15_standard",
     label: "Kling v1.5 Standard",
     modelLabel: "Kling v1.5 Standard",
@@ -447,6 +477,31 @@ export const VIDEO_MODELS: VideoModel[] = [
       referenceAudios: 0,
     },
     pricingKey: () => kling15StandardPricingKey(),
+  },
+  {
+    id: "kling15_pro",
+    label: "Kling v1.5 Pro",
+    modelLabel: "Kling v1.5 Pro",
+    modelRole: "video_kling15_pro",
+    providerModel: "kwaivgi/kling-v1.5-pro",
+    providerFamily: "kling15pro",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    subtools: ["image2video"],
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling15ProPricingKey(),
   },
 ];
 
@@ -584,7 +639,13 @@ export function validateVideoReferences(
     return { ok: false, error: `Up to ${caps.referenceAudios} reference audios are allowed.` };
   }
 
-  if (referenceImages.length > 0 && (firstFrame || lastFrame)) {
+  // Most models forbid reference_images alongside first/last frame; Kling v1.6
+  // Standard allows start_image + reference_images (scene elements) together.
+  if (
+    referenceImages.length > 0 &&
+    (firstFrame || lastFrame) &&
+    model.providerFamily !== "kling16"
+  ) {
     return {
       ok: false,
       error: "Reference images can't be combined with first/last frame images.",
@@ -617,6 +678,10 @@ export function validateVideoReferences(
 
   if (model.requiresFirstFrame && !firstFrame) {
     return { ok: false, error: "This model requires a start image (first frame)." };
+  }
+
+  if (model.providerFamily === "kling15pro" && !firstFrame && !lastFrame) {
+    return { ok: false, error: "This model requires a start image or end image." };
   }
 
   return { ok: true };
@@ -694,6 +759,20 @@ export function buildVideoProviderInput(params: {
       if (refs.lastFrame) input.end_image = refs.lastFrame;
       return input;
     }
+    case "kling16": {
+      // kwaivgi/kling-v1.6-standard: t2v / i2v + up to 4 reference_images (scene
+      // elements). aspect_ratio ignored when start_image is set.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
+      if (referenceImages.length) input.reference_images = referenceImages;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
+      return input;
+    }
     case "kling15": {
       // kwaivgi/kling-v1.5-standard: image-to-video only (start_image required).
       const input: Record<string, unknown> = {
@@ -703,6 +782,19 @@ export function buildVideoProviderInput(params: {
         aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
+      return input;
+    }
+    case "kling15pro": {
+      // kwaivgi/kling-v1.5-pro: start_image and/or end_image required; aspect_ratio
+      // is ignored when start_image is provided.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "seedance15": {

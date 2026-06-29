@@ -709,6 +709,8 @@ function VideoOmniPage() {
     model.providerFamily === "seedance1lite" && resolution === "1080p";
   const resolution1080pBlockedByRefs =
     model.providerFamily === "seedance1lite" && hasRefImages;
+  // Kling v1.6 allows start_image + reference_images together.
+  const blocksFramesWithRefs = model.providerFamily !== "kling16";
 
   useEffect(() => {
     if (resolution1080pBlockedByRefs && resolution === "1080p") {
@@ -1048,8 +1050,12 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple={false}
                   group={firstFrame}
-                  disabled={loading || hasRefImages}
-                  disabledReason={hasRefImages ? "Remove reference images to use a first frame." : undefined}
+                  disabled={loading || (blocksFramesWithRefs && hasRefImages)}
+                  disabledReason={
+                    blocksFramesWithRefs && hasRefImages
+                      ? "Remove reference images to use a first frame."
+                      : undefined
+                  }
                   hint="Image-to-video starting frame."
                 />
               )}
@@ -1060,9 +1066,9 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple={false}
                   group={lastFrame}
-                  disabled={loading || hasRefImages || !firstFrameReady}
+                  disabled={loading || (blocksFramesWithRefs && hasRefImages) || !firstFrameReady}
                   disabledReason={
-                    hasRefImages
+                    blocksFramesWithRefs && hasRefImages
                       ? "Remove reference images to use a last frame."
                       : !firstFrameReady
                         ? "Add a first frame first."
@@ -1078,15 +1084,15 @@ function VideoOmniPage() {
                   accept={IMAGE_ACCEPT}
                   multiple
                   group={refImages}
-                  disabled={loading || hasFrames || refImagesBlocked1080p}
+                  disabled={loading || (blocksFramesWithRefs && hasFrames) || refImagesBlocked1080p}
                   disabledReason={
-                    hasFrames
+                    blocksFramesWithRefs && hasFrames
                       ? "Remove first/last frame to use reference images."
                       : refImagesBlocked1080p
                         ? "Reference images are only supported at 480p or 720p."
                         : undefined
                   }
-                  hint="Character / style / composition (480p–720p only). Tag with @ or upload."
+                  hint="Scene elements (up to 4). Tag with @ or upload."
                 />
               )}
               {model.references.referenceVideos > 0 && (
@@ -1242,8 +1248,7 @@ export default function VideoOmniPageWrapper() {
 const MC_IMAGE_ACCEPT = "image/jpeg,image/png";
 const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 
-// Image to Video — models that require a start image (e.g. Kling v1.5 Standard).
-// Prompt + start image only; no optional reference arrays.
+// Image to Video — models that require a reference image (Kling v1.5 family).
 function ImageToVideoComposer({
   mentionAssets,
   onSelectCreation,
@@ -1260,6 +1265,8 @@ function ImageToVideoComposer({
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   const [imageSource, setImageSource] = useState<PhotoLibrarySource>("upload");
   const [libraryImage, setLibraryImage] = useState<LibraryImage | null>(null);
+  const [endImageSource, setEndImageSource] = useState<PhotoLibrarySource>("upload");
+  const [endLibraryImage, setEndLibraryImage] = useState<LibraryImage | null>(null);
   const [duration, setDuration] = useState<number>(model.defaultDuration);
   const [resolution, setResolution] = useState(model.defaultResolution);
   const [aspectRatio, setAspectRatio] = useState(model.defaultAspectRatio);
@@ -1268,6 +1275,7 @@ function ImageToVideoComposer({
     const m = getVideoModel(modelId);
     setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
     setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
+    if (!m.references.lastFrame) setEndLibraryImage(null);
   }, [modelId]);
 
   useEffect(() => {
@@ -1289,14 +1297,31 @@ function ImageToVideoComposer({
   const { videoCredits } = usePricing();
 
   const startImage = useMediaRefs("image", 1);
+  const endImage = useMediaRefs("image", 1);
+
+  useEffect(() => {
+    if (!getVideoModel(modelId).references.lastFrame) endImage.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
+
   const pricingKey = model.pricingKey({ resolution });
   const cost = videoCredits(pricingKey, duration);
 
-  const uploadedReady = startImage.done.length > 0;
-  const libraryReady = libraryImage !== null;
-  const imageReady = imageSource === "upload" ? uploadedReady : libraryReady;
-  const anyUploading = imageSource === "upload" && startImage.uploading;
-  const canGenerate = !loading && !anyUploading && imageReady && prompt.trim().length > 0;
+  const startUploadedReady = startImage.done.length > 0;
+  const startLibraryReady = libraryImage !== null;
+  const startReady = imageSource === "upload" ? startUploadedReady : startLibraryReady;
+  const endUploadedReady = endImage.done.length > 0;
+  const endLibraryReady = endLibraryImage !== null;
+  const endReady = endImageSource === "upload" ? endUploadedReady : endLibraryReady;
+  const frameReady = model.requiresFirstFrame
+    ? startReady
+    : model.references.lastFrame
+      ? startReady || endReady
+      : startReady;
+  const anyUploading =
+    (imageSource === "upload" && startImage.uploading) ||
+    (model.references.lastFrame && endImageSource === "upload" && endImage.uploading);
+  const canGenerate = !loading && !anyUploading && frameReady && prompt.trim().length > 0;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1311,10 +1336,17 @@ function ImageToVideoComposer({
       generateAudio: false,
       startImageCreationId:
         imageSource === "library" && libraryImage ? libraryImage.id : undefined,
+      endImageCreationId:
+        model.references.lastFrame && endImageSource === "library" && endLibraryImage
+          ? endLibraryImage.id
+          : undefined,
       referenceCreationIds: mentions.map((m) => m.id),
       references: {
         firstFrame: imageSource === "upload" ? (startImage.done[0] ?? null) : null,
-        lastFrame: null,
+        lastFrame:
+          model.references.lastFrame && endImageSource === "upload"
+            ? (endImage.done[0] ?? null)
+            : null,
         referenceImages: [],
         referenceVideos: [],
         referenceAudios: [],
@@ -1358,7 +1390,9 @@ function ImageToVideoComposer({
       setResultUrl(data.videoUrl);
       onGenerated();
       startImage.reset();
+      endImage.reset();
       setLibraryImage(null);
+      setEndLibraryImage(null);
       setMentions([]);
     } catch (err: unknown) {
       attempt.settle(false);
@@ -1395,9 +1429,13 @@ function ImageToVideoComposer({
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div
+            className={`grid grid-cols-1 gap-3 ${
+              model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
+            }`}
+          >
             <PhotoLibraryPicker
-              label="Start image"
+              label={model.requiresFirstFrame ? "Start image" : "Start image (optional)"}
               icon={<ImageIcon className="h-3.5 w-3.5" />}
               accept={IMAGE_ACCEPT}
               group={startImage}
@@ -1410,9 +1448,35 @@ function ImageToVideoComposer({
               selected={libraryImage}
               onSelect={setLibraryImage}
               disabled={loading}
-              hint="Required — pick from your library or upload a new image."
+              hint={
+                model.requiresFirstFrame
+                  ? "Required — pick from your library or upload."
+                  : "Optional if you provide an end image."
+              }
             />
-            <div className="flex min-h-[120px] flex-col rounded-2xl border border-dashed border-white/10 bg-black/20 p-3 sm:col-span-1">
+            {model.references.lastFrame && (
+              <PhotoLibraryPicker
+                label="End image (optional)"
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+                accept={IMAGE_ACCEPT}
+                group={endImage}
+                source={endImageSource}
+                onSourceChange={(s) => {
+                  setEndImageSource(s);
+                  if (s === "upload") setEndLibraryImage(null);
+                  else endImage.reset();
+                }}
+                selected={endLibraryImage}
+                onSelect={setEndLibraryImage}
+                disabled={loading}
+                hint="Optional if you provide a start image — at least one frame is required."
+              />
+            )}
+            <div
+              className={`flex min-h-[120px] flex-col rounded-2xl border border-dashed border-white/10 bg-black/20 p-3 ${
+                model.references.lastFrame ? "lg:col-span-1" : "sm:col-span-1"
+              }`}
+            >
               <label className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">
                 Motion prompt
               </label>
@@ -1517,11 +1581,13 @@ function ImageToVideoComposer({
             </div>
           </div>
 
-          {!imageReady ? (
+          {!frameReady ? (
             <p className="mt-3 pl-1 text-xs text-amber-300/80">
-              {imageSource === "library"
-                ? "Pick a start image from your library."
-                : "Upload a start image to animate."}
+              {model.requiresFirstFrame
+                ? imageSource === "library"
+                  ? "Pick a start image from your library."
+                  : "Upload a start image to animate."
+                : "Add a start image or end image (at least one)."}
             </p>
           ) : null}
         </div>
