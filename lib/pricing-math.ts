@@ -374,3 +374,8 @@ export function kling21PricingKey(params: { resolution?: string | null }): strin
 export function klingV3MotionControlPricingKey(mode: string | null | undefined): string {
   return mode === "std" ? "kling3mc_std_per_second" : "kling3mc_pro_per_second";
 }
+
+/** Kling v2.6 Motion Control — same mode pricing as v3 MC ($0.07 std / $0.12 pro per sec). */
+export function kling26MotionControlPricingKey(mode: string | null | undefined): string {
+  return mode === "std" ? "kling26mc_std_per_second" : "kling26mc_pro_per_second";
+}

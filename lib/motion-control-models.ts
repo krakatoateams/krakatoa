@@ -1,4 +1,4 @@
-import { klingV3MotionControlPricingKey } from "@/lib/pricing-math";
+import { klingV3MotionControlPricingKey, kling26MotionControlPricingKey } from "@/lib/pricing-math";
 
 /**
  * Motion Control model registry (Text to Video → Motion Control sub-tool).
@@ -12,7 +12,7 @@ import { klingV3MotionControlPricingKey } from "@/lib/pricing-math";
  * Starter scope: Kling v3 Motion Control (kwaivgi/kling-v3-motion-control).
  */
 
-export type MotionControlModelId = "kling_v3_motion";
+export type MotionControlModelId = "kling_v3_motion" | "kling26_motion";
 
 /** Provider quality mode. std = 720p (cheaper), pro = 1080p. */
 export type MotionControlMode = "std" | "pro";
@@ -60,6 +60,21 @@ export const MOTION_CONTROL_MODELS: MotionControlModel[] = [
     maxDurationForOrientation: (orientation) => (orientation === "video" ? 30 : 10),
     promptMaxChars: 2500,
     pricingKey: (mode) => klingV3MotionControlPricingKey(mode),
+  },
+  {
+    id: "kling26_motion",
+    label: "Kling v2.6 Motion Control",
+    modelLabel: "Kling v2.6 Motion Control",
+    modelRole: "video_kling26_motion",
+    providerModel: "kwaivgi/kling-v2.6-motion-control",
+    modes: ["std", "pro"],
+    defaultMode: "std",
+    defaultKeepOriginalSound: true,
+    defaultOrientation: "image",
+    minDurationSec: 3,
+    maxDurationForOrientation: (orientation) => (orientation === "video" ? 30 : 10),
+    promptMaxChars: 2500,
+    pricingKey: (mode) => kling26MotionControlPricingKey(mode),
   },
 ];
 
@@ -110,7 +125,7 @@ export function effectiveMotionControlDuration(params: {
   return Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
 }
 
-/** Build the Replicate input for kwaivgi/kling-v3-motion-control. */
+/** Build the Replicate input for Kling Motion Control (v2.6 / v3 — same shape). */
 export function buildMotionControlProviderInput(params: {
   prompt: string;
   mode: MotionControlMode;

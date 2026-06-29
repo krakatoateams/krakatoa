@@ -107,6 +107,8 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // (std=720p / pro=1080p). Output duration follows the reference video.
   kling3mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "std" },
   kling3mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "pro" },
+  kling26mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "std" },
+  kling26mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "pro" },
   // Storyboard image / GPT Image 2 (per image).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },
