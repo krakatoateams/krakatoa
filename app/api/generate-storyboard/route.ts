@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
-import { insertUserCreation } from "@/lib/creations-db";
+import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -49,6 +49,9 @@ import {
 } from "@/lib/storyboard-style";
 
 export const maxDuration = 300;
+
+// Max @-mentioned assets (saved characters / storyboards) used as references.
+const MAX_MENTIONS = 8;
 
 /*
   Supabase — add storyboard style column (run once in SQL editor):
@@ -281,6 +284,44 @@ export async function POST(req: Request) {
       );
     }
 
+    // @-mentions: tagged saved characters / storyboards. Resolve each owner-scoped
+    // to its image URL (passed to the image model as a reference) and remember its
+    // name + kind so the prompt can name what each reference depicts. Validated
+    // BEFORE any spend so a bad mention never charges credits.
+    const referenceCreationIds: string[] = Array.isArray(body.referenceCreationIds)
+      ? body.referenceCreationIds
+          .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
+          .filter(Boolean)
+          .slice(0, MAX_MENTIONS)
+      : [];
+    const mentionReferenceUrls: string[] = [];
+    const mentionRefs: { name: string; kind: "character" | "storyboard" | "image" }[] = [];
+    if (referenceCreationIds.length && userId) {
+      for (const mentionId of referenceCreationIds) {
+        const creation = await getUserCreationForUser(userId, mentionId);
+        if (!creation) {
+          return NextResponse.json(
+            { error: "A mentioned asset could not be found." },
+            { status: 400 }
+          );
+        }
+        mentionReferenceUrls.push(creation.mediaUrl);
+        const metaName =
+          typeof creation.metadata?.characterName === "string"
+            ? creation.metadata.characterName.trim()
+            : "";
+        const kind: "character" | "storyboard" | "image" =
+          creation.metadata?.creationKind === "character"
+            ? "character"
+            : creation.tool === "storyboard"
+              ? "storyboard"
+              : "image";
+        const fallbackName =
+          kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
+        mentionRefs.push({ name: metaName || creation.title || fallbackName, kind });
+      }
+    }
+
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
         { error: "REPLICATE_API_TOKEN is not configured." },
@@ -311,7 +352,13 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const requestHash = computeRequestHash({ theme, storyboardStyle, aspectRatio, language });
+    const requestHash = computeRequestHash({
+      theme,
+      storyboardStyle,
+      aspectRatio,
+      language,
+      mentionRefs: referenceCreationIds.join(","),
+    });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
       idempotencyKey: idemKey,
@@ -487,12 +534,19 @@ export async function POST(req: Request) {
     // chosen ratio even if it relied solely on seedance_prompt.
     seedancePrompt = `${storyboardVideoAspectDirective(aspectRatio)}\n\n${seedancePrompt}`;
 
-    const imagePrompt = buildStoryboardImagePrompt(
+    let imagePrompt = buildStoryboardImagePrompt(
       theme,
       scenes,
       styleInstruction,
       aspectDirective
     );
+    // @-mention guidance: tell the model the provided reference images depict the
+    // named subjects so the storyboard panels feature them consistently.
+    if (mentionRefs.length) {
+      const list = mentionRefs.map((r) => `@${r.name} (${r.kind})`).join(", ");
+      const many = mentionRefs.length > 1;
+      imagePrompt += `\n\nThe theme references ${list}; matching reference image${many ? "s are" : " is"} provided. Use ${many ? "them" : "it"} as the visual reference for ${many ? "those subjects" : "that subject"} across the panels, preserving appearance and identity.`;
+    }
 
     await beginStep("image_generation", "GPT Image storyboard sheet");
     console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
@@ -508,6 +562,8 @@ export async function POST(req: Request) {
           quality: "auto",
           background: "opaque",
           moderation: "auto",
+          // gpt-image-2 reference images for @-mentioned characters / storyboards.
+          ...(mentionReferenceUrls.length ? { input_images: mentionReferenceUrls } : {}),
         },
       }
     );
