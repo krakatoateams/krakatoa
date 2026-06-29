@@ -13,6 +13,7 @@ import {
   kling15ProPricingKey,
   kling16StandardPricingKey,
   kling16ProPricingKey,
+  kling20PricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -40,6 +41,7 @@ export type VideoModelId =
   | "veo31_fast"
   | "veo31_lite"
   | "kling_v3"
+  | "kling20"
   | "kling16_standard"
   | "kling16_pro"
   | "kling15_standard"
@@ -74,6 +76,7 @@ export type VideoProviderFamily =
   | "veo31fast"
   | "veo31lite"
   | "klingv3"
+  | "kling20"
   | "kling16"
   | "kling16pro"
   | "kling15"
@@ -429,6 +432,30 @@ export const VIDEO_MODELS: VideoModel[] = [
         resolution: ctx.resolution,
         generateAudio: ctx.generateAudio ?? false,
       }),
+  },
+  {
+    id: "kling20",
+    label: "Kling v2.0",
+    modelLabel: "Kling v2.0",
+    modelRole: "video_kling20",
+    providerModel: "kwaivgi/kling-v2.0",
+    providerFamily: "kling20",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling20PricingKey(),
   },
   {
     id: "kling16_standard",
@@ -803,6 +830,18 @@ export function buildVideoProviderInput(params: {
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      return input;
+    }
+    case "kling20": {
+      // kwaivgi/kling-v2.0: t2v / optional i2v via start_image. aspect_ratio
+      // ignored when start_image is set.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling16": {
