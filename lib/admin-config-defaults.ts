@@ -307,6 +307,10 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_second", credit_amount: 9, enabled: true,
     provider_cost_usd: 0.09, cost_unit: "per_second", pricing_group: "kling21", variant_key: "pro", currency: "USD",
   },
+  kling25turbo_per_second: {
+    pricing_type: "per_second", credit_amount: 7, enabled: true,
+    provider_cost_usd: 0.07, cost_unit: "per_second", pricing_group: "kling25turbo", variant_key: "default", currency: "USD",
+  },
   // ---- Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) rows (019).
   // Priced by mode (std=720p / pro=1080p). Duration follows the reference video. ----
   kling3mc_std_per_second: {
@@ -407,6 +411,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "reels.video_seedance1_pro": { provider: "replicate", model: "bytedance/seedance-1-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance1_lite": { provider: "replicate", model: "bytedance/seedance-1-lite", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling21": { provider: "replicate", model: "kwaivgi/kling-v2.1", parameters: {}, enabled: true, is_default: true },
+  "reels.video_kling25_turbo_pro": { provider: "replicate", model: "kwaivgi/kling-v2.5-turbo-pro", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling26_motion": { provider: "replicate", model: "kwaivgi/kling-v2.6-motion-control", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling20": { provider: "replicate", model: "kwaivgi/kling-v2.0", parameters: {}, enabled: true, is_default: true },
   "reels.video_kling16_pro": { provider: "replicate", model: "kwaivgi/kling-v1.6-pro", parameters: {}, enabled: true, is_default: true },

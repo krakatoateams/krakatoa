@@ -15,6 +15,7 @@ import {
   kling16ProPricingKey,
   kling20PricingKey,
   kling21PricingKey,
+  kling25TurboProPricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -44,6 +45,7 @@ export type VideoModelId =
   | "kling_v3"
   | "kling20"
   | "kling21"
+  | "kling25_turbo_pro"
   | "kling16_standard"
   | "kling16_pro"
   | "kling15_standard"
@@ -80,6 +82,7 @@ export type VideoProviderFamily =
   | "klingv3"
   | "kling20"
   | "kling21"
+  | "kling25turbo"
   | "kling16"
   | "kling16pro"
   | "kling15"
@@ -537,6 +540,30 @@ export const VIDEO_MODELS: VideoModel[] = [
     pricingKey: (ctx) => kling21PricingKey({ resolution: ctx.resolution }),
   },
   {
+    id: "kling25_turbo_pro",
+    label: "Kling v2.5 Turbo Pro",
+    modelLabel: "Kling v2.5 Turbo Pro",
+    modelRole: "video_kling25_turbo_pro",
+    providerModel: "kwaivgi/kling-v2.5-turbo-pro",
+    providerFamily: "kling25turbo",
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ["720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1"],
+    defaultAspectRatio: "9:16",
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    references: {
+      firstFrame: true,
+      lastFrame: true,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: () => kling25TurboProPricingKey(),
+  },
+  {
     id: "kling15_standard",
     label: "Kling v1.5 Standard",
     modelLabel: "Kling v1.5 Standard",
@@ -895,6 +922,19 @@ export function buildVideoProviderInput(params: {
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
+      return input;
+    }
+    case "kling25turbo": {
+      // kwaivgi/kling-v2.5-turbo-pro: t2v / optional i2v via start_image + end_image.
+      // aspect_ratio ignored when start_image is set.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+      };
+      if (negativePrompt) input.negative_prompt = negativePrompt;
+      if (refs.firstFrame) input.start_image = refs.firstFrame;
+      if (refs.lastFrame) input.end_image = refs.lastFrame;
+      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling16": {

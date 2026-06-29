@@ -367,6 +367,11 @@ export function kling21PricingKey(params: { resolution?: string | null }): strin
     : "kling21_standard_per_second";
 }
 
+/** Kling v2.5 Turbo Pro (kwaivgi/kling-v2.5-turbo-pro) — flat per-second rate. */
+export function kling25TurboProPricingKey(): string {
+  return "kling25turbo_per_second";
+}
+
 /**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.
