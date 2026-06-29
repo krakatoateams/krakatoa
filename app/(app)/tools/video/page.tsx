@@ -80,6 +80,8 @@ import {
 import {
   reelsPricingKey,
   reelsTotalDurationSec,
+  reelsEngineLabel,
+  REELS_ENGINES,
   DEFAULT_VOICE_ID,
   type SeedanceResolution,
   type VeoResolution,
@@ -2522,7 +2524,7 @@ function StoryboardToVideoComposer({
 // ---------------------------------------------------------------------------
 // Reels Creator sub-tool. Consolidates the legacy ReelsGen Veo + Seedance page
 // into one composer that POSTs to the unified /api/generate-reels route. Engine
-// (Seedance | Veo) is the "model" chip; Veo adds a Mode chip (Single | Per
+// (Seedance 2 Fast | Veo 3.1 Lite) is the "model" chip; Veo adds a Mode chip (Single | Per
 // scene). Adaptive controls + narrator + caption styler + a live caption preview
 // whose 480x854 math mirrors the ASS MarginV math on the server.
 // ---------------------------------------------------------------------------
@@ -2904,12 +2906,9 @@ function ReelsCreatorComposer({
           />
           <ChipDropdown
             icon={<Cpu className="h-3.5 w-3.5" />}
-            value={engine === "veo" ? "Veo" : "Seedance"}
+            value={reelsEngineLabel(engine)}
             activeId={engine}
-            options={[
-              { id: "seedance", label: "Seedance" },
-              { id: "veo", label: "Veo" },
-            ]}
+            options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
             onSelect={(id) => setEngine(id as ReelsEngine)}
             disabled={loading}
           />
@@ -3363,8 +3362,8 @@ function ReelsCreatorComposer({
             </div>
             <p className="text-sm text-gray-300">
               {engine === "veo"
-                ? `Veo · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
-                : `Seedance · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
+                ? `${reelsEngineLabel("veo")} · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
+                : `${reelsEngineLabel("seedance")} · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a

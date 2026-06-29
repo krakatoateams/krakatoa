@@ -1,7 +1,7 @@
 export const CREATION_TOOLS = {
   product_photo: { label: "Product Photo", mediaType: "image" as const },
-  reels_seedance: { label: "Reels (Seedance)", mediaType: "video" as const },
-  reels_veo: { label: "Reels (Veo)", mediaType: "video" as const },
+  reels_seedance: { label: "Reels (Seedance 2 Fast)", mediaType: "video" as const },
+  reels_veo: { label: "Reels (Veo 3.1 Lite)", mediaType: "video" as const },
   storyboard: { label: "Storyboard", mediaType: "image" as const },
   storyboard_video: { label: "Storyboard Video", mediaType: "video" as const },
   video_text2video: { label: "Text to Video", mediaType: "video" as const },
