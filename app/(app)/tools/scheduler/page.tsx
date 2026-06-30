@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { derivePostDisplayStatus } from "@/lib/post-status";
+import { suggestFormat, SHORT_MAX_SECONDS } from "@/lib/video-format";
 import CreationsHistory from "@/components/CreationsHistory";
 import {
   Upload,
@@ -126,22 +127,6 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// YouTube Shorts cap (current limit is 3 minutes).
-const SHORT_MAX_SECONDS = 180;
-
-// Auto-suggest the publish format from metadata: a vertical clip no longer than
-// the Shorts cap suggests "short"; landscape OR longer suggests "video".
-// Unknown aspect falls back to duration alone (so a short, dimensionless clip
-// still suggests "short").
-function suggestFormat(
-  durationSec: number | null,
-  aspect: { w: number; h: number } | null,
-): VideoFormat {
-  const isPortrait = aspect ? aspect.h > aspect.w : true;
-  const withinShort = durationSec === null || durationSec <= SHORT_MAX_SECONDS;
-  return isPortrait && withinShort ? "short" : "video";
 }
 
 // Ensure a Short's description carries #Shorts (case-insensitive), appending it
@@ -1483,15 +1468,15 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
 
 // ─── Deep-link intake ─────────────────────────────────────────────────────────
 
-// Reads a `?assetUrl=&title=` hand-off (e.g. from ReelsGen's "Schedule to
-// YouTube") and applies it exactly once. Isolated in its own component so the
-// `useSearchParams()` call can sit under a <Suspense> boundary as App Router
-// requires. The useRef guard makes it StrictMode-safe (effects double-invoke in
-// dev) and immune to re-renders.
+// Reads a `?assetUrl=&title=&format=` hand-off (e.g. from video generation
+// tabs' "Schedule to YouTube") and applies it exactly once. Isolated in its
+// own component so the `useSearchParams()` call can sit under a <Suspense>
+// boundary as App Router requires. The useRef guard makes it StrictMode-safe
+// (effects double-invoke in dev) and immune to re-renders.
 function DeepLinkIntake({
   onAsset,
 }: {
-  onAsset: (assetUrl: string, title: string | null) => void;
+  onAsset: (assetUrl: string, title: string | null, format: string | null) => void;
 }) {
   const searchParams = useSearchParams();
   const consumed = useRef(false);
@@ -1501,7 +1486,7 @@ function DeepLinkIntake({
     const assetUrl = searchParams.get("assetUrl");
     if (!assetUrl) return;
     consumed.current = true;
-    onAsset(assetUrl, searchParams.get("title"));
+    onAsset(assetUrl, searchParams.get("title"), searchParams.get("format"));
   }, [searchParams, onAsset]);
 
   return null;
@@ -1797,19 +1782,30 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
-  // Deep-link hand-off (e.g. ReelsGen → "Schedule to YouTube"). Reuses the
-  // asset intake above, then pre-fills the title on the card that now holds the
-  // asset (matched by videoUrl — the prior setItems updates are already queued,
-  // so this functional update sees the just-added/filled item). Finally strips
-  // the query params so a refresh doesn't re-trigger and the URL stays clean.
+  // Deep-link hand-off (e.g. video generation tabs → "Schedule to YouTube").
+  // Reuses the asset intake above, then pre-fills the title and (optionally)
+  // the publish format on the card that now holds the asset (matched by
+  // videoUrl — the prior setItems updates are already queued, so this
+  // functional update sees the just-added/filled item). When a valid format
+  // is provided it is locked (formatTouched: true) so the post-load
+  // auto-suggest doesn't override it. Finally strips the query params so a
+  // refresh doesn't re-trigger and the URL stays clean.
   const handleDeepLinkAsset = useCallback(
-    (assetUrl: string, title: string | null) => {
+    (assetUrl: string, title: string | null, format: string | null) => {
       handleAssetSelected(assetUrl);
-      if (title && title.trim()) {
+      const validFormat: VideoFormat | null =
+        format === "short" || format === "video" ? format : null;
+      if (title?.trim() || validFormat) {
         setItems((prev) => {
           const idx = prev.findIndex((i) => i.videoUrl === assetUrl);
           if (idx === -1) return prev;
-          return prev.map((i, k) => (k === idx ? { ...i, title: title.trim() } : i));
+          return prev.map((i, k) => {
+            if (k !== idx) return i;
+            const patch: Partial<VideoItem> = {};
+            if (title?.trim()) patch.title = title.trim();
+            if (validFormat) { patch.format = validFormat; patch.formatTouched = true; }
+            return { ...i, ...patch };
+          });
         });
       }
       router.replace("/tools/scheduler");
