@@ -94,6 +94,7 @@ import {
   type StoryboardStyleKey,
   SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
 } from "@/lib/storyboard-style";
+import { formatFromAspectRatioString } from "@/lib/video-format";
 import {
   reelsPricingKey,
   reelsTotalDurationSec,
@@ -1251,6 +1252,28 @@ function VideoOmniPage() {
               <p className="mt-1 text-xs text-gray-500">
                 Find it in your history below, or generate another.
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a
+                  href={resultUrl}
+                  download
+                  className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+                <a
+                  href={(() => {
+                    const fmt = formatFromAspectRatioString(aspectRatio, duration);
+                    return `/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                      prompt.trim() ? `&title=${encodeURIComponent(prompt.trim())}` : ""
+                    }${fmt ? `&format=${fmt}` : ""}`;
+                  })()}
+                  className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Schedule to YouTube
+                </a>
+              </div>
             </div>
           </div>
         )}
@@ -1759,6 +1782,28 @@ function ImageToVideoComposer({
             <p className="text-sm text-gray-300">
               {model.modelLabel} · {duration}s · {ASPECT_RATIO_LABELS[aspectRatio]}
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href={resultUrl}
+                download
+                className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </a>
+              <a
+                href={(() => {
+                  const fmt = formatFromAspectRatioString(aspectRatio, duration);
+                  return `/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                    prompt.trim() ? `&title=${encodeURIComponent(prompt.trim())}` : ""
+                  }${fmt ? `&format=${fmt}` : ""}`;
+                })()}
+                className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+              >
+                <CalendarClock className="h-4 w-4" />
+                Schedule to YouTube
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -2151,6 +2196,25 @@ function MotionControlComposer({
             <p className="mt-1 text-xs text-gray-500">
               Find it in your history below, or generate another.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href={resultUrl}
+                download
+                className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </a>
+              <a
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                  prompt.trim() ? `&title=${encodeURIComponent(prompt.trim())}` : ""
+                }`}
+                className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+              >
+                <CalendarClock className="h-4 w-4" />
+                Schedule to YouTube
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -2956,6 +3020,25 @@ function StoryboardToVideoComposer({
             <p className="mt-1 text-xs text-gray-500">
               Find it in your history below, or render another resolution.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href={resultUrl}
+                download
+                className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </a>
+              <a
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                  selected?.theme ? `&title=${encodeURIComponent(selected.theme)}` : ""
+                }&format=${formatFromAspectRatioString(aspect, 15) ?? "video"}`}
+                className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+              >
+                <CalendarClock className="h-4 w-4" />
+                Schedule to YouTube
+              </a>
+            </div>
           </div>
         </div>
       )}
