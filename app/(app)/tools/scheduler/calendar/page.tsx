@@ -24,7 +24,7 @@ interface Post {
   id: string;
   user_id: string;
   platform: string;
-  video_url: string;
+  video_url: string | null;
   youtube_video_id?: string | null;
   title: string;
   description: string;
@@ -496,15 +496,17 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   View on YouTube
                 </a>
               )}
-              <a
-                href={post.video_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
-              >
-                <ExternalLink className="h-4 w-4" />
-                View source video
-              </a>
+              {post.video_url && (
+                <a
+                  href={post.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  View source video
+                </a>
+              )}
             </>
           )}
         </div>

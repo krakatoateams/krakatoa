@@ -371,13 +371,13 @@ export async function restoreUserCreation(
   return updateUserCreation({ userId, id, metadataPatch: { deletedAt: null } });
 }
 
-/** Best-effort removal of storage objects; failures are logged, never thrown. */
-async function removeStorageObjects(paths: string[]): Promise<void> {
+/** Best-effort removal of storage objects by relative path; failures are logged, never thrown. */
+export async function removeStorageObjects(paths: string[]): Promise<void> {
   const valid = paths.filter((p): p is string => !!p);
   if (!valid.length) return;
   const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(valid);
   if (error) {
-    console.warn("[creations] storage cleanup failed:", error.message);
+    console.warn("[storage] cleanup failed:", error.message);
   }
 }
 
