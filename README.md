@@ -44,7 +44,24 @@ REPLICATE_API_TOKEN=your_replicate_token
 RENDI_API_KEY=your_rendi_api_key
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+# DOKU credit checkout (payments)
+DOKU_CLIENT_ID=your_doku_client_id
+DOKU_SECRET_KEY=your_doku_secret_key
+DOKU_ENV=sandbox            # or "production"
+# DOKU_API_BASE=             # optional override; defaults by DOKU_ENV
+# DOKU_NOTIFICATION_URL=     # optional per-request webhook override (same PATH as Back Office)
 ```
+
+`DOKU_NOTIFICATION_URL` is handy for local development: set it to your public
+tunnel URL (e.g. `https://<id>.trycloudflare.com/api/payments/doku/webhook`) and
+every checkout overrides DOKU's Back Office notification URL for that request.
+The **path** must match the Notification URL configured on the payment channel in
+the DOKU Back Office (only the domain may differ).
+
+DOKU sends payment notifications to `POST /api/payments/doku/webhook` — register
+this URL (and the success redirect `/dashboard/settings?tab=credits`) in the DOKU
+merchant dashboard. `NEXTAUTH_URL` is reused to build the absolute callback URLs.
 
 Create one **public** Supabase Storage bucket (default name: `krakatoa`, or set `SUPABASE_STORAGE_BUCKET` in `.env.local`). Use top-level folders per feature:
 
