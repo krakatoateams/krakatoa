@@ -148,3 +148,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
    - `CRON_SECRET` — Protects `app/api/cron` if used.
+ - `DOKU_CLIENT_ID`, `DOKU_SECRET_KEY` — DOKU Checkout credentials (credit purchases).
+ - `DOKU_ENV` — `sandbox` (default) or `production`; selects the DOKU API base URL.
+ - `DOKU_API_BASE` — Optional explicit DOKU API base URL override (otherwise derived from `DOKU_ENV`).
+ - `DOKU_NOTIFICATION_URL` — Optional per-request webhook override (`additional_info.override_notification_url`). Path must match the Back Office Notification URL; only the domain may differ. Useful for local tunnels.
