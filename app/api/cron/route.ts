@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
+import { removeStorageObjects } from "@/lib/creations-db";
+import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -38,6 +40,47 @@ function isPermanentFailure(err: unknown, message: string): boolean {
   const status = (err as { response?: { status?: number } })?.response?.status;
   if (status === 401 || status === 403) return true;
   return false;
+}
+
+/**
+ * Extract the storage-relative path from a Supabase public URL so we can
+ * call storage.remove(). Returns null for URLs that don't match this bucket.
+ * e.g. "https://…/object/public/krakatoa/videos/x.mp4" → "videos/x.mp4"
+ */
+function storagePathFromPublicUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `/object/public/${STORAGE_BUCKET}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return url.slice(idx + marker.length) || null;
+}
+
+/**
+ * Best-effort: delete the video file from storage (only when the post has no
+ * asset_id — asset-owned files must not be removed here) and null out
+ * video_url on the post row. Logs but never throws — a storage failure must
+ * not unwind a successful YouTube publish.
+ */
+async function cleanupPostVideo(
+  postId: string,
+  videoUrl: string | null | undefined,
+  assetId: string | null | undefined,
+): Promise<void> {
+  if (assetId) {
+    // The file belongs to an asset row — deleting it here would break the
+    // asset's public_url and the Reels Creator history gallery.
+    console.log(`[cron] post ${postId} is asset-linked (asset_id=${assetId}) — skipping storage deletion`);
+  } else {
+    const path = storagePathFromPublicUrl(videoUrl);
+    if (path) {
+      await removeStorageObjects([path]);
+      console.log(`[cron] storage object removed: ${path}`);
+    } else if (videoUrl) {
+      console.warn(`[cron] could not extract storage path from video_url: ${videoUrl}`);
+    }
+  }
+  const { error } = await supabaseServer.from("posts").update({ video_url: null }).eq("id", postId);
+  if (error) console.warn(`[cron] failed to null video_url for post ${postId}:`, error.message);
 }
 
 /**
@@ -142,6 +185,7 @@ export async function GET(req: NextRequest) {
         .from("posts")
         .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
         .eq("id", post.id);
+      await cleanupPostVideo(post.id, post.video_url, post.asset_id);
       published++;
       continue;
     }
@@ -211,6 +255,7 @@ export async function GET(req: NextRequest) {
         })
         .eq("id", post.id);
 
+      await cleanupPostVideo(post.id, post.video_url, post.asset_id);
       published++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
