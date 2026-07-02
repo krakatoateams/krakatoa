@@ -1,6 +1,5 @@
 import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
-import { supabaseServer } from "./supabase-server";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -26,71 +25,6 @@ export const authOptions: NextAuthOptions = {
   ],
 
   secret: process.env.NEXTAUTH_SECRET,
-
-  callbacks: {
-    async signIn({ user, account }) {
-      if (!user.email) return false;
-
-      // ── 1. Upsert the user row ───────────────────────────────────────────
-      const { error: upsertErr } = await supabaseServer
-        .from("users")
-        .upsert({ email: user.email }, { onConflict: "email", ignoreDuplicates: true });
-
-      if (upsertErr) {
-        console.error("[auth] upsert user failed:", upsertErr.message);
-      }
-
-      // ── 2. Store / refresh the Google OAuth tokens ───────────────────────
-      if (account?.provider === "google" && account.access_token) {
-        const { data: userRow } = await supabaseServer
-          .from("users")
-          .select("id")
-          .eq("email", user.email)
-          .single();
-
-        if (userRow) {
-          const expiresAt = account.expires_at
-            ? new Date(account.expires_at * 1000).toISOString()
-            : new Date(Date.now() + 3_600_000).toISOString();
-
-          if (account.refresh_token) {
-            // Full upsert — we have both tokens (first login or prompt=consent)
-            const { error: tokenErr } = await supabaseServer
-              .from("platform_tokens")
-              .upsert(
-                {
-                  user_id: userRow.id,
-                  platform: "youtube",
-                  access_token: account.access_token,
-                  refresh_token: account.refresh_token,
-                  expires_at: expiresAt,
-                },
-                { onConflict: "user_id,platform" },
-              );
-            if (tokenErr) console.error("[auth] token upsert failed:", tokenErr.message);
-          } else {
-            // Subsequent login without a new refresh_token — only update the
-            // access token and expiry so we don't lose the stored refresh_token
-            const { data: existing } = await supabaseServer
-              .from("platform_tokens")
-              .select("id")
-              .eq("user_id", userRow.id)
-              .eq("platform", "youtube")
-              .single();
-
-            if (existing) {
-              await supabaseServer
-                .from("platform_tokens")
-                .update({ access_token: account.access_token, expires_at: expiresAt })
-                .eq("id", existing.id);
-            }
-          }
-        }
-      }
-
-      return true;
-    },
-  },
 
   debug: true,
   logger: {

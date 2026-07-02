@@ -12,6 +12,7 @@
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.105.4",
     "googleapis": "^171.4.0",
     "lucide-react": "^1.14.0",

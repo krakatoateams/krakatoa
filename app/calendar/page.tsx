@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useSession, signIn } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
+import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import {
   ChevronLeft,
   ChevronRight,
@@ -164,7 +165,7 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
 function Navbar() {
-  const { data: session, status } = useSession();
+  const { status, name, image } = useCurrentUser();
   const isLoading = status === "loading";
   const isConnected = status === "authenticated";
 
@@ -201,8 +202,8 @@ function Navbar() {
         <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />
       ) : isConnected ? (
         <div className="flex items-center gap-2.5 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
-          {session.user?.image ? (
-            <Image src={session.user.image} alt={session.user.name ?? "Profile"} width={24} height={24} className="rounded-full" />
+          {image ? (
+            <Image src={image} alt={name ?? "Profile"} width={24} height={24} className="rounded-full" />
           ) : (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-green-500/30">
               <YoutubeIcon className="h-3.5 w-3.5 text-green-400" />
@@ -213,7 +214,7 @@ function Navbar() {
       ) : (
         <button
           type="button"
-          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+          onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` } })}
           className="flex cursor-pointer items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:border-red-500/60 hover:bg-red-500/20"
         >
           <YoutubeIcon className="h-4 w-4" />

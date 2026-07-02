@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useSession, signIn } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
@@ -233,11 +233,22 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 // ─── YouTube status badge ─────────────────────────────────────────────────────
 
 function YouTubeStatusBadge() {
-  const { status } = useSession();
-  if (status === "loading") {
+  const { status } = useCurrentUser();
+  const [youtubeConnected, setYoutubeConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (status === "loading") return;
+    if (status === "unauthenticated") { setYoutubeConnected(false); return; }
+    fetch("/api/connections/status")
+      .then((res) => (res.ok ? res.json() : { youtube: false }))
+      .then((data: { youtube?: boolean }) => setYoutubeConnected(Boolean(data.youtube)))
+      .catch(() => setYoutubeConnected(false));
+  }, [status]);
+
+  if (status === "loading" || youtubeConnected === null) {
     return <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />;
   }
-  if (status === "authenticated") {
+  if (youtubeConnected) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
         <YoutubeIcon className="h-3.5 w-3.5 text-green-400" />
@@ -246,15 +257,10 @@ function YouTubeStatusBadge() {
     );
   }
   return (
-    <button
-      type="button"
-      onClick={() => signIn("google", { callbackUrl: "/tools/scheduler" })}
-      className="flex cursor-pointer items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition-colors hover:border-red-500/60 hover:bg-red-500/20"
-      aria-label="Connect YouTube account"
-    >
-      <YoutubeIcon className="h-3.5 w-3.5" />
-      Connect YouTube
-    </button>
+    <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5">
+      <YoutubeIcon className="h-3.5 w-3.5 text-gray-500" />
+      <span className="text-xs font-medium text-gray-500">YouTube not connected</span>
+    </div>
   );
 }
 
