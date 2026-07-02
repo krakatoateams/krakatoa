@@ -672,7 +672,10 @@ export default function CreationsHistory({
         </p>
       )}
 
-      {loading && items.length === 0 ? (
+      {loading ? (
+        // `loading` is only true on a cache miss (a cached chip serves instantly
+        // and revalidates silently), so this spinner marks a real fresh load —
+        // including switching to a chip that hasn't been opened yet.
         <div className="flex items-center justify-center py-20 text-gray-500">
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
