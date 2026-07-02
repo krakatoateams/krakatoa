@@ -674,12 +674,14 @@ function StoryboardComposer({
         </div>
       )}
 
-      {/* Creation history — global library across every tool (videos, photos,
-          characters, storyboards). Action-rich, no tab bar. */}
-      <div className="mt-[120px]">
+      {/* Storyboard generation history — matches the other photo subtools:
+          the tool's own outputs, action-rich, no tab bar. */}
+      <div className="mt-[150px]">
         <CreationsHistory
-          title="Your creations"
-          description="Everything you create appears here — videos, photos, characters, and storyboards."
+          title="Generation history"
+          description="Every storyboard you create appears here. Click any sheet to view it full size."
+          tools={["storyboard"]}
+          mediaType="image"
           refreshKey={historyRefreshKey}
           showActions
           showMeta={false}
