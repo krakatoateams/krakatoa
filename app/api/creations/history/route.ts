@@ -15,6 +15,15 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const tools = parseToolsQuery(searchParams.get("tool"));
+    // Active-tab tool filter (e.g. the Storyboards tab). It narrows the listing
+    // only; the pill counts stay scoped to `tools` so switching tabs never shifts
+    // them. When both are present, the listing uses their intersection.
+    const tabTools = parseToolsQuery(searchParams.get("tabTool"));
+    const listTools = tabTools?.length
+      ? tools?.length
+        ? tools.filter((t) => tabTools.includes(t))
+        : tabTools
+      : tools;
     const mediaTypeRaw = searchParams.get("mediaType");
     const mediaType =
       mediaTypeRaw === "image" || mediaTypeRaw === "video" ? mediaTypeRaw : undefined;
@@ -38,7 +47,7 @@ export async function GET(req: NextRequest) {
     // Best-effort self-heal: surface product photos that exist in Storage but
     // lack a DB row (e.g. created before the dual-write). Only on the first page
     // so paging through the library doesn't re-run it. Never blocks history.
-    const wantsProductPhoto = !tools?.length || tools.includes("product_photo");
+    const wantsProductPhoto = !listTools?.length || listTools.includes("product_photo");
     if (wantsProductPhoto && offset === 0) {
       try {
         await reconcileProductPhotosFromStorage(userId);
@@ -62,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     const [{ items, total }, counts] = await Promise.all([
       listUserCreationsPage(userId, {
-        tools,
+        tools: listTools,
         mediaType,
         kind,
         ids,

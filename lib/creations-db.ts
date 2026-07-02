@@ -338,17 +338,26 @@ export async function countUserCreationsByTab(
   image: number;
   video: number;
   character: number;
+  storyboard: number;
   trash: number;
 }> {
   const tools = options?.tools;
-  const [all, image, video, character, trash] = await Promise.all([
+  // Storyboards tab counts storyboard-tool creations, intersected with any outer
+  // tool filter (empty intersection ⇒ 0, so it never falls back to counting all).
+  const storyboardTools: CreationTool[] = tools?.length
+    ? tools.filter((t) => t === "storyboard")
+    : ["storyboard"];
+  const [all, image, video, character, storyboard, trash] = await Promise.all([
     countCreations(userId, { tools }),
     countCreations(userId, { tools, mediaType: "image" }),
     countCreations(userId, { tools, mediaType: "video" }),
     countCreations(userId, { tools, kind: "character" }),
+    storyboardTools.length
+      ? countCreations(userId, { tools: storyboardTools })
+      : Promise.resolve(0),
     countCreations(userId, { tools, trashed: true }),
   ]);
-  return { all, image, video, character, trash };
+  return { all, image, video, character, storyboard, trash };
 }
 
 /** Move a creation to Trash (soft delete) by stamping metadata.deletedAt. */

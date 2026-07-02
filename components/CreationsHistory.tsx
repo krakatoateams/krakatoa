@@ -8,6 +8,7 @@ import {
   Download,
   History,
   ImageIcon,
+  Layers,
   LayoutGrid,
   Loader2,
   RotateCcw,
@@ -63,7 +64,14 @@ function pageWindow(current: number, total: number): (number | "ellipsis")[] {
   return out;
 }
 
-type LibraryTab = "all" | "video" | "image" | "character" | "favorite" | "trash";
+type LibraryTab =
+  | "all"
+  | "video"
+  | "image"
+  | "character"
+  | "storyboard"
+  | "favorite"
+  | "trash";
 
 const FAVORITES_KEY = "krakatoa:library:favorites";
 
@@ -181,6 +189,7 @@ export default function CreationsHistory({
     image: number;
     video: number;
     character: number;
+    storyboard: number;
     trash: number;
   } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -319,6 +328,7 @@ export default function CreationsHistory({
         : undefined;
   const effectiveMediaType = mediaType ?? tabMediaType;
   const tabKind = enableTabs && activeTab === "character" ? "character" : undefined;
+  const isStoryboardTab = enableTabs && activeTab === "storyboard";
   const isFavoriteTab = enableTabs && activeTab === "favorite";
   const isTrashTab = enableTabs && activeTab === "trash";
   // Favorites live in localStorage; serialize the ids so the fetch re-runs when
@@ -333,6 +343,9 @@ export default function CreationsHistory({
     setError(null);
     const params = new URLSearchParams();
     if (toolsKey) params.set("tool", toolsKey);
+    // The Storyboards tab narrows the listing to storyboards via a separate param
+    // so the pill counts (scoped to `tool`) don't shift when the tab is active.
+    if (isStoryboardTab) params.set("tabTool", "storyboard");
     if (effectiveMediaType) params.set("mediaType", effectiveMediaType);
     if (tabKind) params.set("kind", tabKind);
     if (isTrashTab) params.set("trashed", "1");
@@ -360,6 +373,7 @@ export default function CreationsHistory({
     toolsKey,
     effectiveMediaType,
     tabKind,
+    isStoryboardTab,
     isFavoriteTab,
     isTrashTab,
     favoriteIdsKey,
@@ -493,6 +507,7 @@ export default function CreationsHistory({
     video: serverCounts?.video ?? 0,
     image: serverCounts?.image ?? 0,
     character: serverCounts?.character ?? 0,
+    storyboard: serverCounts?.storyboard ?? 0,
     favorite: favorites.size,
     trash: serverCounts?.trash ?? 0,
   };
@@ -505,6 +520,7 @@ export default function CreationsHistory({
     { id: "video", label: "Videos", icon: Video },
     { id: "image", label: "Photos", icon: ImageIcon },
     { id: "character", label: "Characters", icon: User },
+    { id: "storyboard", label: "Storyboards", icon: Layers },
     { id: "favorite", label: "Favorites", icon: Star },
     { id: "trash", label: "Trash", icon: Trash2 },
   ];
@@ -606,6 +622,11 @@ export default function CreationsHistory({
             <>
               <Trash2 className="w-12 h-12 text-gray-600 mx-auto mb-4" />
               <p className="text-gray-400">Trash is empty.</p>
+            </>
+          ) : enableTabs && activeTab === "storyboard" ? (
+            <>
+              <Layers className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-400">No storyboards yet.</p>
             </>
           ) : (
             <>
