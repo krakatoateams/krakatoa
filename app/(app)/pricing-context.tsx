@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
 import {
   type BillingSettings,
   type CostUnit,
@@ -102,7 +102,7 @@ const DEFAULT_STATE: PricingState = {
 const PricingContext = createContext<PricingState>(DEFAULT_STATE);
 
 export function PricingProvider({ children }: { children: React.ReactNode }) {
-  const { status } = useSession();
+  const { status } = useCurrentUser();
   const [billingSettings, setBillingSettings] = useState<BillingSettings>(DEFAULT_BILLING_SETTINGS);
   const [configs, setConfigs] = useState<Record<string, PublicPricingConfig>>({});
   const [loading, setLoading] = useState(false);

@@ -1,11 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useSession } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
 
 export default function BasicSettingsTab() {
-  const { data: session } = useSession();
-  const user = session?.user;
+  const { name, image } = useCurrentUser();
+  const user = { name, image };
 
   return (
     <div className="space-y-6">

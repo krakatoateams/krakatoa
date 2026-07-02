@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { signIn, useSession } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
+import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { useRouter } from "next/navigation";
 import { Mountain, X } from "lucide-react";
 
 export function GrowthToggleLogin() {
   const [on, setOn] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const { status } = useSession();
+  const { status } = useCurrentUser();
   const router = useRouter();
 
   const closeModal = useCallback(() => {
@@ -127,7 +128,7 @@ export function GrowthToggleLogin() {
 
             <button
               type="button"
-              onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+              onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` } })}
               className="mt-8 flex w-full cursor-pointer items-center justify-center gap-3 rounded-full bg-neutral-950 px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-neutral-800"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden>

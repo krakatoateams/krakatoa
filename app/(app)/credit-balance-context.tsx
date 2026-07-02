@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { useSession } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
 
 type CreditBalanceState = {
   balance: number | null;
@@ -34,7 +34,7 @@ export function CreditBalanceProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { status } = useSession();
+  const { status } = useCurrentUser();
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

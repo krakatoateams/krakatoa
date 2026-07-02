@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, Zap, CalendarClock } from "lucide-react";
 import RecentCreations from "./RecentCreations";
 import StatsRow from "./StatsRow";
@@ -39,8 +39,8 @@ const TOOLS = [
 ];
 
 export default function DashboardPage() {
-  const { data: session } = useSession();
-  const firstName = session?.user?.name?.split(" ")[0] ?? "there";
+  const { name } = useCurrentUser();
+  const firstName = name?.split(" ")[0] ?? "there";
 
   return (
     <div className="px-8 py-8">

@@ -1,25 +1,20 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { supabaseServer } from "@/lib/supabase-server";
+import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
 
-export async function resolveUserIdByEmail(email: string): Promise<string | null> {
-  const { data, error } = await supabaseServer
-    .from("users")
-    .select("id")
-    .eq("email", email)
-    .single();
-
-  if (error) {
-    console.error("[auth] resolve user:", error.message);
-    return null;
-  }
-  return data?.id ?? null;
-}
-
-/** Returns the signed-in user's UUID from `users`, or null if unauthenticated / missing. */
+/**
+ * Returns the signed-in Supabase auth.users.id, or null if unauthenticated.
+ *
+ * After the NextAuth → Supabase Auth migration, auth.users.id IS the stable
+ * user identifier — no separate `users` table lookup needed.
+ *
+ * Used by legacy API routes that reference user_id directly
+ * (product-photo/history, storyboards, creations/*). After the deferred
+ * cleanup SQL runs and all FKs point to auth.users, the returned id will
+ * match correctly for existing rows.
+ */
 export async function getSessionUserId(): Promise<string | null> {
-  const session = await getServerSession(authOptions);
-  const email = session?.user?.email;
-  if (!email) return null;
-  return resolveUserIdByEmail(email);
+  const supabase = createSupabaseAuthServer();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
 }

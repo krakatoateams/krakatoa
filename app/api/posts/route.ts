@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
 import { getAssetForProfile } from "@/lib/assets-db";
@@ -8,32 +6,17 @@ import { getAssetForProfile } from "@/lib/assets-db";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// ── Shared helper: resolve user UUID from session email ───────────────────────
-async function resolveUserId(email: string): Promise<string | null> {
-  const { data } = await supabaseServer
-    .from("users")
-    .select("id")
-    .eq("email", email)
-    .single();
-  return data?.id ?? null;
-}
-
 // ── GET /api/posts — return all posts for the current user ────────────────────
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const profile = await getCurrentProfile();
+  if (!profile) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  }
-
-  const userId = await resolveUserId(session.user.email);
-  if (!userId) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
   }
 
   const { data, error } = await supabaseServer
     .from("posts")
     .select("*")
-    .eq("user_id", userId)
+    .eq("profile_id", profile.id)
     .order("scheduled_time", { ascending: true });
 
   if (error) {
@@ -45,21 +28,6 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    // ── Auth check ────────────────────────────────────────────────────────────
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-    }
-
-    // ── Look up the user's UUID by email ─────────────────────────────────────
-    const userId = await resolveUserId(session.user.email);
-    if (!userId) {
-      return NextResponse.json(
-        { error: "User account not found. Please sign out and sign in again." },
-        { status: 404 },
-      );
-    }
-
     // ── Parse body ────────────────────────────────────────────────────────────
     const body = await req.json();
     const { video_url, title, description, tags, scheduled_time, platform, asset_id, project_id, format } =
@@ -89,15 +57,17 @@ export async function POST(req: NextRequest) {
     }
     const wantsPlatformLink = Boolean(asset_id) || Boolean(project_id);
 
-    // ── Resolve platform profile ──────────────────────────────────────────────
+    // ── Resolve profile (auth + ownership boundary) ───────────────────────────
     // profile_id is the platform ownership boundary. It is always server-derived;
     // never trust a client-provided profile_id.
     let profileId: string | null = null;
+    let userId: string | null = null;
     if (wantsPlatformLink) {
       // Linkage requested -> a profile is required to verify ownership.
       try {
         const profile = await requireCurrentProfile();
         profileId = profile.id;
+        userId = profile.user_id;
       } catch (e) {
         if (e instanceof Error && /not authenticated/i.test(e.message)) {
           return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -109,6 +79,7 @@ export async function POST(req: NextRequest) {
       try {
         const profile = await getCurrentProfile();
         profileId = profile?.id ?? null;
+        userId = profile?.user_id ?? null;
       } catch {
         profileId = null;
       }

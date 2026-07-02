@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase-server";
+import { getCurrentProfile } from "@/lib/profiles-db";
 
 // A claim newer than this means the cron is actively publishing the post right
 // now, so edits/cancels are refused. Mirrors lib/post-status.ts's window.
@@ -18,8 +17,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  const profile = await getCurrentProfile();
+  if (!profile) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
@@ -48,10 +47,11 @@ export async function PATCH(
     );
   }
 
-  // Confirm the post belongs to the requesting user before updating
+  // Confirm the post belongs to the requesting user before updating.
+  // Ownership is checked via profile_id (stable across user_id remapping).
   const { data: existing, error: fetchErr } = await supabaseServer
     .from("posts")
-    .select("id, user_id, status, publish_started_at")
+    .select("id, profile_id, status, publish_started_at")
     .eq("id", id)
     .single();
 
@@ -59,13 +59,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Post not found." }, { status: 404 });
   }
 
-  const { data: userRow } = await supabaseServer
-    .from("users")
-    .select("id")
-    .eq("email", session.user.email)
-    .single();
-
-  if (!userRow || existing.user_id !== userRow.id) {
+  if (existing.profile_id !== profile.id) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 

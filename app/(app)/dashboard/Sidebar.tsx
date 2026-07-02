@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useCurrentUser } from "@/lib/auth-context";
+import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import {
   Mountain,
   Video,
@@ -73,7 +74,7 @@ type ToolVisibility = {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { data: session, status } = useSession();
+  const { status, name, email, image } = useCurrentUser();
   const [isAdmin, setIsAdmin] = useState(false);
   const [toolVisibility, setToolVisibility] = useState<Record<string, ToolVisibility> | null>(
     null
@@ -183,29 +184,29 @@ export default function Sidebar() {
 
       {/* User profile */}
       <div className="border-t border-gray-800 p-3">
-        {session?.user ? (
+        {status === "authenticated" ? (
           <div className="flex items-center gap-1 rounded-lg bg-gray-900 px-1 py-1">
             <Link
               href="/dashboard/settings"
               aria-label="Open profile settings"
               className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 transition-colors hover:bg-gray-800"
             >
-              {session.user.image ? (
+              {image ? (
                 <Image
-                  src={session.user.image}
-                  alt={session.user.name ?? "Profile"}
+                  src={image}
+                  alt={name ?? "Profile"}
                   width={32}
                   height={32}
                   className="h-8 w-8 shrink-0 rounded-full"
                 />
               ) : (
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-semibold text-violet-300">
-                  {session.user.name?.[0]?.toUpperCase() ?? "?"}
+                  {name?.[0]?.toUpperCase() ?? "?"}
                 </div>
               )}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-white">{session.user.name}</p>
-                <p className="truncate text-[10px] text-gray-500">{session.user.email}</p>
+                <p className="truncate text-xs font-medium text-white">{name}</p>
+                <p className="truncate text-[10px] text-gray-500">{email}</p>
                 <div className="mt-1">
                   <CreditBadge />
                 </div>
@@ -213,7 +214,7 @@ export default function Sidebar() {
             </Link>
             <button
               type="button"
-              onClick={() => signOut({ callbackUrl: "/" })}
+              onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
               aria-label="Sign out"
               className="shrink-0 cursor-pointer self-start rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
             >

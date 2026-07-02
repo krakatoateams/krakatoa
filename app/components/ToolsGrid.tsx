@@ -85,7 +85,7 @@ export default function ToolsGrid({ isLoggedIn = false }: ToolsGridProps) {
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
   const activeTool = TOOLS.find((t) => t.name === activeModal) ?? null;
-  const ctaHref = isLoggedIn ? "/dashboard" : "/api/auth/signin";
+  const ctaHref = isLoggedIn ? "/dashboard" : "/login";
   const ctaLabel = isLoggedIn ? "Go to Dashboard" : "Start Using This Tool";
 
   return (
