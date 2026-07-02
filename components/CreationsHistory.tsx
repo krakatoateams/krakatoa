@@ -73,6 +73,30 @@ type LibraryTab =
   | "favorite"
   | "trash";
 
+type TabCounts = {
+  all: number;
+  image: number;
+  video: number;
+  character: number;
+  storyboard: number;
+  trash: number;
+};
+
+type CachedHistory = {
+  items: CreationHistoryItem[];
+  total: number;
+  counts: TabCounts | null;
+};
+
+// Stale-while-revalidate cache for the library/history views, keyed by the full
+// request query string (tab + page + filters). Serving a cached snapshot makes
+// re-opening a previously loaded chip feel instant; a background refetch still
+// runs to keep it fresh. Cleared on any mutation or parent refresh.
+// ponytail: unbounded module-level Map — fine for a per-session library where
+// (tabs × pages) is small. If it ever caches very large histories, cap it with a
+// tiny LRU.
+const historyCache = new Map<string, CachedHistory>();
+
 const FAVORITES_KEY = "krakatoa:library:favorites";
 
 /** A creation tagged as a Character creation (turnaround sheet) in the omni-form. */
@@ -184,16 +208,13 @@ export default function CreationsHistory({
   const pageSize = limit;
   const [items, setItems] = useState<CreationHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [serverCounts, setServerCounts] = useState<{
-    all: number;
-    image: number;
-    video: number;
-    character: number;
-    storyboard: number;
-    trash: number;
-  } | null>(null);
+  const [serverCounts, setServerCounts] = useState<TabCounts | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards for the SWR cache: ignore responses for a chip the user already left,
+  // and detect a real parent refresh (vs. the initial mount) to drop stale cache.
+  const latestKeyRef = useRef<string>("");
+  const prevRefreshKeyRef = useRef(refreshKey);
   const [activeTab, setActiveTab] = useState<LibraryTab>("all");
   const [page, setPage] = useState(1);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -290,6 +311,7 @@ export default function CreationsHistory({
       const updated = data.item as CreationHistoryItem;
       setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
       setPreviewItem(updated);
+      historyCache.clear();
     } catch (err: unknown) {
       setNameError(err instanceof Error ? err.message : "Failed to save name");
     } finally {
@@ -339,7 +361,6 @@ export default function CreationsHistory({
   const toolsKey = tools?.length ? tools.join(",") : "";
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
     const params = new URLSearchParams();
     if (toolsKey) params.set("tool", toolsKey);
@@ -354,20 +375,51 @@ export default function CreationsHistory({
     if (enableTabs) params.set("counts", "1");
     if (isFavoriteTab) params.set("ids", favoriteIdsKey);
 
+    const cacheKey = params.toString();
+    latestKeyRef.current = cacheKey;
+
+    // Serve a cached snapshot instantly (stale-while-revalidate) so re-opening a
+    // chip that was loaded before feels immediate; the fetch below still runs to
+    // refresh it. Only show the spinner on a true cache miss.
+    const cached = historyCache.get(cacheKey);
+    if (cached) {
+      setItems(cached.items);
+      setTotal(cached.total);
+      if (cached.counts) setServerCounts(cached.counts);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
       const res = await fetch(`/api/creations/history?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load history");
-      setItems(data.items || []);
-      setTotal(typeof data.total === "number" ? data.total : (data.items?.length ?? 0));
-      if (data.counts) setServerCounts(data.counts);
+      const nextItems: CreationHistoryItem[] = data.items || [];
+      const nextTotal =
+        typeof data.total === "number" ? data.total : nextItems.length;
+      const nextCounts: TabCounts | null = data.counts ?? null;
+      historyCache.set(cacheKey, {
+        items: nextItems,
+        total: nextTotal,
+        counts: nextCounts,
+      });
+      // Drop a slow response for a chip the user already switched away from.
+      if (latestKeyRef.current !== cacheKey) return;
+      setItems(nextItems);
+      setTotal(nextTotal);
+      if (nextCounts) setServerCounts(nextCounts);
     } catch (err: unknown) {
+      if (latestKeyRef.current !== cacheKey) return;
       const message = err instanceof Error ? err.message : "Failed to load history";
       setError(message);
-      setItems([]);
-      setTotal(0);
+      // Keep any cached items on a background-revalidation failure.
+      if (!cached) {
+        setItems([]);
+        setTotal(0);
+      }
     } finally {
-      setLoading(false);
+      if (latestKeyRef.current === cacheKey) setLoading(false);
     }
   }, [
     toolsKey,
@@ -381,6 +433,15 @@ export default function CreationsHistory({
     pageSize,
     page,
   ]);
+
+  // A real parent refresh (new generation, manual Refresh) means the server data
+  // changed — drop the SWR cache so the next load refetches instead of serving a
+  // stale snapshot. Skips the initial mount so cross-navigation caching survives.
+  useEffect(() => {
+    if (prevRefreshKeyRef.current === refreshKey) return;
+    prevRefreshKeyRef.current = refreshKey;
+    historyCache.clear();
+  }, [refreshKey]);
 
   useEffect(() => {
     void load();
@@ -422,6 +483,7 @@ export default function CreationsHistory({
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Failed to move to Trash");
         setPreviewItem(null);
+        historyCache.clear();
         await load();
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to move to Trash");
@@ -445,6 +507,7 @@ export default function CreationsHistory({
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Failed to restore");
         setPreviewItem(null);
+        historyCache.clear();
         await load();
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to restore");
@@ -474,6 +537,7 @@ export default function CreationsHistory({
         if (!res.ok) throw new Error(data.error || "Failed to delete");
         forgetFavorite(item.id);
         setPreviewItem(null);
+        historyCache.clear();
         await load();
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to delete");
@@ -493,6 +557,7 @@ export default function CreationsHistory({
       if (!res.ok) throw new Error(data.error || "Failed to empty Trash");
       setPreviewItem(null);
       setConfirmEmptyTrash(false);
+      historyCache.clear();
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to empty Trash");
