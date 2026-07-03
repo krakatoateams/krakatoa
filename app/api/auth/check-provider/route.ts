@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 /**
  * POST /api/auth/check-provider
@@ -18,6 +19,16 @@ import { createClient } from "@supabase/supabase-js";
  * We use the JS admin client (listUsers + in-memory find) instead.
  */
 export async function POST(req: NextRequest) {
+  const forwarded = req.headers.get("x-forwarded-for");
+  const ip =
+    (forwarded ? forwarded.split(",")[0].trim() : null) ??
+    req.headers.get("x-real-ip") ??
+    "unknown";
+
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   let email: string;
   try {
     const body = (await req.json()) as { email?: unknown };
