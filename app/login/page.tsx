@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { AuthLayout } from "@/components/auth/AuthLayout";
 
 type LoginError =
   | { kind: "invalid_credentials" }
@@ -121,13 +122,13 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 p-4">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl border border-gray-800 bg-gray-900 p-8">
+    <AuthLayout>
+      <div className="space-y-6">
         <div>
-          <h1 className="text-xl font-bold text-white">Sign in</h1>
+          <h1 className="font-display text-xl font-bold text-white">Sign in</h1>
           <p className="mt-1 text-sm text-gray-400">
             Belum punya akun?{" "}
-            <Link href="/signup" className="text-violet-400 hover:text-violet-300">
+            <Link href="/signup" className="text-[#F26522] hover:text-[#e05a1a]">
               Daftar di sini
             </Link>
           </p>
@@ -137,7 +138,7 @@ function LoginForm() {
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+          className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
         >
           <GoogleIcon />
           Continue with Google
@@ -161,7 +162,7 @@ function LoginForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-violet-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
           <div>
@@ -174,7 +175,7 @@ function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-violet-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
 
@@ -239,13 +240,13 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+            className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </div>
-    </div>
+    </AuthLayout>
   );
 }
 

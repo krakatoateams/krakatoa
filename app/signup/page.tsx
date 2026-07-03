@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { AuthLayout } from "@/components/auth/AuthLayout";
 
 type SignupError =
   | { kind: "duplicate_google" }
@@ -112,8 +113,8 @@ export default function SignupPage() {
 
   if (submitted) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-950 p-4">
-        <div className="w-full max-w-sm space-y-4 rounded-2xl border border-gray-800 bg-gray-900 p-8 text-center">
+      <AuthLayout>
+        <div className="space-y-4 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
             <svg
               className="h-6 w-6 text-green-400"
@@ -130,28 +131,28 @@ export default function SignupPage() {
               />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-white">Cek email kamu!</h2>
+          <h2 className="font-display text-lg font-semibold text-white">Cek email kamu!</h2>
           <p className="text-sm text-gray-400">
             Kami kirim link verifikasi ke{" "}
             <strong className="text-white">{email}</strong>. Klik link tersebut
             untuk mengaktifkan akun kamu.
           </p>
-          <Link href="/login" className="block text-sm text-violet-400 hover:text-violet-300">
+          <Link href="/login" className="block text-sm text-[#F26522] hover:text-[#e05a1a]">
             Kembali ke halaman login
           </Link>
         </div>
-      </div>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 p-4">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl border border-gray-800 bg-gray-900 p-8">
+    <AuthLayout>
+      <div className="space-y-6">
         <div>
-          <h1 className="text-xl font-bold text-white">Buat akun</h1>
+          <h1 className="font-display text-xl font-bold text-white">Buat akun</h1>
           <p className="mt-1 text-sm text-gray-400">
             Sudah punya akun?{" "}
-            <Link href="/login" className="text-violet-400 hover:text-violet-300">
+            <Link href="/login" className="text-[#F26522] hover:text-[#e05a1a]">
               Login di sini
             </Link>
           </p>
@@ -161,7 +162,7 @@ export default function SignupPage() {
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+          className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
         >
           <GoogleIcon />
           Continue with Google
@@ -185,7 +186,7 @@ export default function SignupPage() {
               required
               autoComplete="name"
               placeholder="Nama kamu"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-violet-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
           <div>
@@ -198,7 +199,7 @@ export default function SignupPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-violet-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
           <div>
@@ -212,7 +213,7 @@ export default function SignupPage() {
               required
               minLength={6}
               autoComplete="new-password"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-violet-500"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
 
@@ -259,12 +260,12 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+            className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
             {loading ? "Membuat akun…" : "Buat akun"}
           </button>
         </form>
       </div>
-    </div>
+    </AuthLayout>
   );
 }
