@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { getCreditPack } from "@/lib/credit-packs";
+import { getCreditPack, packTotalCredits } from "@/lib/credit-packs";
 import { createOrder, setOrderToken } from "@/lib/credit-orders-db";
 import { createCheckoutPayment, DokuConfigError, DokuApiError } from "@/lib/doku";
 
@@ -52,14 +52,22 @@ export async function POST(req: Request) {
   // Unique, human-readable invoice number (also DOKU order.invoice_number).
   const invoiceNumber = `KRK-${profileId.slice(0, 8)}-${Date.now()}`;
 
+  // Credits actually granted include any promotional bonus on the pack.
+  const grantedCredits = packTotalCredits(pack);
+
   try {
     const order = await createOrder({
       profileId,
       packId: pack.id,
-      credits: pack.credits,
+      credits: grantedCredits,
       amountIdr: pack.priceIdr,
       invoiceNumber,
-      metadata: { source: "doku", packLabel: pack.label },
+      metadata: {
+        source: "doku",
+        packLabel: pack.label,
+        baseCredits: pack.credits,
+        bonusCredits: pack.bonusCredits ?? 0,
+      },
     });
 
     const origin = siteOrigin();
@@ -79,7 +87,7 @@ export async function POST(req: Request) {
       successUrl,
       notificationUrl,
       lineItem: {
-        name: `${pack.credits} credits - ${pack.label}`,
+        name: `${grantedCredits} credits - ${pack.label}`,
         quantity: 1,
         price: pack.priceIdr,
       },

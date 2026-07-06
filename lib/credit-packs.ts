@@ -11,8 +11,10 @@
  */
 export type CreditPack = {
   id: string;
-  /** Credits granted on successful purchase. */
+  /** Headline (base) credits advertised for the pack. */
   credits: number;
+  /** Extra credits granted on top of `credits` as a promotional bonus. */
+  bonusCredits?: number;
   /** Price charged via DOKU, in whole IDR (no decimals). */
   priceIdr: number;
   /** Short marketing label. */
@@ -23,14 +25,30 @@ export type CreditPack = {
 
 export const CREDIT_PACKS: CreditPack[] = [
   { id: "p1", credits: 100, priceIdr: 27_000, label: "Starter" },
-  { id: "p3", credits: 660, priceIdr: 180_000, label: "Creator", popular: true },
-  { id: "p4", credits: 1_320, priceIdr: 360_000, label: "Pro" },
-  { id: "p5", credits: 3_500, priceIdr: 900_000, label: "Studio" },
+  { id: "p3", credits: 250, priceIdr: 67_500, label: "Creator", popular: true },
+  { id: "p4", credits: 500, bonusCredits: 25, priceIdr: 135_000, label: "Pro" },
+  { id: "p5", credits: 1_000, bonusCredits: 100, priceIdr: 270_000, label: "Studio" },
 ];
 
 /** Resolve a pack by id, or undefined when unknown. */
 export function getCreditPack(id: string): CreditPack | undefined {
   return CREDIT_PACKS.find((p) => p.id === id);
+}
+
+/** Total credits actually granted for a pack (base + bonus). */
+export function packTotalCredits(pack: CreditPack): number {
+  return pack.credits + (pack.bonusCredits ?? 0);
+}
+
+/**
+ * Cosmetic IDR value of the bonus credits, priced at the pack's own base
+ * rate (priceIdr / credits). Used only to show a "Saved Rp X" hint — it does
+ * not affect the amount charged.
+ */
+export function packBonusValueIdr(pack: CreditPack): number {
+  if (!pack.bonusCredits) return 0;
+  const perCredit = pack.priceIdr / pack.credits;
+  return Math.round(pack.bonusCredits * perCredit);
 }
 
 /** Format a whole-IDR amount as e.g. "Rp180.000". */

@@ -8,22 +8,31 @@ type FeatureItem = {
   label: string;
   description: string;
   video: string;
+  badge?: string;
 };
 
 const FEATURES: FeatureItem[] = [
   {
-    id: "reels",
-    label: "AI Video Reels",
-    description: "Faceless reels with narration, scenes, and captions.",
+    id: "video",
+    label: "Video generation",
+    description: "Scroll-stopping videos with narration, scenes, and captions.",
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_170732_8a9ccda6-5cff-4628-b164-059c500a2b41.mp4",
   },
   {
-    id: "product-photo",
-    label: "Product Photography",
-    description: "Studio-grade product shots from a single upload.",
+    id: "image",
+    label: "Image generation",
+    description: "Studio-grade images and product shots from a single prompt.",
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260418_063509_7d167302-4fd4-480b-8260-18ab572333d4.mp4",
+  },
+  {
+    id: "virtual-creator",
+    label: "Virtual Creator",
+    description: "Bring a lifelike AI persona to life to front your content.",
+    video:
+      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_074625_a81f018a-956b-43fb-9aee-4d1508e30e6a.mp4",
+    badge: "New",
   },
   {
     id: "scheduler",
@@ -31,20 +40,6 @@ const FEATURES: FeatureItem[] = [
     description: "Plan posts when your audience is most active.",
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260510_060007_60275ce7-030c-4668-a160-8f364ec537d3.mp4",
-  },
-  {
-    id: "social",
-    label: "Social Automation",
-    description: "Generate and queue Instagram content on autopilot.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_074625_a81f018a-956b-43fb-9aee-4d1508e30e6a.mp4",
-  },
-  {
-    id: "analytics",
-    label: "Analytics",
-    description: "Track performance across channels in one view.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260511_131941_d136af49-e243-493a-be14-6ff3f24e09e6.mp4",
   },
 ];
 
@@ -64,10 +59,21 @@ function FeatureMenuItem({
       type="button"
       onClick={onSelect}
       aria-current={active ? "true" : undefined}
-      className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors duration-200 sm:px-4 sm:py-3.5 ${
+      className={`relative flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors duration-200 sm:px-4 sm:py-3.5 ${
         active ? "bg-[#F26522] text-white" : "hover:bg-gray-50"
       }`}
     >
+      {feature.badge ? (
+        <span className="animate-badge-nudge pointer-events-none absolute left-full top-1/2 z-10 ml-7 -translate-y-1/2">
+          <span className="relative inline-block rounded bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#F26522] shadow-[0_8px_24px_-6px_rgba(0,0,0,0.4)]">
+            {feature.badge}
+            <span
+              aria-hidden
+              className="absolute right-full top-1/2 -ml-[17px] -translate-y-1/2 border-y-[6px] border-r-[7px] border-y-transparent border-r-white"
+            />
+          </span>
+        </span>
+      ) : null}
       <span
         className={`mt-0.5 shrink-0 text-[11px] font-semibold tabular-nums ${
           active ? "text-white/70" : "text-gray-400"
@@ -163,7 +169,7 @@ export function FeaturesSectionAlt() {
     <section
       id="features"
       ref={outerRef}
-      className="relative h-[600vh] bg-gray-900"
+      className="relative h-[500vh] bg-gray-900"
     >
       <div className="sticky top-0 flex h-screen w-full overflow-hidden">
         <video
