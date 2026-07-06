@@ -265,8 +265,13 @@ export default function CreditsTab() {
                     Popular
                   </span>
                 ) : null}
-                <p className="text-2xl font-bold text-white">
+                <p className="flex items-baseline gap-1.5 text-2xl font-bold text-white">
                   {pack.credits.toLocaleString()}
+                  {pack.bonusCredits ? (
+                    <span className="text-sm font-semibold text-emerald-400">
+                      +{pack.bonusCredits.toLocaleString()}
+                    </span>
+                  ) : null}
                 </p>
                 <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
                   credits · {pack.label}

@@ -10,6 +10,18 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Anchored sections land flush with the top edge of the viewport */
+    scroll-padding-top: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
   body {
     @apply bg-white text-neutral-950 antialiased;
   }
@@ -97,6 +109,27 @@
 
   .animate-float-gentle {
     animation: float-gentle 6s ease-in-out infinite;
+  }
+
+  @keyframes badge-nudge {
+    0%,
+    60%,
+    100% {
+      transform: translateY(-50%) translateX(0);
+    }
+    70% {
+      transform: translateY(-50%) translateX(6px);
+    }
+    80% {
+      transform: translateY(-50%) translateX(0);
+    }
+    90% {
+      transform: translateY(-50%) translateX(3px);
+    }
+  }
+
+  .animate-badge-nudge {
+    animation: badge-nudge 2.4s ease-in-out infinite;
   }
 
   .liquid-glass {

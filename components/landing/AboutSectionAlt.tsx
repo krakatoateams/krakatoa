@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Sparkles, Users, Zap, type LucideIcon } from "lucide-react";
+import { Zap, type LucideIcon } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
 
 const ABOUT_PHOTO =
@@ -58,23 +58,10 @@ export function AboutSectionAlt() {
       id="about"
       className="relative bg-white pt-16 pb-12 sm:pt-20 sm:pb-16 lg:pt-32 lg:pb-24 overflow-hidden"
     >
-      {/* Decorative outlined "01" watermark — sits behind the bento */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute right-[-3%] top-[4%] z-0 select-none font-bold leading-[0.85] tracking-[-0.06em]"
-        style={{
-          fontSize: "clamp(8rem, 22vw, 20rem)",
-          color: "transparent",
-          WebkitTextStroke: "1.5px rgb(229 231 235)",
-        }}
-      >
-        01
-      </span>
-
       <div className="relative z-10 mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4 lg:gap-6">
           {/* Hero — headline + paragraph + CTA */}
-          <div className="flex min-h-[360px] flex-col rounded-3xl bg-gray-900 p-7 text-white sm:col-span-2 sm:p-8 lg:col-span-2 lg:row-span-2 lg:p-10">
+          <div className="flex min-h-[360px] flex-col rounded-3xl bg-gray-900 p-7 text-white sm:col-span-2 sm:p-8 lg:col-span-2 lg:p-10">
             <h2
               className="font-medium leading-[1.06] tracking-[-0.02em]"
               style={{ fontSize: "clamp(1.75rem, 4.2vw, 3rem)" }}
@@ -103,20 +90,6 @@ export function AboutSectionAlt() {
             </div>
           </div>
 
-          <StatCard
-            icon={Sparkles}
-            value="5M+"
-            label="AI reels generated"
-            tone="light"
-          />
-
-          <StatCard
-            icon={Users}
-            value="50k+"
-            label="Active creators"
-            tone="light"
-          />
-
           {/* Editorial photo */}
           <div className="relative aspect-[3/2] overflow-hidden rounded-3xl sm:col-span-2 lg:col-span-2">
             <Image
@@ -138,7 +111,15 @@ export function AboutSectionAlt() {
               their voice at scale.
             </p>
             <div className="mt-6 flex items-center gap-3 text-sm text-white/85">
-              <span className="h-7 w-7 rounded-full bg-white/20 ring-1 ring-white/30" />
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black ring-1 ring-white/30">
+                <Image
+                  src="/Logo Black.png"
+                  alt="Krakatoa"
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-contain p-1.5"
+                />
+              </span>
               <span>Krakatoa team · est. 2026</span>
             </div>
           </div>

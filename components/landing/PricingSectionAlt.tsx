@@ -8,6 +8,22 @@ import {
 } from "react";
 import { Check, Flame } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
+import {
+  CREDIT_PACKS,
+  formatIdr,
+  packBonusValueIdr,
+  packTotalCredits,
+  type CreditPack,
+} from "@/lib/credit-packs";
+
+// Where the landing "Purchase" CTA sends visitors. Purchases actually happen in
+// the dashboard (DOKU checkout); the public page just funnels to signup.
+const CREDIT_CTA_HREF = "#growth";
+
+// Rough spend rates used only to estimate what a pack buys (matches the copy in
+// the aside: ~10 credits per AI reel · 2 per product photo).
+const CREDITS_PER_IMAGE = 2;
+const CREDITS_PER_VIDEO = 10;
 
 // useLayoutEffect on the server logs a warning; this component is "use client"
 // but Next still SSR's the initial render, so fall back to useEffect on the
@@ -27,15 +43,6 @@ type Plan = {
   ctaHref: string;
   ctaLabel: string;
   featured?: boolean;
-};
-
-type CreditPack = {
-  id: string;
-  credits: string;
-  price: string;
-  bonus?: { base: string; bonus: string };
-  flashSale?: boolean;
-  ctaHref: string;
 };
 
 const PLANS: Plan[] = [
@@ -86,27 +93,6 @@ const PLANS: Plan[] = [
     ],
     ctaHref: "#growth",
     ctaLabel: "Talk to us",
-  },
-];
-
-const CREDIT_PACKS: CreditPack[] = [
-  {
-    id: "p1",
-    credits: "100",
-    price: "$1.49",
-    bonus: { base: "98.34", bonus: "1.66" },
-    flashSale: true,
-    ctaHref: "#growth",
-  },
-  { id: "p3", credits: "660", price: "$10", ctaHref: "#growth" },
-  { id: "p4", credits: "1,320", price: "$20", ctaHref: "#growth" },
-  {
-    id: "p5",
-    credits: "3,500",
-    price: "$50",
-    bonus: { base: "3,300", bonus: "200" },
-    flashSale: true,
-    ctaHref: "#growth",
   },
 ];
 
@@ -230,7 +216,15 @@ function PricingCard({ plan }: { plan: Plan }) {
 
 function CreditRow({ pack }: { pack: CreditPack }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl bg-white p-5 ring-1 ring-black/[0.06] shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] transition-shadow hover:shadow-[0_14px_40px_-14px_rgba(0,0,0,0.12)] sm:p-6">
+    <a
+      href={CREDIT_CTA_HREF}
+      aria-label={`Purchase ${pack.credits.toLocaleString()} credits (${pack.label}) for ${formatIdr(pack.priceIdr)}`}
+      className={`group relative block overflow-hidden rounded-2xl p-5 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-1 hover:shadow-[0_14px_40px_-14px_rgba(0,0,0,0.12)] sm:p-6 ${
+        pack.popular
+          ? "bg-white ring-2 ring-[#F26522]"
+          : "bg-white ring-1 ring-black/[0.06]"
+      }`}
+    >
       <Flame
         aria-hidden
         strokeWidth={1.25}
@@ -245,37 +239,49 @@ function CreditRow({ pack }: { pack: CreditPack }) {
               className="font-semibold leading-none tracking-[-0.02em] text-gray-900"
               style={{ fontSize: "clamp(1.5rem, 2.2vw, 1.875rem)" }}
             >
-              {pack.credits}
+              {pack.credits.toLocaleString()}
             </span>
-            {pack.flashSale && (
-              <span className="ml-1 rounded-md bg-gray-900/[0.06] px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                Flash Sale
+            {pack.bonusCredits ? (
+              <span className="text-[13px] font-semibold text-emerald-600">
+                +{pack.bonusCredits.toLocaleString()} Credits
+              </span>
+            ) : null}
+            {pack.popular && (
+              <span className="ml-1 rounded-md bg-[#F26522]/15 px-2 py-0.5 text-[10px] font-semibold text-[#F26522]">
+                Most popular
               </span>
             )}
           </div>
-          {pack.bonus && (
-            <p className="mt-1.5 text-[12px] text-gray-500">
-              Total: {pack.bonus.base} +{" "}
-              <span className="font-medium text-emerald-600">
-                {pack.bonus.bonus} Bonus
-              </span>
-            </p>
-          )}
+          <p className="mt-1.5 text-[12px] text-gray-500">
+            ≈{" "}
+            {Math.floor(
+              packTotalCredits(pack) / CREDITS_PER_IMAGE
+            ).toLocaleString()}{" "}
+            images ·{" "}
+            {Math.floor(
+              packTotalCredits(pack) / CREDITS_PER_VIDEO
+            ).toLocaleString()}{" "}
+            videos
+          </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-3 sm:gap-4">
-          <span className="text-base font-medium text-gray-900 sm:text-lg">
-            {pack.price}
-          </span>
-          <a
-            href={pack.ctaHref}
-            className="rounded-full bg-gray-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-gray-800 sm:text-sm"
-          >
+          <div className="flex flex-col items-end leading-tight">
+            <span className="text-base font-medium text-gray-900 sm:text-lg">
+              {formatIdr(pack.priceIdr)}
+            </span>
+            {pack.bonusCredits ? (
+              <span className="text-[11px] font-medium text-red-600">
+                Saved {formatIdr(packBonusValueIdr(pack))}
+              </span>
+            ) : null}
+          </div>
+          <span className="rounded-full bg-gray-900 px-4 py-2 text-xs font-medium text-white transition-colors group-hover:bg-gray-800 sm:text-sm">
             Purchase
-          </a>
+          </span>
         </div>
       </div>
-    </div>
+    </a>
   );
 }
 
@@ -363,12 +369,16 @@ function ModeToggle({
   );
 }
 
+// Subscription plans are hidden for now — only credit packs are offered.
+// Flip this to re-enable the Plans/Credits toggle and the plan tier cards.
+const SHOW_PLANS = false;
+
 export function PricingSectionAlt() {
-  const [mode, setMode] = useState<Mode>("plans");
+  const [mode, setMode] = useState<Mode>(SHOW_PLANS ? "plans" : "credits");
 
   return (
     <section
-      id="pricing-alt"
+      id="pricing"
       className="bg-white pt-16 pb-16 sm:pt-20 sm:pb-20 lg:pt-28 lg:pb-28"
       style={{
         backgroundImage:
@@ -385,27 +395,29 @@ export function PricingSectionAlt() {
             Pricing that scales with your content.
           </h2>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-gray-600 sm:text-base">
-            Start free, upgrade when you&apos;re ready. Cancel anytime.
+            Buy credits and pay only for what you create. No subscription.
           </p>
         </div>
 
-        <div className="mt-8 flex justify-center px-5 sm:mt-10 sm:px-8 lg:px-12">
-          <ModeToggle mode={mode} onChange={setMode} />
-        </div>
+        {SHOW_PLANS && (
+          <div className="mt-8 flex justify-center px-5 sm:mt-10 sm:px-8 lg:px-12">
+            <ModeToggle mode={mode} onChange={setMode} />
+          </div>
+        )}
 
         <div
           id="pricing-grid"
           className="mt-10 px-5 sm:mt-14 sm:px-8 lg:mt-16 lg:px-12"
         >
-          {mode === "plans" ? (
+          {SHOW_PLANS && mode === "plans" ? (
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-7 xl:gap-8">
               {PLANS.map((plan) => (
                 <PricingCard key={plan.id} plan={plan} />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:items-start lg:gap-12">
-              <aside className="lg:col-span-2 lg:sticky lg:top-28">
+            <div className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:items-stretch lg:gap-12">
+              <aside className="rounded-2xl bg-white p-6 ring-1 ring-black/[0.06] shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] sm:p-8 lg:col-span-2 lg:h-full">
                 <h3
                   className="font-medium leading-[1.12] tracking-[-0.02em] text-gray-900"
                   style={{ fontSize: "clamp(1.5rem, 3vw, 2rem)" }}
@@ -420,7 +432,7 @@ export function PricingSectionAlt() {
                 <ul className="mt-6 flex flex-col gap-3">
                   {[
                     "Mix & match across reels, photos, and captions",
-                    "Bonus credits on $50+ packs",
+                    "Better value on larger packs",
                     "No monthly commitment",
                     "2-year validity from redemption",
                   ].map((f) => (
