@@ -7,6 +7,8 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
+import PageContainer from "../../dashboard/PageContainer";
+import PageHeader from "../../dashboard/PageHeader";
 import {
   Upload,
   Zap,
@@ -1946,16 +1948,11 @@ export default function SchedulerDashboardPage() {
       <Suspense fallback={null}>
         <DeepLinkIntake onAsset={handleDeepLinkAsset} />
       </Suspense>
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Create & Schedule</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Upload a video, generate a caption, and publish on autopilot.
-            </p>
-          </div>
-          <YouTubeStatusBadge />
-        </div>
+      <PageContainer>
+        <PageHeader
+          title="Create & Schedule"
+          actions={<YouTubeStatusBadge />}
+        />
 
         {single ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
@@ -2165,7 +2162,7 @@ export default function SchedulerDashboardPage() {
             onRetry={handleRetry}
           />
         </div>
-      </main>
+      </PageContainer>
 
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>

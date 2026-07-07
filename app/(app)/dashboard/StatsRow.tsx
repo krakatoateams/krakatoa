@@ -24,10 +24,10 @@ function StatsCard({ label, value, icon, accent, loading }: StatsCardProps) {
           {icon}
         </div>
         <p className="text-xs font-medium uppercase tracking-wider text-gray-500">{label}</p>
+        <p className="ml-auto text-3xl font-bold leading-none text-white">
+          {loading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-gray-800" /> : value}
+        </p>
       </div>
-      <p className="mt-4 text-3xl font-bold text-white">
-        {loading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-gray-800" /> : value}
-      </p>
     </div>
   );
 }

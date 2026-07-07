@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, type LucideIcon } from "lucide-react";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 type BaseProps = {
@@ -9,6 +9,10 @@ type BaseProps = {
   iconWrapperClassName?: string;
   iconClassName?: string;
   showIcon?: boolean;
+  /** Icon rendered in the circle. Defaults to ArrowRight. */
+  icon?: LucideIcon;
+  /** Hover transform for the icon circle. Defaults to a -45deg rotate. */
+  iconHoverClassName?: string;
   /** dark = white circle on gray-900 button; orange = white circle with orange arrow */
   iconVariant?: "dark" | "orange";
 };
@@ -34,17 +38,21 @@ function IconCircle({
   iconWrapperClassName,
   iconClassName,
   iconVariant = "orange",
+  icon: Icon = ArrowRight,
+  iconHoverClassName = "group-hover:-rotate-45",
 }: {
   iconWrapperClassName?: string;
   iconClassName?: string;
   iconVariant?: "dark" | "orange";
+  icon?: LucideIcon;
+  iconHoverClassName?: string;
 }) {
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-full bg-white transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:-rotate-45 ${iconWrapperClassName ?? "w-6 h-6"}`}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-white ${iconWrapperClassName ?? "w-6 h-6"}`}
     >
-      <ArrowRight
-        className={`${iconVariant === "dark" ? "text-gray-900" : "text-[#F26522]"} ${iconClassName ?? "w-3.5 h-3.5"}`}
+      <Icon
+        className={`transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${iconHoverClassName} ${iconVariant === "dark" ? "text-gray-900" : "text-[#F26522]"} ${iconClassName ?? "w-3.5 h-3.5"}`}
       />
     </span>
   );
@@ -57,6 +65,8 @@ export function TextRollButton({
   iconWrapperClassName,
   iconClassName,
   showIcon = true,
+  icon,
+  iconHoverClassName,
   iconVariant = "orange",
   href,
   ...rest
@@ -69,6 +79,8 @@ export function TextRollButton({
           iconWrapperClassName={iconWrapperClassName}
           iconClassName={iconClassName}
           iconVariant={iconVariant}
+          icon={icon}
+          iconHoverClassName={iconHoverClassName}
         />
       )}
     </>

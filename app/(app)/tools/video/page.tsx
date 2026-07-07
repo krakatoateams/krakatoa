@@ -203,7 +203,7 @@ function Tooltip({ label, children }: { label: string; children: React.ReactNode
 }
 
 const GENERATE_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+  "flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
 
 function CreditActionButton({
   balance,
@@ -915,14 +915,11 @@ function VideoOmniPage() {
         <div className="absolute -right-[10%] top-[20%] h-[30%] w-[30%] rounded-full bg-indigo-900/20 blur-[120px]" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-5xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
           <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
             Video studio
           </h1>
-          <p className="text-sm text-gray-500">
-            Generate cinematic clips from a prompt — add reference frames, images, videos, or audio to steer the result.
-          </p>
         </div>
 
         {creationType === "text2video" && (
