@@ -6,8 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { Check, Flame } from "lucide-react";
+import { Check, Flame, X } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
+import { useCurrentUser } from "@/lib/auth-context";
 import {
   CREDIT_PACKS,
   formatIdr,
@@ -16,9 +17,10 @@ import {
   type CreditPack,
 } from "@/lib/credit-packs";
 
-// Where the landing "Purchase" CTA sends visitors. Purchases actually happen in
-// the dashboard (DOKU checkout); the public page just funnels to signup.
-const CREDIT_CTA_HREF = "#growth";
+// Where the "Purchase" CTA sends visitors. Signed-in users go straight to the
+// add-credit page; everyone else is funneled through login first.
+const CREDIT_CTA_HREF_AUTHED = "/dashboard/settings?tab=credits";
+const CREDIT_CTA_HREF_GUEST = "/login";
 
 // Rough spend rates used only to estimate what a pack buys (matches the copy in
 // the aside: ~10 credits per AI reel · 2 per product photo).
@@ -214,10 +216,10 @@ function PricingCard({ plan }: { plan: Plan }) {
   );
 }
 
-function CreditRow({ pack }: { pack: CreditPack }) {
+function CreditRow({ pack, href }: { pack: CreditPack; href: string }) {
   return (
     <a
-      href={CREDIT_CTA_HREF}
+      href={href}
       aria-label={`Purchase ${pack.credits.toLocaleString()} credits (${pack.label}) for ${formatIdr(pack.priceIdr)}`}
       className={`group relative block overflow-hidden rounded-2xl p-5 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-1 hover:shadow-[0_14px_40px_-14px_rgba(0,0,0,0.12)] sm:p-6 ${
         pack.popular
@@ -276,7 +278,13 @@ function CreditRow({ pack }: { pack: CreditPack }) {
               </span>
             ) : null}
           </div>
-          <span className="rounded-full bg-gray-900 px-4 py-2 text-xs font-medium text-white transition-colors group-hover:bg-gray-800 sm:text-sm">
+          <span
+            className={`rounded-full px-4 py-2 text-xs font-medium text-white transition-colors sm:text-sm ${
+              pack.popular
+                ? "bg-[#F26522] group-hover:bg-[#e05a1a]"
+                : "bg-gray-900 group-hover:bg-gray-800"
+            }`}
+          >
             Purchase
           </span>
         </div>
@@ -375,6 +383,12 @@ const SHOW_PLANS = false;
 
 export function PricingSectionAlt() {
   const [mode, setMode] = useState<Mode>(SHOW_PLANS ? "plans" : "credits");
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const { status } = useCurrentUser();
+  const creditHref =
+    status === "authenticated"
+      ? CREDIT_CTA_HREF_AUTHED
+      : CREDIT_CTA_HREF_GUEST;
 
   return (
     <section
@@ -417,7 +431,7 @@ export function PricingSectionAlt() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:items-stretch lg:gap-12">
-              <aside className="rounded-2xl bg-white p-6 ring-1 ring-black/[0.06] shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] sm:p-8 lg:col-span-2 lg:h-full">
+              <aside className="flex flex-col rounded-2xl bg-white p-6 ring-1 ring-black/[0.06] shadow-[0_8px_30px_-12px_rgba(0,0,0,0.06)] sm:p-8 lg:col-span-2 lg:h-full">
                 <h3
                   className="font-medium leading-[1.12] tracking-[-0.02em] text-gray-900"
                   style={{ fontSize: "clamp(1.5rem, 3vw, 2rem)" }}
@@ -454,27 +468,114 @@ export function PricingSectionAlt() {
                 <p className="mt-6 text-[12px] text-gray-500">
                   ~10 credits per AI reel · 2 per product photo · 1 per caption
                 </p>
-                <p className="mt-3 text-[12px] leading-relaxed text-gray-400">
+                <p className="mt-auto pt-6 text-[12px] leading-relaxed text-gray-400">
                   Credits cannot be exchanged for memberships, nor refunded,
                   transferred, or withdrawn.{" "}
-                  <a
-                    href="#credits-policy"
-                    className="font-medium text-emerald-600 hover:text-emerald-700"
+                  <button
+                    type="button"
+                    onClick={() => setPolicyOpen(true)}
+                    className="font-medium text-emerald-600 underline-offset-2 hover:text-emerald-700 hover:underline"
                   >
                     Credits Policy
-                  </a>
+                  </button>
                 </p>
               </aside>
 
               <div className="flex flex-col gap-3 lg:col-span-3 lg:gap-4">
                 {CREDIT_PACKS.map((pack) => (
-                  <CreditRow key={pack.id} pack={pack} />
+                  <CreditRow key={pack.id} pack={pack} href={creditHref} />
                 ))}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <CreditPolicyModal open={policyOpen} onClose={() => setPolicyOpen(false)} />
     </section>
+  );
+}
+
+function CreditPolicyModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="credits-policy-title"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+    >
+      <div
+        aria-hidden
+        onClick={onClose}
+        className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"
+      />
+
+      <div className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.4)]">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 p-6">
+          <h3
+            id="credits-policy-title"
+            className="text-lg font-semibold tracking-[-0.01em] text-gray-900"
+          >
+            Credits Policy
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="-mr-1 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+          >
+            <X className="h-4 w-4" strokeWidth={2.25} />
+          </button>
+        </div>
+
+        <ul className="flex flex-col gap-3 p-6 text-[14px] leading-relaxed text-gray-600">
+          {[
+            "Credits are non-refundable, non-transferable, and cannot be withdrawn or exchanged for cash.",
+            "Credits cannot be exchanged for memberships or subscription plans.",
+            "Credits are valid for 2 years from the date of redemption.",
+            "Spent credits are consumed at generation time and are not returned for outputs you choose not to use.",
+            "Krakatoa may adjust credit pricing for future purchases; credits already purchased keep their granted value.",
+          ].map((item) => (
+            <li key={item} className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
+                <Check className="h-3 w-3 text-emerald-600" strokeWidth={2.5} />
+              </span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex justify-end border-t border-gray-100 p-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-gray-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

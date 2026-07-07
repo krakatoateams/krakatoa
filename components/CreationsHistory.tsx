@@ -35,6 +35,8 @@ type Props = {
   refreshKey?: number;
   /** Show the All / Videos / Photos / Favorites tab bar and per-card favorite toggle */
   enableTabs?: boolean;
+  /** When false, the Trash tab (and its empty-trash controls) is hidden. Defaults to true. */
+  showTrashTab?: boolean;
   /** Enable library-style hover actions + rich preview modal (favorite, download, delete, prev/next) WITHOUT the tab bar. */
   showActions?: boolean;
   /** When false, only the created date is shown on each card (no title / tool label) */
@@ -194,6 +196,7 @@ export default function CreationsHistory({
   className = "",
   refreshKey = 0,
   enableTabs = false,
+  showTrashTab = true,
   showActions = false,
   showMeta = true,
   showRefresh = true,
@@ -587,7 +590,9 @@ export default function CreationsHistory({
     { id: "character", label: "Characters", icon: User },
     { id: "storyboard", label: "Storyboards", icon: Layers },
     { id: "favorite", label: "Favorites", icon: Star },
-    { id: "trash", label: "Trash", icon: Trash2 },
+    ...(showTrashTab
+      ? [{ id: "trash" as LibraryTab, label: "Trash", icon: Trash2 }]
+      : []),
   ];
 
   const previewMeta = previewItem?.metadata ?? {};

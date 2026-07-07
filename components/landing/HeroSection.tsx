@@ -1,17 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Circle, Square, Triangle, type LucideIcon } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { LandingNav } from "./LandingNav";
 import { TextRollButton } from "./TextRollButton";
 import { HeroCollageHeadline } from "./HeroCollageHeadline";
 import { HeroFloatingSocialIcons } from "./HeroFloatingSocialIcons";
 
-const AI_MODELS: { name: string; Icon: LucideIcon }[] = [
-  { name: "Nano Banana 2", Icon: Circle },
-  { name: "Kling 3", Icon: Triangle },
-  { name: "Seedance 2", Icon: Square },
-];
+const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
 
 /**
  * Greyscale strip of the AI models powering Krakatoa, pinned to the bottom
@@ -26,15 +22,14 @@ function HeroModelStrip() {
           Powered by leading AI models
         </span>
         <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-3 grayscale sm:gap-x-10">
-          {AI_MODELS.map(({ name, Icon }) => (
+          {AI_MODELS.map((name) => (
             <span
               key={name}
               className="flex items-center gap-1.5 text-sm font-semibold tracking-tight text-white/70 sm:text-base"
             >
-              <Icon
-                className="h-3.5 w-3.5 fill-current text-white/35"
-                strokeWidth={2}
-              />
+              <span aria-hidden className="text-white/35">
+                ✦
+              </span>
               {name}
             </span>
           ))}
@@ -74,8 +69,10 @@ export function HeroLayout({
                 iconWrapperClassName="w-10 h-10 sm:w-11 sm:h-11"
                 iconClassName="w-4 h-4 sm:w-[18px] sm:h-[18px]"
                 iconVariant="orange"
+                icon={ArrowDown}
+                iconHoverClassName="group-hover:translate-y-1"
               >
-                Start a project
+                See how
               </TextRollButton>
             </div>
           </div>

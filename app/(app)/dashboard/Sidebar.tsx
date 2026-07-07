@@ -7,7 +7,6 @@ import { usePathname } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import {
-  Mountain,
   Video,
   Camera,
   Aperture,
@@ -18,6 +17,8 @@ import {
   Settings,
   Shield,
   LogOut,
+  Menu,
+  X,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 
@@ -76,9 +77,15 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { status, name, email, image } = useCurrentUser();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [toolVisibility, setToolVisibility] = useState<Record<string, ToolVisibility> | null>(
     null
   );
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   // Admin link visibility (cosmetic only — the real gate is the server-side
   // requireAdmin() guard on /admin pages and APIs).
@@ -140,13 +147,44 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-gray-800 bg-gray-950 sticky top-0">
+    <>
+      {/* Mobile floating toggle (bottom-right) */}
+      <button
+        type="button"
+        onClick={() => setMobileOpen((open) => !open)}
+        aria-label={mobileOpen ? "Close menu" : "Open menu"}
+        aria-expanded={mobileOpen}
+        className="fixed bottom-5 right-5 z-[60] flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white shadow-lg shadow-black/40 ring-1 ring-inset ring-white/10 backdrop-blur-xl backdrop-saturate-150 transition-colors hover:bg-white/20 md:hidden"
+      >
+        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
+
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-screen w-60 shrink-0 flex-col border-r border-gray-800 bg-gray-950 transition-transform duration-300 ease-in-out md:sticky md:top-0 md:z-auto md:translate-x-0 ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
       {/* Logo */}
       <div className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600">
-          <Mountain className="h-4 w-4 text-white" />
-        </div>
-        <span className="text-base font-black tracking-tight text-white">Krakatoa</span>
+        <Image
+          src="/Logo White transparent.svg"
+          alt="Krakatoa"
+          width={28}
+          height={28}
+          className="h-7 w-7 shrink-0 object-contain"
+        />
+        <span className="text-base font-black uppercase tracking-[-0.5px] text-white">
+          KRAKATOA
+        </span>
       </div>
 
       {/* Nav sections */}
@@ -183,48 +221,47 @@ export default function Sidebar() {
       </nav>
 
       {/* User profile */}
-      <div className="border-t border-gray-800 p-3">
+      <div className="hidden border-t border-gray-800 p-3 md:block">
         {status === "authenticated" ? (
-          <div className="flex items-center gap-1 rounded-lg bg-gray-900 px-1 py-1">
+          <div className="relative rounded-xl border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-white/20 hover:bg-white/[0.05]">
+            <button
+              type="button"
+              onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
+              aria-label="Sign out"
+              className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
             <Link
               href="/dashboard/settings"
               aria-label="Open profile settings"
-              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 transition-colors hover:bg-gray-800"
+              className="flex min-w-0 flex-col items-start gap-2 text-left"
             >
               {image ? (
                 <Image
                   src={image}
                   alt={name ?? "Profile"}
-                  width={32}
-                  height={32}
-                  className="h-8 w-8 shrink-0 rounded-full"
+                  width={40}
+                  height={40}
+                  className="h-10 w-10 shrink-0 rounded-full ring-2 ring-white/10"
                 />
               ) : (
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-semibold text-violet-300">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/40 to-indigo-500/20 text-sm font-semibold text-violet-100 ring-2 ring-white/10">
                   {name?.[0]?.toUpperCase() ?? "?"}
                 </div>
               )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-white">{name}</p>
+              <div className="min-w-0 w-full">
+                <p className="truncate text-sm font-semibold text-white">{name}</p>
                 <p className="truncate text-[10px] text-gray-500">{email}</p>
-                <div className="mt-1">
-                  <CreditBadge />
-                </div>
               </div>
+              <CreditBadge />
             </Link>
-            <button
-              type="button"
-              onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
-              aria-label="Sign out"
-              className="shrink-0 cursor-pointer self-start rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
           </div>
         ) : (
-          <div className="h-12 animate-pulse rounded-lg bg-gray-900" />
+          <div className="h-32 animate-pulse rounded-xl bg-white/[0.03]" />
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

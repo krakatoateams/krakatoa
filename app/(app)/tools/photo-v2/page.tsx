@@ -608,7 +608,7 @@ function StoryboardComposer({
             <button
               type="submit"
               disabled={!canGenerate}
-              className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -664,7 +664,7 @@ function StoryboardComposer({
               type="button"
               onClick={() => goToVideo(result.id)}
               disabled={!result.id}
-              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Clapperboard className="h-4 w-4" />
               <span>Create video</span>
@@ -1011,7 +1011,7 @@ function PhotoOmniPage() {
         <div className="absolute -right-[10%] top-[20%] h-[30%] w-[30%] rounded-full bg-indigo-900/20 blur-[120px]" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-5xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
           <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
             Photo studio
@@ -1253,7 +1253,7 @@ function PhotoOmniPage() {
                 <button
                   type="submit"
                   disabled={loading || !canGenerate}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {loading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />

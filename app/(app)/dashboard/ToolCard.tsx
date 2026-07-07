@@ -3,14 +3,14 @@ import { ArrowRight } from "lucide-react";
 
 export interface ToolCardProps {
   name: string;
-  description: string;
   href: string;
   icon: React.ReactNode;
   accent: string;
   comingSoon?: boolean;
+  thumbnail?: React.ReactNode;
 }
 
-export default function ToolCard({ name, description, href, icon, accent, comingSoon }: ToolCardProps) {
+export default function ToolCard({ name, href, icon, accent, comingSoon, thumbnail }: ToolCardProps) {
   const Wrapper = comingSoon ? "div" : Link;
   const wrapperProps = comingSoon ? {} : { href };
 
@@ -21,6 +21,8 @@ export default function ToolCard({ name, description, href, icon, accent, coming
         comingSoon ? "opacity-60" : "hover:border-violet-500/40 hover:bg-gray-900/80"
       }`}
     >
+      {thumbnail}
+
       {comingSoon && (
         <span className="absolute right-4 top-4 rounded-full bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-amber-400">
           Coming Soon
@@ -31,8 +33,7 @@ export default function ToolCard({ name, description, href, icon, accent, coming
         {icon}
       </div>
 
-      <h3 className="text-base font-semibold text-white">{name}</h3>
-      <p className="mt-1 flex-1 text-sm text-gray-500">{description}</p>
+      <h3 className="flex-1 text-base font-semibold text-white">{name}</h3>
 
       <div
         className={`mt-4 inline-flex items-center gap-1.5 text-sm font-medium ${

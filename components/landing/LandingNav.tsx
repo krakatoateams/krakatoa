@@ -3,8 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Menu, X, ArrowRight } from "lucide-react";
+import { useCurrentUser } from "@/lib/auth-context";
 import { LondonClock } from "./LondonClock";
 import { TextRollButton } from "./TextRollButton";
+
+/** First letter for the avatar circle, from name/email (falls back to "U"). */
+function initialFrom(name: string | null, email: string | null): string {
+  const source = name?.trim() || email?.trim() || "U";
+  return source.charAt(0).toUpperCase();
+}
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -103,6 +110,10 @@ export function LandingNav() {
   // to light backgrounds once the user has scrolled.
   const light = scrolled && theme === "light";
 
+  const { status, name, email } = useCurrentUser();
+  const isAuthed = status === "authenticated";
+  const initial = initialFrom(name, email);
+
   return (
     <>
       <div
@@ -153,13 +164,25 @@ export function LandingNav() {
           </div>
 
           <div className="hidden md:flex items-center gap-4 lg:gap-5">
-            <TextRollButton
-              href="/dashboard"
-              className="inline-flex items-center gap-2 bg-gray-900 text-white text-[13px] font-medium rounded-full pl-5 pr-2 py-2 hover:bg-gray-800 transition-colors"
-              iconVariant="dark"
-            >
-              Start creating free
-            </TextRollButton>
+            {isAuthed ? (
+              <Link
+                href="/dashboard"
+                className="group inline-flex items-center gap-2 bg-gray-900 text-white text-[13px] font-medium rounded-full pl-5 pr-2 py-2 hover:bg-gray-800 transition-colors"
+              >
+                Dashboard
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-bold text-gray-900">
+                  {initial}
+                </span>
+              </Link>
+            ) : (
+              <TextRollButton
+                href="/dashboard"
+                className="inline-flex items-center gap-2 bg-gray-900 text-white text-[13px] font-medium rounded-full pl-5 pr-2 py-2 hover:bg-gray-800 transition-colors"
+                iconVariant="dark"
+              >
+                Start creating free
+              </TextRollButton>
+            )}
           </div>
 
           <button
@@ -204,14 +227,20 @@ export function LandingNav() {
             ))}
           </nav>
           <Link
-            href="#growth"
+            href={isAuthed ? "/dashboard" : "#growth"}
             className="group inline-flex w-full items-center justify-between bg-gray-900 text-white rounded-full px-5 py-3.5 text-[15px] font-medium"
             onClick={() => setMenuOpen(false)}
           >
-            Start a project
-            <span className="flex w-8 h-8 items-center justify-center rounded-full bg-white transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:-rotate-45">
-              <ArrowRight className="w-4 h-4 text-gray-900" />
-            </span>
+            {isAuthed ? "Dashboard" : "Start a project"}
+            {isAuthed ? (
+              <span className="flex w-8 h-8 items-center justify-center rounded-full bg-white text-[13px] font-bold text-gray-900">
+                {initial}
+              </span>
+            ) : (
+              <span className="flex w-8 h-8 items-center justify-center rounded-full bg-white transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] group-hover:-rotate-45">
+                <ArrowRight className="w-4 h-4 text-gray-900" />
+              </span>
+            )}
           </Link>
         </div>
       </div>

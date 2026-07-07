@@ -1,36 +1,51 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, Zap, CalendarClock } from "lucide-react";
+import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
+import ToolCardThumbnail from "./ToolCardThumbnail";
+import PageContainer from "./PageContainer";
+import PageHeader from "./PageHeader";
 
-const TOOLS = [
+type ToolDef = {
+  name: string;
+  href: string;
+  icon: ReactNode;
+  accent: string;
+  comingSoon?: boolean;
+  thumbMediaType?: "image" | "video";
+  thumbOutlined?: boolean;
+};
+
+const TOOLS: ToolDef[] = [
   {
-    name: "Reels Creator",
-    description: "Generate faceless video reels with AI narration and captions.",
+    name: "Video",
     href: "/tools/video?type=reels-creator",
     icon: <Video className="h-5 w-5 text-indigo-400" />,
     accent: "bg-indigo-500/10",
+    thumbMediaType: "video" as const,
+    thumbOutlined: true,
   },
   {
-    name: "Product Photo",
-    description: "Transform product images into studio-quality shots with AI.",
-    href: "/tools/photo",
+    name: "Photo",
+    href: "/tools/photo-v2",
     icon: <Camera className="h-5 w-5 text-purple-400" />,
     accent: "bg-purple-500/10",
+    thumbMediaType: "image" as const,
+    thumbOutlined: true,
   },
   {
     name: "Schedule",
-    description: "Schedule and auto-publish videos to YouTube on autopilot.",
     href: "/tools/scheduler",
     icon: <CalendarClock className="h-5 w-5 text-emerald-400" />,
     accent: "bg-emerald-500/10",
   },
   {
-    name: "IG Automation",
-    description: "Auto-generate and post Instagram content on a schedule.",
+    name: "Instagram",
     href: "/tools/ig",
     icon: <Zap className="h-5 w-5 text-amber-400" />,
     accent: "bg-amber-500/10",
@@ -43,16 +58,10 @@ export default function DashboardPage() {
   const firstName = name?.split(" ")[0] ?? "there";
 
   return (
-    <div className="px-8 py-8">
-      {/* Welcome */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Welcome back, {firstName}</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Here&apos;s a snapshot of your scheduled content and the tools you can use.
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader title={`Welcome back, ${firstName}`} />
 
-      <RecentCreations />
+      <DashboardHero />
 
       {/* Stats */}
       <section className="mb-10">
@@ -63,16 +72,29 @@ export default function DashboardPage() {
       </section>
 
       {/* Tools */}
-      <section>
+      <section className="mb-10">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
           Your tools
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {TOOLS.map((tool) => (
-            <ToolCard key={tool.name} {...tool} />
+          {TOOLS.map(({ thumbMediaType, thumbOutlined, ...tool }) => (
+            <ToolCard
+              key={tool.name}
+              {...tool}
+              thumbnail={
+                thumbMediaType ? (
+                  <ToolCardThumbnail
+                    mediaType={thumbMediaType}
+                    outlined={thumbOutlined}
+                  />
+                ) : undefined
+              }
+            />
           ))}
         </div>
       </section>
-    </div>
+
+      <RecentCreations />
+    </PageContainer>
   );
 }

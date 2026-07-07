@@ -1,11 +1,53 @@
 "use client";
 
 import Image from "next/image";
-import { Zap, type LucideIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Gift, type LucideIcon } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
 
-const ABOUT_PHOTO =
-  "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260516_090133_c157d30b-a99a-4477-bec1-a446149ec3f2.png&w=1280&q=85";
+const ABOUT_PHOTOS = [
+  "https://images.unsplash.com/photo-1614858978391-a3feca014006?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1767571900953-a6efae9c0ac1?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1761898565688-b5dec21c908a?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1675573206424-36f844f7627a?w=1200&auto=format&fit=crop&q=80",
+];
+
+function FadePhotoCarousel({
+  images,
+  intervalMs = 4000,
+}: {
+  images: string[];
+  intervalMs?: number;
+}) {
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const id = setInterval(
+      () => setActive((prev) => (prev + 1) % images.length),
+      intervalMs
+    );
+    return () => clearInterval(id);
+  }, [images.length, intervalMs]);
+
+  return (
+    <>
+      {images.map((src, i) => (
+        <Image
+          key={src}
+          src={src}
+          alt="AI-generated content creation"
+          fill
+          priority={i === 0}
+          className={`object-cover object-[center_30%] transition-opacity duration-1000 ease-in-out ${
+            i === active ? "opacity-100" : "opacity-0"
+          }`}
+          sizes="(min-width: 1024px) 50vw, 100vw"
+        />
+      ))}
+    </>
+  );
+}
 
 function StatCard({
   value,
@@ -66,18 +108,18 @@ export function AboutSectionAlt() {
               className="font-medium leading-[1.06] tracking-[-0.02em]"
               style={{ fontSize: "clamp(1.75rem, 4.2vw, 3rem)" }}
             >
-              Strategy-led AI tools,
+              AI video and images,
               <br className="hidden sm:block" />
               <span className="sm:hidden"> </span>
-              delivering results
+              from prompt to
               <br className="hidden sm:block" />
               <span className="sm:hidden"> </span>
-              in content and beyond.
+              post in minutes.
             </h2>
             <p className="mt-6 max-w-md text-base leading-relaxed text-white/70 sm:mt-7">
-              Research, creative thinking, and iteration help growing brands
-              realize their full digital potential with Krakatoa&apos;s AI
-              suite.
+              Generate faceless reels, cinematic clips, and studio-grade product
+              photos with one AI suite — scripted, generated, captioned, and
+              ready to publish.
             </p>
             <div className="mt-auto pt-8 lg:pt-10">
               <TextRollButton
@@ -90,15 +132,9 @@ export function AboutSectionAlt() {
             </div>
           </div>
 
-          {/* Editorial photo */}
-          <div className="relative aspect-[3/2] overflow-hidden rounded-3xl sm:col-span-2 lg:col-span-2">
-            <Image
-              src={ABOUT_PHOTO}
-              alt=""
-              fill
-              className="object-cover"
-              sizes="(min-width: 1024px) 50vw, 100vw"
-            />
+          {/* Editorial photo — matches the height of the hero card on desktop */}
+          <div className="relative min-h-[360px] overflow-hidden rounded-3xl bg-gray-900 sm:col-span-2 lg:col-span-2 lg:min-h-0">
+            <FadePhotoCarousel images={ABOUT_PHOTOS} />
           </div>
 
           {/* Manifesto quote */}
@@ -125,9 +161,9 @@ export function AboutSectionAlt() {
           </div>
 
           <StatCard
-            icon={Zap}
-            value="10×"
-            label="Faster delivery"
+            icon={Gift}
+            value="Free to start"
+            label="Register now — no commitment, no card required"
             tone="dark"
             className="sm:col-span-2 lg:col-span-1"
           />

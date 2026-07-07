@@ -12,6 +12,8 @@ import AccountTab from "./AccountTab";
 import CreditsTab from "./CreditsTab";
 import ConnectionsTab from "./ConnectionsTab";
 import BasicSettingsTab from "./BasicSettingsTab";
+import PageContainer from "../PageContainer";
+import PageHeader from "../PageHeader";
 
 const TABS = [
   { id: "account", label: "Account", icon: User },
@@ -43,13 +45,8 @@ function SettingsContent() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Profile Settings</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Manage your account, credits, and connections.
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader title="Profile Settings" />
 
       <div className="flex flex-col gap-8 md:flex-row">
         {/* Tab nav */}
@@ -90,7 +87,7 @@ function SettingsContent() {
           {activeTab === "settings" && <BasicSettingsTab />}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -98,9 +95,9 @@ export default function SettingsPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-5xl px-6 py-10">
+        <PageContainer>
           <div className="h-8 w-48 animate-pulse rounded bg-gray-900" />
-        </div>
+        </PageContainer>
       }
     >
       <SettingsContent />

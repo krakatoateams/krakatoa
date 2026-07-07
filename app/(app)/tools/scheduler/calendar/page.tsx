@@ -755,8 +755,9 @@ export default function SchedulerCalendarPage() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Content Calendar</h1>
-            <p className="mt-0.5 text-sm text-gray-500">Drag posts between days to reschedule them.</p>
+            <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+              Content Calendar
+            </h1>
           </div>
           <div className="flex items-center gap-2">
             <YouTubeStatusBadge />

@@ -9,12 +9,14 @@ export default function RecentCreations() {
         Recent creations
       </h2>
       <CreationsHistory
-        hideHeader
-        showActions
-        showRefresh={false}
-        limit={12}
+        title="Your generations"
+        description="Every successful generation appears here."
         className="!mt-0 !border-t-0 !pt-0"
-        gridClassName="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3"
+        enableTabs
+        showTrashTab={false}
+        showMeta={false}
+        showRefresh={false}
+        limit={10}
       />
     </section>
   );
