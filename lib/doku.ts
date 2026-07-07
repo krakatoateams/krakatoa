@@ -17,6 +17,8 @@ import crypto from "crypto";
  */
 
 const CHECKOUT_PATH = "/checkout/v1/payment";
+/** Base path for the DOKU Check Status API (append the invoice number). */
+const ORDER_STATUS_PATH = "/orders/v1/status";
 /** Path DOKU calls for notifications — must match the deployed route + dashboard config. */
 export const DOKU_WEBHOOK_PATH = "/api/payments/doku/webhook";
 
@@ -97,6 +99,98 @@ function buildSignature(params: {
     `Request-Target:${params.target}\n` +
     `Digest:${digest}`;
   return `HMACSHA256=${hmacSha256Base64(component, params.secretKey)}`;
+}
+
+/**
+ * Signature for GET requests. Per DOKU, GET requests omit the Digest line
+ * (there is no request body to hash).
+ */
+function buildGetSignature(params: {
+  clientId: string;
+  secretKey: string;
+  requestId: string;
+  timestamp: string;
+  target: string;
+}): string {
+  const component =
+    `Client-Id:${params.clientId}\n` +
+    `Request-Id:${params.requestId}\n` +
+    `Request-Timestamp:${params.timestamp}\n` +
+    `Request-Target:${params.target}`;
+  return `HMACSHA256=${hmacSha256Base64(component, params.secretKey)}`;
+}
+
+export type CheckoutOrderStatus = {
+  /** Transaction-level status: SUCCESS | PENDING | FAILED | EXPIRED | ... */
+  transactionStatus: string;
+  /** Order-level status: ORDER_GENERATED | ORDER_EXPIRED | ORDER_RECOVERED | ... */
+  orderStatus: string | null;
+  /** Amount DOKU has on record for the order (IDR). */
+  amount: number | null;
+  /** Payment channel/acquirer id, when present. */
+  paymentMethod: string | null;
+  raw: unknown;
+};
+
+/**
+ * Query the DOKU Check Status API for an order by invoice number. Used to
+ * reconcile orders whose notification webhook never arrived (or failed), so a
+ * genuinely-paid order can still be fulfilled from the redirect-return polling.
+ */
+export async function checkCheckoutOrderStatus(
+  invoiceNumber: string
+): Promise<CheckoutOrderStatus> {
+  const { clientId, secretKey, baseUrl } = getConfig();
+  const target = `${ORDER_STATUS_PATH}/${invoiceNumber}`;
+  const requestId = crypto.randomUUID();
+  const timestamp = dokuTimestamp();
+  const signature = buildGetSignature({
+    clientId,
+    secretKey,
+    requestId,
+    timestamp,
+    target,
+  });
+
+  const res = await fetch(`${baseUrl}${target}`, {
+    method: "GET",
+    headers: {
+      "Client-Id": clientId,
+      "Request-Id": requestId,
+      "Request-Timestamp": timestamp,
+      Signature: signature,
+    },
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new DokuApiError(
+      `DOKU check-status failed (${res.status}).`,
+      res.status,
+      text
+    );
+  }
+
+  let parsed: {
+    order?: { status?: string; amount?: number | string };
+    transaction?: { status?: string };
+    channel?: { id?: string };
+    acquirer?: { id?: string };
+  };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new DokuApiError("DOKU returned a non-JSON response.", res.status, text);
+  }
+
+  const amount = Number(parsed.order?.amount);
+  return {
+    transactionStatus: (parsed.transaction?.status ?? "").toUpperCase(),
+    orderStatus: parsed.order?.status ?? null,
+    amount: Number.isFinite(amount) ? amount : null,
+    paymentMethod: parsed.channel?.id ?? parsed.acquirer?.id ?? null,
+    raw: parsed,
+  };
 }
 
 export type CheckoutPaymentResult = {
