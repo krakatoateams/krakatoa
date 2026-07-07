@@ -3,12 +3,8 @@ import {
   verifyNotificationSignature,
   DOKU_WEBHOOK_PATH,
 } from "@/lib/doku";
-import {
-  getOrderByInvoice,
-  markOrderFailed,
-  markOrderPaid,
-} from "@/lib/credit-orders-db";
-import { addPurchaseCredits } from "@/lib/credits-db";
+import { getOrderByInvoice, markOrderFailed } from "@/lib/credit-orders-db";
+import { fulfillPaidOrder } from "@/lib/credit-fulfillment";
 
 export const dynamic = "force-dynamic";
 
@@ -98,27 +94,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await addPurchaseCredits({
-      profileId: order.profile_id,
-      amount: order.credits,
-      idempotencyKey: `purchase:doku:${invoiceNumber}`,
-      description: `Credit pack ${order.pack_id} (${order.credits} credits)`,
-      metadata: {
-        source: "doku",
-        invoiceNumber,
-        packId: order.pack_id,
-        amountIdr: order.amount_idr,
-        paymentMethod,
-      },
-    });
-
-    await markOrderPaid({
-      invoiceNumber,
-      paymentMethod,
-      dokuTokenId: order.doku_token_id,
-      creditTransactionId: result.transaction.id,
-    });
-
+    await fulfillPaidOrder(order, paymentMethod);
     return NextResponse.json({ ok: true, status: "paid" });
   } catch (e) {
     // Don't ack on a fulfillment error — let DOKU retry the notification.

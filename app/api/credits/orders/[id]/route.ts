@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { getOrderForUser } from "@/lib/credit-orders-db";
+import { reconcilePendingOrder } from "@/lib/credit-fulfillment";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,24 @@ export async function GET(
     return NextResponse.json({ error: "Missing order id." }, { status: 400 });
   }
 
-  const order = await getOrderForUser(profileId, key);
+  let order = await getOrderForUser(profileId, key);
   if (!order) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
+  }
+
+  // Self-heal: if the notification webhook never fulfilled a still-pending
+  // order, ask DOKU directly and credit the wallet here if it's actually paid.
+  // Ownership was already verified above; fulfillment is idempotent.
+  if (order.status === "pending") {
+    try {
+      await reconcilePendingOrder(order.invoice_number);
+      order = (await getOrderForUser(profileId, key)) ?? order;
+    } catch (e) {
+      console.warn(
+        `[credits/orders] reconcile failed for ${order.invoice_number}:`,
+        e instanceof Error ? e.message : e
+      );
+    }
   }
 
   return NextResponse.json({
