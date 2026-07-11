@@ -16,5 +16,8 @@ export async function GET() {
 
   const connected = new Set((data ?? []).map((r: { platform: string }) => r.platform));
 
-  return NextResponse.json({ youtube: connected.has("youtube") });
+  return NextResponse.json({
+    youtube: connected.has("youtube"),
+    tiktok: connected.has("tiktok"),
+  });
 }

@@ -19,13 +19,13 @@ import {
   FileVideo,
   Sparkles,
   CheckCircle2,
-  ChevronDown,
   AlertCircle,
   X,
   CalendarDays,
   ExternalLink,
   ArrowRight,
   Info,
+  Music2,
 } from "lucide-react";
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -68,6 +68,12 @@ interface Post {
 // Per-card scheduling lifecycle for bulk "Schedule All" (Prompt 3)
 type ScheduleStatus = "idle" | "scheduling" | "scheduled" | "failed";
 
+// Per-platform submission outcome for a multi-platform VideoItem. Client-side
+// only, scoped to the scheduling UI — never persisted. Lets a retry resubmit
+// only the platforms that failed, never re-POSTing one that already created a
+// `posts` row (see openspec/changes/fix-schedule-retry-duplication/design.md).
+type PlatformResult = { status: "success" | "failed"; error?: string };
+
 // Publish target. YouTube auto-classifies Short vs regular video from aspect +
 // duration; we upload identically either way. `format` only drives our UI,
 // validation copy, caption style, and the auto-appended #Shorts tag.
@@ -95,6 +101,18 @@ interface VideoItem {
   time: string;
   scheduleStatus: ScheduleStatus;
   scheduleError: string | null;
+  // Publish target platform(s) — multi-select: scheduling with both checked
+  // creates one independent post per platform (see handleSubmit/
+  // handleScheduleAll). TikTok-only fields below are only meaningful when
+  // "tiktok" is included and are never defaulted silently — the user must
+  // choose them (see openspec/changes/tiktok-publish/design.md).
+  platforms: Array<"youtube" | "tiktok">;
+  tiktokPrivacyLevel: string | null;
+  tiktokBrandOrganicToggle: boolean;
+  tiktokBrandContentToggle: boolean;
+  // Per-platform submission outcome, so a retry only resends to platforms
+  // that haven't already succeeded.
+  platformResults: Partial<Record<"youtube" | "tiktok", PlatformResult>>;
 }
 
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
@@ -119,6 +137,11 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     time,
     scheduleStatus: "idle",
     scheduleError: null,
+    platforms: ["youtube"],
+    tiktokPrivacyLevel: null,
+    tiktokBrandOrganicToggle: false,
+    tiktokBrandContentToggle: false,
+    platformResults: {},
   };
 }
 
@@ -232,36 +255,55 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
   );
 }
 
-// ─── YouTube status badge ─────────────────────────────────────────────────────
+// ─── Connection status prompt ────────────────────────────────────────────────
+// Reflects whichever platform(s) are currently selected in the form (item0's
+// platforms for single mode; multi-select means more than one can be
+// unconnected at once). Renders nothing when every selected platform is
+// connected — a healthy state doesn't need to occupy header space. Only
+// surfaces the ones that ISN'T connected yet, as an actionable prompt (with a
+// direct link) rather than a passive status label.
 
-function YouTubeStatusBadge() {
+function ConnectionStatusPrompt({ platforms }: { platforms: VideoItem["platforms"] }) {
   const { status } = useCurrentUser();
   const [youtubeConnected, setYoutubeConnected] = useState<boolean | null>(null);
+  const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (status === "loading") return;
-    if (status === "unauthenticated") { setYoutubeConnected(false); return; }
+    if (status === "unauthenticated") {
+      setYoutubeConnected(false);
+      setTiktokConnected(false);
+      return;
+    }
     fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { youtube: false }))
-      .then((data: { youtube?: boolean }) => setYoutubeConnected(Boolean(data.youtube)))
-      .catch(() => setYoutubeConnected(false));
+      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false }))
+      .then((data: { youtube?: boolean; tiktok?: boolean }) => {
+        setYoutubeConnected(Boolean(data.youtube));
+        setTiktokConnected(Boolean(data.tiktok));
+      })
+      .catch(() => {
+        setYoutubeConnected(false);
+        setTiktokConnected(false);
+      });
   }, [status]);
 
-  if (status === "loading" || youtubeConnected === null) {
-    return <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />;
-  }
-  if (youtubeConnected) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
-        <YoutubeIcon className="h-3.5 w-3.5 text-green-400" />
-        <span className="text-xs font-medium text-green-400">YouTube Connected</span>
-      </div>
-    );
-  }
+  if (status === "loading") return null;
+
+  const unconnected = platforms.filter((p) => (p === "tiktok" ? tiktokConnected : youtubeConnected) === false);
+  if (unconnected.length === 0) return null;
+
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5">
-      <YoutubeIcon className="h-3.5 w-3.5 text-gray-500" />
-      <span className="text-xs font-medium text-gray-500">YouTube not connected</span>
+    <div className="flex flex-wrap items-center gap-2">
+      {unconnected.map((p) => (
+        <Link
+          key={p}
+          href="/dashboard/settings?tab=connections"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/20"
+        >
+          <AlertCircle className="h-3.5 w-3.5" />
+          {PLATFORM_LABELS[p]} not connected — Connect it
+        </Link>
+      ))}
     </div>
   );
 }
@@ -654,12 +696,238 @@ function FormatToggle({
   );
 }
 
+// ─── Platform fields (Platform + TikTok privacy/disclosure) ────────────────────
+
+const TIKTOK_PRIVACY_LABELS: Record<string, string> = {
+  PUBLIC_TO_EVERYONE: "Public",
+  MUTUAL_FOLLOW_FRIENDS: "Friends",
+  FOLLOWER_OF_CREATOR: "Followers",
+  SELF_ONLY: "Only me",
+};
+
+const PLATFORM_LABELS: Record<"youtube" | "tiktok", string> = {
+  youtube: "YouTube",
+  tiktok: "TikTok",
+};
+
+// Small inline clue so a platform-specific field (Format = YouTube-only,
+// Privacy/Disclose = TikTok-only) isn't mistaken for a shared/global setting
+// when both platforms are selected at once.
+function PlatformTag({ platform }: { platform: "youtube" | "tiktok" }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-gray-800 px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-gray-500">
+      {platform === "tiktok" ? (
+        <Music2 className="h-2.5 w-2.5 text-pink-400" />
+      ) : (
+        <YoutubeIcon className="h-2.5 w-2.5 text-red-400" />
+      )}
+      {PLATFORM_LABELS[platform]}
+    </span>
+  );
+}
+
+type PlatformPatch = Partial<
+  Pick<VideoItem, "platforms" | "tiktokPrivacyLevel" | "tiktokBrandOrganicToggle" | "tiktokBrandContentToggle" | "platformResults">
+>;
+
+// Shared by ScheduleCard (single mode) and BulkVideoCard (bulk mode) so both
+// stay in sync with the same platform-choice + TikTok privacy/disclosure
+// rules (see openspec/changes/tiktok-publish/design.md, Decisions 4, 4a, 7).
+// Multi-select: both YouTube and TikTok can be checked at once — scheduling
+// creates one independent post per checked platform.
+function PlatformFields({
+  platforms,
+  platformResults,
+  tiktokPrivacyLevel,
+  tiktokBrandOrganicToggle,
+  tiktokBrandContentToggle,
+  onChange,
+  tiktokConnected,
+  tiktokPrivacyOptions,
+}: {
+  platforms: VideoItem["platforms"];
+  platformResults: VideoItem["platformResults"];
+  tiktokPrivacyLevel: string | null;
+  tiktokBrandOrganicToggle: boolean;
+  tiktokBrandContentToggle: boolean;
+  onChange: (patch: PlatformPatch) => void;
+  tiktokConnected: boolean;
+  tiktokPrivacyOptions: string[];
+}) {
+  // Local UI-only switch for whether the disclosure sub-checkboxes are shown.
+  // Not persisted — derived once from any existing toggle so a card loaded
+  // with disclosure already set opens with it visible.
+  const [discloseOpen, setDiscloseOpen] = useState(tiktokBrandOrganicToggle || tiktokBrandContentToggle);
+  const isSelfOnly = tiktokPrivacyLevel === "SELF_ONLY";
+  const hasYoutube = platforms.includes("youtube");
+  const hasTiktok = platforms.includes("tiktok");
+
+  // Unchecking a platform also clears its stale result — otherwise re-checking
+  // it later could be silently skipped on the next submit as "already succeeded".
+  const toggleYoutube = (checked: boolean) => {
+    onChange({
+      platforms: checked ? [...platforms, "youtube"] : platforms.filter((p) => p !== "youtube"),
+      platformResults: checked ? platformResults : { ...platformResults, youtube: undefined },
+    });
+  };
+  const toggleTiktok = (checked: boolean) => {
+    onChange(
+      checked
+        ? { platforms: [...platforms, "tiktok"] }
+        : {
+            platforms: platforms.filter((p) => p !== "tiktok"),
+            tiktokPrivacyLevel: null,
+            tiktokBrandOrganicToggle: false,
+            tiktokBrandContentToggle: false,
+            platformResults: { ...platformResults, tiktok: undefined },
+          },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-gray-400">
+          Platform <span className="text-red-400" aria-hidden>*</span>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <label
+            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
+              hasYoutube ? "border-violet-500/50 bg-violet-500/10 text-white" : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={hasYoutube}
+              onChange={(e) => toggleYoutube(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+            />
+            <YoutubeIcon className="h-4 w-4 text-red-400" />
+            YouTube
+          </label>
+
+          {tiktokConnected && (
+            <label
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
+                hasTiktok ? "border-violet-500/50 bg-violet-500/10 text-white" : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={hasTiktok}
+                onChange={(e) => toggleTiktok(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+              />
+              <Music2 className="h-4 w-4 text-pink-400" />
+              TikTok
+            </label>
+          )}
+        </div>
+        {!tiktokConnected && (
+          <p className="mt-1 text-xs text-gray-600">Connect TikTok in Settings to publish there too.</p>
+        )}
+        {platforms.length === 0 && (
+          <p className="mt-1 text-xs text-amber-400">Select at least one platform.</p>
+        )}
+      </div>
+
+      {hasTiktok && (
+        <>
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              Privacy <span className="text-red-400" aria-hidden>*</span>
+              <PlatformTag platform="tiktok" />
+            </label>
+            <select
+              value={tiktokPrivacyLevel ?? ""}
+              onChange={(e) => {
+                const next = e.target.value;
+                // Leaving SELF_ONLY invalidates a branded-content disclosure.
+                onChange(
+                  next === "SELF_ONLY"
+                    ? { tiktokPrivacyLevel: next, tiktokBrandContentToggle: false }
+                    : { tiktokPrivacyLevel: next },
+                );
+              }}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            >
+              <option value="" disabled>
+                {tiktokPrivacyOptions.length === 0 ? "Loading…" : "Select privacy…"}
+              </option>
+              {tiktokPrivacyOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {TIKTOK_PRIVACY_LABELS[opt] ?? opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-gray-400">
+              <input
+                type="checkbox"
+                checked={discloseOpen}
+                onChange={(e) => {
+                  const open = e.target.checked;
+                  setDiscloseOpen(open);
+                  if (!open) onChange({ tiktokBrandOrganicToggle: false, tiktokBrandContentToggle: false });
+                }}
+                className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+              />
+              Disclose video content
+              <PlatformTag platform="tiktok" />
+            </label>
+
+            {discloseOpen && (
+              <div className="mt-2 space-y-1.5 pl-5.5">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={tiktokBrandOrganicToggle}
+                    onChange={(e) => onChange({ tiktokBrandOrganicToggle: e.target.checked })}
+                    className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+                  />
+                  Your Brand
+                </label>
+                <label
+                  className={`flex items-center gap-2 text-xs ${isSelfOnly ? "cursor-not-allowed text-gray-600" : "cursor-pointer text-gray-300"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={tiktokBrandContentToggle}
+                    disabled={isSelfOnly}
+                    onChange={(e) => onChange({ tiktokBrandContentToggle: e.target.checked })}
+                    className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
+                  />
+                  Branded Content
+                </label>
+                {isSelfOnly && (
+                  <p className="text-[11px] text-gray-600">
+                    Branded content must be public — unavailable while privacy is &ldquo;Only me&rdquo;.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Schedule Card ────────────────────────────────────────────────────────────
 
 interface ScheduleCardProps {
   videoUrl: string | null;
   caption: string;
+  // Full reset (wipes the draft back to blank) — called only on full success,
+  // never on partial/total failure, so a failed platform stays selected and
+  // retryable instead of losing the user's entered data.
   onSuccess: () => void;
+  // Refreshes the Recent Posts list without wiping the draft — called
+  // whenever at least one platform's post was created this attempt, even on
+  // a partial failure.
+  onPostCreated: () => void;
   onToast: (toast: ToastState) => void;
   // Measured metadata — drives advisory (non-blocking) warnings
   videoDuration: number | null;
@@ -672,12 +940,22 @@ interface ScheduleCardProps {
   tags: string;
   onTitleChange: (title: string) => void;
   onTagsChange: (tags: string) => void;
+  // Platform(s) + TikTok privacy/disclosure (lifted to page, patched generically)
+  platforms: VideoItem["platforms"];
+  platformResults: VideoItem["platformResults"];
+  tiktokPrivacyLevel: string | null;
+  tiktokBrandOrganicToggle: boolean;
+  tiktokBrandContentToggle: boolean;
+  onPlatformPatch: (patch: PlatformPatch) => void;
+  tiktokConnected: boolean;
+  tiktokPrivacyOptions: string[];
 }
 
 function ScheduleCard({
   videoUrl,
   caption,
   onSuccess,
+  onPostCreated,
   onToast,
   videoDuration,
   videoAspect,
@@ -687,6 +965,14 @@ function ScheduleCard({
   tags,
   onTitleChange,
   onTagsChange,
+  platforms,
+  platformResults,
+  tiktokPrivacyLevel,
+  tiktokBrandOrganicToggle,
+  tiktokBrandContentToggle,
+  onPlatformPatch,
+  tiktokConnected,
+  tiktokPrivacyOptions,
 }: ScheduleCardProps) {
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
@@ -707,7 +993,13 @@ function ScheduleCard({
   };
 
   const handleSubmit = async () => {
-    if (!videoUrl || !title.trim() || !form.date || !form.time) return;
+    // Retry-safe: only submit platforms that haven't already succeeded on a
+    // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
+    const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
+
+    if (!videoUrl || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
+      return;
+    }
 
     // Soft, non-blocking warning: empty caption requires one confirming click
     if (!caption.trim() && !confirmEmptyCaption) {
@@ -720,41 +1012,90 @@ function ScheduleCard({
     try {
       const scheduled_time = new Date(`${form.date}T${form.time}:00`).toISOString();
 
-      // Shorts get #Shorts appended to reinforce YouTube's classification.
-      const description = format === "short" ? withShortsTag(caption) : caption;
+      const results = await Promise.allSettled(
+        pendingPlatforms.map(async (p) => {
+          // Shorts get #Shorts appended to reinforce YouTube's classification.
+          // YouTube-only — format/#Shorts is not a TikTok concept.
+          const description = p === "youtube" && format === "short" ? withShortsTag(caption) : caption;
 
-      const res = await fetch("/api/posts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          video_url: videoUrl,
-          title: title.trim(),
-          description,
-          tags,
-          scheduled_time,
-          platform: "youtube",
-          format,
+          const res = await fetch("/api/posts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              video_url: videoUrl,
+              title: title.trim(),
+              description,
+              tags,
+              scheduled_time,
+              platform: p,
+              ...(p === "youtube" ? { format } : {}),
+              ...(p === "tiktok"
+                ? {
+                    tiktok_privacy_level: tiktokPrivacyLevel,
+                    tiktok_brand_organic_toggle: tiktokBrandOrganicToggle,
+                    tiktok_brand_content_toggle: tiktokBrandContentToggle,
+                  }
+                : {}),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? "Failed to schedule post.");
+          return p;
         }),
-      });
+      );
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to schedule post.");
-
-      onToast({ type: "success", message: "✓ Post scheduled successfully!" });
-      resetForm();
-      onSuccess();
-    } catch (err) {
-      onToast({
-        type: "error",
-        message: err instanceof Error ? err.message : "Failed to schedule post.",
+      // Merge this attempt's outcomes into any results carried over from a
+      // prior partial failure, so the summary below reflects the whole set.
+      const newResults: Partial<Record<"youtube" | "tiktok", PlatformResult>> = {};
+      results.forEach((r, i) => {
+        const p = pendingPlatforms[i];
+        newResults[p] =
+          r.status === "fulfilled"
+            ? { status: "success" }
+            : { status: "failed", error: r.reason instanceof Error ? r.reason.message : "failed" };
       });
+      const mergedResults = { ...platformResults, ...newResults };
+      onPlatformPatch({ platformResults: mergedResults });
+
+      const succeeded = platforms.filter((p) => mergedResults[p]?.status === "success").map((p) => PLATFORM_LABELS[p]);
+      const failed = platforms
+        .filter((p) => mergedResults[p]?.status === "failed")
+        .map((p) => `${PLATFORM_LABELS[p]}: ${mergedResults[p]?.error ?? "failed"}`);
+
+      if (failed.length === 0) {
+        onToast({
+          type: "success",
+          message: succeeded.length > 1 ? `✓ Scheduled to ${succeeded.join(" & ")}!` : "✓ Post scheduled successfully!",
+        });
+        // Full success — clear the carried-over results too, so the next,
+        // unrelated post doesn't inherit stale "already succeeded" markers.
+        onPlatformPatch({ platformResults: {} });
+        resetForm();
+        onSuccess();
+      } else {
+        if (succeeded.length > 0) {
+          onToast({ type: "error", message: `Scheduled to ${succeeded.join(", ")}. Failed: ${failed.join("; ")}` });
+          // At least one post was created — refresh the list, but keep the
+          // draft (title/platforms/etc) intact so the failed platform stays
+          // selected and retryable instead of the user losing their work.
+          onPostCreated();
+        } else {
+          onToast({ type: "error", message: failed.join("; ") });
+        }
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
   // Duration no longer blocks scheduling — only the essentials gate the button.
-  const isReady = !!videoUrl && !!title.trim() && !!form.date && !!form.time;
+  // A TikTok-targeted post additionally requires a chosen privacy level (never
+  // defaulted — see design.md Decision 4).
+  const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
+  const isReady =
+    !!videoUrl && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
+    pendingPlatforms.length > 0 &&
+    (!platforms.includes("tiktok") || !!tiktokPrivacyLevel);
 
   // Advisory (non-blocking) warnings for Shorts only.
   const shortWarn = formatWarning(format, videoDuration, videoAspect);
@@ -764,36 +1105,43 @@ function ScheduleCard({
       <CardHeader title="Schedule Post" icon={<Calendar className="h-4 w-4" />} />
 
       <div className="space-y-5 p-5">
-        {/* Format */}
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-gray-400">Format</label>
-          <FormatToggle value={format} onChange={onFormatChange} />
-          <p className="mt-1 text-xs text-gray-600">
-            {format === "short"
-              ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
-              : "Any aspect ratio or length · publishes as a regular video"}
-          </p>
-        </div>
-
-        {/* Advisory warnings (Short only; never blocks) */}
-        {shortWarn && (
-          <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
-            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
-            <p className="text-xs text-amber-400">{shortWarn}</p>
-          </div>
-        )}
-
         {/* Platform */}
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-gray-400">Platform</label>
-          <div className="flex items-center gap-2.5 rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5">
-            <YoutubeIcon className="h-4 w-4 text-red-400" />
-            <span className="flex-1 text-sm text-white">YouTube</span>
-            <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-violet-400">Selected</span>
-            <ChevronDown className="h-4 w-4 text-gray-600" />
-          </div>
-          <p className="mt-1 text-xs text-gray-600">More platforms coming soon</p>
-        </div>
+        <PlatformFields
+          platforms={platforms}
+          platformResults={platformResults}
+          tiktokPrivacyLevel={tiktokPrivacyLevel}
+          tiktokBrandOrganicToggle={tiktokBrandOrganicToggle}
+          tiktokBrandContentToggle={tiktokBrandContentToggle}
+          onChange={onPlatformPatch}
+          tiktokConnected={tiktokConnected}
+          tiktokPrivacyOptions={tiktokPrivacyOptions}
+        />
+
+        {/* Format — YouTube-only concept (Short vs regular Video + #Shorts tag) */}
+        {platforms.includes("youtube") && (
+          <>
+            <div>
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+                Format
+                <PlatformTag platform="youtube" />
+              </label>
+              <FormatToggle value={format} onChange={onFormatChange} />
+              <p className="mt-1 text-xs text-gray-600">
+                {format === "short"
+                  ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
+                  : "Any aspect ratio or length · publishes as a regular video"}
+              </p>
+            </div>
+
+            {/* Advisory warnings (Short only; never blocks) */}
+            {shortWarn && (
+              <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
+                <AlertCircle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+                <p className="text-xs text-amber-400">{shortWarn}</p>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Title */}
         <div>
@@ -935,6 +1283,11 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
           return (
             <div key={post.id} className="flex items-center gap-3 px-5 py-3.5">
               <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${cfg.dot}`} />
+              {post.platform === "tiktok" ? (
+                <Music2 className="h-3.5 w-3.5 shrink-0 text-pink-400" aria-label="TikTok" />
+              ) : (
+                <YoutubeIcon className="h-3.5 w-3.5 shrink-0 text-red-400" aria-label="YouTube" />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{post.title}</p>
                 <p className="mt-0.5 text-xs text-gray-500">{fmtScheduledTime(post.scheduled_time)}</p>
@@ -1241,9 +1594,11 @@ interface BulkVideoCardProps {
   captionMode: "individual" | "same";
   onUpdate: (patch: Partial<VideoItem>) => void;
   onRemove: () => void;
+  tiktokConnected: boolean;
+  tiktokPrivacyOptions: string[];
 }
 
-function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVideoCardProps) {
+function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokPrivacyOptions }: BulkVideoCardProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const today = new Date().toISOString().split("T")[0];
   const ai = useCaptionAI();
@@ -1323,11 +1678,14 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
             </div>
           )}
 
-          <FormatToggle
-            value={item.format}
-            onChange={(next) => onUpdate({ format: next, formatTouched: true })}
-            size="sm"
-          />
+          {/* Format — YouTube-only concept (Short vs regular Video + #Shorts tag) */}
+          {item.platforms.includes("youtube") && (
+            <FormatToggle
+              value={item.format}
+              onChange={(next) => onUpdate({ format: next, formatTouched: true })}
+              size="sm"
+            />
+          )}
 
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
             <span className="truncate">{item.file?.name ?? `Video ${index + 1}`}</span>
@@ -1338,7 +1696,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
             )}
           </div>
 
-          {warn && (
+          {item.platforms.includes("youtube") && warn && (
             <p className="flex items-start gap-1 text-[11px] text-amber-400">
               <AlertCircle className="mt-px h-3 w-3 shrink-0" />
               <span>{warn.replace(/^⚠️\s*/, "")}</span>
@@ -1360,6 +1718,27 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   Scheduling…
                 </span>
+              ) : item.platforms.length > 1 && (item.scheduleStatus === "scheduled" || item.scheduleStatus === "failed") ? (
+                // Per-platform breakdown — only when more than one platform is
+                // selected. Single-platform cards keep the plain badge below,
+                // unchanged (see openspec/changes/fix-schedule-retry-duplication).
+                <div className="flex flex-col items-end gap-0.5">
+                  {item.platforms.map((p) => {
+                    const ok = item.platformResults[p]?.status === "success";
+                    return (
+                      <span
+                        key={p}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                          ok
+                            ? "border-green-500/30 bg-green-500/10 text-green-400"
+                            : "border-red-500/30 bg-red-500/10 text-red-400"
+                        }`}
+                      >
+                        {PLATFORM_LABELS[p]} {ok ? "✓" : "✗"}
+                      </span>
+                    );
+                  })}
+                </div>
               ) : item.scheduleStatus === "scheduled" ? (
                 <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[11px] font-medium text-green-400">
                   Scheduled ✅
@@ -1426,6 +1805,17 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove }: BulkVid
               />
             </div>
           </div>
+
+          <PlatformFields
+            platforms={item.platforms}
+            platformResults={item.platformResults}
+            tiktokPrivacyLevel={item.tiktokPrivacyLevel}
+            tiktokBrandOrganicToggle={item.tiktokBrandOrganicToggle}
+            tiktokBrandContentToggle={item.tiktokBrandContentToggle}
+            onChange={onUpdate}
+            tiktokConnected={tiktokConnected}
+            tiktokPrivacyOptions={tiktokPrivacyOptions}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1585,7 +1975,33 @@ export default function SchedulerDashboardPage() {
     (t: string) => updateItem(item0Id, { tags: t }),
     [updateItem, item0Id],
   );
+  const handleItem0PlatformPatch = useCallback(
+    (patch: Partial<VideoItem>) => updateItem(item0Id, patch),
+    [updateItem, item0Id],
+  );
   const noop = useCallback(() => {}, []);
+
+  // ── TikTok connection + privacy options (Decisions 4, 7) ──
+  const [tiktokConnected, setTiktokConnected] = useState(false);
+  const [tiktokPrivacyOptions, setTiktokPrivacyOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/connections/status")
+      .then((res) => (res.ok ? res.json() : { tiktok: false }))
+      .then((data: { tiktok?: boolean }) => setTiktokConnected(Boolean(data.tiktok)))
+      .catch(() => setTiktokConnected(false));
+  }, []);
+
+  useEffect(() => {
+    if (!tiktokConnected) {
+      setTiktokPrivacyOptions([]);
+      return;
+    }
+    fetch("/api/connections/tiktok/creator-info")
+      .then((res) => (res.ok ? res.json() : { privacyLevelOptions: [] }))
+      .then((data: { privacyLevelOptions?: string[] }) => setTiktokPrivacyOptions(data.privacyLevelOptions ?? []))
+      .catch(() => setTiktokPrivacyOptions([]));
+  }, [tiktokConnected]);
 
   // ── Bulk caption state (Prompt 2) ──
   const [captionMode, setCaptionMode] = useState<"individual" | "same">("individual");
@@ -1839,7 +2255,8 @@ export default function SchedulerDashboardPage() {
   // Duration no longer gates scheduling — mirrors single-mode ScheduleCard.isReady.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      !!i.videoUrl && !!i.title.trim() && !!i.date && !!i.time,
+      !!i.videoUrl && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
+      (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
     [],
   );
 
@@ -1882,40 +2299,73 @@ export default function SchedulerDashboardPage() {
       ),
     );
 
+    // Retry-safe: only (re-)submit platforms that haven't already succeeded
+    // on a prior attempt for this card (see
+    // openspec/changes/fix-schedule-retry-duplication/design.md) — a card
+    // that partially failed no longer re-POSTs the platform(s) that already
+    // created a `posts` row.
     let success = 0;
     for (const it of targets) {
-      try {
-        const scheduled_time = new Date(`${it.date}T${it.time}:00`).toISOString();
-        const description = it.format === "short" ? withShortsTag(it.caption) : it.caption;
-        const res = await fetch("/api/posts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            video_url: it.videoUrl,
-            title: it.title.trim(),
-            description,
-            tags: it.tags,
-            scheduled_time,
-            platform: "youtube",
-            format: it.format,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Failed to schedule post.");
+      const scheduled_time = new Date(`${it.date}T${it.time}:00`).toISOString();
+      const pendingPlatforms = it.platforms.filter((p) => it.platformResults[p]?.status !== "success");
+
+      const results = await Promise.allSettled(
+        pendingPlatforms.map(async (p) => {
+          const description = p === "youtube" && it.format === "short" ? withShortsTag(it.caption) : it.caption;
+          const res = await fetch("/api/posts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              video_url: it.videoUrl,
+              title: it.title.trim(),
+              description,
+              tags: it.tags,
+              scheduled_time,
+              platform: p,
+              ...(p === "youtube" ? { format: it.format } : {}),
+              ...(p === "tiktok"
+                ? {
+                    tiktok_privacy_level: it.tiktokPrivacyLevel,
+                    tiktok_brand_organic_toggle: it.tiktokBrandOrganicToggle,
+                    tiktok_brand_content_toggle: it.tiktokBrandContentToggle,
+                  }
+                : {}),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? "Failed to schedule post.");
+          return p;
+        }),
+      );
+
+      // Merge this attempt's outcomes into any results carried over from a
+      // prior partial failure.
+      const newResults: Partial<Record<"youtube" | "tiktok", PlatformResult>> = {};
+      results.forEach((r, i2) => {
+        const p = pendingPlatforms[i2];
+        newResults[p] =
+          r.status === "fulfilled"
+            ? { status: "success" }
+            : { status: "failed", error: r.reason instanceof Error ? r.reason.message : "failed" };
+      });
+      const mergedResults = { ...it.platformResults, ...newResults };
+
+      const failed = it.platforms
+        .filter((p) => mergedResults[p]?.status === "failed")
+        .map((p) => `${PLATFORM_LABELS[p]}: ${mergedResults[p]?.error ?? "failed"}`);
+
+      if (failed.length === 0) {
         success += 1;
-        updateItem(it.id, { scheduleStatus: "scheduled", scheduleError: null });
-      } catch (err) {
-        updateItem(it.id, {
-          scheduleStatus: "failed",
-          scheduleError: err instanceof Error ? err.message : "Failed to schedule post.",
-        });
+        updateItem(it.id, { scheduleStatus: "scheduled", scheduleError: null, platformResults: mergedResults });
+      } else {
+        updateItem(it.id, { scheduleStatus: "failed", scheduleError: failed.join("; "), platformResults: mergedResults });
       }
     }
 
     setSchedulingAll(false);
     setToast({
       type: success === targets.length ? "success" : "error",
-      message: `${success}/${targets.length} posts scheduled successfully`,
+      message: `${success}/${targets.length} videos scheduled successfully`,
     });
     fetchPosts();
   };
@@ -1951,7 +2401,7 @@ export default function SchedulerDashboardPage() {
       <PageContainer>
         <PageHeader
           title="Create & Schedule"
-          actions={<YouTubeStatusBadge />}
+          actions={<ConnectionStatusPrompt platforms={item0.platforms} />}
         />
 
         {single ? (
@@ -1983,6 +2433,7 @@ export default function SchedulerDashboardPage() {
                 videoUrl={item0.videoUrl}
                 caption={item0.caption}
                 onSuccess={handleSuccess}
+                onPostCreated={fetchPosts}
                 onToast={setToast}
                 videoDuration={item0.duration}
                 videoAspect={item0.aspect}
@@ -1992,6 +2443,14 @@ export default function SchedulerDashboardPage() {
                 tags={item0.tags}
                 onTitleChange={handleItem0Title}
                 onTagsChange={handleItem0Tags}
+                platforms={item0.platforms}
+                platformResults={item0.platformResults}
+                tiktokPrivacyLevel={item0.tiktokPrivacyLevel}
+                tiktokBrandOrganicToggle={item0.tiktokBrandOrganicToggle}
+                tiktokBrandContentToggle={item0.tiktokBrandContentToggle}
+                onPlatformPatch={handleItem0PlatformPatch}
+                tiktokConnected={tiktokConnected}
+                tiktokPrivacyOptions={tiktokPrivacyOptions}
               />
             </div>
           </div>
@@ -2095,6 +2554,8 @@ export default function SchedulerDashboardPage() {
                   captionMode={captionMode}
                   onUpdate={(patch) => updateItem(it.id, patch)}
                   onRemove={() => removeItem(it.id)}
+                  tiktokConnected={tiktokConnected}
+                  tiktokPrivacyOptions={tiktokPrivacyOptions}
                 />
               ))}
             </div>

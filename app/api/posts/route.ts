@@ -30,22 +30,65 @@ export async function POST(req: NextRequest) {
   try {
     // ── Parse body ────────────────────────────────────────────────────────────
     const body = await req.json();
-    const { video_url, title, description, tags, scheduled_time, platform, asset_id, project_id, format } =
-      body as {
-        video_url?: string;
-        title: string;
-        description?: string;
-        tags?: string;
-        scheduled_time: string;
-        platform: string;
-        asset_id?: string;
-        project_id?: string;
-        format?: string;
-      };
+    const {
+      video_url,
+      title,
+      description,
+      tags,
+      scheduled_time,
+      platform,
+      asset_id,
+      project_id,
+      format,
+      tiktok_privacy_level,
+      tiktok_brand_organic_toggle,
+      tiktok_brand_content_toggle,
+    } = body as {
+      video_url?: string;
+      title: string;
+      description?: string;
+      tags?: string;
+      scheduled_time: string;
+      platform: string;
+      asset_id?: string;
+      project_id?: string;
+      format?: string;
+      tiktok_privacy_level?: string;
+      tiktok_brand_organic_toggle?: boolean;
+      tiktok_brand_content_toggle?: boolean;
+    };
 
     // Publish format is optional; only persist a recognized value, otherwise
     // leave it null (unknown). Never fail the request over a bad format.
     const normalizedFormat = format === "short" || format === "video" ? format : null;
+
+    // TikTok-only fields. The privacy level must be one the user's own account
+    // actually offers (never defaulted — see design.md Decision 4); unlike
+    // `format`, an invalid privacy level fails the request rather than being
+    // silently dropped, since publishing without it is not a safe fallback.
+    const TIKTOK_PRIVACY_LEVELS = new Set([
+      "PUBLIC_TO_EVERYONE",
+      "MUTUAL_FOLLOW_FRIENDS",
+      "FOLLOWER_OF_CREATOR",
+      "SELF_ONLY",
+    ]);
+    if (platform === "tiktok") {
+      if (!tiktok_privacy_level || !TIKTOK_PRIVACY_LEVELS.has(tiktok_privacy_level)) {
+        return NextResponse.json(
+          { error: "tiktok_privacy_level is required and must be a valid TikTok privacy level." },
+          { status: 400 },
+        );
+      }
+      // Branded content must be publicly viewable — TikTok requires this for
+      // its Commercial Content Library. Reject the combination outright rather
+      // than silently dropping the disclosure flag (see design.md Decision 4a).
+      if (tiktok_brand_content_toggle && tiktok_privacy_level === "SELF_ONLY") {
+        return NextResponse.json(
+          { error: "Branded content cannot be posted with SELF_ONLY privacy — TikTok requires it to be publicly viewable." },
+          { status: 400 },
+        );
+      }
+    }
 
     // Optional platform linkage. Validate UUID format up front so malformed ids
     // return 400 instead of a Postgres uuid-cast 500 later.
@@ -147,6 +190,11 @@ export async function POST(req: NextRequest) {
     if (verifiedProjectId) insertRow.project_id = verifiedProjectId;
     if (verifiedAssetId) insertRow.asset_id = verifiedAssetId;
     if (normalizedFormat) insertRow.format = normalizedFormat;
+    if (platform === "tiktok") {
+      insertRow.tiktok_privacy_level = tiktok_privacy_level;
+      insertRow.tiktok_brand_organic_toggle = Boolean(tiktok_brand_organic_toggle);
+      insertRow.tiktok_brand_content_toggle = Boolean(tiktok_brand_content_toggle);
+    }
 
     const { data, error } = await supabaseServer
       .from("posts")

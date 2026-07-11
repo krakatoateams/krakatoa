@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
+import { refreshAccessToken, publishToTikTok } from "@/lib/tiktok";
 import { removeStorageObjects } from "@/lib/creations-db";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 
@@ -39,6 +40,23 @@ function isPermanentFailure(err: unknown, message: string): boolean {
   }
   const status = (err as { response?: { status?: number } })?.response?.status;
   if (status === 401 || status === 403) return true;
+  return false;
+}
+
+/**
+ * Same intent as isPermanentFailure, for TikTok's error shapes (which don't
+ * overlap with Google's): auth/scope/reconnect problems and the SELF_ONLY +
+ * branded-content conflict are permanent (retrying wastes an attempt on
+ * something that cannot self-heal); everything else is treated as transient.
+ */
+function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
+  const m = message.toLowerCase();
+  if (/re-?authori|refresh token|reconnect|token for user|token request failed/.test(m)) {
+    return true;
+  }
+  if (/branded content cannot be posted|self_only/.test(m)) {
+    return true;
+  }
   return false;
 }
 
@@ -163,7 +181,7 @@ export async function GET(req: NextRequest) {
       .eq("id", post.id)
       .eq("status", "scheduled")
       .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
-      .select("id, youtube_video_id")
+      .select("id, youtube_video_id, tiktok_publish_id")
       .maybeSingle();
 
     if (claimErr) {
@@ -178,9 +196,11 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    // ── Idempotency: a post that already uploaded must never upload again. ──────
-    if (claimed.youtube_video_id) {
-      console.log(`[cron] Post ${post.id} already has a YouTube ID — marking published, no re-upload`);
+    // ── Idempotency: a post that already published must never publish again. ────
+    const alreadyPublishedId =
+      post.platform === "tiktok" ? claimed.tiktok_publish_id : claimed.youtube_video_id;
+    if (alreadyPublishedId) {
+      console.log(`[cron] Post ${post.id} already has a ${post.platform} publish ID — marking published, no re-upload`);
       await supabaseServer
         .from("posts")
         .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
@@ -220,9 +240,66 @@ export async function GET(req: NextRequest) {
 
       if (!token.refresh_token) {
         throw new Error(
-          "No refresh token stored. The user must sign in again with " +
-          "the YouTube permission to obtain a refresh token.",
+          `No refresh token stored. The user must reconnect ${post.platform} to obtain a refresh token.`,
         );
+      }
+
+      if (post.platform === "tiktok") {
+        // ── Refresh, then IMMEDIATELY persist, then publish ───────────────────
+        // TikTok invalidates the old refresh_token on every refresh call and
+        // issues a new one. The rotated token is persisted before anything else
+        // is attempted so a later publish failure can never strand the user
+        // with an already-invalidated refresh_token (see
+        // openspec/changes/tiktok-publish/design.md, Decision 3).
+        const refreshed = await refreshAccessToken(token.refresh_token);
+
+        const { error: refreshUpsertErr } = await supabaseServer
+          .from("platform_tokens")
+          .upsert(
+            {
+              user_id: post.user_id,
+              platform: "tiktok",
+              access_token: refreshed.accessToken,
+              refresh_token: refreshed.refreshToken,
+              expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString(),
+            },
+            { onConflict: "user_id,platform" },
+          );
+
+        if (refreshUpsertErr) {
+          console.error(`[cron] Failed to persist refreshed TikTok token for post ${post.id}:`, refreshUpsertErr.message);
+          throw new Error(`Failed to persist refreshed TikTok token: ${refreshUpsertErr.message}`);
+        }
+
+        console.log(`[cron] Calling publishToTikTok for post ${post.id}`);
+
+        // ── Publish to TikTok (optimistic — no status polling, see Decision 1) ──
+        const publishId = await publishToTikTok({
+          accessToken: refreshed.accessToken,
+          videoUrl: post.video_url,
+          title: post.title,
+          privacyLevel: post.tiktok_privacy_level,
+          brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+          brandContentToggle: !!post.tiktok_brand_content_toggle,
+        });
+
+        console.log(`[cron] ✓ Post ${post.id} published → TikTok publish ID: ${publishId}`);
+
+        // ── Mark published and store TikTok publish ID ──────────────────────────
+        await supabaseServer
+          .from("posts")
+          .update({
+            status: "published",
+            tiktok_publish_id: publishId,
+            last_error: null,
+            publish_started_at: null,
+            publish_attempts: 0,
+          })
+          .eq("id", post.id);
+
+        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+        published++;
+        continue;
       }
 
       const tags = post.tags
@@ -271,7 +348,8 @@ export async function GET(req: NextRequest) {
 
       // ── Decide retry vs give up ─────────────────────────────────────────────
       const attempts = (post.publish_attempts ?? 0) + 1;
-      const permanent = isPermanentFailure(err, message);
+      const permanent =
+        post.platform === "tiktok" ? isTikTokPermanentFailure(err, message) : isPermanentFailure(err, message);
       const giveUp = permanent || attempts >= MAX_PUBLISH_ATTEMPTS;
 
       // Releasing the lock (publish_started_at = null) on a retry lets the next
