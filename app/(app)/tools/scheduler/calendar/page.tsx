@@ -15,6 +15,7 @@ import {
   Pencil,
   Trash2,
   Loader2,
+  Music2,
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 
@@ -26,6 +27,7 @@ interface Post {
   platform: string;
   video_url: string | null;
   youtube_video_id?: string | null;
+  tiktok_publish_id?: string | null;
   title: string;
   description: string;
   tags: string;
@@ -344,8 +346,17 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900 shadow-2xl">
         <div className="flex items-start justify-between border-b border-gray-800 p-5">
           <div className="flex items-center gap-2.5">
-            <YoutubeIcon className="h-5 w-5 text-red-400" />
-            <span className="text-xs font-medium uppercase tracking-wider text-gray-500">YouTube</span>
+            {post.platform === "tiktok" ? (
+              <>
+                <Music2 className="h-5 w-5 text-pink-400" />
+                <span className="text-xs font-medium uppercase tracking-wider text-gray-500">TikTok</span>
+              </>
+            ) : (
+              <>
+                <YoutubeIcon className="h-5 w-5 text-red-400" />
+                <span className="text-xs font-medium uppercase tracking-wider text-gray-500">YouTube</span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.badge}`}>
@@ -587,7 +598,8 @@ function DayCell({
   const dateKey = toLocalDateKey(date);
   const isOver = dragOverKey === dateKey && draggingId !== null;
   const MAX_VISIBLE = 3;
-  const visible = posts.slice(0, MAX_VISIBLE);
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? posts : posts.slice(0, MAX_VISIBLE);
   const overflow = posts.length - MAX_VISIBLE;
 
   return (
@@ -627,8 +639,23 @@ function DayCell({
             isDragging={draggingId === post.id}
           />
         ))}
-        {overflow > 0 && (
-          <span className="pl-1 text-[10px] text-gray-600">+{overflow} more</span>
+        {overflow > 0 && !expanded && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+            className="cursor-pointer pl-1 text-left text-[10px] text-gray-500 underline decoration-dotted transition-colors hover:text-violet-400"
+          >
+            +{overflow} more
+          </button>
+        )}
+        {expanded && posts.length > MAX_VISIBLE && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+            className="cursor-pointer pl-1 text-left text-[10px] text-gray-500 underline decoration-dotted transition-colors hover:text-violet-400"
+          >
+            Show less
+          </button>
         )}
       </div>
     </div>

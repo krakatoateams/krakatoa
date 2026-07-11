@@ -43,6 +43,11 @@ export default function ConnectionsTab() {
   const [youtubeConnected, setYoutubeConnected] = useState<boolean | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(null);
+  const [disconnectingTiktok, setDisconnectingTiktok] = useState(false);
+  const [confirmDisconnectTiktok, setConfirmDisconnectTiktok] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
 
   // Surface redirect-back errors from the OAuth callback.
@@ -50,6 +55,8 @@ export default function ConnectionsTab() {
     const urlError = searchParams.get("error");
     if (urlError === "youtube_connect_failed") {
       setError("Couldn't connect YouTube. Please try again.");
+    } else if (urlError === "tiktok_connect_failed") {
+      setError("Couldn't connect TikTok. Please try again.");
     } else if (urlError === "invalid_state") {
       setError("Connection attempt expired or was tampered with. Please try again.");
     }
@@ -59,12 +66,19 @@ export default function ConnectionsTab() {
     if (authStatus === "loading") return;
     if (authStatus === "unauthenticated") {
       setYoutubeConnected(false);
+      setTiktokConnected(false);
       return;
     }
     fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { youtube: false }))
-      .then((data: { youtube?: boolean }) => setYoutubeConnected(Boolean(data.youtube)))
-      .catch(() => setYoutubeConnected(false));
+      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false }))
+      .then((data: { youtube?: boolean; tiktok?: boolean }) => {
+        setYoutubeConnected(Boolean(data.youtube));
+        setTiktokConnected(Boolean(data.tiktok));
+      })
+      .catch(() => {
+        setYoutubeConnected(false);
+        setTiktokConnected(false);
+      });
   }, [authStatus]);
 
   async function handleDisconnect() {
@@ -81,6 +95,23 @@ export default function ConnectionsTab() {
       setError("Couldn't disconnect YouTube. Please try again.");
     } finally {
       setDisconnecting(false);
+    }
+  }
+
+  async function handleDisconnectTiktok() {
+    setDisconnectingTiktok(true);
+    setConfirmDisconnectTiktok(false);
+    try {
+      const res = await fetch("/api/connections/tiktok", { method: "DELETE" });
+      if (res.ok) {
+        setTiktokConnected(false);
+      } else {
+        setError("Couldn't disconnect TikTok. Please try again.");
+      }
+    } catch {
+      setError("Couldn't disconnect TikTok. Please try again.");
+    } finally {
+      setDisconnectingTiktok(false);
     }
   }
 
@@ -183,12 +214,75 @@ export default function ConnectionsTab() {
           description="Auto-publish Reels to Instagram"
           status="soon"
         />
-        <StaticConnectionRow
-          icon={<Music2 className="h-5 w-5" />}
-          name="TikTok"
-          description="Auto-publish videos to TikTok"
-          status="soon"
-        />
+
+        {/* TikTok row — interactive */}
+        {tiktokConnected === null ? (
+          <div className="px-5 py-4">
+            <div className="h-10 animate-pulse rounded-lg bg-gray-800" />
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-800">
+                <Music2 className="h-5 w-5 text-pink-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">TikTok</p>
+                <p className="truncate text-xs text-gray-500">
+                  {tiktokConnected
+                    ? "TikTok publishing enabled"
+                    : "TikTok publishing not yet connected"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              {tiktokConnected ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-400">
+                    <Check className="h-3.5 w-3.5" />
+                    Connected
+                  </span>
+                  {confirmDisconnectTiktok ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleDisconnectTiktok}
+                        disabled={disconnectingTiktok}
+                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        {disconnectingTiktok ? "Disconnecting…" : "Confirm"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnectTiktok(false)}
+                        disabled={disconnectingTiktok}
+                        className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:text-white disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDisconnectTiktok(true)}
+                      className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </>
+              ) : (
+                <a
+                  href="/api/connections/tiktok/start"
+                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+                >
+                  Connect
+                </a>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="text-xs text-gray-600">
