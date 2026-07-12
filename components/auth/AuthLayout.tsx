@@ -3,11 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-const VIDEOS = [
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/krakatoa/videos/storyboard/video_1780624948107.mp4",
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/krakatoa/videos/storyboard/video_1781517356093.mp4",
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/krakatoa/videos/storyboard/video_1782740832045.mp4",
+// Same background clips as the homepage hero (components/landing/HeroSectionVideo.tsx).
+const R2_BASE = "https://pub-30197c9faf284e5e852ce7d61364972c.r2.dev";
+const VIDEO_FILES = [
+  "Badminton (GPT).mp4",
+  "Car Racing 1 (Seedence).mp4",
+  "Car Racing 2 (seedence).mp4",
+  "Dinosaur (Kling).mp4",
 ];
+const VIDEOS = VIDEO_FILES.map(
+  (name) => `${R2_BASE}/${encodeURIComponent(name)}`
+);
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
   const [currentIdx, setCurrentIdx] = useState(0);

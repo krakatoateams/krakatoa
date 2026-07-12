@@ -799,8 +799,23 @@ export async function POST(req: Request) {
       }));
     }
 
+    // The provider (Nano Banana / Gemini) returns a terse "Failed to generate
+    // image." when it produces no image for a request — most often a vague or
+    // placeholder prompt, or a content-policy refusal. Surface an actionable
+    // hint instead of the raw provider string (kept in logs above).
+    const isNoImageProviderError =
+      !pricingMissing &&
+      /failed to generate image|did not return a valid image|prediction failed/i.test(
+        message
+      );
+    const clientMessage = isNoImageProviderError
+      ? "The AI couldn't generate an image from this request. Try a more descriptive prompt (and add a reference image if you have one)."
+      : message;
+
     return NextResponse.json(
-      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      pricingMissing
+        ? { error: clientMessage, code: "PRICING_CONFIG_MISSING" }
+        : { error: clientMessage },
       { status: 500 }
     );
   }
