@@ -134,9 +134,17 @@ export default function DashboardHero() {
             from { transform: translateX(0); }
             to { transform: translateX(-50%); }
           }
-          .hero-marquee { animation: heroMarquee 32s linear infinite; }
+          .hero-marquee {
+            animation: heroMarquee 32s linear infinite;
+            will-change: transform;
+            transform: translateZ(0);
+          }
+          /* The floating nodes are the distracting motion; disable those under
+             reduced-motion. The feature ticker is a slow, subtle scroll, so we
+             keep it running (many phones report reduced-motion via Battery Saver
+             / "Remove animations", which was silently freezing the ticker). */
           @media (prefers-reduced-motion: reduce) {
-            .hero-node, .hero-marquee { animation: none; }
+            .hero-node { animation: none; }
           }
         `}</style>
       </div>

@@ -227,7 +227,7 @@ export function LandingNav() {
             ))}
           </nav>
           <Link
-            href={isAuthed ? "/dashboard" : "#growth"}
+            href="/dashboard"
             className="group inline-flex w-full items-center justify-between bg-gray-900 text-white rounded-full px-5 py-3.5 text-[15px] font-medium"
             onClick={() => setMenuOpen(false)}
           >
