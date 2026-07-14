@@ -95,3 +95,21 @@ export const PRODUCT_PHOTO_GENERATIONS_TABLE = "product_photo_generations";
 export function photosStoragePath(...segments: string[]): string {
   return [PHOTOS_FOLDER, ...segments].join("/");
 }
+
+/**
+ * Extract the storage-relative path from a Supabase public URL for this
+ * project's bucket, e.g. "https://…/object/public/krakatoa/videos/x.mp4" →
+ * "videos/x.mp4". Returns null for URLs that don't match this bucket.
+ */
+export function storagePathFromPublicUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `/object/public/${STORAGE_BUCKET}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return url.slice(idx + marker.length) || null;
+}
+
+// NOTE: this module is imported by client components too (e.g. lib/product-photo.ts,
+// transitively reachable from the dashboard). Keep it free of `lib/supabase-server`
+// (or any other server-secret-touching import) — the Storage API-calling
+// existence check lives in `lib/video-storage.ts` instead.

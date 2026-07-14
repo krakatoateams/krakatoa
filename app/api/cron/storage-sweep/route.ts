@@ -34,7 +34,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const dryRun = searchParams.get("dryRun") === "1";
 
-  const rawAge = Number(searchParams.get("minAgeHours"));
+  // Number(null) is 0 (finite, >= 0), so a naive Number(searchParams.get(...))
+  // would silently turn "param absent" into "minAgeHours=0" instead of falling
+  // back to the default — disabling the age guard on every unparameterized
+  // call (i.e. every automatic daily cron tick, since vercel.json's cron entry
+  // never passes minAgeHours). Check for absence explicitly first.
+  const minAgeHoursParam = searchParams.get("minAgeHours");
+  const rawAge = minAgeHoursParam === null ? NaN : Number(minAgeHoursParam);
   const minAgeHours =
     Number.isFinite(rawAge) && rawAge >= 0 ? rawAge : DEFAULT_SWEEP_MIN_AGE_HOURS;
 

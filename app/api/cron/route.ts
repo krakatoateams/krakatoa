@@ -3,7 +3,8 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
 import { refreshAccessToken, publishToTikTok } from "@/lib/tiktok";
 import { removeStorageObjects } from "@/lib/creations-db";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { storagePathFromPublicUrl } from "@/lib/storage-buckets";
+import { isVideoUrlConfirmedMissing } from "@/lib/video-storage";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -38,6 +39,9 @@ function isPermanentFailure(err: unknown, message: string): boolean {
   if (/quota|dailylimitexceeded|quotaexceeded/.test(m)) {
     return true;
   }
+  if (/video file no longer exists in storage|could not fetch video from storage/.test(m)) {
+    return true;
+  }
   const status = (err as { response?: { status?: number } })?.response?.status;
   if (status === 401 || status === 403) return true;
   return false;
@@ -57,20 +61,10 @@ function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
   if (/branded content cannot be posted|self_only/.test(m)) {
     return true;
   }
+  if (/video file no longer exists in storage|could not fetch video from storage/.test(m)) {
+    return true;
+  }
   return false;
-}
-
-/**
- * Extract the storage-relative path from a Supabase public URL so we can
- * call storage.remove(). Returns null for URLs that don't match this bucket.
- * e.g. "https://…/object/public/krakatoa/videos/x.mp4" → "videos/x.mp4"
- */
-function storagePathFromPublicUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  const marker = `/object/public/${STORAGE_BUCKET}/`;
-  const idx = url.indexOf(marker);
-  if (idx === -1) return null;
-  return url.slice(idx + marker.length) || null;
 }
 
 /**
@@ -241,6 +235,15 @@ export async function GET(req: NextRequest) {
       if (!token.refresh_token) {
         throw new Error(
           `No refresh token stored. The user must reconnect ${post.platform} to obtain a refresh token.`,
+        );
+      }
+
+      // ── Re-verify the video still exists before spending a publish attempt ──
+      // Catches the case where the file was deleted/swept sometime between
+      // scheduling and now (see openspec/changes/video-existence-check).
+      if (await isVideoUrlConfirmedMissing(post.video_url)) {
+        throw new Error(
+          "Video file no longer exists in storage — it was deleted or swept before publishing.",
         );
       }
 
