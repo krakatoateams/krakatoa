@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
 import { getAssetForProfile } from "@/lib/assets-db";
+import { isVideoUrlConfirmedMissing } from "@/lib/video-storage";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -172,6 +173,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "video_url, title, scheduled_time and platform are required." },
         { status: 400 },
+      );
+    }
+
+    // ── Reject scheduling a video that's already gone from storage ────────────
+    // Fails open (never blocks) on an unparseable/external URL or a Storage
+    // API error — see openspec/changes/video-existence-check.
+    if (await isVideoUrlConfirmedMissing(resolvedVideoUrl)) {
+      return NextResponse.json(
+        { error: "Video file no longer exists in storage. Please re-upload or regenerate the video." },
+        { status: 422 },
       );
     }
 
