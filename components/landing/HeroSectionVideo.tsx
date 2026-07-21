@@ -3,17 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HeroLayout } from "./HeroSection";
 
-const R2_BASE = "https://pub-30197c9faf284e5e852ce7d61364972c.r2.dev";
+// Served from our own Supabase Storage (public "Internal Assets" bucket). The
+// previous Cloudflare R2 public dev domain (*.r2.dev) is rate-limited/best-effort
+// and intermittently returned blank clips for some users.
+const VIDEO_BASE =
+  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/Internal%20Assets/Videos";
 
 const VIDEO_FILES = [
-  "Badminton (GPT).mp4",
-  "Car Racing 1 (Seedence).mp4",
-  "Car Racing 2 (seedence).mp4",
-  "Dinosaur (Kling).mp4",
+  "Badminton (GPT)-optimized.mp4",
+  "Car Racing 1 (Seedence)-optimized.mp4",
+  "Car Racing 2 (seedence)-optimized.mp4",
+  "Dinosaur (Kling)-optimized.mp4",
 ];
 
 const VIDEO_SRCS = VIDEO_FILES.map(
-  (name) => `${R2_BASE}/${encodeURIComponent(name)}`
+  (name) => `${VIDEO_BASE}/${encodeURIComponent(name)}`
 );
 
 /**

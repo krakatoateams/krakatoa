@@ -2,7 +2,7 @@ import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { supabaseServer } from "@/lib/supabase-server";
 
 /**
- * Krakatoa product identity. Linked 1:1 to Supabase auth.users via user_id.
+ * Kelolako product identity. Linked 1:1 to Supabase auth.users via user_id.
  * All product resources are owned by profile_id — never by the raw auth UUID
  * or email directly.
  */
@@ -111,7 +111,7 @@ async function findAndPatchProfile(sessionUser: {
 }
 
 /**
- * Get or create the current user's Krakatoa profile.
+ * Get or create the current user's Kelolako profile.
  *
  * Reuses findAndPatchProfile() for the resolve + lazy-patch steps, then creates
  * a fresh profile for a brand-new user. Throws if unauthenticated. Callers that
@@ -160,7 +160,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 }
 
 /**
- * Require an authenticated Krakatoa profile (creating it on first use).
+ * Require an authenticated Kelolako profile (creating it on first use).
  * Mutation/query routes should call this and scope every query by the
  * returned profile.id. Throws "Not authenticated." when there is no session.
  */

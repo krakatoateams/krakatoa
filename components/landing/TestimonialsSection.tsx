@@ -11,7 +11,7 @@ type Testimonial = {
 
 const TESTIMONIALS: Testimonial[] = [
   {
-    quote: "Krakatoa cut my reel turnaround from 4 hours to 4 minutes.",
+    quote: "Kelolako cut my reel turnaround from 4 hours to 4 minutes.",
     name: "Maya Chen",
     handle: "@mayamakes",
     platform: "Instagram",
@@ -140,7 +140,7 @@ export function TestimonialsSection() {
             className="max-w-3xl font-medium leading-[1.08] tracking-[-0.02em] text-white"
             style={{ fontSize: "clamp(1.75rem, 5vw, 3rem)" }}
           >
-            Creators ship more with Krakatoa.
+            Creators ship more with Kelolako.
           </h2>
         </div>
       </div>

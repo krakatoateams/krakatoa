@@ -58,7 +58,7 @@ const PLANS: Plan[] = [
       "5 AI reels per month",
       "Standard templates",
       "Standard generation queue",
-      "Krakatoa watermark",
+      "Kelolako watermark",
     ],
     ctaHref: "#growth",
     ctaLabel: "Start free",
@@ -439,7 +439,7 @@ export function PricingSectionAlt() {
                   Pay only for what you create.
                 </h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-gray-600">
-                  Buy credits in bulk and spend them across every Krakatoa
+                  Buy credits in bulk and spend them across every Kelolako
                   tool. No subscription. No surprise charges.
                 </p>
 
@@ -555,7 +555,7 @@ function CreditPolicyModal({
             "Credits cannot be exchanged for memberships or subscription plans.",
             "Credits are valid for 2 years from the date of redemption.",
             "Spent credits are consumed at generation time and are not returned for outputs you choose not to use.",
-            "Krakatoa may adjust credit pricing for future purchases; credits already purchased keep their granted value.",
+            "Kelolako may adjust credit pricing for future purchases; credits already purchased keep their granted value.",
           ].map((item) => (
             <li key={item} className="flex items-start gap-3">
               <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">

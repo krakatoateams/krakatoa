@@ -1,10 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Plus,
-  Wand2,
   Loader2,
   AlertCircle,
   Check,
@@ -43,13 +42,21 @@ import PhotoLibraryPicker, {
 import type { CreationHistoryItem } from "@/lib/creations";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
-import {
-  isCreditBalanceSufficient,
-  insufficientCreditsTooltip,
-} from "@/lib/credit-ui";
 import { usePricing } from "@/app/(app)/pricing-context";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import {
+  ChipDropdown,
+  CreditActionButton,
+  GENERATE_BTN_CLASS,
+  CANCEL_BTN_CLASS,
+  Tooltip,
+  RefGroup,
+  useMediaRefs,
+  uploadRefFile,
+  STUDIO_CHIP_ROW_CLASS,
+  StudioModelPanel,
+  type RefGroupApi,
+} from "@/components/studio";
 import {
   TEXT_TO_VIDEO_MODELS,
   IMAGE_TO_VIDEO_MODELS,
@@ -135,10 +142,10 @@ async function loadMentionAssetsFromApi(): Promise<MentionAsset[]> {
 
 // Creation types in the top-left chip. All four are now wired in-page.
 const CREATION_TYPES = [
-  { id: "text2video", label: "Text to Video", available: true },
-  { id: "image2video", label: "Image to Video", available: true },
-  { id: "motion_control", label: "Motion Control", available: true },
-  { id: "storyboard", label: "Storyboard to Video", available: true },
+  { id: "text2video", label: "Text to video", available: true },
+  { id: "image2video", label: "Image to video", available: true },
+  { id: "motion_control", label: "Motion control", available: true },
+  { id: "storyboard", label: "Storyboard to video", available: true },
   { id: "reels-creator", label: "Reels Creator", available: true },
 ] as const;
 
@@ -164,460 +171,6 @@ const ASPECT_RATIO_LABELS: Record<VideoAspectRatio, string> = {
   "9:21": "9:21",
   adaptive: "Adaptive",
 };
-
-type ChipOption = { id: string; label: string; hint?: string };
-
-// Glassy floating tooltip bubble shown above its anchor. The anchor's wrapper
-// must be position:relative. Always rendered (so it can fade) but inert when
-// hidden. Visibility is driven by the caller's hover/focus state.
-function TooltipBubble({ label, show }: { label: string; show: boolean }) {
-  return (
-    <span
-      role="tooltip"
-      className={`pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 w-max max-w-[260px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#0b1020]/95 px-3 py-2 text-center text-xs font-medium leading-snug text-gray-200 shadow-2xl shadow-black/60 backdrop-blur-md transition-all duration-150 ${
-        show ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
-      }`}
-    >
-      {label}
-      <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-[#0b1020]/95" />
-    </span>
-  );
-}
-
-// Wraps any element with a hover/focus tooltip. Use for plain buttons; the
-// ChipDropdown has its own built-in tooltip support via the `tooltip` prop.
-function Tooltip({ label, children }: { label: string; children: React.ReactNode }) {
-  const [show, setShow] = useState(false);
-  return (
-    <div
-      className="relative inline-flex"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onFocusCapture={() => setShow(true)}
-      onBlurCapture={() => setShow(false)}
-    >
-      {children}
-      <TooltipBubble label={label} show={show} />
-    </div>
-  );
-}
-
-const GENERATE_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
-
-function CreditActionButton({
-  balance,
-  cost,
-  ready,
-  loading,
-  label,
-  type = "submit",
-  onClick,
-  className = GENERATE_BTN_CLASS,
-}: {
-  balance: number | null;
-  cost: number;
-  ready: boolean;
-  loading: boolean;
-  label: string;
-  type?: "submit" | "button";
-  onClick?: () => void;
-  className?: string;
-}) {
-  const canAfford = isCreditBalanceSufficient(balance, cost);
-  const disabled = !ready || !canAfford || loading;
-  const creditHint =
-    ready && !canAfford ? insufficientCreditsTooltip(balance, cost) : null;
-
-  const button = (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={className}
-    >
-      {loading ? (
-        <Loader2 className="h-5 w-5 animate-spin" />
-      ) : (
-        <>
-          <span>{label}</span>
-          <Wand2 className="h-4 w-4" />
-          <span className="text-sm font-extrabold">{cost}</span>
-        </>
-      )}
-    </button>
-  );
-
-  if (creditHint) {
-    return <Tooltip label={creditHint}>{button}</Tooltip>;
-  }
-  return button;
-}
-
-function ChipDropdown({
-  icon,
-  value,
-  options,
-  activeId,
-  onSelect,
-  disabled,
-  square = false,
-  showChevron = true,
-  tooltip,
-}: {
-  icon: React.ReactNode;
-  value: string;
-  options: ChipOption[];
-  activeId: string;
-  onSelect: (id: string) => void;
-  disabled?: boolean;
-  square?: boolean;
-  showChevron?: boolean;
-  tooltip?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hover, setHover] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div
-      ref={ref}
-      className="relative"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onFocusCapture={() => setHover(true)}
-      onBlurCapture={() => setHover(false)}
-    >
-      {tooltip && (
-        <TooltipBubble label={tooltip} show={hover && !open && !disabled} />
-      )}
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 items-center gap-2 border px-3 text-sm transition-colors disabled:opacity-40 ${
-          square ? "rounded-[4px]" : "rounded-full"
-        } ${
-          open
-            ? "border-purple-400/50 bg-purple-500/15 text-white"
-            : "border-white/10 bg-white/5 text-gray-200 hover:border-white/25"
-        }`}
-      >
-        <span className="text-purple-300">{icon}</span>
-        <span className="font-semibold">{value}</span>
-        {showChevron && (
-          <ChevronDown
-            className={`h-3.5 w-3.5 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        )}
-      </button>
-
-      {open && (
-        <div className="absolute left-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
-          {options.map((opt) => {
-            const active = opt.id === activeId;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => {
-                  onSelect(opt.id);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                  active ? "bg-purple-500/20 text-white" : "text-gray-300 hover:bg-white/5"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  {opt.label}
-                  {opt.hint && (
-                    <span className="text-xs font-medium text-purple-300">{opt.hint}</span>
-                  )}
-                </span>
-                {active && <Check className="h-4 w-4 shrink-0 text-purple-400" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type RefKind = "image" | "video" | "audio";
-type RefStatus = "uploading" | "done" | "error";
-
-type MediaRef = {
-  id: string;
-  file: File;
-  preview: string | null;
-  kind: RefKind;
-  status: RefStatus;
-  url?: string;
-  path?: string;
-  error?: string;
-};
-
-// Mint a signed upload URL and push the bytes straight to Supabase (videos/temp/refs/).
-async function uploadRefFile(file: File): Promise<{ url: string; path: string }> {
-  const signRes = await fetch("/api/upload/ref/sign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filename: file.name,
-      contentType: file.type,
-      size: file.size,
-    }),
-  });
-  const signData = await signRes.json().catch(() => null);
-  if (!signRes.ok || !signData) {
-    throw new Error(signData?.error || "Couldn't start the upload (server error).");
-  }
-  const { bucket, path, token, publicUrl } = signData as {
-    bucket: string;
-    path: string;
-    token: string;
-    publicUrl: string;
-  };
-  const { error } = await getSupabaseBrowser()
-    .storage.from(bucket)
-    .uploadToSignedUrl(path, token, file, { contentType: file.type });
-  if (error) throw new Error(error.message || "Upload failed.");
-  return { url: publicUrl, path };
-}
-
-type RefGroupApi = {
-  items: MediaRef[];
-  add: (files: FileList | File[]) => void;
-  remove: (id: string) => void;
-  reset: () => void;
-  max: number;
-  /** at least one item still uploading */
-  uploading: boolean;
-  /** done items as { url, path } */
-  done: { url: string; path: string }[];
-};
-
-// Manages a list of media references (auto-uploads on add, dedupes uploads in a
-// strict-mode-safe effect, and revokes object URLs on remove/unmount).
-function useMediaRefs(kind: RefKind, max: number): RefGroupApi {
-  const [items, setItems] = useState<MediaRef[]>([]);
-  const startedRef = useRef<Set<string>>(new Set());
-  const itemsRef = useRef<MediaRef[]>([]);
-  itemsRef.current = items;
-
-  useEffect(() => {
-    return () => {
-      itemsRef.current.forEach((it) => {
-        if (it.preview) URL.revokeObjectURL(it.preview);
-      });
-    };
-  }, []);
-
-  // Kick off uploads for any freshly-added item (deduped by id).
-  useEffect(() => {
-    for (const it of items) {
-      if (it.status === "uploading" && !startedRef.current.has(it.id)) {
-        startedRef.current.add(it.id);
-        uploadRefFile(it.file)
-          .then(({ url, path }) =>
-            setItems((cur) =>
-              cur.map((x) => (x.id === it.id ? { ...x, status: "done", url, path } : x))
-            )
-          )
-          .catch((e) =>
-            setItems((cur) =>
-              cur.map((x) =>
-                x.id === it.id
-                  ? {
-                      ...x,
-                      status: "error",
-                      error: e instanceof Error ? e.message : "Upload failed.",
-                    }
-                  : x
-              )
-            )
-          );
-      }
-    }
-  }, [items]);
-
-  const add = useCallback(
-    (files: FileList | File[]) => {
-      const list = Array.from(files);
-      setItems((prev) => {
-        const room = Math.max(0, max - prev.length);
-        const accepted: MediaRef[] = list.slice(0, room).map((file) => ({
-          id: crypto.randomUUID(),
-          file,
-          preview: kind === "audio" ? null : URL.createObjectURL(file),
-          kind,
-          status: "uploading" as const,
-        }));
-        return [...prev, ...accepted];
-      });
-    },
-    [kind, max]
-  );
-
-  const remove = useCallback((id: string) => {
-    setItems((prev) => {
-      const target = prev.find((x) => x.id === id);
-      if (target?.preview) URL.revokeObjectURL(target.preview);
-      return prev.filter((x) => x.id !== id);
-    });
-  }, []);
-
-  const reset = useCallback(() => {
-    setItems((prev) => {
-      prev.forEach((x) => {
-        if (x.preview) URL.revokeObjectURL(x.preview);
-      });
-      return [];
-    });
-  }, []);
-
-  const uploading = items.some((x) => x.status === "uploading");
-  const done = items
-    .filter((x) => x.status === "done" && x.url)
-    .map((x) => ({ url: x.url as string, path: x.path ?? "" }));
-
-  return { items, add, remove, reset, max, uploading, done };
-}
-
-function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => void }) {
-  return (
-    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-white/5">
-      {item.kind === "image" && item.preview ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.preview} alt="reference" className="absolute inset-0 h-full w-full object-cover" />
-      ) : item.kind === "video" && item.preview ? (
-        <video src={item.preview} muted playsInline className="absolute inset-0 h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-gray-400">
-          <Music className="h-5 w-5" />
-          <span className="max-w-full truncate px-1 text-[8px]">{item.file.name}</span>
-        </div>
-      )}
-
-      {item.status === "uploading" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-300" />
-        </div>
-      )}
-      {item.status === "error" && (
-        <div
-          className="absolute inset-0 flex items-center justify-center bg-red-900/60"
-          title={item.error || "Upload failed"}
-        >
-          <AlertCircle className="h-5 w-5 text-red-300" />
-        </div>
-      )}
-
-      <span
-        role="button"
-        tabIndex={0}
-        onClick={onRemove}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") onRemove();
-        }}
-        className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
-      >
-        <X className="h-3 w-3" />
-      </span>
-    </div>
-  );
-}
-
-function RefGroup({
-  icon,
-  label,
-  hint,
-  accept,
-  multiple,
-  group,
-  disabled,
-  disabledReason,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  hint?: string;
-  accept: string;
-  multiple: boolean;
-  group: RefGroupApi;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const full = group.items.length >= group.max;
-  const addDisabled = disabled || full;
-
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-          <span className="text-purple-300">{icon}</span>
-          {label}
-        </span>
-        <span className="text-[10px] text-gray-600">
-          {group.items.length}/{group.max}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {group.items.map((it) => (
-          <RefTile key={it.id} item={it} onRemove={() => group.remove(it.id)} />
-        ))}
-        {!full && (
-          <button
-            type="button"
-            disabled={addDisabled}
-            onClick={() => inputRef.current?.click()}
-            title={disabled ? disabledReason : `Add ${label.toLowerCase()}`}
-            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add</span>
-          </button>
-        )}
-      </div>
-
-      {disabled && disabledReason ? (
-        <p className="mt-2 text-[10px] text-amber-300/70">{disabledReason}</p>
-      ) : hint ? (
-        <p className="mt-2 text-[10px] text-gray-600">{hint}</p>
-      ) : null}
-
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        multiple={multiple}
-        className="hidden"
-        onChange={(e) => {
-          if (e.target.files?.length) group.add(e.target.files);
-          if (inputRef.current) inputRef.current.value = "";
-        }}
-      />
-    </div>
-  );
-}
 
 // Motion Control "Your character" — upload or pick any saved Photo Studio image.
 function CharacterPicker({
@@ -646,6 +199,8 @@ function CharacterPicker({
       selected={selected}
       onSelect={onSelect}
       disabled={disabled}
+      libraryKind="character"
+      libraryEmptyLabel="No saved characters yet."
       hint="A clear image with a visible face and body. JPG/PNG."
     />
   );
@@ -923,7 +478,7 @@ function VideoOmniPage() {
         </div>
 
         {creationType === "text2video" && (
-        <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+        <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
           <style>{`
             @keyframes omniDotDrift { from { background-position: 0 0; } to { background-position: 48px 48px; } }
             @keyframes omniDotsPulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
@@ -947,6 +502,7 @@ function VideoOmniPage() {
           {/* Top-left chips: creation type + model */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <ChipDropdown
+              sheetTitle="Select creation type"
               icon={<Layers className="h-3.5 w-3.5" />}
               value={selectedCreation?.label ?? "Creation"}
               activeId="text2video"
@@ -958,21 +514,25 @@ function VideoOmniPage() {
               onSelect={handleCreationType}
               disabled={loading}
             />
-            <ChipDropdown
-              icon={<Cpu className="h-3.5 w-3.5" />}
-              value={model.modelLabel}
-              activeId={modelId}
-              options={TEXT_TO_VIDEO_MODELS.map((m) => ({
-                id: m.id,
-                label: m.modelLabel,
-                hint: formatVideoModelCreditHint(m, videoCredits),
-              }))}
-              onSelect={(id) => setModelId(id as VideoModelId)}
-              disabled={loading}
-            />
+            {/* Model chip stays inline in the top row on desktop only */}
+            <div className="hidden lg:block">
+              <ChipDropdown
+                sheetTitle="Select model"
+                icon={<Cpu className="h-3.5 w-3.5" />}
+                value={model.modelLabel}
+                activeId={modelId}
+                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                  id: m.id,
+                  label: m.modelLabel,
+                  hint: formatVideoModelCreditHint(m, videoCredits),
+                }))}
+                onSelect={(id) => setModelId(id as VideoModelId)}
+                disabled={loading}
+              />
+            </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+          <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
             {supportsMentions ? (
               <MentionTextarea
                 value={prompt}
@@ -999,8 +559,9 @@ function VideoOmniPage() {
 
             {/* Controls row */}
             <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className={STUDIO_CHIP_ROW_CLASS}>
                 <ChipDropdown
+                  sheetTitle="Select clip length"
                   square
                   showChevron={false}
                   icon={<Clock className="h-3.5 w-3.5" />}
@@ -1017,6 +578,7 @@ function VideoOmniPage() {
                 />
                 {model.resolutions.length > 1 && (
                 <ChipDropdown
+                  sheetTitle="Select resolution"
                   square
                   showChevron={false}
                   icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -1035,6 +597,7 @@ function VideoOmniPage() {
                 />
                 )}
                 <ChipDropdown
+                  sheetTitle="Select video ratio"
                   square
                   showChevron={false}
                   icon={<Crop className="h-3.5 w-3.5" />}
@@ -1079,7 +642,7 @@ function VideoOmniPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="hidden items-center gap-3 lg:flex">
                 <CreditActionButton
                   balance={balance}
                   cost={videoCost}
@@ -1092,7 +655,7 @@ function VideoOmniPage() {
                     type="button"
                     onClick={() => cancelSubmit()}
                     disabled={cancelling}
-                    className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={CANCEL_BTN_CLASS}
                   >
                     {cancelling ? (
                       <>
@@ -1106,6 +669,56 @@ function VideoOmniPage() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Model — attached under the form card on mobile only */}
+          <StudioModelPanel>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-gray-500">Model</span>
+              <ChipDropdown
+                sheetTitle="Select model"
+                bare
+                icon={<Cpu className="h-3.5 w-3.5" />}
+                value={model.modelLabel}
+                activeId={modelId}
+                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                  id: m.id,
+                  label: m.modelLabel,
+                  hint: formatVideoModelCreditHint(m, videoCredits),
+                }))}
+                onSelect={(id) => setModelId(id as VideoModelId)}
+                disabled={loading}
+              />
+            </div>
+          </StudioModelPanel>
+
+          {/* Generate (mobile — below the form card) */}
+          <div className="mt-3 flex items-center gap-3 lg:hidden">
+            <CreditActionButton
+              balance={balance}
+              cost={videoCost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            {loading && (
+              <button
+                type="button"
+                onClick={() => cancelSubmit()}
+                disabled={cancelling}
+                className={CANCEL_BTN_CLASS}
+              >
+                {cancelling ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Cancelling</span>
+                  </>
+                ) : (
+                  <span>Cancel</span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* References */}
@@ -1295,8 +908,9 @@ function VideoOmniPage() {
         )}
 
         {/* Video generation history */}
-        <div className="mt-[120px]">
+        <div className="mt-0 lg:mt-[120px]">
           <CreationsHistory
+            className="!mt-0"
             title="Generation history"
             description="Every video you create appears here. Click any clip to preview it."
             tools={[
@@ -1504,11 +1118,12 @@ function ImageToVideoComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
+            sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
-            value="Image to Video"
+            value="Image to video"
             activeId="image2video"
             options={CREATION_TYPES.map((c) => ({
               id: c.id,
@@ -1518,21 +1133,25 @@ function ImageToVideoComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-          <ChipDropdown
-            icon={<Cpu className="h-3.5 w-3.5" />}
-            value={model.modelLabel}
-            activeId={modelId}
-            options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
-              id: m.id,
-              label: m.modelLabel,
-              hint: formatVideoModelCreditHint(m, videoCredits),
-            }))}
-            onSelect={(id) => setModelId(id as VideoModelId)}
-            disabled={loading}
-          />
+          {/* Model chip stays inline in the top row on desktop only */}
+          <div className="hidden lg:block">
+            <ChipDropdown
+              sheetTitle="Select model"
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={model.modelLabel}
+              activeId={modelId}
+              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits),
+              }))}
+              onSelect={(id) => setModelId(id as VideoModelId)}
+              disabled={loading}
+            />
+          </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           <div
             className={`grid grid-cols-1 gap-3 ${
               model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
@@ -1585,9 +1204,6 @@ function ImageToVideoComposer({
                 model.references.lastFrame ? "lg:col-span-1" : "sm:col-span-1"
               }`}
             >
-              <label className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">
-                Motion prompt
-              </label>
               <MentionTextarea
                 value={prompt}
                 onChange={setPrompt}
@@ -1618,8 +1234,9 @@ function ImageToVideoComposer({
           )}
 
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className={STUDIO_CHIP_ROW_CLASS}>
               <ChipDropdown
+                sheetTitle="Select clip length"
                 square
                 showChevron={false}
                 icon={<Clock className="h-3.5 w-3.5" />}
@@ -1636,6 +1253,7 @@ function ImageToVideoComposer({
               />
               {model.resolutions.length > 1 && (
                 <ChipDropdown
+                  sheetTitle="Select resolution"
                   square
                   showChevron={false}
                   icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -1670,6 +1288,7 @@ function ImageToVideoComposer({
               )}
               {model.aspectRatios.length > 1 && (
               <ChipDropdown
+                sheetTitle="Select video ratio"
                 square
                 showChevron={false}
                 icon={<Crop className="h-3.5 w-3.5" />}
@@ -1686,7 +1305,7 @@ function ImageToVideoComposer({
               )}
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-3 lg:flex">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -1699,7 +1318,7 @@ function ImageToVideoComposer({
                   type="button"
                   onClick={() => cancelSubmit()}
                   disabled={cancelling}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={CANCEL_BTN_CLASS}
                 >
                   {cancelling ? (
                     <>
@@ -1723,6 +1342,56 @@ function ImageToVideoComposer({
                 : "Add a start image or end image (at least one)."}
             </p>
           ) : null}
+        </div>
+
+        {/* Model — attached under the form card on mobile only */}
+        <StudioModelPanel>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-gray-500">Model</span>
+            <ChipDropdown
+              sheetTitle="Select model"
+              bare
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={model.modelLabel}
+              activeId={modelId}
+              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits),
+              }))}
+              onSelect={(id) => setModelId(id as VideoModelId)}
+              disabled={loading}
+            />
+          </div>
+        </StudioModelPanel>
+
+        {/* Generate (mobile — below the form card) */}
+        <div className="mt-3 flex items-center gap-3 lg:hidden">
+          <CreditActionButton
+            balance={balance}
+            cost={cost}
+            ready={canGenerate}
+            loading={loading}
+            label="Generate"
+            className={`${GENERATE_BTN_CLASS} flex-1`}
+          />
+          {loading && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
         </div>
       </form>
 
@@ -1925,12 +1594,13 @@ function MotionControlComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
         {/* Top-left chips: creation type + model */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
+            sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
-            value="Motion Control"
+            value="Motion control"
             activeId="motion_control"
             options={CREATION_TYPES.map((c) => ({
               id: c.id,
@@ -1940,21 +1610,25 @@ function MotionControlComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-          <ChipDropdown
-            icon={<Cpu className="h-3.5 w-3.5" />}
-            value={model.modelLabel}
-            activeId={modelId}
-            options={MOTION_CONTROL_MODELS.map((m) => ({
-              id: m.id,
-              label: m.modelLabel,
-              hint: formatMotionControlModelCreditHint(m, videoCredits),
-            }))}
-            onSelect={(id) => setModelId(id as MotionControlModelId)}
-            disabled={loading}
-          />
+          {/* Model chip stays inline in the top row on desktop only */}
+          <div className="hidden lg:block">
+            <ChipDropdown
+              sheetTitle="Select model"
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={model.modelLabel}
+              activeId={modelId}
+              options={MOTION_CONTROL_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatMotionControlModelCreditHint(m, videoCredits),
+              }))}
+              onSelect={(id) => setModelId(id as MotionControlModelId)}
+              disabled={loading}
+            />
+          </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           {/* Uploads: character image + motion video (both required) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CharacterPicker
@@ -2022,8 +1696,9 @@ function MotionControlComposer({
 
           {/* Controls row */}
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className={STUDIO_CHIP_ROW_CLASS}>
               <ChipDropdown
+                sheetTitle="Select quality"
                 square
                 showChevron={false}
                 icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -2039,6 +1714,7 @@ function MotionControlComposer({
                 disabled={loading}
               />
               <ChipDropdown
+                sheetTitle="Select orientation"
                 square
                 showChevron={false}
                 icon={<Repeat className="h-3.5 w-3.5" />}
@@ -2053,6 +1729,7 @@ function MotionControlComposer({
                 disabled={loading}
               />
               <Tooltip
+                className="flex-1 lg:flex-none"
                 label={
                   keepOriginalSound
                     ? "On — your result keeps the reference video's original audio. Click to mute it."
@@ -2063,10 +1740,10 @@ function MotionControlComposer({
                   type="button"
                   disabled={loading}
                   onClick={() => setKeepOriginalSound((v) => !v)}
-                  className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                  className={`flex h-10 w-full items-center justify-center gap-2 rounded-[4px] px-3 text-sm font-semibold transition-colors disabled:opacity-40 lg:w-auto lg:justify-start ${
                     keepOriginalSound
-                      ? "border-purple-400/50 bg-purple-500/15 text-white"
-                      : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
+                      ? "bg-purple-500/15 text-white"
+                      : "bg-white/5 text-gray-200 hover:bg-white/10"
                   }`}
                 >
                   {keepOriginalSound ? (
@@ -2079,7 +1756,7 @@ function MotionControlComposer({
               </Tooltip>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-3 lg:flex">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -2092,7 +1769,7 @@ function MotionControlComposer({
                   type="button"
                   onClick={() => cancelSubmit()}
                   disabled={cancelling}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={CANCEL_BTN_CLASS}
                 >
                   {cancelling ? (
                     <>
@@ -2112,6 +1789,56 @@ function MotionControlComposer({
               Add both your character image and a motion video to generate.
             </p>
           ) : null}
+        </div>
+
+        {/* Model — attached under the form card on mobile only */}
+        <StudioModelPanel>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-gray-500">Model</span>
+            <ChipDropdown
+              sheetTitle="Select model"
+              bare
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={model.modelLabel}
+              activeId={modelId}
+              options={MOTION_CONTROL_MODELS.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatMotionControlModelCreditHint(m, videoCredits),
+              }))}
+              onSelect={(id) => setModelId(id as MotionControlModelId)}
+              disabled={loading}
+            />
+          </div>
+        </StudioModelPanel>
+
+        {/* Generate (mobile — below the form card) */}
+        <div className="mt-3 flex items-center gap-3 lg:hidden">
+          <CreditActionButton
+            balance={balance}
+            cost={cost}
+            ready={canGenerate}
+            loading={loading}
+            label="Generate"
+            className={`${GENERATE_BTN_CLASS} flex-1`}
+          />
+          {loading && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
         </div>
       </form>
 
@@ -2185,7 +1912,7 @@ function storyboardVideoPricingKey(
 // and a Seedance model (Mini default; Fast or full Seedance 2 optional), then renders the 15s clip.
 const STORYBOARD_VIDEO_DURATION_SEC = 15;
 
-// Modal for importing a user's OWN storyboard image (not generated in Krakatoa).
+// Modal for importing a user's OWN storyboard image (not generated in Kelolako).
 // Uploads the file to the transient refs path, then asks /api/storyboards/import
 // to run a GPT-5 vision pass (charged) that synthesizes the seedance_prompt and
 // registers a storyboards row. On success the new board is handed back to the
@@ -2358,8 +2085,9 @@ function ImportStoryboardModal({
           </div>
 
           {/* Orientation / language / style */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={STUDIO_CHIP_ROW_CLASS}>
             <ChipDropdown
+              sheetTitle="Select video ratio"
               square
               showChevron={false}
               icon={<Crop className="h-3.5 w-3.5" />}
@@ -2375,6 +2103,9 @@ function ImportStoryboardModal({
               disabled={busy}
             />
             <ChipDropdown
+              sheetTitle="Select language"
+              square
+              showChevron={false}
               icon={<Languages className="h-3.5 w-3.5" />}
               value={storyboardLanguageLabel(language)}
               activeId={language}
@@ -2384,6 +2115,9 @@ function ImportStoryboardModal({
               disabled={busy}
             />
             <ChipDropdown
+              sheetTitle="Select style"
+              square
+              showChevron={false}
               icon={<Sparkles className="h-3.5 w-3.5" />}
               value={STORYBOARD_STYLE_LABELS[style]}
               activeId={style}
@@ -2624,12 +2358,13 @@ function StoryboardToVideoComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
         {/* Top-left chips: creation type + model */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
+            sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
-            value="Storyboard to Video"
+            value="Storyboard to video"
             activeId="storyboard"
             options={CREATION_TYPES.map((c) => ({
               id: c.id,
@@ -2639,24 +2374,28 @@ function StoryboardToVideoComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-          <ChipDropdown
-            icon={<Cpu className="h-3.5 w-3.5" />}
-            value={storyboardVideoModel.modelLabel}
-            activeId={videoModelId}
-            options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
-              const m = getVideoModel(id);
-              return {
-                id,
-                label: m.modelLabel,
-                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
-              };
-            })}
-            onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
-            disabled={loading}
-          />
+          {/* Model chip stays inline in the top row on desktop only */}
+          <div className="hidden lg:block">
+            <ChipDropdown
+              sheetTitle="Select model"
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={storyboardVideoModel.modelLabel}
+              activeId={videoModelId}
+              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
+                const m = getVideoModel(id);
+                return {
+                  id,
+                  label: m.modelLabel,
+                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+                };
+              })}
+              onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
+              disabled={loading}
+            />
+          </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -2703,7 +2442,7 @@ function StoryboardToVideoComposer({
                 type="button"
                 disabled={loading}
                 onClick={() => setShowUpload(true)}
-                className="flex aspect-[3/2] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
+                className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
               >
                 <Upload className="h-5 w-5" />
                 <span className="text-[11px] font-semibold">Upload your own</span>
@@ -2760,8 +2499,9 @@ function StoryboardToVideoComposer({
 
           {/* Controls row */}
           <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className={STUDIO_CHIP_ROW_CLASS}>
               <ChipDropdown
+                sheetTitle="Select resolution"
                 square
                 showChevron={false}
                 icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -2777,6 +2517,7 @@ function StoryboardToVideoComposer({
                 disabled={loading}
               />
               <ChipDropdown
+                sheetTitle="Select video ratio"
                 square
                 showChevron={!aspectLocked}
                 icon={<Crop className="h-3.5 w-3.5" />}
@@ -2796,6 +2537,9 @@ function StoryboardToVideoComposer({
                 disabled={loading || aspectLocked}
               />
               <ChipDropdown
+                sheetTitle="Select language"
+                square
+                showChevron={false}
                 icon={<Languages className="h-3.5 w-3.5" />}
                 value={storyboardLanguageLabel(language)}
                 activeId={language}
@@ -2809,7 +2553,7 @@ function StoryboardToVideoComposer({
               />
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-3 lg:flex">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -2822,7 +2566,7 @@ function StoryboardToVideoComposer({
                   type="button"
                   onClick={() => cancelSubmit()}
                   disabled={cancelling}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={CANCEL_BTN_CLASS}
                 >
                   {cancelling ? (
                     <>
@@ -2907,6 +2651,59 @@ function StoryboardToVideoComposer({
               Pick a storyboard to turn into a video.
             </p>
           ) : null}
+        </div>
+
+        {/* Model — attached under the form card on mobile only */}
+        <StudioModelPanel>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-gray-500">Model</span>
+            <ChipDropdown
+              sheetTitle="Select model"
+              bare
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={storyboardVideoModel.modelLabel}
+              activeId={videoModelId}
+              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
+                const m = getVideoModel(id);
+                return {
+                  id,
+                  label: m.modelLabel,
+                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+                };
+              })}
+              onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
+              disabled={loading}
+            />
+          </div>
+        </StudioModelPanel>
+
+        {/* Generate (mobile — below the form card) */}
+        <div className="mt-3 flex items-center gap-3 lg:hidden">
+          <CreditActionButton
+            balance={balance}
+            cost={cost}
+            ready={canGenerate}
+            loading={loading}
+            label="Create video"
+            className={`${GENERATE_BTN_CLASS} flex-1`}
+          />
+          {loading && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
         </div>
       </form>
 
@@ -3333,10 +3130,11 @@ function ReelsCreatorComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-10">
+      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
         {/* Top-left chips: creation type + engine (+ Veo mode) */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
+            sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Reels Creator"
             activeId="reels-creator"
@@ -3344,16 +3142,21 @@ function ReelsCreatorComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-          <ChipDropdown
-            icon={<Cpu className="h-3.5 w-3.5" />}
-            value={reelsEngineLabel(engine)}
-            activeId={engine}
-            options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
-            onSelect={(id) => setEngine(id as ReelsEngine)}
-            disabled={loading}
-          />
+          {/* Engine chip stays inline in the top row on desktop only */}
+          <div className="hidden lg:block">
+            <ChipDropdown
+              sheetTitle="Select engine"
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={reelsEngineLabel(engine)}
+              activeId={engine}
+              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              onSelect={(id) => setEngine(id as ReelsEngine)}
+              disabled={loading}
+            />
+          </div>
           {engine === "veo" && (
             <ChipDropdown
+              sheetTitle="Select mode"
               icon={<Film className="h-3.5 w-3.5" />}
               value={veoMode === "single" ? "Single video" : "Per scene"}
               activeId={veoMode}
@@ -3367,7 +3170,7 @@ function ReelsCreatorComposer({
           )}
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
           {/* Theme */}
           <textarea
             value={theme}
@@ -3380,10 +3183,11 @@ function ReelsCreatorComposer({
 
           {/* Controls row */}
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className={STUDIO_CHIP_ROW_CLASS}>
               {engine === "seedance" ? (
                 <>
                   <ChipDropdown
+                    sheetTitle="Select scene count"
                     square
                     showChevron={false}
                     icon={<Layers className="h-3.5 w-3.5" />}
@@ -3399,6 +3203,7 @@ function ReelsCreatorComposer({
                     disabled={loading}
                   />
                   <ChipDropdown
+                    sheetTitle="Select scene length"
                     square
                     showChevron={false}
                     icon={<Clock className="h-3.5 w-3.5" />}
@@ -3414,6 +3219,7 @@ function ReelsCreatorComposer({
                     disabled={loading}
                   />
                   <ChipDropdown
+                    sheetTitle="Select resolution"
                     square
                     showChevron={false}
                     icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -3432,6 +3238,7 @@ function ReelsCreatorComposer({
               ) : (
                 <>
                   <ChipDropdown
+                    sheetTitle="Select clip length"
                     square
                     showChevron={false}
                     icon={<Clock className="h-3.5 w-3.5" />}
@@ -3457,6 +3264,7 @@ function ReelsCreatorComposer({
                     disabled={loading || veoResolution === "1080p"}
                   />
                   <ChipDropdown
+                    sheetTitle="Select resolution"
                     square
                     showChevron={false}
                     icon={<Maximize2 className="h-3.5 w-3.5" />}
@@ -3472,6 +3280,7 @@ function ReelsCreatorComposer({
                   />
                   {veoMode === "single" ? (
                     <ChipDropdown
+                      sheetTitle="Select prompt structure"
                       square
                       showChevron={false}
                       icon={<Film className="h-3.5 w-3.5" />}
@@ -3487,6 +3296,7 @@ function ReelsCreatorComposer({
                     />
                   ) : (
                     <ChipDropdown
+                      sheetTitle="Select scene count"
                       square
                       showChevron={false}
                       icon={<Layers className="h-3.5 w-3.5" />}
@@ -3506,6 +3316,9 @@ function ReelsCreatorComposer({
 
               {/* Narrator: voice + emotion (shared) */}
               <ChipDropdown
+                sheetTitle="Select narrator voice"
+                square
+                showChevron={false}
                 icon={<Mic className="h-3.5 w-3.5" />}
                 value={humanizeReelsVoice(voiceId)}
                 activeId={voiceId}
@@ -3518,6 +3331,9 @@ function ReelsCreatorComposer({
                 disabled={loading}
               />
               <ChipDropdown
+                sheetTitle="Select delivery mood"
+                square
+                showChevron={false}
                 icon={<Smile className="h-3.5 w-3.5" />}
                 value={humanizeReelsEmotion(emotion)}
                 activeId={emotion}
@@ -3535,7 +3351,7 @@ function ReelsCreatorComposer({
               />
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-3 lg:flex">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -3548,7 +3364,7 @@ function ReelsCreatorComposer({
                   type="button"
                   onClick={() => cancelSubmit()}
                   disabled={cancelling}
-                  className="flex h-10 items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className={CANCEL_BTN_CLASS}
                 >
                   {cancelling ? (
                     <>
@@ -3562,6 +3378,52 @@ function ReelsCreatorComposer({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Engine — attached under the form card on mobile only */}
+        <StudioModelPanel>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-gray-500">Engine</span>
+            <ChipDropdown
+              sheetTitle="Select engine"
+              bare
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              value={reelsEngineLabel(engine)}
+              activeId={engine}
+              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              onSelect={(id) => setEngine(id as ReelsEngine)}
+              disabled={loading}
+            />
+          </div>
+        </StudioModelPanel>
+
+        {/* Generate (mobile — below the form card) */}
+        <div className="mt-3 flex items-center gap-3 lg:hidden">
+          <CreditActionButton
+            balance={balance}
+            cost={cost}
+            ready={canGenerate}
+            loading={loading}
+            label="Generate"
+            className={`${GENERATE_BTN_CLASS} flex-1`}
+          />
+          {loading && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Caption styler + live preview */}

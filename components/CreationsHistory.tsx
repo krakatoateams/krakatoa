@@ -141,10 +141,10 @@ function downloadFilename(item: CreationHistoryItem, mimeType?: string): string 
           ? "webp"
           : "jpg";
   const base =
-    (item.title || item.toolLabel || "krakatoa")
+    (item.title || item.toolLabel || "kelolako")
       .replace(/[^a-z0-9]+/gi, "-")
       .replace(/^-+|-+$/g, "")
-      .toLowerCase() || "krakatoa";
+      .toLowerCase() || "kelolako";
   return `${base}-${item.id.slice(0, 8)}.${ext}`;
 }
 

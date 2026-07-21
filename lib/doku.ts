@@ -242,7 +242,7 @@ export async function createCheckoutPayment(params: {
     },
     customer: {
       id: params.customer.id,
-      name: sanitizeText(params.customer.name, "Krakatoa Customer"),
+      name: sanitizeText(params.customer.name, "Kelolako Customer"),
       email: params.customer.email,
     },
     ...(params.notificationUrl

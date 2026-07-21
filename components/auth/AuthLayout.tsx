@@ -3,16 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-// Same background clips as the homepage hero (components/landing/HeroSectionVideo.tsx).
-const R2_BASE = "https://pub-30197c9faf284e5e852ce7d61364972c.r2.dev";
+// Same background clips as the homepage hero (components/landing/HeroSectionVideo.tsx),
+// served from our own Supabase Storage (the *.r2.dev dev domain was flaky).
+const VIDEO_BASE =
+  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/Internal%20Assets/Videos";
 const VIDEO_FILES = [
-  "Badminton (GPT).mp4",
-  "Car Racing 1 (Seedence).mp4",
-  "Car Racing 2 (seedence).mp4",
-  "Dinosaur (Kling).mp4",
+  "Badminton (GPT)-optimized.mp4",
+  "Car Racing 1 (Seedence)-optimized.mp4",
+  "Car Racing 2 (seedence)-optimized.mp4",
+  "Dinosaur (Kling)-optimized.mp4",
 ];
 const VIDEOS = VIDEO_FILES.map(
-  (name) => `${R2_BASE}/${encodeURIComponent(name)}`
+  (name) => `${VIDEO_BASE}/${encodeURIComponent(name)}`
 );
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -71,9 +73,9 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
           <div className="mb-8">
             <Link
               href="/"
-              className="font-display text-lg font-black tracking-[-1.9px] text-white"
+              className="font-display text-lg font-black tracking-normal text-white"
             >
-              KRAKATOA.
+              KELOLAKO.
             </Link>
           </div>
           {children}

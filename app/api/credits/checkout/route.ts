@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     const successUrl = `${origin}/dashboard/settings?tab=credits&status=success&order=${encodeURIComponent(invoiceNumber)}`;
 
     const customerEmail = email || `user-${profileId}@krakatoa.app`;
-    const customerName = displayName || email || "Krakatoa Customer";
+    const customerName = displayName || email || "Kelolako Customer";
 
     // Optional: override the Back Office notification URL per request (handy when
     // a dev tunnel domain changes). Must share the same PATH as the configured URL.

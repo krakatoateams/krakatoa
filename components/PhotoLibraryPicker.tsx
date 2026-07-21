@@ -64,9 +64,10 @@ export default function PhotoLibraryPicker({
   selected,
   onSelect,
   disabled,
-  hint,
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
+  libraryTool = "product_photo",
+  libraryKind,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -80,6 +81,10 @@ export default function PhotoLibraryPicker({
   hint?: string;
   libraryHref?: string;
   libraryEmptyLabel?: string;
+  /** Creations `tool` to list from (default "product_photo"). */
+  libraryTool?: string;
+  /** When set, only keep items whose `metadata.creationKind` matches (e.g. "character"). */
+  libraryKind?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<LibraryImage[]>([]);
@@ -89,21 +94,35 @@ export default function PhotoLibraryPicker({
   const loadLibrary = useCallback(() => {
     startedRef.current = true;
     setLoadState("loading");
-    fetch("/api/creations/history?tool=product_photo&mediaType=image&limit=60")
+    fetch(
+      `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image&limit=100${
+        libraryKind ? `&kind=${encodeURIComponent(libraryKind)}` : ""
+      }`
+    )
       .then((r) => r.json())
-      .then((d: { items?: { id: string; mediaUrl?: string; title?: string }[] }) => {
-        const list: LibraryImage[] = (d.items ?? [])
-          .filter((it) => !!it.mediaUrl)
-          .map((it) => ({
-            id: it.id,
-            url: it.mediaUrl as string,
-            title: it.title || "Image",
-          }));
-        setItems(list);
-        setLoadState("loaded");
-      })
+      .then(
+        (d: {
+          items?: {
+            id: string;
+            mediaUrl?: string;
+            title?: string;
+            metadata?: { creationKind?: string } | null;
+          }[];
+        }) => {
+          const list: LibraryImage[] = (d.items ?? [])
+            .filter((it) => !!it.mediaUrl)
+            .filter((it) => !libraryKind || it.metadata?.creationKind === libraryKind)
+            .map((it) => ({
+              id: it.id,
+              url: it.mediaUrl as string,
+              title: it.title || "Image",
+            }));
+          setItems(list);
+          setLoadState("loaded");
+        }
+      )
       .catch(() => setLoadState("error"));
-  }, []);
+  }, [libraryTool, libraryKind]);
 
   useEffect(() => {
     if (source !== "library" || startedRef.current) return;
@@ -229,7 +248,6 @@ export default function PhotoLibraryPicker({
         </div>
       )}
 
-      {hint ? <p className="mt-2 text-[10px] text-gray-600">{hint}</p> : null}
       {source === "library" && selected ? (
         <p className="mt-2 text-[10px] text-gray-600">Selected: {selected.title}</p>
       ) : null}

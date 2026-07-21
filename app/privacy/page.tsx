@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, type LegalContent } from "@/components/legal/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Kebijakan Privasi / Privacy Policy — Krakatoa",
+  title: "Kebijakan Privasi / Privacy Policy — Kelolako",
   robots: "noindex",
 };
 

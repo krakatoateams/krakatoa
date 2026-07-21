@@ -1,5 +1,5 @@
 /**
- * Krakatoa credit cost constants.
+ * Kelolako credit cost constants.
  *
  * Pricing Config v2.2 NOTE: generation pricing is NO LONGER driven by these
  * constants. The runtime resolver (lib/pricing-resolver.ts) prices every

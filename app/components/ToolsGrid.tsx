@@ -51,7 +51,7 @@ const TOOLS: (ToolModalContent & { color: string; cardDescription: string })[] =
     cardDescription: "Intelligent scheduling that knows when your audience is most active.",
     tagline: "Schedule and auto-post to YouTube, TikTok, Instagram",
     description:
-      "Upload once, publish everywhere — on your schedule. Krakatoa's Scheduler automatically posts your videos to YouTube at the exact time you choose, with AI-generated captions ready to go.",
+      "Upload once, publish everywhere — on your schedule. Kelolako's Scheduler automatically posts your videos to YouTube at the exact time you choose, with AI-generated captions ready to go.",
     capabilities: [
       "Smart scheduling based on your audience's peak activity",
       "Auto-upload to YouTube on a set schedule",
