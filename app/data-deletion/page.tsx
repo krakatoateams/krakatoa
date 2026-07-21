@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, type LegalContent } from "@/components/legal/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Instruksi Penghapusan Data / Data Deletion Instructions — Krakatoa",
+  title: "Instruksi Penghapusan Data / Data Deletion Instructions — Kelolako",
   robots: "noindex",
 };
 

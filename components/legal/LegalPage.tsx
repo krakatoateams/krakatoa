@@ -97,7 +97,7 @@ export function LegalPage({ content }: { content: LegalContent }) {
             href="/"
             className="font-display text-base font-black tracking-[-1.5px] text-gray-900"
           >
-            KRAKATOA.
+            KELOLAKO.
           </Link>
         </div>
       </header>
@@ -132,7 +132,7 @@ export function LegalPage({ content }: { content: LegalContent }) {
 
         {/* Footer */}
         <div className="mt-16 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">
-          © {new Date().getFullYear()} Krakatoa. All rights reserved.
+          © {new Date().getFullYear()} Kelolako. All rights reserved.
         </div>
       </main>
     </div>

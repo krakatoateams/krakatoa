@@ -1,5 +1,5 @@
 /**
- * Krakatoa uses one public Supabase Storage bucket with top-level folders per feature.
+ * Kelolako uses one public Supabase Storage bucket with top-level folders per feature.
  * Product photos live under `photos/` — never inside `videos/`.
  * ReelsGen: final MP4s under `videos/`; transient caption files under `videos/temp/`; Storyboard tab under `videos/storyboard/`.
  *

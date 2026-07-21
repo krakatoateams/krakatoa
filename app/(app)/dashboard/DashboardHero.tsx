@@ -142,7 +142,7 @@ export default function DashboardHero() {
           /* The floating nodes are the distracting motion; disable those under
              reduced-motion. The feature ticker is a slow, subtle scroll, so we
              keep it running (many phones report reduced-motion via Battery Saver
-             / "Remove animations", which was silently freezing the ticker). */
+             or Remove-animations, which was silently freezing the ticker). */
           @media (prefers-reduced-motion: reduce) {
             .hero-node { animation: none; }
           }

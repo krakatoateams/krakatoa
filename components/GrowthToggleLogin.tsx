@@ -111,7 +111,7 @@ export function GrowthToggleLogin() {
                 <Mountain className="h-5 w-5 text-white" />
               </div>
               <span className="font-display text-lg font-semibold tracking-tight text-neutral-950">
-                Krakatoa
+                Kelolako
               </span>
             </div>
 
@@ -123,7 +123,7 @@ export function GrowthToggleLogin() {
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-neutral-600">
               The all-in-one creative engine for modern brands. Sign in to generate,
-              automate, and dominate your social presence with Krakatoa&apos;s AI suite.
+              automate, and dominate your social presence with Kelolako&apos;s AI suite.
             </p>
 
             <button

@@ -58,7 +58,7 @@ export function LandingFooter() {
 
       <div className="relative z-10 border-t border-white/10 px-5 py-6 sm:px-8 lg:px-12">
         <p className="mx-auto max-w-[1440px] text-center text-sm text-white/45">
-          &copy; 2025 Krakatoa. Built for the future of content.
+          &copy; 2025 Kelolako. Built for the future of content.
         </p>
       </div>
     </footer>

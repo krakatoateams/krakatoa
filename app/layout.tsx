@@ -16,7 +16,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Krakatoa - AI-powered tools for content creators",
+  title: "Kelolako - AI-powered tools for content creators",
   description:
     "Generate faceless reels, product photos, and automate your social media — all in one place.",
 };

@@ -51,7 +51,7 @@ export const maxDuration = 300;
 
 /**
  * POST /api/storyboards/import — register a USER-UPLOADED storyboard sheet as a
- * Krakatoa storyboard so it can be turned into a video.
+ * Kelolako storyboard so it can be turned into a video.
  *
  * The user's image is uploaded by the browser to videos/temp/refs/ via the
  * existing signed-upload flow; this route receives its transient path, runs a

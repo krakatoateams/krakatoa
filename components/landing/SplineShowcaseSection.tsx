@@ -46,7 +46,7 @@ export function SplineShowcaseSection() {
             </h2>
             <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-white/70 sm:mt-5 sm:text-base">
               Sign up free and start creating reels, product photos, and posts
-              with Krakatoa&apos;s AI suite.
+              with Kelolako&apos;s AI suite.
             </p>
             <TextRollButton
               href={isAuthed ? "/dashboard" : "/login"}
@@ -64,14 +64,14 @@ export function SplineShowcaseSection() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-3 px-5 pb-4 sm:grid sm:grid-cols-3 sm:items-center sm:px-8 sm:pb-5 lg:px-12 lg:pb-6">
         <Image
           src="/Logo White transparent.svg"
-          alt="Krakatoa"
+          alt="Kelolako"
           width={40}
           height={40}
           className="h-9 w-9 shrink-0 object-contain sm:justify-self-start"
         />
 
         <p className="text-center text-[11px] font-medium tracking-wide text-white/50 sm:justify-self-center sm:text-xs">
-          &copy; 2025 Krakatoa. Built for the future of content.
+          &copy; 2025 Kelolako. Built for the future of content.
         </p>
 
         <a

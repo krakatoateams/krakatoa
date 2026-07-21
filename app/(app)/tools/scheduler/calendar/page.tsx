@@ -18,6 +18,7 @@ import {
   Music2,
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
+import PageContainer from "../../../dashboard/PageContainer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -779,7 +780,7 @@ export default function SchedulerCalendarPage() {
 
   return (
     <div className="min-h-screen bg-gray-950">
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      <PageContainer>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
@@ -907,7 +908,7 @@ export default function SchedulerCalendarPage() {
           ))}
           <span className="ml-auto italic">Drag a post to a new day to reschedule.</span>
         </div>
-      </main>
+      </PageContainer>
 
       {selectedPost && (
         <PostModal

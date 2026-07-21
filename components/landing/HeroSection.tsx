@@ -10,7 +10,7 @@ import { HeroFloatingSocialIcons } from "./HeroFloatingSocialIcons";
 const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
 
 /**
- * Greyscale strip of the AI models powering Krakatoa, pinned to the bottom
+ * Greyscale strip of the AI models powering Kelolako, pinned to the bottom
  * center of the hero. Rendered as monochrome wordmarks (no brand assets), so
  * they read as muted "logos" over the video backdrop.
  */

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, type LegalContent } from "@/components/legal/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Syarat dan Ketentuan / Terms of Service — Krakatoa",
+  title: "Syarat dan Ketentuan / Terms of Service — Kelolako",
   robots: "noindex",
 };
 

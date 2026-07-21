@@ -150,13 +150,13 @@ export function AboutSectionAlt() {
               <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black ring-1 ring-white/30">
                 <Image
                   src="/Logo Black.png"
-                  alt="Krakatoa"
+                  alt="Kelolako"
                   width={48}
                   height={48}
                   className="h-full w-full object-contain p-1.5"
                 />
               </span>
-              <span>Krakatoa team · est. 2026</span>
+              <span>Kelolako team · est. 2026</span>
             </div>
           </div>
 

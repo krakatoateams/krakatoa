@@ -135,15 +135,15 @@ export function LandingNav() {
           >
             <Link
               href="/"
-              aria-label="Krakatoa home"
+              aria-label="Kelolako home"
               className="flex items-center shrink-0"
             >
               <span
-                className={`text-gray-900 text-[18px] sm:text-xl font-black tracking-[-1.9px] transition-colors duration-300 ${
+                className={`text-gray-900 text-[18px] sm:text-xl font-black tracking-normal transition-colors duration-300 ${
                   light ? "md:text-gray-900" : "md:text-white"
                 }`}
               >
-                KRAKATOA.
+                KELOLAKO.
               </span>
             </Link>
             <div className="hidden md:flex items-center gap-6">
