@@ -32,7 +32,7 @@ export default function ResetPasswordPage() {
     setError(null);
 
     if (password !== confirmPassword) {
-      setError("Password dan konfirmasi password tidak sama.");
+      setError("Password and confirmation don't match.");
       return;
     }
 
@@ -56,7 +56,7 @@ export default function ResetPasswordPage() {
   if (sessionState === "checking") {
     return (
       <AuthLayout>
-        <div className="py-8 text-center text-sm text-gray-400">Memeriksa link…</div>
+        <div className="py-8 text-center text-sm text-gray-400">Checking link…</div>
       </AuthLayout>
     );
   }
@@ -65,15 +65,15 @@ export default function ResetPasswordPage() {
     return (
       <AuthLayout>
         <div className="space-y-4 text-center">
-          <h1 className="font-display text-xl font-bold text-white">Link tidak valid</h1>
+          <h1 className="font-display text-xl font-bold text-white">Invalid link</h1>
           <p className="text-sm text-gray-400">
-            Link ini tidak valid atau sudah kedaluwarsa.
+            This link is invalid or has expired.
           </p>
           <Link
             href="/forgot-password"
             className="block text-sm text-[#F26522] hover:text-[#e05a1a]"
           >
-            Minta link reset password baru
+            Request a new password reset link
           </Link>
         </div>
       </AuthLayout>
@@ -84,16 +84,16 @@ export default function ResetPasswordPage() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Buat password baru</h1>
+          <h1 className="font-display text-xl font-bold text-white">Create a new password</h1>
           <p className="mt-1 text-sm text-gray-400">
-            Masukkan password baru kamu di bawah ini.
+            Enter your new password below.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-400">
-              Password baru
+              New password
             </label>
             <input
               type="password"
@@ -107,7 +107,7 @@ export default function ResetPasswordPage() {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-400">
-              Konfirmasi password
+              Confirm password
             </label>
             <input
               type="password"
@@ -131,7 +131,7 @@ export default function ResetPasswordPage() {
             disabled={loading}
             className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
-            {loading ? "Menyimpan…" : "Simpan password baru"}
+            {loading ? "Saving…" : "Save new password"}
           </button>
         </form>
       </div>
