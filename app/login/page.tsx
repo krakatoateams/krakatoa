@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { sanitizeNextPath } from "@/lib/safe-redirect";
 
 type LoginError =
   | { kind: "invalid_credentials" }
@@ -53,7 +54,7 @@ async function checkIsGoogleOnly(email: string): Promise<boolean> {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = sanitizeNextPath(searchParams.get("next"));
 
   const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");
@@ -61,6 +62,11 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
+
+  // Set by app/auth/callback/route.ts when exchangeCodeForSession() fails
+  // (e.g. a stale/reused OAuth code) — previously redirected here silently
+  // with no message at all.
+  const callbackError = searchParams.get("error");
 
   const supabase = getSupabaseAuthBrowser();
 
@@ -134,6 +140,12 @@ function LoginForm() {
           </p>
         </div>
 
+        {callbackError && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
+            Autentikasi gagal, coba lagi.
+          </div>
+        )}
+
         {/* Google */}
         <button
           type="button"
@@ -166,9 +178,15 @@ function LoginForm() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
-              Password
-            </label>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-400">Password</label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-[#F26522] hover:text-[#e05a1a]"
+              >
+                Lupa password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}
