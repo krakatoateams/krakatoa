@@ -133,16 +133,16 @@ function LoginForm() {
         <div>
           <h1 className="font-display text-xl font-bold text-white">Sign in</h1>
           <p className="mt-1 text-sm text-gray-400">
-            Belum punya akun?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/signup" className="text-[#F26522] hover:text-[#e05a1a]">
-              Daftar di sini
+              Sign up here
             </Link>
           </p>
         </div>
 
         {callbackError && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
-            Autentikasi gagal, coba lagi.
+            Authentication failed, please try again.
           </div>
         )}
 
@@ -158,7 +158,7 @@ function LoginForm() {
 
         <div className="flex items-center gap-3">
           <div className="h-px flex-1 bg-gray-800" />
-          <span className="text-xs text-gray-600">atau</span>
+          <span className="text-xs text-gray-600">or</span>
           <div className="h-px flex-1 bg-gray-800" />
         </div>
 
@@ -184,7 +184,7 @@ function LoginForm() {
                 href="/forgot-password"
                 className="text-xs text-[#F26522] hover:text-[#e05a1a]"
               >
-                Lupa password?
+                Forgot password?
               </Link>
             </div>
             <input
@@ -202,10 +202,11 @@ function LoginForm() {
             <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3">
               <div>
                 <p className="text-xs font-medium text-amber-300">
-                  Sepertinya kamu daftar pakai Google.
+                  Looks like you signed up with Google.
                 </p>
                 <p className="mt-0.5 text-xs text-amber-400/70">
-                  Akun ini tidak punya password — coba login dengan Google aja.
+                  This account doesn&apos;t have a password — try logging in with Google
+                  instead.
                 </p>
               </div>
               <button
@@ -222,9 +223,9 @@ function LoginForm() {
           {/* Cases A + C — wrong credentials / not registered */}
           {loginError?.kind === "invalid_credentials" && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
-              Email atau password salah. Belum punya akun?{" "}
+              Wrong email or password. Don&apos;t have an account?{" "}
               <Link href="/signup" className="underline hover:text-red-300">
-                Daftar di sini
+                Sign up here
               </Link>
             </div>
           )}
@@ -232,9 +233,9 @@ function LoginForm() {
           {/* Case D — email not confirmed */}
           {loginError?.kind === "email_not_confirmed" && (
             <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-400">
-              <p>Cek email kamu untuk verifikasi akun dulu ya.</p>
+              <p>Please check your email to verify your account first.</p>
               {resendSuccess ? (
-                <p className="text-green-400">Email verifikasi berhasil dikirim ulang!</p>
+                <p className="text-green-400">Verification email resent successfully!</p>
               ) : (
                 <button
                   type="button"
@@ -242,7 +243,7 @@ function LoginForm() {
                   disabled={resending}
                   className="mt-1 w-full rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
                 >
-                  {resending ? "Mengirim…" : "Kirim ulang email verifikasi"}
+                  {resending ? "Sending…" : "Resend verification email"}
                 </button>
               )}
             </div>

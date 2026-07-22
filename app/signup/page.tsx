@@ -52,6 +52,7 @@ export default function SignupPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [signupError, setSignupError] = useState<SignupError | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -131,14 +132,14 @@ export default function SignupPage() {
               />
             </svg>
           </div>
-          <h2 className="font-display text-lg font-semibold text-white">Cek email kamu!</h2>
+          <h2 className="font-display text-lg font-semibold text-white">Check your email!</h2>
           <p className="text-sm text-gray-400">
-            Kami kirim link verifikasi ke{" "}
-            <strong className="text-white">{email}</strong>. Klik link tersebut
-            untuk mengaktifkan akun kamu.
+            We&apos;ve sent a verification link to{" "}
+            <strong className="text-white">{email}</strong>. Click the link to
+            activate your account.
           </p>
           <Link href="/login" className="block text-sm text-[#F26522] hover:text-[#e05a1a]">
-            Kembali ke halaman login
+            Back to login
           </Link>
         </div>
       </AuthLayout>
@@ -149,20 +150,51 @@ export default function SignupPage() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Buat akun</h1>
+          <h1 className="font-display text-xl font-bold text-white">Create an account</h1>
           <p className="mt-1 text-sm text-gray-400">
-            Sudah punya akun?{" "}
+            Already have an account?{" "}
             <Link href="/login" className="text-[#F26522] hover:text-[#e05a1a]">
-              Login di sini
+              Log in here
             </Link>
           </p>
+        </div>
+
+        {/* Consent — gates both Google and email/password signup below */}
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            id="agree-terms"
+            checked={agreedToTerms}
+            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            required
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-700 bg-gray-800 text-[#F26522] focus:outline-none focus:ring-2 focus:ring-[#F26522]"
+          />
+          <label htmlFor="agree-terms" className="text-xs text-gray-400">
+            I agree to the{" "}
+            <Link
+              href="/terms"
+              target="_blank"
+              className="text-[#F26522] hover:text-[#e05a1a]"
+            >
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/privacy"
+              target="_blank"
+              className="text-[#F26522] hover:text-[#e05a1a]"
+            >
+              Privacy Policy
+            </Link>
+          </label>
         </div>
 
         {/* Google */}
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+          disabled={!agreedToTerms}
+          className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50"
         >
           <GoogleIcon />
           Continue with Google
@@ -170,14 +202,14 @@ export default function SignupPage() {
 
         <div className="flex items-center gap-3">
           <div className="h-px flex-1 bg-gray-800" />
-          <span className="text-xs text-gray-600">atau</span>
+          <span className="text-xs text-gray-600">or</span>
           <div className="h-px flex-1 bg-gray-800" />
         </div>
 
         <form onSubmit={handleSignUp} className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-400">
-              Nama lengkap
+              Full name
             </label>
             <input
               type="text"
@@ -185,7 +217,7 @@ export default function SignupPage() {
               onChange={(e) => setFullName(e.target.value)}
               required
               autoComplete="name"
-              placeholder="Nama kamu"
+              placeholder="Your name"
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
             />
           </div>
@@ -222,10 +254,10 @@ export default function SignupPage() {
             <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3">
               <div>
                 <p className="text-xs font-medium text-amber-300">
-                  Email ini sudah terdaftar pakai Google.
+                  This email is already registered with Google.
                 </p>
                 <p className="mt-0.5 text-xs text-amber-400/70">
-                  Login langsung dengan tombol di bawah ini.
+                  Log in directly with the button below.
                 </p>
               </div>
               <button
@@ -241,12 +273,12 @@ export default function SignupPage() {
 
           {signupError?.kind === "duplicate_email" && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
-              Email ini sudah terdaftar. Sudah punya akun?{" "}
+              This email is already registered. Already have an account?{" "}
               <Link
                 href={`/login?email=${encodeURIComponent(email)}`}
                 className="underline hover:text-red-300"
               >
-                Login di sini
+                Log in here
               </Link>
             </div>
           )}
@@ -259,10 +291,10 @@ export default function SignupPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !agreedToTerms}
             className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
-            {loading ? "Membuat akun…" : "Buat akun"}
+            {loading ? "Creating account…" : "Create account"}
           </button>
         </form>
       </div>

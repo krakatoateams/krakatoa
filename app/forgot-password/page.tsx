@@ -56,13 +56,13 @@ function ForgotPasswordForm() {
               />
             </svg>
           </div>
-          <h2 className="font-display text-lg font-semibold text-white">Cek email kamu!</h2>
+          <h2 className="font-display text-lg font-semibold text-white">Check your email!</h2>
           <p className="text-sm text-gray-400">
-            Kalau <strong className="text-white">{email}</strong> terdaftar, kami sudah
-            kirim link reset password ke email tersebut.
+            If <strong className="text-white">{email}</strong> is registered, we&apos;ve
+            sent a password reset link to that address.
           </p>
           <Link href="/login" className="block text-sm text-[#F26522] hover:text-[#e05a1a]">
-            Kembali ke halaman login
+            Back to login
           </Link>
         </div>
       </AuthLayout>
@@ -73,16 +73,16 @@ function ForgotPasswordForm() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Lupa password?</h1>
+          <h1 className="font-display text-xl font-bold text-white">Forgot password?</h1>
           <p className="mt-1 text-sm text-gray-400">
-            Masukkan email kamu, kami kirim link buat reset password.
+            Enter your email and we&apos;ll send you a link to reset your password.
           </p>
         </div>
 
         {expired && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-400">
-            Link reset password sudah kedaluwarsa atau sudah dipakai. Minta link baru di
-            bawah ini.
+            This password reset link has expired or was already used. Request a new one
+            below.
           </div>
         )}
 
@@ -106,13 +106,13 @@ function ForgotPasswordForm() {
             disabled={loading}
             className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
-            {loading ? "Mengirim…" : "Kirim link reset"}
+            {loading ? "Sending…" : "Send reset link"}
           </button>
         </form>
 
         <p className="text-center text-sm text-gray-400">
           <Link href="/login" className="text-[#F26522] hover:text-[#e05a1a]">
-            Kembali ke halaman login
+            Back to login
           </Link>
         </p>
       </div>
