@@ -132,6 +132,20 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** (Veo uses `captions_veo_<timestamp>.ass`) for Rendi to fetch; deleted after a successful run.
 - **Product Photo** uses **`photos/`** in the same bucket — never under `videos/`.
 
+## Admin Config v2 (unified control panel)
+
+**Status:** ~90% wired at `/admin/config-v2`; legacy `/admin/config` pending cutover.
+
+Operators configure **Tool → Model → Mode → Variant pricing** plus **Pipeline** roles (LLM/TTS/Whisper, storyboard sheet). Photo mode matrix persists via `feature_model_configs`; video composers are local-only until Phase 2 in the plan.
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/admin/admin-config-v2-plan.md`](docs/admin/admin-config-v2-plan.md) | Authoritative plan for agents (architecture, phases, parity checklist) |
+| [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
+| [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |
+
+Key code: `lib/admin-config-tree.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
+
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
 2. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.
