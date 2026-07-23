@@ -132,9 +132,8 @@ function usableCreditAmount(n: number | null | undefined): n is number {
 }
 
 /**
- * Video (per-second) credits with the v2 -> legacy -> constant fallback chain.
- * Always floors at 1 credit (video is never zero-cost). `durationSec` is the TOTAL
- * duration; the single final ceil happens inside calculateCredits.
+ * Video (per-second) credits. Option A: admin-set credit_amount is authoritative;
+ * provider_cost_usd is reference-only (used when credit_amount absent).
  */
 export function videoCreditsFromRow(
   row: PricingRow | null | undefined,
@@ -144,19 +143,18 @@ export function videoCreditsFromRow(
 ): number {
   const dur = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
   if (row && row.enabled) {
-    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_second") {
-      return Math.max(1, calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: dur, settings }));
-    }
     if (usableCreditAmount(row.creditAmount)) {
       return roundVideoCredits(dur, row.creditAmount);
+    }
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_second") {
+      return Math.max(1, calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: dur, settings }));
     }
   }
   return roundVideoCredits(dur, fallbackRatePerSecond);
 }
 
 /**
- * Image (per-image) credits with the v2 -> legacy -> constant fallback chain.
- * No 1-credit floor: an admin-set 0 (free) is honored.
+ * Image (per-image) credits. Option A: credit_amount first, then provider cost.
  */
 export function imageCreditsFromRow(
   row: PricingRow | null | undefined,
@@ -166,11 +164,11 @@ export function imageCreditsFromRow(
 ): number {
   const count = Number.isFinite(imageCount) ? Math.max(0, imageCount) : 0;
   if (row && row.enabled) {
-    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_image") {
-      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: count, settings });
-    }
     if (usableCreditAmount(row.creditAmount)) {
       return Math.max(0, Math.ceil(row.creditAmount * count - CEIL_EPSILON));
+    }
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_image") {
+      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: count, settings });
     }
   }
   const safeFallback = isFiniteNonNegative(fallbackPerImage) ? fallbackPerImage : 0;
@@ -178,8 +176,7 @@ export function imageCreditsFromRow(
 }
 
 /**
- * Run (per-run) credits with the v2 -> legacy -> constant fallback chain.
- * One run = unit_count 1.
+ * Run (per-run) credits. Option A: credit_amount first, then provider cost.
  */
 export function runCreditsFromRow(
   row: PricingRow | null | undefined,
@@ -187,11 +184,11 @@ export function runCreditsFromRow(
   fallbackCredits: number
 ): number {
   if (row && row.enabled) {
-    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_run") {
-      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: 1, settings });
-    }
     if (usableCreditAmount(row.creditAmount)) {
       return row.creditAmount;
+    }
+    if (isFiniteNonNegative(row.providerCostUsd) && row.costUnit === "per_run") {
+      return calculateCredits({ providerCostUsd: row.providerCostUsd, unitCount: 1, settings });
     }
   }
   return isFiniteNonNegative(fallbackCredits) ? Math.ceil(fallbackCredits) : 0;
