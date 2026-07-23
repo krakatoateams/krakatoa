@@ -689,7 +689,7 @@ export default function AdminConfigPage() {
                 <span className="font-mono text-gray-300">visible_in_sidebar</span> only hides the
                 sidebar link; it does not block routes.
               </li>
-              <li>Veo and Storyboard currently share the ReelsGen (reels) runtime flag.</li>
+              <li>Veo and Storyboard currently share the Video (reels) runtime flag.</li>
             </ul>
           </NoteBox>
           <div className="overflow-x-auto rounded-xl border border-gray-800">
