@@ -72,10 +72,17 @@ function LoginForm() {
 
   async function handleGoogleSignIn() {
     setLoginError(null);
+    // TEMPORARY TEST — deliberately dropping ?next=... to check whether
+    // Supabase's redirect-URL allow-list match is choking on the query
+    // string. `next` is unused as a result; the callback route falls back
+    // to /dashboard regardless of where the user meant to end up. Revert
+    // once the hypothesis is confirmed either way — see debug/google-login-redirect.
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    console.log("[debug] resolved redirectTo (no query string):", JSON.stringify(redirectTo));
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        redirectTo,
       },
     });
   }
