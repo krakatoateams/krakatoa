@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   type AdminCostVariant,
@@ -18,12 +18,62 @@ import {
   type BillingSettings,
   type CostUnit,
 } from "@/lib/pricing-math";
+import {
+  AdminConfigSkeleton,
+  AdminToast,
+  useAdminToast,
+} from "../admin-ui";
 
-const SAVE_NOTICE = "Saved — live in ~60s.";
-const TH =
-  "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
 const INPUT =
   "w-full min-h-[36px] rounded border border-gray-700/80 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500";
+
+function PricingNumberInput({
+  value,
+  onChange,
+  decimals = false,
+  className = INPUT,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  decimals?: boolean;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? String(value);
+  const pattern = decimals ? /^\d*\.?\d*$/ : /^\d*$/;
+
+  const commit = (raw: string) => {
+    if (raw === "" || raw === ".") {
+      onChange(0);
+      return;
+    }
+    const n = decimals ? parseFloat(raw) : parseInt(raw, 10);
+    if (!Number.isNaN(n)) onChange(Math.max(0, decimals ? n : Math.round(n)));
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode={decimals ? "decimal" : "numeric"}
+      value={display}
+      onFocus={() => setDraft(String(value))}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (!pattern.test(raw)) return;
+        setDraft(raw);
+        if (raw !== "" && raw !== "." && !raw.endsWith(".")) commit(raw);
+      }}
+      onBlur={() => {
+        if (draft !== null) commit(draft);
+        setDraft(null);
+      }}
+      className={className}
+    />
+  );
+}
+
+const TH =
+  "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
 
 type DefaultOverridePrompt = {
   featureKey: string;
@@ -33,6 +83,86 @@ type DefaultOverridePrompt = {
   toModelId: string;
   toModelLabel: string;
 };
+
+type PricingBaseline = Pick<AdminCostVariant, "providerReferenceUsd" | "credits">;
+
+function findVariantByPricingKey(
+  tools: AdminToolNode[],
+  pricingKey: string
+): AdminCostVariant | null {
+  for (const tool of tools) {
+    for (const model of tool.models) {
+      const variant = model.variants.find((row) => row.pricingKey === pricingKey);
+      if (variant) return variant;
+    }
+    for (const group of tool.pipelines) {
+      const variant = group.variants.find((row) => row.pricingKey === pricingKey);
+      if (variant) return variant;
+    }
+  }
+  return null;
+}
+
+function findFeatureByModelId(
+  tools: AdminToolNode[],
+  featureModelId: string
+): AdminFeatureToggle | null {
+  for (const tool of tools) {
+    for (const model of tool.models) {
+      const feature = model.features.find((row) => row.featureModelId === featureModelId);
+      if (feature) return feature;
+    }
+  }
+  return null;
+}
+
+function findPipelineRoleByConfigId(
+  tools: AdminToolNode[],
+  modelConfigId: string
+): AdminPipelineRole | null {
+  for (const tool of tools) {
+    for (const group of tool.pipelines) {
+      const role = group.roles.find((row) => row.modelConfigId === modelConfigId);
+      if (role) return role;
+    }
+  }
+  return null;
+}
+
+function collectPricingBaselines(tools: AdminToolNode[]): Record<string, PricingBaseline> {
+  const out: Record<string, PricingBaseline> = {};
+  for (const tool of tools) {
+    for (const model of tool.models) {
+      for (const v of model.variants) {
+        out[v.pricingKey] = {
+          providerReferenceUsd: v.providerReferenceUsd,
+          credits: v.credits,
+        };
+      }
+    }
+    for (const group of tool.pipelines) {
+      for (const v of group.variants) {
+        out[v.pricingKey] = {
+          providerReferenceUsd: v.providerReferenceUsd,
+          credits: v.credits,
+        };
+      }
+    }
+  }
+  return out;
+}
+
+function isPricingDirty(
+  variant: AdminCostVariant,
+  saved: Record<string, PricingBaseline>
+): boolean {
+  const baseline = saved[variant.pricingKey];
+  if (!baseline) return true;
+  return (
+    baseline.providerReferenceUsd !== variant.providerReferenceUsd ||
+    baseline.credits !== variant.credits
+  );
+}
 
 /** Who holds default for a mode across all models in a tool (exclusive per mode). */
 function findDefaultHolder(
@@ -125,15 +255,19 @@ function OverrideDefaultDialog({
 function VariantTable({
   variants,
   billingSettings,
-  busy,
+  saving,
+  savedPricing,
   onChange,
   onSave,
+  onToggle,
 }: {
   variants: AdminCostVariant[];
   billingSettings: BillingSettings;
-  busy: boolean;
+  saving: boolean;
+  savedPricing: Record<string, PricingBaseline>;
   onChange: (pricingKey: string, patch: Partial<AdminCostVariant>) => void;
   onSave: (variant: AdminCostVariant) => void;
+  onToggle: (variant: AdminCostVariant) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-800/80">
@@ -152,43 +286,38 @@ function VariantTable({
           {variants.map((v) => {
             const suggested = suggestCreditsFromProvider(v.providerReferenceUsd, billingSettings);
             const custom = v.credits !== suggested;
+            const dirty = isPricingDirty(v, savedPricing);
             return (
               <tr key={v.pricingKey} className={v.enabled ? "text-gray-300" : "text-gray-600"}>
                 <td className="px-2 py-2 font-medium text-white">
                   {v.label}
-                  {custom ? (
+                  {dirty ? (
+                    <span className="ml-1.5 text-[10px] font-normal text-violet-400/90">unsaved</span>
+                  ) : null}
+                  {!dirty && custom ? (
                     <span className="ml-1.5 text-[10px] font-normal text-amber-400/80">custom</span>
                   ) : null}
                 </td>
                 <td className="px-2 py-1.5">
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.001}
+                  <PricingNumberInput
+                    decimals
                     value={v.providerReferenceUsd}
-                    onChange={(e) =>
-                      onChange(v.pricingKey, { providerReferenceUsd: Number(e.target.value) })
-                    }
-                    className={INPUT}
+                    onChange={(next) => onChange(v.pricingKey, { providerReferenceUsd: next })}
                   />
                 </td>
                 <td className="px-2 py-1.5">
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
+                  <PricingNumberInput
                     value={v.credits}
-                    onChange={(e) => onChange(v.pricingKey, { credits: Number(e.target.value) })}
+                    onChange={(next) => onChange(v.pricingKey, { credits: next })}
                     className={`${INPUT} font-mono text-emerald-300`}
                   />
                 </td>
                 <td className="px-2 py-1.5">
                   <button
                     type="button"
-                    disabled={busy}
                     title={`Suggest ${suggested} credits from Replicate price`}
                     onClick={() => onChange(v.pricingKey, { credits: suggested })}
-                    className="whitespace-nowrap rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-400 hover:border-violet-500 hover:text-white disabled:opacity-50"
+                    className="whitespace-nowrap rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-400 hover:border-violet-500 hover:text-white"
                   >
                     → {suggested}
                   </button>
@@ -197,15 +326,24 @@ function VariantTable({
                   <input
                     type="checkbox"
                     checked={v.enabled}
-                    onChange={(e) => onChange(v.pricingKey, { enabled: e.target.checked })}
+                    onChange={(e) => {
+                      const next = { ...v, enabled: e.target.checked };
+                      onChange(v.pricingKey, { enabled: e.target.checked });
+                      onToggle(next);
+                    }}
                   />
                 </td>
                 <td className="px-2 py-1.5 text-right">
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={!dirty || saving}
+                    title={dirty ? "Save pricing changes" : "No unsaved changes"}
                     onClick={() => onSave(v)}
-                    className="rounded bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+                    className={
+                      dirty
+                        ? "rounded bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+                        : "rounded border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-[11px] font-medium text-gray-600 disabled:cursor-default"
+                    }
                   >
                     Save
                   </button>
@@ -223,24 +361,17 @@ function ModesTable({
   features,
   tool,
   modelId,
-  persist,
-  busy,
   onEnabledChange,
   onDefaultChange,
-  onSaveAll,
 }: {
   features: AdminFeatureToggle[];
   tool: AdminToolNode;
   modelId: string;
-  persist: boolean;
-  busy: boolean;
   onEnabledChange: (key: string, enabled: boolean) => void;
   onDefaultChange: (key: string, checked: boolean) => void;
-  onSaveAll: () => void;
 }) {
   return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto rounded-lg border border-gray-800/80">
+    <div className="overflow-x-auto rounded-lg border border-gray-800/80">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-800 bg-gray-900/40">
             <tr>
@@ -280,33 +411,16 @@ function ModesTable({
             })}
           </tbody>
         </table>
-      </div>
-      {persist ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onSaveAll}
-            className="rounded bg-violet-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-          >
-            Save modes
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
 
 function PipelineRolesTable({
   roles,
-  busy,
   onEnabledChange,
-  onSave,
 }: {
   roles: AdminPipelineRole[];
-  busy: boolean;
-  onEnabledChange: (modelConfigId: string, enabled: boolean) => void;
-  onSave: (role: AdminPipelineRole) => void;
+  onEnabledChange: (role: AdminPipelineRole, enabled: boolean) => void;
 }) {
   if (roles.length === 0) return null;
 
@@ -318,7 +432,6 @@ function PipelineRolesTable({
             <th className={TH}>Role</th>
             <th className={TH}>Provider / model</th>
             <th className={`${TH} w-12`}>On</th>
-            <th className={`${TH} w-16`}></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/80">
@@ -339,20 +452,8 @@ function PipelineRolesTable({
                   checked={role.enabled}
                   disabled={!role.modelConfigId}
                   title={role.modelConfigId ? undefined : "No DB row — run db:setup to persist toggles"}
-                  onChange={(e) => {
-                    if (role.modelConfigId) onEnabledChange(role.modelConfigId, e.target.checked);
-                  }}
+                  onChange={(e) => onEnabledChange(role, e.target.checked)}
                 />
-              </td>
-              <td className="px-2 py-1.5 text-right">
-                <button
-                  type="button"
-                  disabled={busy || !role.modelConfigId}
-                  onClick={() => onSave(role)}
-                  className="rounded bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                >
-                  Save
-                </button>
               </td>
             </tr>
           ))}
@@ -366,30 +467,36 @@ function PipelineSection({
   pipelines,
   storyboardModels,
   billingSettings,
-  busy,
+  saving,
+  savedPricing,
   onChange,
-  onSaveRole,
+  onCommitRole,
   onSaveVariant,
+  onToggleVariant,
 }: {
   pipelines: AdminPipelineGroup[];
   storyboardModels: string[];
   billingSettings: BillingSettings;
-  busy: boolean;
+  saving: boolean;
+  savedPricing: Record<string, PricingBaseline>;
   onChange: (groupKey: string, patch: Partial<AdminPipelineGroup>) => void;
-  onSaveRole: (role: AdminPipelineRole) => void;
+  onCommitRole: (role: AdminPipelineRole) => void;
   onSaveVariant: (variant: AdminCostVariant) => void;
+  onToggleVariant: (variant: AdminCostVariant) => void;
 }) {
   const [open, setOpen] = useState(false);
   if (pipelines.length === 0) return null;
 
-  const patchRole = (groupKey: string, modelConfigId: string, enabled: boolean) => {
+  const patchRole = (groupKey: string, role: AdminPipelineRole, enabled: boolean) => {
     const group = pipelines.find((g) => g.key === groupKey);
     if (!group) return;
+    const next = { ...role, enabled };
     onChange(groupKey, {
       roles: group.roles.map((r) =>
-        r.modelConfigId === modelConfigId ? { ...r, enabled } : r
+        r.modelConfigId === role.modelConfigId ? next : r
       ),
     });
+    onCommitRole(next);
   };
 
   const patchVariant = (groupKey: string, pricingKey: string, patch: Partial<AdminCostVariant>) => {
@@ -434,18 +541,18 @@ function PipelineSection({
 
               <PipelineRolesTable
                 roles={group.roles}
-                busy={busy}
-                onEnabledChange={(id, enabled) => patchRole(group.key, id, enabled)}
-                onSave={onSaveRole}
+                onEnabledChange={(role, enabled) => patchRole(group.key, role, enabled)}
               />
 
               {group.variants.length > 0 ? (
                 <VariantTable
                   variants={group.variants}
                   billingSettings={billingSettings}
-                  busy={busy}
+                  saving={saving}
+                  savedPricing={savedPricing}
                   onChange={(pricingKey, patch) => patchVariant(group.key, pricingKey, patch)}
                   onSave={onSaveVariant}
+                  onToggle={onToggleVariant}
                 />
               ) : null}
             </div>
@@ -461,27 +568,30 @@ function ModelSection({
   tool,
   billingSettings,
   defaultOpen,
-  busy,
+  saving,
+  savedPricing,
   onChange,
   onEnabledChange,
   onDefaultChange,
   onSaveVariant,
-  onSaveToolModes,
+  onToggleVariant,
+  onCommitCatalog,
 }: {
   model: AdminModelNode;
   tool: AdminToolNode;
   billingSettings: BillingSettings;
   defaultOpen?: boolean;
-  busy: boolean;
+  saving: boolean;
+  savedPricing: Record<string, PricingBaseline>;
   onChange: (patch: Partial<AdminModelNode>) => void;
   onEnabledChange: (modelId: string, featureKey: string, enabled: boolean) => void;
   onDefaultChange: (modelId: string, featureKey: string, checked: boolean) => void;
   onSaveVariant: (variant: AdminCostVariant) => void;
-  onSaveToolModes: () => void;
+  onToggleVariant: (variant: AdminCostVariant) => void;
+  onCommitCatalog: (modelId: string, enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const showModes = model.features.length > 0;
-  const modesPersist = tool.toolKey === "photo" || tool.toolKey === "reels";
   const modeSummary = model.features.map((f) => f.label).join(" · ");
 
   const setVariant = (pricingKey: string, patch: Partial<AdminCostVariant>) => {
@@ -491,22 +601,36 @@ function ModelSection({
   };
 
   return (
-    <div className="border-l border-gray-800/60 pl-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 py-2 text-left"
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-        )}
-        <span className="text-sm font-medium text-white">{model.label}</span>
-        {modeSummary ? (
-          <span className="text-[11px] font-normal text-gray-500">{modeSummary}</span>
-        ) : null}
-      </button>
+    <div className={`border-l border-gray-800/60 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
+      <div className="flex flex-wrap items-center gap-2 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+          )}
+          <span className="text-sm font-medium text-white">{model.label}</span>
+          {modeSummary ? (
+            <span className="truncate text-[11px] font-normal text-gray-500">{modeSummary}</span>
+          ) : null}
+        </button>
+        <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+          <input
+            type="checkbox"
+            checked={model.enabled}
+            onChange={(e) => {
+              const enabled = e.target.checked;
+              onChange({ enabled });
+              onCommitCatalog(model.id, enabled);
+            }}
+          />
+          On
+        </label>
+      </div>
 
       {open ? (
         <div className="space-y-4 pb-3 pl-5">
@@ -515,20 +639,19 @@ function ModelSection({
               features={model.features}
               tool={tool}
               modelId={model.id}
-              persist={modesPersist}
-              busy={busy}
               onEnabledChange={(key, enabled) => onEnabledChange(model.id, key, enabled)}
               onDefaultChange={(key, checked) => onDefaultChange(model.id, key, checked)}
-              onSaveAll={onSaveToolModes}
             />
           ) : null}
 
           <VariantTable
             variants={model.variants}
             billingSettings={billingSettings}
-            busy={busy}
+            saving={saving}
+            savedPricing={savedPricing}
             onChange={setVariant}
             onSave={onSaveVariant}
+            onToggle={onToggleVariant}
           />
         </div>
       ) : null}
@@ -539,21 +662,27 @@ function ModelSection({
 function ToolSection({
   tool,
   billingSettings,
-  busy,
+  saving,
+  savedPricing,
   onChange,
-  onSaveTool,
+  onCommitTool,
   onSaveVariant,
-  onSaveToolModes,
-  onSavePipelineRole,
+  onToggleVariant,
+  onCommitMode,
+  onCommitCatalog,
+  onCommitPipelineRole,
 }: {
   tool: AdminToolNode;
   billingSettings: BillingSettings;
-  busy: boolean;
+  saving: boolean;
+  savedPricing: Record<string, PricingBaseline>;
   onChange: (patch: Partial<AdminToolNode>) => void;
-  onSaveTool: () => void;
-  onSaveVariant: (modelId: string, variant: AdminCostVariant) => void;
-  onSaveToolModes: (tool: AdminToolNode) => void;
-  onSavePipelineRole: (role: AdminPipelineRole) => void;
+  onCommitTool: () => void;
+  onSaveVariant: (variant: AdminCostVariant) => void;
+  onToggleVariant: (variant: AdminCostVariant) => void;
+  onCommitMode: (featureModelId: string) => void;
+  onCommitCatalog: (modelId: string, enabled: boolean) => void;
+  onCommitPipelineRole: (role: AdminPipelineRole) => void;
 }) {
   const [open, setOpen] = useState(tool.toolKey === "reels" || tool.toolKey === "photo");
   const [overridePrompt, setOverridePrompt] = useState<DefaultOverridePrompt | null>(null);
@@ -574,16 +703,24 @@ function ToolSection({
     });
   };
 
+  const commitModeRow = (modelId: string, featureKey: string) => {
+    const m = tool.models.find((row) => row.id === modelId);
+    const f = m?.features.find((row) => row.key === featureKey);
+    onCommitMode(f?.featureModelId ?? "");
+  };
+
   const handleEnabledChange = (modelId: string, featureKey: string, enabled: boolean) => {
     const m = tool.models.find((row) => row.id === modelId);
     if (!m) return;
+    const feature = m.features.find((f) => f.key === featureKey);
+    if (!feature) return;
+    const isDefault = enabled ? feature.isDefault : false;
     patchModel(modelId, {
       features: m.features.map((f) =>
-        f.key === featureKey
-          ? { ...f, enabled, isDefault: enabled ? f.isDefault : false }
-          : f
+        f.key === featureKey ? { ...f, enabled, isDefault } : f
       ),
     });
+    commitModeRow(modelId, featureKey);
   };
 
   const handleDefaultChange = (modelId: string, featureKey: string, checked: boolean) => {
@@ -597,6 +734,7 @@ function ToolSection({
           f.key === featureKey ? { ...f, isDefault: false } : f
         ),
       });
+      commitModeRow(modelId, featureKey);
       return;
     }
 
@@ -614,11 +752,14 @@ function ToolSection({
     }
 
     onChange(applyDefaultForMode(tool, featureKey, modelId));
+    commitModeRow(modelId, featureKey);
   };
 
   const confirmOverride = () => {
     if (!overridePrompt) return;
-    onChange(applyDefaultForMode(tool, overridePrompt.featureKey, overridePrompt.toModelId));
+    const { featureKey, toModelId } = overridePrompt;
+    onChange(applyDefaultForMode(tool, featureKey, toModelId));
+    commitModeRow(toModelId, featureKey);
     setOverridePrompt(null);
   };
 
@@ -647,7 +788,10 @@ function ToolSection({
           <input
             type="checkbox"
             checked={tool.enabled}
-            onChange={(e) => onChange({ enabled: e.target.checked })}
+            onChange={(e) => {
+              onChange({ enabled: e.target.checked });
+              onCommitTool();
+            }}
           />
           On
         </label>
@@ -655,18 +799,13 @@ function ToolSection({
           <input
             type="checkbox"
             checked={tool.visibleInSidebar}
-            onChange={(e) => onChange({ visibleInSidebar: e.target.checked })}
+            onChange={(e) => {
+              onChange({ visibleInSidebar: e.target.checked });
+              onCommitTool();
+            }}
           />
           Sidebar
         </label>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onSaveTool}
-          className="rounded bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-        >
-          Save
-        </button>
       </div>
 
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
@@ -678,12 +817,14 @@ function ToolSection({
               tool={tool}
               billingSettings={billingSettings}
               defaultOpen={m.id === "balanced" || m.id === "seedance2_fast"}
-              busy={busy}
+              saving={saving}
+              savedPricing={savedPricing}
               onChange={(patch) => patchModel(m.id, patch)}
               onEnabledChange={handleEnabledChange}
               onDefaultChange={handleDefaultChange}
-              onSaveVariant={(variant) => onSaveVariant(m.id, variant)}
-              onSaveToolModes={() => onSaveToolModes(tool)}
+              onSaveVariant={onSaveVariant}
+              onToggleVariant={onToggleVariant}
+              onCommitCatalog={onCommitCatalog}
             />
           ))}
 
@@ -691,10 +832,12 @@ function ToolSection({
             pipelines={tool.pipelines}
             storyboardModels={storyboardModels}
             billingSettings={billingSettings}
-            busy={busy}
+            saving={saving}
+            savedPricing={savedPricing}
             onChange={patchPipeline}
-            onSaveRole={onSavePipelineRole}
-            onSaveVariant={(variant) => onSaveVariant("", variant)}
+            onCommitRole={onCommitPipelineRole}
+            onSaveVariant={onSaveVariant}
+            onToggleVariant={onToggleVariant}
           />
         </div>
       ) : null}
@@ -705,28 +848,61 @@ function ToolSection({
 
 export default function AdminConfigV2Page() {
   const [tools, setTools] = useState<AdminToolNode[]>([]);
+  const toolsRef = useRef(tools);
+  toolsRef.current = tools;
   const [billingSettings, setBillingSettings] = useState<BillingSettings>(DEFAULT_BILLING_SETTINGS);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
+  const { toast, dismiss, show: showToast } = useAdminToast();
+  const debouncersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const savingCountRef = useRef(0);
+  const saveBatchErroredRef = useRef(false);
+  const catalogPendingRef = useRef(new Map<string, boolean>());
+  const autosaveInflightRef = useRef(new Map<string, Promise<void>>());
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
-      const [toolsRes, pricingRes, fmRes, modelsRes, billingRes] = await Promise.all([
-        fetch("/api/admin/config/tools").then((r) => r.json()),
-        fetch("/api/admin/config/pricing").then((r) => r.json()),
-        fetch("/api/admin/config/feature-models").then((r) => (r.ok ? r.json() : { featureModels: [] })),
-        fetch("/api/admin/config/models").then((r) => (r.ok ? r.json() : { models: [] })),
-        fetch("/api/credits/pricing").then((r) => (r.ok ? r.json() : null)),
+      const [toolsRes, pricingRes, fmRes, catalogRes, modelsRes, billingRes] = await Promise.all([
+        fetch("/api/admin/config/tools"),
+        fetch("/api/admin/config/pricing"),
+        fetch("/api/admin/config/feature-models"),
+        fetch("/api/admin/config/model-catalog"),
+        fetch("/api/admin/config/models"),
+        fetch("/api/credits/pricing"),
       ]);
 
-      const settings = normalizeBillingSettings(billingRes?.billingSettings);
+      if (!fmRes.ok) {
+        const body = await fmRes.json().catch(() => ({}));
+        throw new Error(
+          typeof body.error === "string"
+            ? body.error
+            : `Failed to load feature-model configs (${fmRes.status}).`
+        );
+      }
+      if (!catalogRes.ok) {
+        const body = await catalogRes.json().catch(() => ({}));
+        throw new Error(
+          typeof body.error === "string"
+            ? body.error
+            : `Failed to load model catalog (${catalogRes.status}). Apply migration 048.`
+        );
+      }
+
+      const toolsData = await toolsRes.json();
+      const pricingResData = await pricingRes.json();
+      const fmData = await fmRes.json();
+      const catalogData = await catalogRes.json();
+      const modelsData = modelsRes.ok ? await modelsRes.json() : { models: [] };
+      const billingResData = billingRes.ok ? await billingRes.json() : null;
+
+      const settings = normalizeBillingSettings(billingResData?.billingSettings);
       setBillingSettings(settings);
 
-      const pricing = ((pricingRes.pricing ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      const pricing = ((pricingResData.pricing ?? []) as Array<Record<string, unknown>>).map((row) => ({
         pricing_key: String(row.pricing_key),
         display_name: String(row.display_name),
         credit_amount: Number(row.credit_amount),
@@ -739,7 +915,7 @@ export default function AdminConfigV2Page() {
         is_deprecated: Boolean(row.is_deprecated),
       }));
 
-      const modelConfigs = ((modelsRes.models ?? []) as Array<Record<string, unknown>>).map(
+      const modelConfigs = ((modelsData.models ?? []) as Array<Record<string, unknown>>).map(
         (row) => ({
           id: String(row.id),
           tool_key: String(row.tool_key),
@@ -750,17 +926,27 @@ export default function AdminConfigV2Page() {
         })
       );
 
-      setTools(
-        buildAdminConfigTree({
-          tools: toolsRes.tools ?? [],
-          pricing,
-          featureModels: fmRes.featureModels ?? [],
-          modelConfigs,
-          billingSettings: settings,
+      const modelCatalog = ((catalogData.modelCatalog ?? []) as Array<Record<string, unknown>>).map(
+        (row) => ({
+          id: String(row.id),
+          tool_key: String(row.tool_key),
+          model_id: String(row.model_id),
+          enabled: Boolean(row.enabled),
         })
       );
+
+      const tree = buildAdminConfigTree({
+          tools: toolsData.tools ?? [],
+          pricing,
+          featureModels: fmData.featureModels ?? [],
+          modelCatalog,
+          modelConfigs,
+          billingSettings: settings,
+        });
+      setTools(tree);
+      setSavedPricing(collectPricingBaselines(tree));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load.");
+      setLoadError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
       setLoading(false);
     }
@@ -771,104 +957,239 @@ export default function AdminConfigV2Page() {
   }, [load]);
 
   const patchTool = (toolKey: string, patch: Partial<AdminToolNode>) => {
-    setTools((prev) => prev.map((t) => (t.toolKey === toolKey ? { ...t, ...patch } : t)));
+    setTools((prev) => {
+      const next = prev.map((t) => (t.toolKey === toolKey ? { ...t, ...patch } : t));
+      toolsRef.current = next;
+      return next;
+    });
   };
 
-  const apiPatch = async (url: string, body: Record<string, unknown>) => {
-    setBusy(true);
-    setNotice(null);
-    setError(null);
+  const patchApi = async (url: string, body: Record<string, unknown>) => {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+  };
+
+  const executeAutosave = useCallback(async (fn: () => Promise<void>) => {
+    const isFirst = savingCountRef.current === 0;
+    savingCountRef.current += 1;
+    if (isFirst) {
+      saveBatchErroredRef.current = false;
+      showToast({ type: "loading", message: "Saving…" });
+    }
+    setSaving(true);
     try {
-      const res = await fetch(url, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      await fn();
+    } catch (e) {
+      saveBatchErroredRef.current = true;
+      showToast({
+        type: "error",
+        message: e instanceof Error ? e.message : "Failed to save.",
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-      setNotice(SAVE_NOTICE);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveTool = (tool: AdminToolNode) =>
-    apiPatch(`/api/admin/config/tools/${tool.toolKey}`, {
-      enabled: tool.enabled,
-      visible_in_sidebar: tool.visibleInSidebar,
-      sort_order: tool.sortOrder,
-    });
-
-  const saveVariant = (variant: AdminCostVariant) =>
-    apiPatch(`/api/admin/config/pricing/${variant.pricingKey}`, {
-      credit_amount: Math.round(variant.credits),
-      provider_cost_usd: variant.providerReferenceUsd,
-      enabled: variant.enabled,
-    });
-
-  const savePipelineRole = (role: AdminPipelineRole) => {
-    if (!role.modelConfigId) return;
-    apiPatch(`/api/admin/config/models/${role.modelConfigId}`, { enabled: role.enabled });
-  };
-
-  const saveToolModes = async (tool: AdminToolNode) => {
-    const toSave = tool.models.flatMap((m) => m.features.filter((f) => f.featureModelId));
-    if (toSave.length === 0) return;
-    setBusy(true);
-    setNotice(null);
-    setError(null);
-    try {
-      for (const f of toSave) {
-        const res = await fetch(`/api/admin/config/feature-models/${f.featureModelId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: f.enabled, is_default: f.isDefault }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      savingCountRef.current -= 1;
+      if (savingCountRef.current <= 0) {
+        savingCountRef.current = 0;
+        setSaving(false);
+        if (!saveBatchErroredRef.current) {
+          showToast({ type: "success", message: "Saved." });
+        }
+        saveBatchErroredRef.current = false;
       }
-      setNotice(SAVE_NOTICE);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
-    } finally {
-      setBusy(false);
     }
-  };
+  }, [showToast]);
+
+  const scheduleAutosave = useCallback(
+    (key: string, fn: () => Promise<void>, debounceMs = 0) => {
+      const timers = debouncersRef.current;
+      const prev = timers.get(key);
+      if (prev) clearTimeout(prev);
+
+      const run = async () => {
+        const inflight = autosaveInflightRef.current.get(key);
+        if (inflight) await inflight.catch(() => {});
+        const task = executeAutosave(fn);
+        autosaveInflightRef.current.set(key, task);
+        try {
+          await task;
+        } finally {
+          if (autosaveInflightRef.current.get(key) === task) {
+            autosaveInflightRef.current.delete(key);
+          }
+        }
+      };
+
+      if (debounceMs > 0) {
+        timers.set(
+          key,
+          setTimeout(() => {
+            timers.delete(key);
+            void run();
+          }, debounceMs)
+        );
+        return;
+      }
+      void run();
+    },
+    [executeAutosave]
+  );
+
+  const commitTool = useCallback(
+    (toolKey: string) => {
+      scheduleAutosave(`tool:${toolKey}`, async () => {
+        const tool = toolsRef.current.find((t) => t.toolKey === toolKey);
+        if (!tool) throw new Error("Tool not found — click Refresh, then try again.");
+        await patchApi(`/api/admin/config/tools/${toolKey}`, {
+          enabled: tool.enabled,
+          visible_in_sidebar: tool.visibleInSidebar,
+          sort_order: tool.sortOrder,
+        });
+      }, 300);
+    },
+    [scheduleAutosave]
+  );
+
+  const saveVariant = useCallback(
+    (variant: AdminCostVariant) => {
+      const { pricingKey } = variant;
+      scheduleAutosave(`pricing:${pricingKey}`, async () => {
+        const live = findVariantByPricingKey(toolsRef.current, pricingKey);
+        if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
+        await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
+          credit_amount: Math.round(live.credits),
+          provider_cost_usd: live.providerReferenceUsd,
+          enabled: live.enabled,
+        });
+        setSavedPricing((prev) => ({
+          ...prev,
+          [pricingKey]: {
+            providerReferenceUsd: live.providerReferenceUsd,
+            credits: live.credits,
+          },
+        }));
+      });
+    },
+    [scheduleAutosave]
+  );
+
+  const toggleVariant = useCallback(
+    (variant: AdminCostVariant) => {
+      const { pricingKey } = variant;
+      scheduleAutosave(`pricing-toggle:${pricingKey}`, async () => {
+        const live = findVariantByPricingKey(toolsRef.current, pricingKey);
+        if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
+        await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
+          credit_amount: Math.round(live.credits),
+          provider_cost_usd: live.providerReferenceUsd,
+          enabled: live.enabled,
+        });
+      });
+    },
+    [scheduleAutosave]
+  );
+
+  const commitPipelineRole = useCallback(
+    (role: AdminPipelineRole) => {
+      const modelConfigId = role.modelConfigId;
+      if (!modelConfigId) {
+        scheduleAutosave(`mc:missing:${role.modelConfigToolKey}:${role.configKey}`, async () => {
+          throw new Error("Pipeline role has no DB row — run db:setup to persist toggles.");
+        });
+        return;
+      }
+      scheduleAutosave(`mc:${modelConfigId}`, async () => {
+        const live = findPipelineRoleByConfigId(toolsRef.current, modelConfigId);
+        if (!live?.modelConfigId) {
+          throw new Error("Pipeline role not found — click Refresh, then try again.");
+        }
+        await patchApi(`/api/admin/config/models/${modelConfigId}`, { enabled: live.enabled });
+      });
+    },
+    [scheduleAutosave]
+  );
+
+  const commitModelCatalog = useCallback(
+    (modelId: string, enabled: boolean) => {
+      catalogPendingRef.current.set(modelId, enabled);
+      scheduleAutosave(`catalog:${modelId}`, async () => {
+        const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
+        if (!live?.catalogConfigId) {
+          throw new Error("Catalog row missing — click Refresh, then try again.");
+        }
+        do {
+          const targetEnabled = catalogPendingRef.current.get(modelId);
+          if (targetEnabled === undefined) {
+            throw new Error("Catalog save cancelled — toggle On again.");
+          }
+          await patchApi(`/api/admin/config/model-catalog/${live.catalogConfigId}`, {
+            enabled: targetEnabled,
+          });
+          if (catalogPendingRef.current.get(modelId) === targetEnabled) break;
+        } while (true);
+      });
+    },
+    [scheduleAutosave]
+  );
+
+  const commitFeatureMode = useCallback(
+    (featureModelId: string) => {
+      scheduleAutosave(`fm:${featureModelId || "missing"}`, async () => {
+        if (!featureModelId) {
+          throw new Error("Mode row missing — click Refresh, then try again.");
+        }
+        const feature = findFeatureByModelId(toolsRef.current, featureModelId);
+        if (!feature?.featureModelId) {
+          throw new Error("Mode row missing — click Refresh, then try again.");
+        }
+        await patchApi(`/api/admin/config/feature-models/${featureModelId}`, {
+          enabled: feature.enabled,
+          is_default: feature.isDefault,
+        });
+      });
+    },
+    [scheduleAutosave]
+  );
+
+  if (loading) return <AdminConfigSkeleton />;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3">
+    <>
+      {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
+      <div className="mx-auto max-w-5xl space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
         <span>
-          Credits = user charge · Replicate $ = provider reference ·{" "}
+          Credits = user charge · Replicate $ = provider reference · toggles save automatically · pricing rows use Save ·{" "}
           <button type="button" onClick={() => void load()} className="text-violet-400 hover:text-violet-300">
             Refresh
           </button>
         </span>
       </div>
 
-      {notice ? <p className="text-xs text-emerald-400">{notice}</p> : null}
-      {error ? <p className="text-xs text-red-400">{error}</p> : null}
-      {loading ? <p className="text-xs text-gray-600">Loading…</p> : null}
+      {loadError ? <p className="text-xs text-red-400">{loadError}</p> : null}
 
-      {!loading ? (
-        <div className="space-y-2">
+      <div className="space-y-2">
           {tools.map((tool) => (
             <ToolSection
               key={tool.toolKey}
               tool={tool}
               billingSettings={billingSettings}
-              busy={busy}
+              saving={saving}
+              savedPricing={savedPricing}
               onChange={(patch) => patchTool(tool.toolKey, patch)}
-              onSaveTool={() => saveTool(tool)}
-              onSaveVariant={(_modelId, variant) => saveVariant(variant)}
-              onSaveToolModes={saveToolModes}
-              onSavePipelineRole={savePipelineRole}
+              onCommitTool={() => commitTool(tool.toolKey)}
+              onSaveVariant={saveVariant}
+              onToggleVariant={toggleVariant}
+              onCommitMode={commitFeatureMode}
+              onCommitCatalog={commitModelCatalog}
+              onCommitPipelineRole={commitPipelineRole}
             />
           ))}
-        </div>
-      ) : null}
-    </div>
+      </div>
+      </div>
+    </>
   );
 }

@@ -251,24 +251,33 @@ function VideoOmniPage() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/tools/video/features")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!active || !data?.composers) return;
-        const raw = {} as Record<VideoComposerKey, { enabledTiers: string[]; defaultTier: string }>;
-        for (const c of data.composers) {
-          if (c.key) {
-            raw[c.key as VideoComposerKey] = {
-              enabledTiers: c.enabledModelIds ?? [],
-              defaultTier: c.defaultModelId ?? "",
-            };
+    const loadEnablement = () => {
+      fetch("/api/tools/video/features")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!active || !data?.composers) return;
+          const raw = {} as Record<VideoComposerKey, { enabledTiers: string[]; defaultTier: string }>;
+          for (const c of data.composers) {
+            if (c.key) {
+              raw[c.key as VideoComposerKey] = {
+                enabledTiers: c.enabledModelIds ?? [],
+                defaultTier: c.defaultModelId ?? "",
+              };
+            }
           }
-        }
-        setComposerEnablement(mapVideoComposerEnablement(raw));
-      })
-      .catch(() => {});
+          setComposerEnablement(mapVideoComposerEnablement(raw));
+        })
+        .catch(() => {});
+    };
+
+    loadEnablement();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadEnablement();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

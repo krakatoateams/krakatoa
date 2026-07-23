@@ -14,6 +14,7 @@ import {
   VIDEO_COMPOSER_KEYS,
   type VideoComposerKey,
 } from "@/lib/video-composer-features";
+import { getEnabledCatalogModelIds } from "@/lib/model-catalog-configs-db";
 
 /**
  * Per-feature model enablement data access (service-role) — Admin Config v3.
@@ -157,6 +158,8 @@ export async function updateFeatureModelConfig(
     .maybeSingle();
 
   handleError(error, "Failed to update feature model config.");
+  cache = { map: null, expiresAt: 0 };
+  videoCache = { map: null, expiresAt: 0 };
   return (data as FeatureModelConfig | null) ?? null;
 }
 
@@ -208,7 +211,7 @@ export type FeatureEnablement = {
   defaultTier: string;
 };
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 0;
 type EnablementCache = {
   map: Record<PhotoFeatureKey, FeatureEnablement> | null;
   expiresAt: number;
@@ -246,7 +249,10 @@ export async function getPhotoFeatureEnablement(): Promise<
   if (cache.map && now < cache.expiresAt) return cache.map;
 
   try {
-    const rows = await listFeatureModelConfigs();
+    const [rows, catalogEnabled] = await Promise.all([
+      listFeatureModelConfigs(),
+      getEnabledCatalogModelIds("photo"),
+    ]);
     const byKey = new Map<string, FeatureModelConfig>();
     for (const r of rows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
 
@@ -254,8 +260,9 @@ export async function getPhotoFeatureEnablement(): Promise<
     for (const featureKey of ["image", "product", "character"] as PhotoFeatureKey[]) {
       const eligible = eligibleTiersForFeature(featureKey);
       const enabledTiers = eligible.filter((tier) => {
+        if (!catalogEnabled.has(tier)) return false;
         const row = byKey.get(`${featureKey}:${tier}`);
-        return row ? row.enabled : true; // missing row => shipped default (enabled)
+        return row ? row.enabled : true;
       });
 
       // Default: an enabled, eligible row flagged is_default wins; otherwise the
@@ -302,7 +309,10 @@ export async function getVideoComposerEnablement(): Promise<
   if (videoCache.map && now < videoCache.expiresAt) return videoCache.map;
 
   try {
-    const rows = await listFeatureModelConfigs();
+    const [rows, catalogEnabled] = await Promise.all([
+      listFeatureModelConfigs(),
+      getEnabledCatalogModelIds("reels"),
+    ]);
     const reelsRows = rows.filter((r) => r.tool_key === "reels");
     const byKey = new Map<string, FeatureModelConfig>();
     for (const r of reelsRows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
@@ -311,6 +321,7 @@ export async function getVideoComposerEnablement(): Promise<
     for (const composerKey of VIDEO_COMPOSER_KEYS) {
       const eligible = eligibleModelsForComposer(composerKey);
       const enabledTiers = eligible.filter((tier) => {
+        if (!catalogEnabled.has(tier)) return false;
         const row = byKey.get(`${composerKey}:${tier}`);
         return row ? row.enabled : true;
       });

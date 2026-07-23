@@ -16,6 +16,7 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
@@ -152,6 +153,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown motion control model." }, { status: 400 });
     }
     const model = getMotionControlModel(modelId);
+    if (!(await isCatalogModelEnabled("reels", modelId))) {
+      return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
+    }
     const prompt = promptRaw.slice(0, model.promptMaxChars);
 
     if (!isValidMotionControlMode(model, mode)) {

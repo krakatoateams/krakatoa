@@ -17,7 +17,7 @@
 - [x] 3.2 Redirect `/admin/config` → `/admin/config-v2` (or in-place replace)
 - [x] 3.3 Update `AdminNav.tsx` — single "Config" link
 - [x] 3.4 Delete `app/(app)/admin/config/page.tsx` after bake
-- [ ] 3.5 Apply migration `046_reels_tool_display_name_video.sql` via Supabase MCP
+- [x] 3.5 Apply migration `046_reels_tool_display_name_video.sql` via Supabase MCP
 
 ## 4. Phase 2 — Video composer persistence (P0)
 
@@ -33,9 +33,9 @@
 
 ## 5. Phase 3 — Generation model on/off (P1)
 
-- [ ] 5.1 Design minimal `(tool_key, model_id, enabled)` storage
-- [ ] 5.2 Admin UI: model-level On checkbox on model card header
-- [ ] 5.3 Studio APIs filter disabled models (admin tree still shows them)
+- [x] 5.1 Design minimal `(tool_key, model_id, enabled)` storage
+- [x] 5.2 Admin UI: model-level On checkbox on model card header
+- [x] 5.3 Studio APIs filter disabled models (admin tree still shows them)
 
 ## 6. Phase 4 — Provider binding editor (P1, blocked)
 

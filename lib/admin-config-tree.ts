@@ -68,7 +68,9 @@ export type AdminModelNode = {
   id: string;
   label: string;
   subtitle: string;
+  /** Catalog on/off — hides model from studio when false. */
   enabled: boolean;
+  catalogConfigId?: string;
   features: AdminFeatureToggle[];
   variants: AdminCostVariant[];
 };
@@ -131,6 +133,13 @@ export type FeatureModelInput = {
   model_tier: string;
   enabled: boolean;
   is_default: boolean;
+};
+
+export type ModelCatalogInput = {
+  id: string;
+  tool_key: string;
+  model_id: string;
+  enabled: boolean;
 };
 
 export type ModelConfigInput = {
@@ -361,10 +370,23 @@ function enumeratePhotoVariants(
     .filter((v): v is AdminCostVariant => v !== null);
 }
 
+function resolveCatalogModel(
+  toolKey: string,
+  modelId: string,
+  modelCatalog: ModelCatalogInput[]
+): { enabled: boolean; catalogConfigId?: string } {
+  const row = modelCatalog.find((r) => r.tool_key === toolKey && r.model_id === modelId);
+  return {
+    enabled: row?.enabled ?? true,
+    catalogConfigId: row?.id,
+  };
+}
+
 function buildVideoModels(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings,
-  featureModels: FeatureModelInput[]
+  featureModels: FeatureModelInput[],
+  modelCatalog: ModelCatalogInput[]
 ): AdminModelNode[] {
   const models: AdminModelNode[] = [];
 
@@ -375,7 +397,7 @@ function buildVideoModels(
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      enabled: true,
+      ...resolveCatalogModel("reels", model.id, modelCatalog),
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -388,7 +410,7 @@ function buildVideoModels(
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      enabled: true,
+      ...resolveCatalogModel("reels", model.id, modelCatalog),
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -400,14 +422,15 @@ function buildVideoModels(
 function buildPhotoModels(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings,
-  featureModels: FeatureModelInput[]
+  featureModels: FeatureModelInput[],
+  modelCatalog: ModelCatalogInput[]
 ): AdminModelNode[] {
   return normalizeDefaultsPerMode(
     PRODUCT_PHOTO_TIERS.map((tier) => ({
       id: tier.id,
       label: tier.modelLabel,
       subtitle: tier.providerModel,
-      enabled: true,
+      ...resolveCatalogModel("photo", tier.id, modelCatalog),
       features: buildPhotoFeatures(tier.id, featureModels),
       variants: enumeratePhotoVariants(tier, map, settings),
     })).filter((m) => m.variants.length > 0)
@@ -463,11 +486,14 @@ const MODEL_BUILDERS: Record<
   (
     map: Map<string, PricingConfigInput>,
     settings: BillingSettings,
-    featureModels: FeatureModelInput[]
+    featureModels: FeatureModelInput[],
+    modelCatalog: ModelCatalogInput[]
   ) => AdminModelNode[]
 > = {
-  reels: (map, settings, featureModels) => buildVideoModels(map, settings, featureModels),
-  photo: (map, settings, featureModels) => buildPhotoModels(map, settings, featureModels),
+  reels: (map, settings, featureModels, modelCatalog) =>
+    buildVideoModels(map, settings, featureModels, modelCatalog),
+  photo: (map, settings, featureModels, modelCatalog) =>
+    buildPhotoModels(map, settings, featureModels, modelCatalog),
 };
 
 /** Tools shown in config v2 (dashboard omitted — toggle-only elsewhere if needed). */
@@ -477,6 +503,7 @@ export function buildAdminConfigTree(params: {
   tools: ToolConfigInput[];
   pricing: PricingConfigInput[];
   featureModels: FeatureModelInput[];
+  modelCatalog: ModelCatalogInput[];
   modelConfigs: ModelConfigInput[];
   billingSettings: BillingSettings;
 }): AdminToolNode[] {
@@ -489,7 +516,7 @@ export function buildAdminConfigTree(params: {
 
     const buildModels = MODEL_BUILDERS[toolKey];
     const models = buildModels
-      ? buildModels(pmap, params.billingSettings, params.featureModels)
+      ? buildModels(pmap, params.billingSettings, params.featureModels, params.modelCatalog)
       : [];
 
     const pipelines =

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AdminTableSkeleton } from "../admin-ui";
 
 type AdminUser = {
   id: string;
@@ -118,7 +119,7 @@ export default function AdminUsersPage() {
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading admins…</p>
+        <AdminTableSkeleton rows={5} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-800">
           <table className="w-full text-left text-sm">

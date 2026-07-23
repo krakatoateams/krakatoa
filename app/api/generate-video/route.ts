@@ -16,6 +16,7 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
@@ -206,6 +207,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
     const model = getVideoModel(modelId);
+    if (!(await isCatalogModelEnabled("reels", modelId))) {
+      return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
+    }
     jobKind = getVideoJobKind(model);
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 

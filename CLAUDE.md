@@ -134,9 +134,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 
 ## Admin Config v2 (unified control panel)
 
-**Status:** Cutover complete — `/admin/config` redirects to `/admin/config-v2` (single Config nav link). Video composer enablement persists via `feature_model_configs` (`tool_key = 'reels'`); studio reads `/api/tools/video/features`.
-
-Operators configure **Tool → Model → Mode → Variant pricing** plus **Pipeline** roles (LLM/TTS/Whisper, storyboard sheet). Photo and Video mode matrices persist via `feature_model_configs`.
+**Status:** Cutover complete. Photo + Video mode matrices and per-model catalog on/off persist via `feature_model_configs` and `model_catalog_configs`.
 
 | Doc | Purpose |
 |-----|---------|
@@ -144,7 +142,7 @@ Operators configure **Tool → Model → Mode → Variant pricing** plus **Pipel
 | [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
 | [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |
 
-Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
+Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/model-catalog-configs.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
 
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.

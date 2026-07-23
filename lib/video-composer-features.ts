@@ -12,6 +12,8 @@ import {
   MOTION_CONTROL_MODELS,
   type MotionControlModelId,
 } from "@/lib/motion-control-models";
+import { REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
+import type { ReelsEngine } from "@/lib/reels-pipeline/types";
 
 /**
  * Video studio composers (Admin Config v2 — per-composer model enablement).
@@ -204,20 +206,13 @@ export function snapToEnabledModel(
   return enabled[0]?.id ?? currentId;
 }
 
-/** Reels Creator engine → catalog model ids used for enablement gating. */
-export const REELS_ENGINE_MODEL_IDS: Record<"seedance" | "veo", string[]> = {
-  seedance: ["seedance2_mini", "seedance2_fast", "seedance2", "seedance15_pro"],
-  veo: ["veo31_fast", "veo31_lite"],
-};
-
+/** Reels Creator engine visible when its runtime catalog model is enabled for reels-creator. */
 export function filterReelsEngines<
-  T extends { id: "seedance" | "veo" },
+  T extends { id: ReelsEngine },
 >(engines: readonly T[], enablement: Record<VideoComposerKey, VideoComposerEnablement> | null): T[] {
   if (!enablement) return [...engines];
   const enabled = new Set(enablement["reels-creator"].enabledModelIds);
-  const filtered = engines.filter((e) =>
-    REELS_ENGINE_MODEL_IDS[e.id].some((id) => enabled.has(id))
-  );
+  const filtered = engines.filter((e) => enabled.has(REELS_ENGINE_CATALOG_MODEL_ID[e.id]));
   return filtered.length > 0 ? filtered : [...engines];
 }
 
@@ -227,6 +222,12 @@ export function composerHasEnabledModels(
   enablement: Record<VideoComposerKey, VideoComposerEnablement> | null
 ): boolean {
   if (!enablement) return true;
+  if (composerKey === "reels-creator") {
+    const enabled = enablement["reels-creator"].enabledModelIds;
+    return (Object.values(REELS_ENGINE_CATALOG_MODEL_ID) as string[]).some((id) =>
+      enabled.includes(id)
+    );
+  }
   return enablement[composerKey].enabledModelIds.length > 0;
 }
 

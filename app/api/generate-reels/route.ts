@@ -49,7 +49,8 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
-import { validateReelsRequest } from "@/lib/reels-models";
+import { validateReelsRequest, REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
+import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
 import {
   runSeedancePipeline,
   runVeoSinglePipeline,
@@ -161,6 +162,12 @@ export async function POST(req: Request) {
     }
     const reqv = validated.value;
     jobType = reqv.jobType;
+
+    const composerEnablement = await getVideoComposerEnablement();
+    const engineCatalogModelId = REELS_ENGINE_CATALOG_MODEL_ID[reqv.engine];
+    if (!composerEnablement["reels-creator"].enabledTiers.includes(engineCatalogModelId)) {
+      return NextResponse.json({ error: "This engine isn't available." }, { status: 400 });
+    }
 
     // ---- Fail fast on misconfig BEFORE any credit spend ----
     const replicate = createReplicateClient(); // throws if REPLICATE_API_TOKEN missing
