@@ -21,6 +21,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Run development server**: `npm run dev`
 - **Build for production**: `npm run build`
 - **Linting**: `npm run lint`
+- **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
 
 ## Project Structure
@@ -43,6 +44,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
 - `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
 - `public/`: Static assets (images, fonts, icons).
+  - **PWA**: `public/icons/` (16–512px + maskable + apple-touch), `public/sw.js` (minimal install SW), source logo `Logo White transparent.svg`. Next.js serves `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png`, and `app/manifest.ts` → `/manifest.webmanifest`. Regenerate with `npm run icons:generate`.
 
 ## Platform Foundation & Credits
 Krakatoa's product identity, observability, and billing primitives live in seven Postgres tables that all in-scope generation routes read/write through typed helpers in `lib/`. Ownership boundary is `profile_id`; server routes use the service role and enforce ownership in application code (RLS is enabled on every table as deny-by-default).
