@@ -111,6 +111,15 @@ import {
   type VeoResolution,
 } from "@/lib/reels-models";
 import type { ReelsEngine, ReelsVeoMode } from "@/lib/reels-pipeline/types";
+import {
+  composerHasEnabledModels,
+  filterEnabledCatalog,
+  filterReelsEngines,
+  mapVideoComposerEnablement,
+  snapToEnabledModel,
+  type VideoComposerEnablement,
+  type VideoComposerKey,
+} from "@/lib/video-composer-features";
 
 function describeIdempotencyError(
   status: number,
@@ -148,6 +157,8 @@ const CREATION_TYPES = [
   { id: "storyboard", label: "Storyboard to video", available: true },
   { id: "reels-creator", label: "Reels Creator", available: true },
 ] as const;
+
+type VideoCreationTypeOption = (typeof CREATION_TYPES)[number];
 
 type VideoCreationType =
   | "text2video"
@@ -235,6 +246,41 @@ function VideoOmniPage() {
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   const { balance, refetch: refetchCredits } = useCreditBalance();
 
+  const [composerEnablement, setComposerEnablement] =
+    useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/tools/video/features")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data?.composers) return;
+        const raw = {} as Record<VideoComposerKey, { enabledTiers: string[]; defaultTier: string }>;
+        for (const c of data.composers) {
+          if (c.key) {
+            raw[c.key as VideoComposerKey] = {
+              enabledTiers: c.enabledModelIds ?? [],
+              defaultTier: c.defaultModelId ?? "",
+            };
+          }
+        }
+        setComposerEnablement(mapVideoComposerEnablement(raw));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const text2videoModels = filterEnabledCatalog(
+    TEXT_TO_VIDEO_MODELS,
+    "text2video",
+    composerEnablement
+  );
+  const availableCreationTypes = CREATION_TYPES.filter((c) =>
+    composerHasEnabledModels(c.id as VideoComposerKey, composerEnablement)
+  );
+
   useEffect(() => {
     void loadMentionAssetsFromApi().then(setMentionAssets);
   }, [historyRefreshKey]);
@@ -253,6 +299,24 @@ function VideoOmniPage() {
 
   const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
+
+  useEffect(() => {
+    if (text2videoModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      text2videoModels,
+      "text2video",
+      composerEnablement
+    ) as VideoModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text2videoModels.map((m) => m.id).join(","), composerEnablement]);
+
+  useEffect(() => {
+    if (availableCreationTypes.length === 0) return;
+    if (availableCreationTypes.some((c) => c.id === creationType)) return;
+    setCreationType(availableCreationTypes[0].id as VideoCreationType);
+  }, [availableCreationTypes, creationType]);
   const supportsMentions =
     model.references.referenceImages > 0 || model.references.firstFrame;
 
@@ -506,7 +570,7 @@ function VideoOmniPage() {
               icon={<Layers className="h-3.5 w-3.5" />}
               value={selectedCreation?.label ?? "Creation"}
               activeId="text2video"
-              options={CREATION_TYPES.map((c) => ({
+                options={availableCreationTypes.map((c) => ({
                 id: c.id,
                 label: c.label,
                 hint: c.available ? undefined : "Open",
@@ -521,7 +585,7 @@ function VideoOmniPage() {
                 icon={<Cpu className="h-3.5 w-3.5" />}
                 value={model.modelLabel}
                 activeId={modelId}
-                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                options={text2videoModels.map((m) => ({
                   id: m.id,
                   label: m.modelLabel,
                   hint: formatVideoModelCreditHint(m, videoCredits),
@@ -681,7 +745,7 @@ function VideoOmniPage() {
                 icon={<Cpu className="h-3.5 w-3.5" />}
                 value={model.modelLabel}
                 activeId={modelId}
-                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                options={text2videoModels.map((m) => ({
                   id: m.id,
                   label: m.modelLabel,
                   hint: formatVideoModelCreditHint(m, videoCredits),
@@ -868,6 +932,8 @@ function VideoOmniPage() {
         {creationType === "image2video" && (
           <ImageToVideoComposer
             mentionAssets={mentionAssets}
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -878,6 +944,8 @@ function VideoOmniPage() {
 
         {creationType === "motion_control" && (
           <MotionControlComposer
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -889,6 +957,8 @@ function VideoOmniPage() {
         {creationType === "storyboard" && (
           <StoryboardToVideoComposer
             initialStoryboardId={initialStoryboardId}
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -899,6 +969,8 @@ function VideoOmniPage() {
 
         {creationType === "reels-creator" && (
           <ReelsCreatorComposer
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -949,15 +1021,36 @@ const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 // Image to Video — models that require a reference image (Kling v1.5 family).
 function ImageToVideoComposer({
   mentionAssets,
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   mentionAssets: MentionAsset[];
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const image2videoModels = filterEnabledCatalog(
+    IMAGE_TO_VIDEO_MODELS,
+    "image2video",
+    composerEnablement
+  );
   const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_IMAGE_TO_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
+
+  useEffect(() => {
+    if (image2videoModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      image2videoModels,
+      "image2video",
+      composerEnablement
+    ) as VideoModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image2videoModels.map((m) => m.id).join(","), composerEnablement]);
 
   const [prompt, setPrompt] = useState("");
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
@@ -1125,7 +1218,7 @@ function ImageToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Image to video"
             activeId="image2video"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -1140,7 +1233,7 @@ function ImageToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              options={image2videoModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1354,7 +1447,7 @@ function ImageToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              options={image2videoModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1437,14 +1530,35 @@ function ImageToVideoComposer({
 // and keep (or drop) the reference video's audio. The output clip length follows
 // the reference video, so the cost is computed from its measured duration.
 function MotionControlComposer({
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const motionControlModels = filterEnabledCatalog(
+    MOTION_CONTROL_MODELS,
+    "motion_control",
+    composerEnablement
+  );
   const [modelId, setModelId] = useState<MotionControlModelId>(MOTION_CONTROL_MODELS[0].id);
   const model = getMotionControlModel(modelId);
+
+  useEffect(() => {
+    if (motionControlModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      motionControlModels,
+      "motion_control",
+      composerEnablement
+    ) as MotionControlModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [motionControlModels.map((m) => m.id).join(","), composerEnablement]);
 
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<MotionControlMode>(model.defaultMode);
@@ -1602,7 +1716,7 @@ function MotionControlComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Motion control"
             activeId="motion_control"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -1617,7 +1731,7 @@ function MotionControlComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={MOTION_CONTROL_MODELS.map((m) => ({
+              options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatMotionControlModelCreditHint(m, videoCredits),
@@ -1801,7 +1915,7 @@ function MotionControlComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={MOTION_CONTROL_MODELS.map((m) => ({
+              options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatMotionControlModelCreditHint(m, videoCredits),
@@ -2161,13 +2275,22 @@ function ImportStoryboardModal({
 
 function StoryboardToVideoComposer({
   initialStoryboardId,
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   initialStoryboardId: string | null;
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const storyboardModels = filterEnabledCatalog(
+    STORYBOARD_VIDEO_MODEL_IDS.map((id) => getVideoModel(id)),
+    "storyboard",
+    composerEnablement
+  );
   const { videoCredits } = usePricing();
   const { balance } = useCreditBalance();
 
@@ -2177,6 +2300,18 @@ function StoryboardToVideoComposer({
   const [videoModelId, setVideoModelId] = useState<StoryboardVideoModelId>(
     DEFAULT_STORYBOARD_VIDEO_MODEL_ID
   );
+
+  useEffect(() => {
+    if (storyboardModels.length === 0) return;
+    const next = snapToEnabledModel(
+      videoModelId,
+      storyboardModels,
+      "storyboard",
+      composerEnablement
+    ) as StoryboardVideoModelId;
+    if (next !== videoModelId) setVideoModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyboardModels.map((m) => m.id).join(","), composerEnablement]);
   const [resolution, setResolution] = useState<"480p" | "720p">("480p");
   // Aspect mirrors the selected storyboard's stored orientation (locked) so the
   // clip never flips. Only editable for legacy storyboards that have no ratio.
@@ -2366,7 +2501,7 @@ function StoryboardToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Storyboard to video"
             activeId="storyboard"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -2381,14 +2516,11 @@ function StoryboardToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={storyboardVideoModel.modelLabel}
               activeId={videoModelId}
-              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
-                const m = getVideoModel(id);
-                return {
-                  id,
-                  label: m.modelLabel,
-                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
-                };
-              })}
+              options={storyboardModels.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              }))}
               onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
               disabled={loading}
             />
@@ -2663,14 +2795,11 @@ function StoryboardToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={storyboardVideoModel.modelLabel}
               activeId={videoModelId}
-              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
-                const m = getVideoModel(id);
-                return {
-                  id,
-                  label: m.modelLabel,
-                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
-                };
-              })}
+              options={storyboardModels.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              }))}
               onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
               disabled={loading}
             />
@@ -2981,18 +3110,29 @@ function NumberStepper({
 }
 
 function ReelsCreatorComposer({
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
   const { balance } = useCreditBalance();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Engine + (Veo-only) mode.
   const [engine, setEngine] = useState<ReelsEngine>("seedance");
+
+  useEffect(() => {
+    if (reelsEngines.length === 0) return;
+    if (reelsEngines.some((e) => e.id === engine)) return;
+    setEngine(reelsEngines[0].id);
+  }, [reelsEngines, engine]);
   const [veoMode, setVeoMode] = useState<ReelsVeoMode>("single");
 
   // Shared.
@@ -3138,7 +3278,7 @@ function ReelsCreatorComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Reels Creator"
             activeId="reels-creator"
-            options={CREATION_TYPES.map((c) => ({ id: c.id, label: c.label }))}
+                options={creationTypes.map((c) => ({ id: c.id, label: c.label }))}
             onSelect={onSelectCreation}
             disabled={loading}
           />
@@ -3149,7 +3289,7 @@ function ReelsCreatorComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={reelsEngineLabel(engine)}
               activeId={engine}
-              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              options={reelsEngines.map((e) => ({ id: e.id, label: e.label }))}
               onSelect={(id) => setEngine(id as ReelsEngine)}
               disabled={loading}
             />
@@ -3390,7 +3530,7 @@ function ReelsCreatorComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={reelsEngineLabel(engine)}
               activeId={engine}
-              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              options={reelsEngines.map((e) => ({ id: e.id, label: e.label }))}
               onSelect={(id) => setEngine(id as ReelsEngine)}
               disabled={loading}
             />

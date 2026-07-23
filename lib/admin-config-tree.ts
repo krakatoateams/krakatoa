@@ -28,11 +28,13 @@ import { getModelDefault } from "@/lib/admin-config-defaults";
 import { PIPELINE_GROUP_SPECS, type PipelineRoleSpec } from "@/lib/admin-pipeline-config";
 import { getV2PricingDefault } from "@/lib/pricing-defaults";
 import {
+  VIDEO_COMPOSER_FEATURES,
+  defaultVideoComposerRows,
+  modelEligibleForComposer,
+} from "@/lib/video-composer-features";
+import {
   STORYBOARD_VIDEO_MODEL_IDS,
   VIDEO_MODELS,
-  isImageToVideoModel,
-  isStoryboardVideoModelId,
-  isTextToVideoModel,
   type VideoModel,
   type VideoPricingContext,
   type VideoResolution,
@@ -47,7 +49,7 @@ export type AdminFeatureToggle = {
   label: string;
   enabled: boolean;
   isDefault: boolean;
-  /** Present when persisted (Photo). Video composers are local-only for now. */
+  /** Present when persisted (Photo + Video composers). */
   featureModelId?: string;
   /** Hard capability gate — cannot enable even if admin tries. */
   eligible: boolean;
@@ -139,23 +141,6 @@ export type ModelConfigInput = {
   model: string;
   enabled: boolean;
 };
-
-const VIDEO_COMPOSERS = [
-  { key: "text2video", label: "Text to video" },
-  { key: "image2video", label: "Image to video" },
-  { key: "motion_control", label: "Motion control" },
-  { key: "storyboard", label: "Storyboard to video" },
-  { key: "reels-creator", label: "Reels Creator" },
-] as const;
-
-const REELS_CREATOR_MODEL_IDS = new Set([
-  "seedance2_mini",
-  "seedance2_fast",
-  "seedance2",
-  "seedance15_pro",
-  "veo31_fast",
-  "veo31_lite",
-]);
 
 function pricingMap(rows: PricingConfigInput[]): Map<string, PricingConfigInput> {
   return new Map(rows.map((r) => [r.pricing_key, r]));
@@ -259,41 +244,32 @@ function enumerateMotionVariants(
   return variants;
 }
 
-const MOTION_CONTROL_MODEL_IDS = new Set(MOTION_CONTROL_MODELS.map((m) => m.id));
+function buildVideoFeatures(
+  modelId: string,
+  featureModels: FeatureModelInput[]
+): AdminFeatureToggle[] {
+  const defaults = defaultVideoComposerRows();
 
-function videoComposerEligibility(modelId: string): Record<string, boolean> {
-  if (MOTION_CONTROL_MODEL_IDS.has(modelId)) {
+  return VIDEO_COMPOSER_FEATURES.filter((composer) =>
+    modelEligibleForComposer(modelId, composer.key)
+  ).map((composer) => {
+    const dbRow = featureModels.find(
+      (r) =>
+        r.tool_key === "reels" &&
+        r.feature_key === composer.key &&
+        r.model_tier === modelId
+    );
+    const def = defaults.find((d) => d.featureKey === composer.key && d.modelTier === modelId);
+
     return {
-      text2video: false,
-      image2video: false,
-      motion_control: true,
-      storyboard: false,
-      "reels-creator": false,
+      key: composer.key,
+      label: composer.label,
+      enabled: dbRow?.enabled ?? def?.enabled ?? true,
+      isDefault: dbRow?.is_default ?? def?.isDefault ?? false,
+      featureModelId: dbRow?.id,
+      eligible: true,
     };
-  }
-  const model = VIDEO_MODELS.find((m) => m.id === modelId);
-  if (!model) {
-    return Object.fromEntries(VIDEO_COMPOSERS.map((c) => [c.key, false])) as Record<string, boolean>;
-  }
-  return {
-    text2video: isTextToVideoModel(model),
-    image2video: isImageToVideoModel(model),
-    motion_control: false,
-    storyboard: isStoryboardVideoModelId(model.id),
-    "reels-creator": REELS_CREATOR_MODEL_IDS.has(model.id),
-  };
-}
-
-function buildVideoFeatures(modelId: string): AdminFeatureToggle[] {
-  const eligible = videoComposerEligibility(modelId);
-
-  return VIDEO_COMPOSERS.filter((c) => eligible[c.key as keyof typeof eligible]).map((c) => ({
-    key: c.key,
-    label: c.label,
-    enabled: true,
-    isDefault: false,
-    eligible: true,
-  }));
+  });
 }
 
 /**
@@ -387,7 +363,8 @@ function enumeratePhotoVariants(
 
 function buildVideoModels(
   map: Map<string, PricingConfigInput>,
-  settings: BillingSettings
+  settings: BillingSettings,
+  featureModels: FeatureModelInput[]
 ): AdminModelNode[] {
   const models: AdminModelNode[] = [];
 
@@ -399,7 +376,7 @@ function buildVideoModels(
       label: model.modelLabel,
       subtitle: model.providerModel,
       enabled: true,
-      features: buildVideoFeatures(model.id),
+      features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
   }
@@ -412,7 +389,7 @@ function buildVideoModels(
       label: model.modelLabel,
       subtitle: model.providerModel,
       enabled: true,
-      features: buildVideoFeatures(model.id),
+      features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
   }
@@ -489,7 +466,7 @@ const MODEL_BUILDERS: Record<
     featureModels: FeatureModelInput[]
   ) => AdminModelNode[]
 > = {
-  reels: (map, settings) => buildVideoModels(map, settings),
+  reels: (map, settings, featureModels) => buildVideoModels(map, settings, featureModels),
   photo: (map, settings, featureModels) => buildPhotoModels(map, settings, featureModels),
 };
 

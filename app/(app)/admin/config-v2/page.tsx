@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
@@ -482,7 +481,7 @@ function ModelSection({
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const showModes = model.features.length > 0;
-  const modesPersist = tool.toolKey === "photo";
+  const modesPersist = tool.toolKey === "photo" || tool.toolKey === "reels";
   const modeSummary = model.features.map((f) => f.label).join(" · ");
 
   const setVariant = (pricingKey: string, patch: Partial<AdminCostVariant>) => {
@@ -847,9 +846,6 @@ export default function AdminConfigV2Page() {
             Refresh
           </button>
         </span>
-        <Link href="/admin/config" className="text-gray-600 hover:text-gray-400">
-          Legacy config
-        </Link>
       </div>
 
       {notice ? <p className="text-xs text-emerald-400">{notice}</p> : null}
