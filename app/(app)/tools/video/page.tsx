@@ -150,6 +150,29 @@ function describeIdempotencyError(
   return null;
 }
 
+async function pollMotionControlResult(idempotencyKey: string): Promise<{
+  videoUrl?: string;
+  storagePath?: string;
+  historyItem?: { storagePath?: string } | null;
+}> {
+  const pollMs = 3000;
+  const maxAttempts = 200;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, pollMs));
+    const res = await fetch("/api/generate-motion-control/status", {
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+    const data = await res.json();
+    if (res.ok && data.videoUrl) return data;
+    if (res.status === 202) continue;
+    if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+      throw Object.assign(new Error("Generation cancelled."), { code: "GENERATION_CANCELLED" });
+    }
+    throw new Error(data.error || data.message || "Generation failed");
+  }
+  throw new Error("Generation is taking longer than expected. Check your history shortly.");
+}
+
 async function loadMentionAssetsFromApi(): Promise<MentionAsset[]> {
   try {
     const res = await fetch(
@@ -1711,7 +1734,7 @@ function MotionControlComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      let data = await response.json();
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -1729,6 +1752,10 @@ function MotionControlComposer({
         throw new Error(data.error || "Generation failed");
       }
 
+      if (response.status === 202 || data.status === "processing") {
+        data = await pollMotionControlResult(attempt.key);
+      }
+
       attempt.settle(true);
       setResultPath(pickGenerateStoragePath(data));
       setResultSeed(data.videoUrl ?? null);
@@ -1737,6 +1764,11 @@ function MotionControlComposer({
       motionVideo.reset();
       setLibraryChar(null);
     } catch (err: unknown) {
+      if (err && typeof err === "object" && "code" in err && err.code === "GENERATION_CANCELLED") {
+        attempt.settle(false);
+        setError(null);
+        return;
+      }
       attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {

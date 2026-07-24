@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
+import { createReplicateClient, createPredictionWithRetry } from "@/lib/replicate-utils";
 import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { insertUserCreation } from "@/lib/creations-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
+import { createJob, startJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
-import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
 import {
   spendCredits,
   refundCredits,
@@ -17,10 +16,9 @@ import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
-import { resolveRefForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
+import { isVideosTempRefPath } from "@/lib/storage-buckets";
+import { resolveRefForPipeline } from "@/lib/storage-signed-url";
 import {
   getMotionControlModel,
   isValidMotionControlModelId,
@@ -29,16 +27,16 @@ import {
   effectiveMotionControlDuration,
   motionControlRefVideoDurationError,
   buildMotionControlProviderInput,
-  motionControlResolutionLabel,
   type MotionControlMode,
   type CharacterOrientation,
 } from "@/lib/motion-control-models";
+import type { MotionControlJobInput } from "@/lib/motion-control-context";
+import { cleanupMotionControlTempRefs } from "@/lib/motion-control-finalize";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
   beginGenerationRequest,
-  finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
@@ -61,6 +59,18 @@ function parseRefAttachment(raw: unknown): RefAttachment | null {
   return { url, path };
 }
 
+async function attachGenerationRequestLinks(params: {
+  generationRequestId: string;
+  jobId?: string | null;
+  assetId?: string | null;
+}): Promise<void> {
+  const patch: Record<string, string> = {};
+  if (params.jobId) patch.job_id = params.jobId;
+  if (params.assetId) patch.asset_id = params.assetId;
+  if (Object.keys(patch).length === 0) return;
+  await supabaseServer.from("generation_requests").update(patch).eq("id", params.generationRequestId);
+}
+
 export async function POST(req: Request) {
   let profileId: string | null = null;
   let jobId: string | null = null;
@@ -69,6 +79,7 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
+  let predictionStarted = false;
   const tempRefPaths: string[] = [];
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
@@ -209,7 +220,6 @@ export async function POST(req: Request) {
       refVideoDurationSec: Number.isFinite(refVideoDurationRaw) ? refVideoDurationRaw : null,
       orientation,
     });
-    const resolutionLabel = motionControlResolutionLabel(mode as MotionControlMode);
     const pricingKey = model.pricingKey(mode as MotionControlMode);
 
     // ---- Resolve runtime model (admin-overridable; falls back to providerModel) ----
@@ -259,8 +269,8 @@ export async function POST(req: Request) {
     }
     if (begin.action === "in_progress") {
       return NextResponse.json(
-        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
-        { status: 409 }
+        { status: "processing", code: "GENERATION_IN_PROGRESS" },
+        { status: 202 },
       );
     }
     if (begin.action === "replay") {
@@ -276,7 +286,19 @@ export async function POST(req: Request) {
         jobType: "video_motion_control",
         provider: resolvedModel.provider,
         model: resolvedModel.model,
-        input: { modelId, mode, characterOrientation, keepOriginalSound, billedDuration, pricingKey },
+        input: {
+          modelId,
+          mode,
+          characterOrientation,
+          keepOriginalSound,
+          billedDuration,
+          pricingKey,
+          prompt,
+          provider: resolvedModel.provider,
+          providerModel: resolvedModel.model,
+          tempRefPaths: [...tempRefPaths],
+          generationRequestId: generationRequestId ?? undefined,
+        } satisfies MotionControlJobInput,
       })
     );
     if (job) {
@@ -359,8 +381,43 @@ export async function POST(req: Request) {
       })
     );
     if (asset) videoAssetId = asset.id;
+    if (jobId) {
+      await safe("patchJobInput", async () => {
+        const { error } = await supabaseServer
+          .from("jobs")
+          .update({
+            input: {
+              modelId,
+              mode,
+              characterOrientation,
+              keepOriginalSound,
+              billedDuration,
+              pricingKey,
+              prompt,
+              provider: resolvedModel.provider,
+              providerModel: resolvedModel.model,
+              creditsAmount,
+              tempRefPaths: [...tempRefPaths],
+              generationRequestId: generationRequestId ?? undefined,
+              videoAssetId: videoAssetId ?? undefined,
+            } satisfies MotionControlJobInput,
+          })
+          .eq("id", jobId)
+          .eq("profile_id", profileId!);
+        if (error) throw error;
+      });
+    }
+    if (generationRequestId) {
+      await safe("attachGenerationRequest", () =>
+        attachGenerationRequestLinks({
+          generationRequestId: generationRequestId!,
+          jobId,
+          assetId: videoAssetId,
+        })
+      );
+    }
 
-    // ---- Provider call (Kling fetches the reference URLs directly) ----
+    // ---- Start provider prediction (non-blocking — finalize via /status) ----
     const pipelineImageUrl = await resolveRefForPipeline(userId!, imageRef);
     const pipelineVideoUrl = await resolveRefForPipeline(userId!, videoRef);
     if (!pipelineImageUrl || !pipelineVideoUrl) {
@@ -383,12 +440,11 @@ export async function POST(req: Request) {
       keepOriginalSound,
       billedDuration,
     });
-    // Abort before paying for a provider run the user already asked to cancel.
     if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
       throw new ReplicateCancellationError();
     }
     console.log(
-      `[Motion Control] Running ${modelRef} (mode=${mode}, orientation=${characterOrientation})...`
+      `[Motion Control] Starting ${modelRef} (mode=${mode}, orientation=${characterOrientation})...`
     );
     const recordPredictionTick = makePredictionRecorder({
       generationRequestId,
@@ -396,121 +452,14 @@ export async function POST(req: Request) {
       jobId,
       kind: "video_motion_control",
     });
-    const output = await runWithRetry(replicate, modelRef, { input: providerInput }, 10, {
-      onPrediction: recordPredictionTick,
-    });
+    const prediction = await createPredictionWithRetry(replicate, modelRef, providerInput);
+    predictionStarted = true;
+    recordPredictionTick?.({ id: prediction.id, status: "starting" });
 
-    // Post-run cancel safety net (see generate-storyboard-video): honor a cancel
-    // that landed in the provider's pre-poll window with a refund + no delivery.
-    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
-    }
-
-    const generatedVideoUrl = extractMediaUrl(output);
-    if (!generatedVideoUrl.startsWith("http")) {
-      throw new Error("Motion control model did not return a valid video URL");
-    }
-    await endStep({ generatedVideoUrl });
-
-    // ---- Download the MP4 + persist to videos/ (so the sweep keeps it) ----
-    await beginStep("storage_upload", "Download generated video + save to Supabase");
-    const videoResponse = await fetch(generatedVideoUrl);
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
-    }
-    const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosGeneratedVideoPath(userId!, "motion-control", `video_${Date.now()}.mp4`);
-
-    const { error: uploadError } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, videoBuffer, { contentType: "video/mp4", upsert: false });
-    if (uploadError) {
-      throw new Error(`Failed to save video to storage: ${uploadError.message}`);
-    }
-    const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
-    await endStep({ storagePath, publicUrl });
-
-    const title = prompt.slice(0, 60) || "Motion Control";
-    const creationMetadata = {
-      prompt,
-      modelId,
-      modelLabel: model.modelLabel,
-      providerModel: resolvedModel.model,
-      mode,
-      resolution: resolutionLabel,
-      characterOrientation,
-      keepOriginalSound,
-      billedDuration,
-      pricingKey,
-    };
-
-    let historyItem = null;
-    if (userId) {
-      historyItem = await safe("insertUserCreation", () =>
-        insertUserCreation({
-          userId: userId!,
-          tool: "video_motion_control",
-          mediaType: "video",
-          mediaUrl: storagePath,
-          storagePath,
-          title,
-          metadata: creationMetadata,
-        })
-      );
-    }
-
-    if (videoAssetId && profileId) {
-      await safe("markAssetReady", () =>
-        markAssetReady(profileId!, videoAssetId!, {
-          storagePath,
-          mimeType: "video/mp4",
-          durationSec: billedDuration,
-          costCredits: creditsAmount,
-          metadata: creationMetadata,
-        })
-      );
-    }
-    if (jobId && profileId) {
-      await safe("finishJob", () =>
-        finishJob(profileId!, jobId!, {
-          output: { videoUrl: publicUrl, storagePath, assetId: videoAssetId },
-          costCredits: creditsAmount,
-        })
-      );
-    }
-
-    await safe("recordUsage", () =>
-      recordUsageEvent({
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: videoAssetId ?? null,
-        tool: "reels",
-        provider: resolvedModel.provider,
-        model: resolvedModel.model,
-        unitType: "video_seconds",
-        units: billedDuration,
-        creditsCharged: creditsAmount,
-        metadata: { jobType: "video_motion_control", modelId, mode, pricingKey },
-      })
+    return NextResponse.json(
+      { status: "processing", predictionId: prediction.id },
+      { status: 202 },
     );
-
-    const successResponse = {
-      videoUrl: publicUrl,
-      storagePath,
-      historyItem,
-      savedToCloud: true,
-    };
-    if (generationRequestId) {
-      await safe("idemSuccess", () =>
-        finishGenerationRequestSuccess({
-          id: generationRequestId!,
-          jobId: jobId ?? null,
-          assetId: videoAssetId ?? null,
-          responseJson: successResponse,
-        })
-      );
-    }
-    return NextResponse.json(successResponse);
   } catch (error: unknown) {
     // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
     const cancelled = isCancellation(error);
@@ -582,12 +531,8 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   } finally {
-    if (tempRefPaths.length > 0) {
-      try {
-        await supabaseServer.storage.from(STORAGE_BUCKET).remove(tempRefPaths);
-      } catch (e) {
-        console.warn("[motion-control] temp reference cleanup failed:", e);
-      }
+    if (tempRefPaths.length > 0 && !predictionStarted) {
+      await cleanupMotionControlTempRefs(tempRefPaths);
     }
   }
 }
