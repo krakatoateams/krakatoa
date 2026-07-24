@@ -80,6 +80,7 @@ import {
   MOTION_CONTROL_MODELS,
   getMotionControlModel,
   effectiveMotionControlDuration,
+  motionControlRefVideoDurationError,
   formatMotionControlModelCreditHint,
   motionControlResolutionLabel,
   characterOrientationChipLabel,
@@ -88,6 +89,7 @@ import {
   CHARACTER_ORIENTATION_TOOLTIP,
   MOTION_CONTROL_QUALITY_TOOLTIP,
   motionControlVideoHint,
+  motionControlRefDurationRangeLabel,
   MOTION_CONTROL_CHARACTER_HINT,
   MOTION_CONTROL_PROMPT_PLACEHOLDER,
   motionControlSoundTooltip,
@@ -1669,7 +1671,9 @@ function MotionControlComposer({
   const videoReady = motionVideo.done.length > 0;
   const anyUploading =
     motionVideo.uploading || (charSource === "upload" && charImage.uploading);
-  const canGenerate = !loading && !anyUploading && imageReady && videoReady;
+  const durationError = motionControlRefVideoDurationError(videoDurationSec, orientation);
+  const canGenerate =
+    !loading && !anyUploading && imageReady && videoReady && !durationError;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1799,9 +1803,26 @@ function MotionControlComposer({
               hint={motionControlVideoHint({
                 refDurationSec: videoDurationSec,
                 billedDurationSec: billedDuration,
+                orientation,
               })}
             />
           </div>
+
+          {durationError ? (
+            <p className="mt-2 text-sm leading-snug text-amber-300/90">{durationError}</p>
+          ) : videoReady && videoDurationSec != null ? (
+            <p className="mt-2 text-sm leading-snug text-gray-400">
+              {orientation === "image" ? "Photo angle" : "Follow motion"} limit:{" "}
+              <span className="text-gray-300">{motionControlRefDurationRangeLabel(orientation)}</span>
+              {orientation === "image" && videoDurationSec >= 9 ? (
+                <span className="text-amber-300/90">
+                  {" "}
+                  — your clip is {videoDurationSec.toFixed(1)}s; use Follow motion if you need 10s or
+                  longer.
+                </span>
+              ) : null}
+            </p>
+          ) : null}
 
           {/* Advanced settings (collapsed by default). The prompt is optional —
               Kling generates from just the character image + motion video — so we
@@ -1938,6 +1959,10 @@ function MotionControlComposer({
           {!imageReady || !videoReady ? (
             <p className="mt-3 pl-1 text-sm text-amber-300/80">
               Upload a character photo and a motion video—both are required to generate.
+            </p>
+          ) : !durationError ? (
+            <p className="mt-3 pl-1 text-sm text-gray-500">
+              Motion clip length depends on orientation: Photo angle 3–9s · Follow motion 3–30s.
             </p>
           ) : null}
         </div>

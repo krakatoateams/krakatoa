@@ -27,6 +27,7 @@ import {
   isValidMotionControlMode,
   isValidCharacterOrientation,
   effectiveMotionControlDuration,
+  motionControlRefVideoDurationError,
   buildMotionControlProviderInput,
   motionControlResolutionLabel,
   type MotionControlMode,
@@ -194,6 +195,15 @@ export async function POST(req: Request) {
     }
 
     const orientation = characterOrientation as CharacterOrientation;
+
+    const durationError = motionControlRefVideoDurationError(
+      Number.isFinite(refVideoDurationRaw) ? refVideoDurationRaw : null,
+      orientation,
+    );
+    if (durationError) {
+      return NextResponse.json({ error: durationError }, { status: 400 });
+    }
+
     const billedDuration = effectiveMotionControlDuration({
       model,
       refVideoDurationSec: Number.isFinite(refVideoDurationRaw) ? refVideoDurationRaw : null,

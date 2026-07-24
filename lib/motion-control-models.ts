@@ -133,26 +133,53 @@ export function isValidCharacterOrientation(orientation: string): orientation is
   return orientation === "image" || orientation === "video";
 }
 
+/** Kling rejects reference videos at exactly 10.0s for image orientation (strict < 10). */
+export const MOTION_CONTROL_IMAGE_MAX_REF_SEC = 10;
+
+/** Human-readable motion-clip length for the selected orientation (provider-safe). */
+export function motionControlRefDurationRangeLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "3–9s" : "3–30s";
+}
+
+export function motionControlRefVideoDurationError(
+  durationSec: number | null | undefined,
+  orientation: CharacterOrientation,
+): string | null {
+  const min = 3;
+  const max = orientation === "video" ? 30 : MOTION_CONTROL_IMAGE_MAX_REF_SEC;
+  if (durationSec == null || !Number.isFinite(durationSec)) return null;
+  if (durationSec < min) {
+    return `Motion clip must be at least ${min} seconds (yours is ${durationSec.toFixed(1)}s).`;
+  }
+  if (orientation === "image" && durationSec >= max) {
+    return `Photo angle allows motion clips under 10 seconds — use 9s or less to be safe (yours is ${durationSec.toFixed(1)}s). Switch to Follow motion for clips up to 30s, or trim the video.`;
+  }
+  if (orientation === "video" && durationSec > max) {
+    return `Follow motion allows motion clips up to ${max} seconds (yours is ${durationSec.toFixed(1)}s). Trim the video or pick a shorter clip.`;
+  }
+  return null;
+}
+
 /** Chip trigger label for character_orientation (image = photo angle, video = follow clip). */
 export function characterOrientationChipLabel(orientation: CharacterOrientation): string {
-  return orientation === "image" ? "Photo angle · ≤10s" : "Follow motion · ≤30s";
+  return orientation === "image" ? "Photo angle · 3–9s" : "Follow motion · 3–30s";
 }
 
 /** Menu row label (slightly longer than the chip). */
 export function characterOrientationMenuLabel(orientation: CharacterOrientation): string {
-  return orientation === "image" ? "Photo angle · up to 10s" : "Follow motion · up to 30s";
+  return orientation === "image" ? "Photo angle" : "Follow motion";
 }
 
-/** Short hint beside each menu option. */
+/** Short hint beside each menu option — includes duration limits. */
 export function characterOrientationMenuHint(orientation: CharacterOrientation): string {
   return orientation === "image"
-    ? "Stays oriented like your photo"
-    : "Turns & poses like the clip";
+    ? "Face like your photo · motion clip 3–9s"
+    : "Turns like the clip · motion clip 3–30s";
 }
 
 /** Hover tooltip on the orientation chip. */
 export const CHARACTER_ORIENTATION_TOOLTIP =
-  "How your character is angled in the result. Photo angle keeps them facing like your uploaded image (max 10s). Follow motion makes them turn and pose like the person in your motion clip (max 30s). Does not change the background.";
+  "Photo angle: character faces like your photo — motion clip 3–9s (provider max 10s; exactly 10s often fails). Follow motion: character moves like the clip — motion clip 3–30s. Use Follow motion for dance, tai chi, or any clip around 10s+.";
 
 /** Hover tooltip on the quality (mode) chip. */
 export const MOTION_CONTROL_QUALITY_TOOLTIP =
@@ -162,11 +189,14 @@ export const MOTION_CONTROL_QUALITY_TOOLTIP =
 export function motionControlVideoHint(params: {
   refDurationSec: number | null;
   billedDurationSec: number;
+  orientation: CharacterOrientation;
 }): string {
+  const limit = motionControlRefDurationRangeLabel(params.orientation);
+  const modeLabel = params.orientation === "image" ? "Photo angle" : "Follow motion";
   if (params.refDurationSec != null) {
-    return `Short clip of the movement to copy (dance, walk, gesture, etc.). ~${Math.round(params.refDurationSec)}s uploaded · billed ${params.billedDurationSec}s. MP4 or MOV, 3–30s.`;
+    return `Movement to copy (dance, walk, gestures). Yours: ${params.refDurationSec.toFixed(1)}s · billed ${params.billedDurationSec}s. With ${modeLabel}, keep the clip within ${limit}. MP4 or MOV, max 100 MB.`;
   }
-  return "Short clip of the movement to copy—dance, walk, gestures, etc. Your character performs these actions. MP4 or MOV, 3–30s.";
+  return `Movement to copy — your character performs these actions. Photo angle: motion clip 3–9s. Follow motion: motion clip 3–30s. MP4 or MOV, max 100 MB.`;
 }
 
 /** PhotoLibraryPicker hint for the character image. */
@@ -203,7 +233,12 @@ export function effectiveMotionControlDuration(params: {
   const raw = params.refVideoDurationSec;
   // Unknown duration → assume the cap (conservative; never undercharge).
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return cap;
-  return Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
+  const billed = Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
+  // Image orientation: provider rejects duration >= 10s — bill at most 9s when at the limit.
+  if (params.orientation === "image" && billed >= MOTION_CONTROL_IMAGE_MAX_REF_SEC) {
+    return MOTION_CONTROL_IMAGE_MAX_REF_SEC - 1;
+  }
+  return billed;
 }
 
 /** Build the Replicate input for Kling Motion Control (v2.6 / v3 — same shape). */
