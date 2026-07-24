@@ -56,6 +56,8 @@ export type StepLogger = {
 
 export type ReelsPipelineContext = {
   replicate: Replicate;
+  /** NextAuth users.id — scopes Supabase Storage under `videos/{userId}/`. */
+  userId: string;
   /** Validated up front by the route so the pipeline can fail fast on misconfig. */
   rendiApiKey: string;
   models: ReelsModelSet;

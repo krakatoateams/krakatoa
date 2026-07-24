@@ -21,7 +21,11 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Run development server**: `npm run dev`
 - **Build for production**: `npm run build`
 - **Linting**: `npm run lint`
+- **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
+- **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`
+- **Migrate to user-first paths** (`photos|videos/{userId}` → `{userId}/photos|videos`): `npm run storage:migrate-user-first` (dry-run, scans DB + storage) / `npm run storage:migrate-user-first -- --execute` / optional `--prune-stale-db` `--delete-global-temp`
+- **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -43,6 +47,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
 - `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
 - `public/`: Static assets (images, fonts, icons).
+  - **PWA**: `public/icons/` (16–512px + maskable + apple-touch), `public/sw.js` (minimal install SW), source logo `Logo White transparent.svg`. Next.js serves `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png`, and `app/manifest.ts` → `/manifest.webmanifest`. Regenerate with `npm run icons:generate`.
 
 ## Platform Foundation & Credits
 Krakatoa's product identity, observability, and billing primitives live in seven Postgres tables that all in-scope generation routes read/write through typed helpers in `lib/`. Ownership boundary is `profile_id`; server routes use the service role and enforce ownership in application code (RLS is enabled on every table as deny-by-default).
@@ -127,10 +132,24 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
 ### 5. Supabase Storage (Reels Creator)
-- **Canonical paths:** `lib/storage-buckets.ts` — bucket name `STORAGE_BUCKET` from `SUPABASE_STORAGE_BUCKET` or default **`krakatoa`**.
-- **Final deliverable:** `videos/reels_<timestamp>.mp4` (Seedance) or `videos/reels_veo_<timestamp>.mp4` (Veo) — public URL returned as `videoUrl` to the client for preview and download.
-- **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** (Veo uses `captions_veo_<timestamp>.ass`) for Rendi to fetch; deleted after a successful run.
-- **Product Photo** uses **`photos/`** in the same bucket — never under `videos/`.
+- **Canonical paths:** User media is scoped under `{userId}/` first. Video studio: `{userId}/videos/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `{userId}/videos/generated/storyboard/`. Photo studio: `{userId}/photos/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `{userId}/photos/uploads/reference/`. Transient video refs: `{userId}/videos/temp/`. Legacy `photos|videos/{userId}/…` paths remain readable until `npm run storage:migrate-user-first -- --execute`.
+- **Final deliverable (Reels Creator):** `{userId}/videos/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
+- **Transient captions:** `.ass` under **`{userId}/videos/temp/`** for Rendi; deleted after a successful run.
+- **Product Photo** uses **`{userId}/photos/`** in the same bucket — never under `videos/`.
+- **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
+- **Private access (live):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs and `useSignedMediaUrl` sign on read. Bucket `krakatoa` is **private** (migration `049_storage_bucket_private.sql`). Legacy `/api/upload` returns 410 — use `POST /api/upload/sign`.
+
+## Admin Config v2 (unified control panel)
+
+**Status:** Cutover complete. Photo + Video mode matrices and per-model catalog on/off persist via `feature_model_configs` and `model_catalog_configs`.
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/admin/admin-config-v2-plan.md`](docs/admin/admin-config-v2-plan.md) | Authoritative plan for agents (architecture, phases, parity checklist) |
+| [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
+| [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |
+
+Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/model-catalog-configs.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
 
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
@@ -144,7 +163,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
    - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Public anon key if you use a browser Supabase client (see `README.md`); server pipelines here rely on the service role for Storage.
    - `SUPABASE_SERVICE_ROLE_KEY` — Server-side Storage/DB (used by generation routes and server helpers).
-   - `SUPABASE_STORAGE_BUCKET` — Optional override for the public Storage bucket name (default `krakatoa`).
+   - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
    - `CRON_SECRET` — Protects `app/api/cron` if used.

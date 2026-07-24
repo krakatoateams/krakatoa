@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createReplicateClient, runWithRetry } from "@/lib/replicate-utils";
 import { extractAudioMp3 } from "@/lib/rendi";
+import { getSessionUserId } from "@/lib/resolve-user";
+import {
+  assertPathOwnedByUser,
+  resolveStoragePath,
+  signStoragePathForPipeline,
+} from "@/lib/storage-signed-url";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { getScheduleModels, replicateRef } from "@/lib/model-resolver";
 
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
-
-const WHISPER_MODEL =
-  "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c";
-const LLM_MODEL = "google/gemini-2.5-flash";
 
 function joinReplicateOutput(output: unknown): string {
   if (Array.isArray(output)) {
@@ -161,6 +165,32 @@ function buildGeneralPrompt(videos: { title?: string; tags?: string }[]): string
   return lines.join("\n");
 }
 
+function isSupabaseSignedUrl(url: string): boolean {
+  return url.includes("/object/sign/");
+}
+
+/** URL external services (Rendi) can fetch — never strip signed URL tokens. */
+function urlForExternalFetch(url: string): string {
+  if (isSupabaseSignedUrl(url)) return url;
+  return url.split("?")[0];
+}
+
+/** Resolve a fetchable video URL for Rendi/Whisper (pipeline TTL when ours). */
+async function resolveCaptionVideoFetchUrl(params: {
+  videoUrl: string;
+  storagePath: string;
+}): Promise<string | null> {
+  const path = resolveStoragePath(params.storagePath || null, params.videoUrl || null);
+  if (path) {
+    const userId = await getSessionUserId();
+    if (!userId) throw new Error("Not authenticated.");
+    await assertPathOwnedByUser(path, userId);
+    return signStoragePathForPipeline(path, userId);
+  }
+  if (params.videoUrl.startsWith("http")) return urlForExternalFetch(params.videoUrl);
+  return null;
+}
+
 function buildPolishPrompt(existingCaption: string): string {
   return [
     "You are a YouTube Shorts content expert.",
@@ -184,16 +214,29 @@ function buildPolishPrompt(existingCaption: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    try {
+      await assertToolEnabled("schedule");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+      }
+      throw e;
+    }
+
     const body = await req.json();
     const mode: string = (body.mode ?? "generate").toString();
     const description: string = (body.description ?? "").toString().trim();
     const title: string = (body.title ?? "").toString().trim();
     const tags: string = (body.tags ?? "").toString().trim();
     const videoUrl: string = (body.videoUrl ?? "").toString().trim();
+    const storagePath: string = (body.storage_path ?? body.storagePath ?? "").toString().trim();
     const existingCaption: string = (body.existingCaption ?? "").toString().trim();
     const format: CaptionFormat = body.format === "video" ? "video" : "short";
 
     const replicate = createReplicateClient();
+    const { llm, whisper } = await getScheduleModels();
+    const llmModel = replicateRef(llm);
+    const whisperModel = replicateRef(whisper);
 
     // ----- General mode: one shared caption for a batch, no transcription -----
     if (mode === "general") {
@@ -215,7 +258,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const generalOutput = await runWithRetry(replicate, LLM_MODEL, {
+      const generalOutput = await runWithRetry(replicate, llmModel, {
         input: {
           prompt: buildGeneralPrompt(videos),
           max_tokens: 300,
@@ -243,7 +286,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const polishOutput = await runWithRetry(replicate, LLM_MODEL, {
+      const polishOutput = await runWithRetry(replicate, llmModel, {
         input: {
           prompt: buildPolishPrompt(existingCaption),
           max_tokens: 300,
@@ -263,11 +306,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ----- Generate mode: build a caption from video/context -----
-    if (!description && !title && !tags && !videoUrl) {
+    if (!description && !title && !tags && !videoUrl && !storagePath) {
       return NextResponse.json(
         {
           error:
-            "Provide at least one of: videoUrl, title, tags, or description.",
+            "Provide at least one of: videoUrl, storage_path, title, tags, or description.",
         },
         { status: 400 },
       );
@@ -279,18 +322,34 @@ export async function POST(req: NextRequest) {
     // "failed" = extraction/Whisper threw (e.g. missing RENDI_API_KEY, provider
     // error, timeout). Defaults to "no_audio" (incl. the no-videoUrl case).
     let transcriptStatus: "ok" | "no_audio" | "failed" = "no_audio";
-    if (videoUrl) {
-      // Strip query params so the URL ends in a real file extension (.mp4/.mov).
-      // Supabase public URLs carry no auth token in the query string, so this is safe.
-      const sourceUrl = videoUrl.split("?")[0];
+    if (videoUrl || storagePath) {
+      let sourceUrl: string;
+      try {
+        const resolved = await resolveCaptionVideoFetchUrl({ videoUrl, storagePath });
+        if (!resolved) {
+          return NextResponse.json(
+            { error: "Could not resolve a fetchable video URL." },
+            { status: 400 },
+          );
+        }
+        sourceUrl = resolved;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = /not authenticated/i.test(message)
+          ? 401
+          : /forbidden/i.test(message)
+            ? 403
+            : 400;
+        return NextResponse.json({ error: message }, { status });
+      }
       try {
         // Whisper is unreliable demuxing audio straight from a video container,
         // so extract a hosted MP3 via Rendi first, then transcribe that.
-        console.log("[generate-caption] extracting audio from:", sourceUrl);
+        console.log("[generate-caption] extracting audio from:", sourceUrl.split("?")[0]);
         const audioUrl = await extractAudioMp3(sourceUrl);
         console.log("[generate-caption] whisper audio url:", audioUrl);
 
-        const wRes = await runWithRetry(replicate, WHISPER_MODEL, {
+        const wRes = await runWithRetry(replicate, whisperModel, {
           input: {
             audio: audioUrl,
             // No `language` pin → Whisper auto-detects the spoken language.
@@ -330,7 +389,7 @@ export async function POST(req: NextRequest) {
       format,
     });
 
-    const output = await runWithRetry(replicate, LLM_MODEL, {
+    const output = await runWithRetry(replicate, llmModel, {
       input: {
         prompt,
         // Long-form descriptions get more room than the 300-char Shorts caption.

@@ -72,6 +72,15 @@ export const REELS_ENGINES: { id: ReelsEngine; label: string; blurb: string }[] 
   },
 ];
 
+/**
+ * Catalog model id each engine actually runs (reels.video / veo.video in model_configs).
+ * Reels Creator UI gates engines on these ids — not every reels-creator-eligible tier.
+ */
+export const REELS_ENGINE_CATALOG_MODEL_ID: Record<ReelsEngine, string> = {
+  seedance: "seedance2_fast",
+  veo: "veo31_lite",
+};
+
 /** Display label for a Reels Creator engine chip / success summary. */
 export function reelsEngineLabel(engine: ReelsEngine): string {
   return REELS_ENGINES.find((e) => e.id === engine)?.label ?? engine;

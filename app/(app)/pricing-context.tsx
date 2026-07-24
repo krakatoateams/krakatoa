@@ -8,6 +8,9 @@ import {
   DEFAULT_BILLING_SETTINGS,
   normalizeBillingSettings,
   calculateCredits,
+  videoCreditsFromRow,
+  imageCreditsFromRow,
+  type PricingRow,
 } from "@/lib/pricing-math";
 import { V2_PRICING_DEFAULTS } from "@/lib/pricing-defaults";
 
@@ -31,6 +34,7 @@ export type PublicPricingConfig = {
   displayName: string;
   pricingType: "fixed" | "per_second" | "per_image";
   enabled: boolean;
+  creditAmount: number | null;
   providerCostUsd: number | null;
   costUnit: CostUnit | null;
   pricingGroup: string | null;
@@ -62,21 +66,43 @@ function toConfigMap(raw: unknown): Record<string, PublicPricingConfig> {
 }
 
 /**
- * Provider USD cost + cost unit for a pricing key: fetched v2 config first, then
- * the built-in v2 default. Returns null only for an unknown key (should not
- * happen for any key the UI uses).
+ * Normalized pricing row for a key: fetched config first, then built-in v2 default.
  */
-function resolveCost(
+function resolveRow(
   configs: Record<string, PublicPricingConfig>,
   pricingKey: string
-): { providerCostUsd: number; costUnit: CostUnit } | null {
+): PricingRow | null {
   const cfg = configs[pricingKey];
-  if (cfg && typeof cfg.providerCostUsd === "number" && Number.isFinite(cfg.providerCostUsd) && cfg.costUnit) {
-    return { providerCostUsd: cfg.providerCostUsd, costUnit: cfg.costUnit };
+  if (cfg) {
+    return {
+      providerCostUsd: cfg.providerCostUsd,
+      costUnit: cfg.costUnit,
+      creditAmount: cfg.creditAmount,
+      enabled: cfg.enabled,
+    };
   }
   const def = V2_PRICING_DEFAULTS[pricingKey];
-  if (def) return { providerCostUsd: def.providerCostUsd, costUnit: def.costUnit };
+  if (def) {
+    return {
+      providerCostUsd: def.providerCostUsd,
+      costUnit: def.costUnit,
+      creditAmount: null,
+      enabled: true,
+    };
+  }
   return null;
+}
+
+function fallbackPerSecondRate(pricingKey: string, settings: BillingSettings): number {
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (!def || def.costUnit !== "per_second") return 2;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
+}
+
+function fallbackPerImage(pricingKey: string, settings: BillingSettings): number {
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (!def || def.costUnit !== "per_image") return 0;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
 }
 
 const DEFAULT_STATE: PricingState = {
@@ -84,17 +110,12 @@ const DEFAULT_STATE: PricingState = {
   configs: {},
   loading: false,
   videoCredits: (pricingKey, durationSec) => {
-    const c = resolveCost({}, pricingKey);
-    if (!c) return 1;
-    return Math.max(
-      1,
-      calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: durationSec, settings: DEFAULT_BILLING_SETTINGS })
-    );
+    const row = resolveRow({}, pricingKey);
+    return videoCreditsFromRow(row, durationSec, DEFAULT_BILLING_SETTINGS, fallbackPerSecondRate(pricingKey, DEFAULT_BILLING_SETTINGS));
   },
   imageCredits: (pricingKey, imageCount) => {
-    const c = resolveCost({}, pricingKey);
-    if (!c) return 0;
-    return calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: imageCount, settings: DEFAULT_BILLING_SETTINGS });
+    const row = resolveRow({}, pricingKey);
+    return imageCreditsFromRow(row, imageCount, DEFAULT_BILLING_SETTINGS, fallbackPerImage(pricingKey, DEFAULT_BILLING_SETTINGS));
   },
   creditsFor: () => 0,
 };
@@ -140,24 +161,29 @@ export function PricingProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<PricingState>(() => {
     const videoCredits = (pricingKey: string, durationSec: number): number => {
-      const c = resolveCost(configs, pricingKey);
-      if (!c) return 1; // video is never zero-cost; unknown key should not happen
-      return Math.max(
-        1,
-        calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: durationSec, settings: billingSettings })
+      const row = resolveRow(configs, pricingKey);
+      return videoCreditsFromRow(
+        row,
+        durationSec,
+        billingSettings,
+        fallbackPerSecondRate(pricingKey, billingSettings)
       );
     };
 
     const imageCredits = (pricingKey: string, imageCount: number): number => {
-      const c = resolveCost(configs, pricingKey);
-      if (!c) return 0;
-      return calculateCredits({ providerCostUsd: c.providerCostUsd, unitCount: imageCount, settings: billingSettings });
+      const row = resolveRow(configs, pricingKey);
+      return imageCreditsFromRow(
+        row,
+        imageCount,
+        billingSettings,
+        fallbackPerImage(pricingKey, billingSettings)
+      );
     };
 
     const creditsFor = (pricingKey: string, unitCount: number): number => {
-      const c = resolveCost(configs, pricingKey);
-      if (!c) return 0;
-      return c.costUnit === "per_second"
+      const row = resolveRow(configs, pricingKey);
+      if (!row?.costUnit) return 0;
+      return row.costUnit === "per_second"
         ? videoCredits(pricingKey, unitCount)
         : imageCredits(pricingKey, unitCount);
     };

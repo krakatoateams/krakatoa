@@ -6,10 +6,11 @@ import { klingV3MotionControlPricingKey, kling26MotionControlPricingKey } from "
  * Motion Control is a distinct generation shape from Text to Video: it REQUIRES a
  * reference image (the character) and a reference video (the motion to copy), and
  * the output clip length follows the reference video (not a user-picked duration).
- * Because the input/billing shape differs so much from VIDEO_MODELS, it lives in
- * its own small registry. Adding a model later = one entry here + a builder branch.
  *
- * Starter scope: Kling v3 Motion Control (kwaivgi/kling-v3-motion-control).
+ * Product decision (2026-07): we ship only **Follow motion** (`character_orientation:
+ * "video"`). The provider's **Photo angle** (`"image"`) mode was removed from the UI
+ * — it capped clips at ~10s and overlapped poorly with real dance/action refs. See
+ * docs/video/motion-control.md.
  */
 
 export type MotionControlModelId = "kling_v3_motion" | "kling26_motion";
@@ -18,11 +19,13 @@ export type MotionControlModelId = "kling_v3_motion" | "kling26_motion";
 export type MotionControlMode = "std" | "pro";
 
 /**
- * Where the generated character's orientation comes from:
- *  - "image": match the person in the reference image (clip capped at 10s).
- *  - "video": match the characters in the reference video (clip up to 30s).
+ * Provider `character_orientation` — we only expose Follow motion (`"video"`).
+ * `"image"` (Photo angle) remains in the type for stored job metadata only.
  */
 export type CharacterOrientation = "image" | "video";
+
+/** Only orientation shipped in the product UI and API. */
+export const DEFAULT_CHARACTER_ORIENTATION: CharacterOrientation = "video";
 
 export type MotionControlModel = {
   id: MotionControlModelId;
@@ -54,10 +57,9 @@ export const MOTION_CONTROL_MODEL_REGISTRY: MotionControlModel[] = [
     modes: ["std", "pro"],
     defaultMode: "pro",
     defaultKeepOriginalSound: true,
-    defaultOrientation: "image",
+    defaultOrientation: DEFAULT_CHARACTER_ORIENTATION,
     minDurationSec: 3,
-    // "image" orientation caps the clip at 10s; "video" allows up to 30s.
-    maxDurationForOrientation: (orientation) => (orientation === "video" ? 30 : 10),
+    maxDurationForOrientation: () => 30,
     promptMaxChars: 2500,
     pricingKey: (mode) => klingV3MotionControlPricingKey(mode),
   },
@@ -70,9 +72,9 @@ export const MOTION_CONTROL_MODEL_REGISTRY: MotionControlModel[] = [
     modes: ["std", "pro"],
     defaultMode: "std",
     defaultKeepOriginalSound: true,
-    defaultOrientation: "image",
+    defaultOrientation: DEFAULT_CHARACTER_ORIENTATION,
     minDurationSec: 3,
-    maxDurationForOrientation: (orientation) => (orientation === "video" ? 30 : 10),
+    maxDurationForOrientation: () => 30,
     promptMaxChars: 2500,
     pricingKey: (mode) => kling26MotionControlPricingKey(mode),
   },
@@ -130,7 +132,53 @@ export function isValidMotionControlMode(
 }
 
 export function isValidCharacterOrientation(orientation: string): orientation is CharacterOrientation {
-  return orientation === "image" || orientation === "video";
+  return orientation === "video";
+}
+
+/** Motion clip length for Follow motion (provider-safe). */
+export const MOTION_CONTROL_REF_DURATION_LABEL = "3–30s";
+
+export function motionControlRefVideoDurationError(
+  durationSec: number | null | undefined,
+): string | null {
+  const min = 3;
+  const max = 30;
+  if (durationSec == null || !Number.isFinite(durationSec)) return null;
+  if (durationSec < min) {
+    return `Motion clip must be at least ${min} seconds (yours is ${durationSec.toFixed(1)}s).`;
+  }
+  if (durationSec > max) {
+    return `Motion clip can be up to ${max} seconds (yours is ${durationSec.toFixed(1)}s). Trim the video or pick a shorter clip.`;
+  }
+  return null;
+}
+export const MOTION_CONTROL_QUALITY_TOOLTIP =
+  "Output sharpness. Standard is 720p and costs less. Pro is 1080p, sharper, and uses more credits.";
+
+/** RefGroup hint for the motion reference video upload. */
+export function motionControlVideoHint(params: {
+  refDurationSec: number | null;
+  billedDurationSec: number;
+}): string {
+  if (params.refDurationSec != null) {
+    return `Movement to copy (dance, walk, gestures). Yours: ${params.refDurationSec.toFixed(1)}s · billed ${params.billedDurationSec}s. Keep the clip within ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
+  }
+  return `Movement to copy — your character performs these actions. Motion clip ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
+}
+
+/** PhotoLibraryPicker hint for the character image. */
+export const MOTION_CONTROL_CHARACTER_HINT =
+  "Photo of the person you want to animate. Their appearance in the result comes from this image. Clear face and body. JPG or PNG, max 10 MB.";
+
+/** Advanced prompt placeholder — motion always comes from the reference video. */
+export const MOTION_CONTROL_PROMPT_PLACEHOLDER =
+  'Optional—describe the scene or add details, e.g. "in a snowy park" or "wearing a red jacket". Movement always comes from your motion video.';
+
+/** Tooltip for the original-sound toggle. */
+export function motionControlSoundTooltip(keep: boolean): string {
+  return keep
+    ? "On — the sound from your motion video is included. Click to remove it."
+    : "Off — your result is silent. Click to keep the motion video's sound.";
 }
 
 /** std -> 720p, pro -> 1080p (for display + asset metadata). */
@@ -146,9 +194,8 @@ export function motionControlResolutionLabel(mode: MotionControlMode): string {
 export function effectiveMotionControlDuration(params: {
   model: MotionControlModel;
   refVideoDurationSec: number | null | undefined;
-  orientation: CharacterOrientation;
 }): number {
-  const cap = params.model.maxDurationForOrientation(params.orientation);
+  const cap = params.model.maxDurationForOrientation(DEFAULT_CHARACTER_ORIENTATION);
   const raw = params.refVideoDurationSec;
   // Unknown duration → assume the cap (conservative; never undercharge).
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return cap;
@@ -169,7 +216,7 @@ export function buildMotionControlProviderInput(params: {
     video: params.videoUrl,
     mode: params.mode,
     keep_original_sound: params.keepOriginalSound,
-    character_orientation: params.characterOrientation,
+    character_orientation: DEFAULT_CHARACTER_ORIENTATION,
   };
   const prompt = params.prompt.trim();
   if (prompt) input.prompt = prompt;

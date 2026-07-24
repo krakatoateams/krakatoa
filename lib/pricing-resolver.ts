@@ -4,7 +4,7 @@ import {
   type PricingType,
   type CostUnit,
 } from "@/lib/pricing-configs-db";
-import { INITIAL_DUMMY_CREDITS } from "@/lib/credit-costs";
+import { INITIAL_DUMMY_CREDITS, VIDEO_CREDITS_PER_SECOND } from "@/lib/credit-costs";
 import {
   type BillingSettings,
   type PricingRow,
@@ -12,6 +12,8 @@ import {
   runCreditsFromRow,
   seedancePricingKey,
   veoPricingKey,
+  videoCreditsFromRow,
+  imageCreditsFromRow,
 } from "@/lib/pricing-math";
 import { getBillingSettings } from "@/lib/billing-settings-db";
 import {
@@ -142,54 +144,24 @@ function usableFixedAmount(cfg: PricingConfig | null): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// v2 resolution core — the ONLY source of generation provider costs.
+// v2 resolution helpers
 // ---------------------------------------------------------------------------
 
-type ResolvedCost = {
-  providerCostUsd: number;
-  costUnit: CostUnit;
-  source: "db" | "default";
-};
-
-/**
- * Resolve a pricing key to its authoritative provider USD cost via the v2 chain:
- * DB row -> built-in v2 default -> fail closed. A deprecated/disabled/invalid DB
- * row falls through to the built-in default (never undercharges, never free).
- */
-function resolveProviderCost(
-  pricingKey: string,
-  dbRow: PricingConfig | null
-): ResolvedCost {
-  // 1) v2 DB row: authoritative only when enabled, not deprecated, with a valid
-  //    provider cost and a cost unit.
-  if (dbRow && dbRow.enabled && !dbRow.is_deprecated) {
-    const cost = coerceNum(dbRow.provider_cost_usd);
-    const unit = (dbRow.cost_unit as CostUnit | null) ?? null;
-    if (cost !== null && cost >= 0 && unit !== null) {
-      return { providerCostUsd: cost, costUnit: unit, source: "db" };
-    }
-  }
-
-  // 2) Built-in v2 default.
+/** Fallback per-second rate from a built-in v2 default (for row-helper fallback arg). */
+function defaultPerSecondRate(pricingKey: string, settings: BillingSettings): number {
   const def = V2_PRICING_DEFAULTS[pricingKey];
-  if (def) {
-    if (dbRow && (!dbRow.enabled || dbRow.is_deprecated)) {
-      console.warn(
-        `[pricing-resolver] "${pricingKey}" DB row is disabled/deprecated — using built-in v2 default (${def.providerCostUsd} USD).`
-      );
-    } else if (dbRow) {
-      console.warn(
-        `[pricing-resolver] "${pricingKey}" DB row has no usable provider_cost_usd/cost_unit — using built-in v2 default.`
-      );
-    }
-    return { providerCostUsd: def.providerCostUsd, costUnit: def.costUnit, source: "default" };
-  }
-
-  // 3) Fail closed — unknown pricing key. Caller must surface before any spend.
-  throw new PricingConfigError(pricingKey);
+  if (!def || def.costUnit !== "per_second") return VIDEO_CREDITS_PER_SECOND;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
 }
 
-/** Per-second video credits via the v2 chain. Floors at 1 (never zero-cost). */
+/** Fallback per-image amount from a built-in v2 default. */
+function defaultPerImageAmount(pricingKey: string, settings: BillingSettings): number {
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (!def || def.costUnit !== "per_image") return 0;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
+}
+
+/** Per-second video credits. Option A: credit_amount on DB row wins; else provider $; else built-in. */
 async function computeVideoCreditsV2(
   pricingKey: string,
   durationSec: number
@@ -198,12 +170,30 @@ async function computeVideoCreditsV2(
     getBillingSettings(),
     getPricingConfig(pricingKey),
   ]);
-  const { providerCostUsd } = resolveProviderCost(pricingKey, dbRow);
-  const dur = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
-  return Math.max(1, calculateCredits({ providerCostUsd, unitCount: dur, settings }));
+  const fallbackRate = defaultPerSecondRate(pricingKey, settings);
+
+  if (dbRow && dbRow.enabled && !dbRow.is_deprecated) {
+    return videoCreditsFromRow(toRow(dbRow), durationSec, settings, fallbackRate);
+  }
+
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (def && def.costUnit === "per_second") {
+    if (dbRow && (!dbRow.enabled || dbRow.is_deprecated)) {
+      console.warn(
+        `[pricing-resolver] "${pricingKey}" DB row is disabled/deprecated — using built-in v2 default.`
+      );
+    }
+    const dur = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+    return Math.max(
+      1,
+      calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: dur, settings })
+    );
+  }
+
+  throw new PricingConfigError(pricingKey);
 }
 
-/** Per-image credits via the v2 chain. No 1-credit floor (0-cost honored). */
+/** Per-image credits. Option A: credit_amount on DB row wins; else provider $; else built-in. */
 async function computeImageCreditsV2(
   pricingKey: string,
   imageCount: number
@@ -212,9 +202,19 @@ async function computeImageCreditsV2(
     getBillingSettings(),
     getPricingConfig(pricingKey),
   ]);
-  const { providerCostUsd } = resolveProviderCost(pricingKey, dbRow);
-  const count = Number.isFinite(imageCount) ? Math.max(0, imageCount) : 0;
-  return calculateCredits({ providerCostUsd, unitCount: count, settings });
+  const fallbackPerImage = defaultPerImageAmount(pricingKey, settings);
+
+  if (dbRow && dbRow.enabled && !dbRow.is_deprecated) {
+    return imageCreditsFromRow(toRow(dbRow), imageCount, settings, fallbackPerImage);
+  }
+
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (def && def.costUnit === "per_image") {
+    const count = Number.isFinite(imageCount) ? Math.max(0, imageCount) : 0;
+    return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: count, settings });
+  }
+
+  throw new PricingConfigError(pricingKey);
 }
 
 /**
@@ -354,12 +354,14 @@ export type PublicPricingConfig = {
   displayName: string;
   pricingType: PricingType;
   enabled: boolean;
+  /** Admin-set charge (Option A). When set, runtime bills this instead of deriving from provider $. */
+  creditAmount: number | null;
   providerCostUsd: number | null;
   costUnit: CostUnit | null;
   pricingGroup: string | null;
   variantKey: string | null;
   currency: string;
-  /** Credits for ONE unit at the current billing settings (single final ceil). */
+  /** Credits for ONE unit — matches runtime charge at current billing settings. */
   computedCreditsPreview: number;
   /** Always true for rows in this payload — they are the runtime pricing source. */
   isPrimaryRuntimePrice: true;
@@ -367,15 +369,21 @@ export type PublicPricingConfig = {
 
 function toPublicConfig(cfg: PricingConfig, settings: BillingSettings): PublicPricingConfig {
   const providerCostUsd = coerceNum(cfg.provider_cost_usd);
+  const rawCredit = coerceNum(cfg.credit_amount);
+  const creditAmount =
+    rawCredit !== null && Number.isInteger(rawCredit) && rawCredit >= 0 ? rawCredit : null;
   const computedCreditsPreview =
-    providerCostUsd !== null
-      ? calculateCredits({ providerCostUsd, unitCount: 1, settings })
-      : 0;
+    creditAmount !== null
+      ? creditAmount
+      : providerCostUsd !== null
+        ? calculateCredits({ providerCostUsd, unitCount: 1, settings })
+        : 0;
   return {
     pricingKey: cfg.pricing_key,
     displayName: cfg.display_name,
     pricingType: cfg.pricing_type,
     enabled: cfg.enabled,
+    creditAmount,
     providerCostUsd,
     costUnit: (cfg.cost_unit as CostUnit | null) ?? null,
     pricingGroup: cfg.pricing_group ?? null,

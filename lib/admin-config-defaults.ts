@@ -451,12 +451,14 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "photo.image_balanced": { provider: "replicate", model: "google/nano-banana-2", parameters: {}, enabled: true, is_default: true },
   "photo.image_pro": { provider: "replicate", model: "google/nano-banana-pro", parameters: {}, enabled: true, is_default: true },
   "render.rendi": { provider: "rendi", model: "default", parameters: {}, enabled: true, is_default: true },
+  "schedule.llm": { provider: "replicate", model: "google/gemini-2.5-flash", parameters: {}, enabled: true, is_default: true },
+  "schedule.whisper": { provider: "replicate", model: "vaibhavs10/incredibly-fast-whisper", parameters: { version: WHISPER_VERSION }, enabled: true, is_default: true },
 };
 
 /** Reset defaults keyed by tool_key (mirrors seed 6b). */
 export const TOOL_DEFAULTS: Record<string, ToolDefault> = {
   dashboard: { display_name: "Dashboard", enabled: true, visible_in_sidebar: true, sort_order: 0 },
-  reels: { display_name: "ReelsGen", enabled: true, visible_in_sidebar: true, sort_order: 1 },
+  reels: { display_name: "Video", enabled: true, visible_in_sidebar: true, sort_order: 1 },
   photo: { display_name: "Product Photo", enabled: true, visible_in_sidebar: true, sort_order: 2 },
   ig: { display_name: "IG Automation", enabled: true, visible_in_sidebar: true, sort_order: 3 },
   schedule: { display_name: "Schedule", enabled: true, visible_in_sidebar: true, sort_order: 4 },

@@ -1,22 +1,25 @@
 /**
  * Supabase Storage helpers for the reels pipeline. Captions are uploaded to a
- * transient `videos/temp/` path so Rendi can fetch them by URL, then removed
+ * transient `videos/{userId}/temp/` path so Rendi can fetch them by URL, then removed
  * after a successful run. The final MP4 is downloaded from Rendi and re-uploaded
- * to `videos/` as the public deliverable.
+ * under `videos/{userId}/generated/video/{mode}/`.
  */
 import { supabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
-  videosStoragePath,
-  videosTempStoragePath,
+  videosGeneratedVideoPath,
+  type VideoStudioMode,
+  videosUserTempPath,
 } from "@/lib/storage-buckets";
+import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 
 /** Upload an .ass caption file and return its transient path + public URL. */
 export async function uploadAssCaptions(
+  userId: string,
   assContent: string,
   filename: string
 ): Promise<{ srtFilename: string; srtUrl: string }> {
-  const srtFilename = videosTempStoragePath(filename);
+  const srtFilename = videosUserTempPath(userId, filename);
   const { error } = await supabase.storage
     .from(STORAGE_BUCKET)
     .upload(srtFilename, assContent, {
@@ -28,23 +31,23 @@ export async function uploadAssCaptions(
     console.error("Supabase caption upload error:", error);
     throw new Error("Failed to upload captions to storage");
   }
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(srtFilename);
-  return { srtFilename, srtUrl: publicUrl };
+  const srtUrl = await signStoragePathForPipeline(srtFilename, userId);
+  return { srtFilename, srtUrl };
 }
 
 /** Download the finished video from Rendi and upload it to Supabase. */
 export async function downloadAndStoreFinal(
+  userId: string,
+  mode: VideoStudioMode,
   rendiUrl: string,
   filename: string
-): Promise<{ storagePath: string; publicUrl: string }> {
+): Promise<{ storagePath: string; publicUrl: string; signedUrl: string }> {
   const resp = await fetch(rendiUrl);
   if (!resp.ok) {
     throw new Error(`Failed to download video from Rendi: ${resp.statusText}`);
   }
   const buffer = await resp.arrayBuffer();
-  const storagePath = videosStoragePath(filename);
+  const storagePath = videosGeneratedVideoPath(userId, mode, filename);
   const { error } = await supabase.storage
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
@@ -55,10 +58,8 @@ export async function downloadAndStoreFinal(
   if (error) {
     throw new Error(`Failed to upload final video to Supabase: ${error.message}`);
   }
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
-  return { storagePath, publicUrl };
+  const signedUrl = await signStoragePathForPipeline(storagePath, userId);
+  return { storagePath, publicUrl: signedUrl, signedUrl };
 }
 
 /** Best-effort removal of the transient caption file (never throws). */

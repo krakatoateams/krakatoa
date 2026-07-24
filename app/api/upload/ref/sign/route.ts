@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosTempRefPath } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, videosUserTempRefPath } from "@/lib/storage-buckets";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 
 /**
@@ -44,8 +44,10 @@ const ACCEPTED_MIME_TYPES = new Set([
 export async function POST(req: NextRequest) {
   try {
     // Login gate. A missing/invalid session surfaces as 401; anything else 500.
+    let userId: string;
     try {
-      await requireCurrentProfile();
+      const profile = await requireCurrentProfile();
+      userId = profile.user_id;
     } catch (authErr: unknown) {
       const message =
         authErr instanceof Error ? authErr.message : "Authentication required.";
@@ -87,9 +89,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Sanitise + make unique, placed under videos/temp/refs/.
+    // Sanitise + make unique, placed under videos/{userId}/temp/refs/.
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = videosTempRefPath(
+    const storagePath = videosUserTempRefPath(
+      userId,
       `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`,
     );
 
@@ -105,15 +108,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
-
+    // Read URL is minted after upload via GET /api/storage/sign (object must exist).
     return NextResponse.json({
       bucket: STORAGE_BUCKET,
       path: data.path,
       token: data.token,
-      publicUrl: urlData.publicUrl,
+      storagePath,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to sign upload.";

@@ -12,6 +12,7 @@ import { listToolConfigs, type ToolConfig } from "@/lib/tool-configs-db";
  * tool, which is the only seeded tool_config that covers them):
  *   generate-reels, generate-storyboard, generate-storyboard-video -> reels
  *   generate-photo -> photo
+ *   generate-caption -> schedule
  */
 
 const CACHE_TTL_MS = 60_000;

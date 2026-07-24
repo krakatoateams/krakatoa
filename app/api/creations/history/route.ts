@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseToolsQuery } from "@/lib/creations";
-import { countUserCreationsByTab, listUserCreationsPage } from "@/lib/creations-db";
+import { countUserCreationsByTab, listUserCreationsPage, signCreationItemsMedia } from "@/lib/creations-db";
 import { reconcileProductPhotosFromStorage } from "@/lib/product-photo-storage";
 import { getSessionUserId } from "@/lib/resolve-user";
 
@@ -82,7 +82,8 @@ export async function GET(req: NextRequest) {
       wantsCounts ? countUserCreationsByTab(userId, { tools }) : Promise.resolve(null),
     ]);
 
-    return NextResponse.json({ items, total, ...(counts ? { counts } : {}) });
+    const signedItems = await signCreationItemsMedia(userId, items);
+    return NextResponse.json({ items: signedItems, total, ...(counts ? { counts } : {}) });
   } catch (error: unknown) {
     console.error("[Creations History]", error);
     const message = error instanceof Error ? error.message : String(error);

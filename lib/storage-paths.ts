@@ -7,8 +7,9 @@
  *   - `assets.storage_path` (in the DB) is the source of truth; these helpers
  *     just generate canonical paths to store there.
  *
- * Legacy paths under `videos/` and `photos/` are unaffected — those continue to
- * be produced by the existing tools until they migrate to assets.
+ * Legacy flat paths under `videos/` (scheduler device uploads) are unaffected.
+ * User media uses `{userId}/photos/…` and `{userId}/videos/…` (legacy `photos|videos/{userId}/…`
+ * still readable until `npm run storage:migrate-user-first -- --execute`).
  */
 
 export const PLATFORM_STORAGE_BUCKET =

@@ -20,7 +20,6 @@ import {
   ImageIcon,
   X,
   Sparkles,
-  Repeat,
   UserRound,
   SlidersHorizontal,
   Languages,
@@ -32,6 +31,7 @@ import {
   Download,
   Type,
   Minus,
+  Info,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -43,6 +43,7 @@ import type { CreationHistoryItem } from "@/lib/creations";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import {
   ChipDropdown,
@@ -78,11 +79,18 @@ import {
   MOTION_CONTROL_MODELS,
   getMotionControlModel,
   effectiveMotionControlDuration,
+  motionControlRefVideoDurationError,
   formatMotionControlModelCreditHint,
   motionControlResolutionLabel,
+  MOTION_CONTROL_QUALITY_TOOLTIP,
+  motionControlVideoHint,
+  MOTION_CONTROL_REF_DURATION_LABEL,
+  MOTION_CONTROL_CHARACTER_HINT,
+  MOTION_CONTROL_PROMPT_PLACEHOLDER,
+  motionControlSoundTooltip,
+  DEFAULT_CHARACTER_ORIENTATION,
   type MotionControlModelId,
   type MotionControlMode,
-  type CharacterOrientation,
 } from "@/lib/motion-control-models";
 import {
   resolveStoryboardAspectRatio,
@@ -111,6 +119,15 @@ import {
   type VeoResolution,
 } from "@/lib/reels-models";
 import type { ReelsEngine, ReelsVeoMode } from "@/lib/reels-pipeline/types";
+import {
+  composerHasEnabledModels,
+  filterEnabledCatalog,
+  filterReelsEngines,
+  mapVideoComposerEnablement,
+  snapToEnabledModel,
+  type VideoComposerEnablement,
+  type VideoComposerKey,
+} from "@/lib/video-composer-features";
 
 function describeIdempotencyError(
   status: number,
@@ -126,6 +143,29 @@ function describeIdempotencyError(
     return data?.error || "Missing idempotency key. Please retry.";
   }
   return null;
+}
+
+async function pollMotionControlResult(idempotencyKey: string): Promise<{
+  videoUrl?: string;
+  storagePath?: string;
+  historyItem?: { storagePath?: string } | null;
+}> {
+  const pollMs = 3000;
+  const maxAttempts = 200;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, pollMs));
+    const res = await fetch("/api/generate-motion-control/status", {
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+    const data = await res.json();
+    if (res.ok && data.videoUrl) return data;
+    if (res.status === 202) continue;
+    if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+      throw Object.assign(new Error("Generation cancelled."), { code: "GENERATION_CANCELLED" });
+    }
+    throw new Error(data.error || data.message || "Generation failed");
+  }
+  throw new Error("Generation is taking longer than expected. Check your history shortly.");
 }
 
 async function loadMentionAssetsFromApi(): Promise<MentionAsset[]> {
@@ -148,6 +188,8 @@ const CREATION_TYPES = [
   { id: "storyboard", label: "Storyboard to video", available: true },
   { id: "reels-creator", label: "Reels Creator", available: true },
 ] as const;
+
+type VideoCreationTypeOption = (typeof CREATION_TYPES)[number];
 
 type VideoCreationType =
   | "text2video"
@@ -201,7 +243,7 @@ function CharacterPicker({
       disabled={disabled}
       libraryKind="character"
       libraryEmptyLabel="No saved characters yet."
-      hint="A clear image with a visible face and body. JPG/PNG."
+      hint={MOTION_CONTROL_CHARACTER_HINT}
     />
   );
 }
@@ -238,6 +280,50 @@ function VideoOmniPage() {
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   const { balance, refetch: refetchCredits } = useCreditBalance();
 
+  const [composerEnablement, setComposerEnablement] =
+    useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const loadEnablement = () => {
+      fetch("/api/tools/video/features")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!active || !data?.composers) return;
+          const raw = {} as Record<VideoComposerKey, { enabledTiers: string[]; defaultTier: string }>;
+          for (const c of data.composers) {
+            if (c.key) {
+              raw[c.key as VideoComposerKey] = {
+                enabledTiers: c.enabledModelIds ?? [],
+                defaultTier: c.defaultModelId ?? "",
+              };
+            }
+          }
+          setComposerEnablement(mapVideoComposerEnablement(raw));
+        })
+        .catch(() => {});
+    };
+
+    loadEnablement();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadEnablement();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  const text2videoModels = filterEnabledCatalog(
+    TEXT_TO_VIDEO_MODELS,
+    "text2video",
+    composerEnablement
+  );
+  const availableCreationTypes = CREATION_TYPES.filter((c) =>
+    composerHasEnabledModels(c.id as VideoComposerKey, composerEnablement)
+  );
+
   useEffect(() => {
     void loadMentionAssetsFromApi().then(setMentionAssets);
   }, [historyRefreshKey]);
@@ -256,6 +342,24 @@ function VideoOmniPage() {
 
   const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
+
+  useEffect(() => {
+    if (text2videoModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      text2videoModels,
+      "text2video",
+      composerEnablement
+    ) as VideoModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text2videoModels.map((m) => m.id).join(","), composerEnablement]);
+
+  useEffect(() => {
+    if (availableCreationTypes.length === 0) return;
+    if (availableCreationTypes.some((c) => c.id === creationType)) return;
+    setCreationType(availableCreationTypes[0].id as VideoCreationType);
+  }, [availableCreationTypes, creationType]);
   const supportsMentions =
     model.references.referenceImages > 0 || model.references.firstFrame;
 
@@ -290,7 +394,9 @@ function VideoOmniPage() {
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
@@ -444,7 +550,8 @@ function VideoOmniPage() {
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
 
@@ -509,7 +616,7 @@ function VideoOmniPage() {
               icon={<Layers className="h-3.5 w-3.5" />}
               value={selectedCreation?.label ?? "Creation"}
               activeId="text2video"
-              options={CREATION_TYPES.map((c) => ({
+                options={availableCreationTypes.map((c) => ({
                 id: c.id,
                 label: c.label,
                 hint: c.available ? undefined : "Open",
@@ -524,7 +631,7 @@ function VideoOmniPage() {
                 icon={<Cpu className="h-3.5 w-3.5" />}
                 value={model.modelLabel}
                 activeId={modelId}
-                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                options={text2videoModels.map((m) => ({
                   id: m.id,
                   label: m.modelLabel,
                   hint: formatVideoModelCreditHint(m, videoCredits),
@@ -684,7 +791,7 @@ function VideoOmniPage() {
                 icon={<Cpu className="h-3.5 w-3.5" />}
                 value={model.modelLabel}
                 activeId={modelId}
-                options={TEXT_TO_VIDEO_MODELS.map((m) => ({
+                options={text2videoModels.map((m) => ({
                   id: m.id,
                   label: m.modelLabel,
                   hint: formatVideoModelCreditHint(m, videoCredits),
@@ -726,7 +833,7 @@ function VideoOmniPage() {
 
           {/* References */}
           <div className="mt-4">
-            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500">
+            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
               <Sparkles className="h-3.5 w-3.5 text-purple-300" />
               References
               <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
@@ -745,7 +852,11 @@ function VideoOmniPage() {
                       ? "Remove reference images to use a first frame."
                       : undefined
                   }
-                  hint="Image-to-video starting frame."
+                  hint={
+                    blocksFramesWithRefs && hasRefImages
+                      ? "Starting frame for image-to-video. Remove reference images to use this instead."
+                      : "Starting frame for image-to-video. JPG, PNG, or WebP."
+                  }
                 />
               )}
               {model.references.lastFrame && (
@@ -763,7 +874,7 @@ function VideoOmniPage() {
                         ? "Add a first frame first."
                         : undefined
                   }
-                  hint="End frame (needs a first frame)."
+                  hint="Optional end frame for image-to-video. Upload a first frame to unlock."
                 />
               )}
               {model.references.referenceImages > 0 && (
@@ -782,9 +893,13 @@ function VideoOmniPage() {
                         : undefined
                   }
                   hint={
-                    model.providerFamily === "kling3omni"
-                      ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
-                      : "Scene elements (up to 4). Tag with @ or upload."
+                    blocksFramesWithRefs && hasFrames
+                      ? "Style and scene elements. Remove first/last frame to use reference images instead."
+                      : refImagesBlocked1080p
+                        ? "Style and scene elements. Only available at 480p or 720p — lower the resolution to use."
+                        : model.providerFamily === "kling3omni"
+                          ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
+                          : "Scene elements (up to 4). Tag with @ or upload."
                   }
                 />
               )}
@@ -800,9 +915,11 @@ function VideoOmniPage() {
                     refVideoBlocked4k ? "Reference video isn't supported at 4K." : undefined
                   }
                   hint={
-                    model.providerFamily === "kling3omni"
-                      ? "Motion/style reference (1 clip). Use [Video1] or upload."
-                      : "Motion / style transfer. Use [Video1] or upload."
+                    refVideoBlocked4k
+                      ? "Motion/style reference clip. Not available at 4K — lower the resolution to use."
+                      : model.providerFamily === "kling3omni"
+                        ? "Motion/style reference (1 clip). Use [Video1] in your prompt or upload."
+                        : "Motion / style transfer. Use [Video1] in your prompt or upload."
                   }
                 />
               )}
@@ -819,14 +936,14 @@ function VideoOmniPage() {
                       ? "Add a reference image or video to use audio."
                       : undefined
                   }
-                  hint="Audio-driven / lip-sync. Use [Audio1]…"
+                  hint="Audio-driven / lip-sync. Requires a reference image or video. Use [Audio1] in your prompt or upload."
                 />
               )}
             </div>
           </div>
 
           {!refCheck.ok && (
-            <p className="mt-2 pl-1 text-xs text-amber-300/80">{refCheck.error}</p>
+            <p className="mt-2 pl-1 text-sm text-amber-300/80">{refCheck.error}</p>
           )}
         </form>
         )}
@@ -861,7 +978,7 @@ function VideoOmniPage() {
               <p className="text-sm text-gray-300">
                 {model.modelLabel} · {duration}s · {resolution} · {ASPECT_RATIO_LABELS[aspectRatio]}
               </p>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-sm text-gray-500">
                 Find it in your history below, or generate another.
               </p>
             </div>
@@ -871,6 +988,8 @@ function VideoOmniPage() {
         {creationType === "image2video" && (
           <ImageToVideoComposer
             mentionAssets={mentionAssets}
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -882,6 +1001,8 @@ function VideoOmniPage() {
         {creationType === "motion_control" && (
           <MotionControlComposer
             initialTemplateVideo={initialTemplateVideo}
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -893,6 +1014,8 @@ function VideoOmniPage() {
         {creationType === "storyboard" && (
           <StoryboardToVideoComposer
             initialStoryboardId={initialStoryboardId}
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -903,6 +1026,8 @@ function VideoOmniPage() {
 
         {creationType === "reels-creator" && (
           <ReelsCreatorComposer
+            creationTypes={availableCreationTypes}
+            composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -953,15 +1078,36 @@ const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 // Image to Video — models that require a reference image (Kling v1.5 family).
 function ImageToVideoComposer({
   mentionAssets,
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   mentionAssets: MentionAsset[];
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const image2videoModels = filterEnabledCatalog(
+    IMAGE_TO_VIDEO_MODELS,
+    "image2video",
+    composerEnablement
+  );
   const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_IMAGE_TO_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
+
+  useEffect(() => {
+    if (image2videoModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      image2videoModels,
+      "image2video",
+      composerEnablement
+    ) as VideoModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image2videoModels.map((m) => m.id).join(","), composerEnablement]);
 
   const [prompt, setPrompt] = useState("");
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
@@ -993,7 +1139,9 @@ function ImageToVideoComposer({
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { videoCredits } = usePricing();
@@ -1104,7 +1252,8 @@ function ImageToVideoComposer({
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
       startImage.reset();
       endImage.reset();
@@ -1129,7 +1278,7 @@ function ImageToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Image to video"
             activeId="image2video"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -1144,7 +1293,7 @@ function ImageToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              options={image2videoModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1232,7 +1381,7 @@ function ImageToVideoComposer({
                 multiple
                 group={refImages}
                 disabled={loading}
-                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ or upload.`}
+                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ in the prompt or upload here.`}
               />
             </div>
           )}
@@ -1338,7 +1487,7 @@ function ImageToVideoComposer({
           </div>
 
           {!frameReady ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
               {model.requiresFirstFrame
                 ? imageSource === "library"
                   ? "Pick a start image from your library."
@@ -1358,7 +1507,7 @@ function ImageToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={IMAGE_TO_VIDEO_MODELS.map((m) => ({
+              options={image2videoModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1437,24 +1586,45 @@ function ImageToVideoComposer({
 }
 
 // Motion Control sub-tool. Mirrors the Higgsfield UX: upload your character image
-// + the motion video to copy, optionally write a prompt, pick quality/orientation,
-// and keep (or drop) the reference video's audio. The output clip length follows
+// + the motion video to copy, optionally write a prompt, pick quality,
+// and keep (or drop) the reference video's audio. Character orientation is
+// fixed to Follow motion (see docs/video/motion-control.md).
 // the reference video, so the cost is computed from its measured duration.
 function MotionControlComposer({
   initialTemplateVideo,
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   initialTemplateVideo?: string | null;
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const motionControlModels = filterEnabledCatalog(
+    MOTION_CONTROL_MODELS,
+    "motion_control",
+    composerEnablement
+  );
   const [modelId, setModelId] = useState<MotionControlModelId>(MOTION_CONTROL_MODELS[0].id);
   const model = getMotionControlModel(modelId);
 
+  useEffect(() => {
+    if (motionControlModels.length === 0) return;
+    const next = snapToEnabledModel(
+      modelId,
+      motionControlModels,
+      "motion_control",
+      composerEnablement
+    ) as MotionControlModelId;
+    if (next !== modelId) setModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [motionControlModels.map((m) => m.id).join(","), composerEnablement]);
+
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<MotionControlMode>(model.defaultMode);
-  const [orientation, setOrientation] = useState<CharacterOrientation>(model.defaultOrientation);
   const [keepOriginalSound, setKeepOriginalSound] = useState<boolean>(
     model.defaultKeepOriginalSound
   );
@@ -1469,7 +1639,9 @@ function MotionControlComposer({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
@@ -1520,22 +1692,16 @@ function MotionControlComposer({
   const billedDuration = effectiveMotionControlDuration({
     model,
     refVideoDurationSec: videoDurationSec,
-    orientation,
   });
   const pricingKey = model.pricingKey(mode);
   const cost = videoCredits(pricingKey, billedDuration);
 
-  // Resolve the character image from whichever source is active. A library
-  // character is a permanent creation (public URL), so it carries no temp path —
-  // the server only sweeps temp upload paths, never library items.
+  // Resolve the character image from whichever source is active. Library characters
+  // are resolved server-side via characterCreationId (pipeline-signed URL).
   const resolvedCharacter: { url: string; path: string } | null =
-    charSource === "library"
-      ? libraryChar
-        ? { url: libraryChar.url, path: "" }
-        : null
-      : charImage.done[0]
-        ? { url: charImage.done[0].url, path: charImage.done[0].path }
-        : null;
+    charSource === "upload" && charImage.done[0]
+      ? { url: charImage.done[0].url, path: charImage.done[0].path }
+      : null;
 
   // The driving video comes from a preloaded template (hosted URL) or an upload.
   const resolvedVideo: { url: string; path: string } | null = templateUrl
@@ -1544,11 +1710,14 @@ function MotionControlComposer({
       ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
       : null;
 
-  const imageReady = resolvedCharacter !== null;
+  const imageReady =
+    charSource === "library" ? libraryChar !== null : resolvedCharacter !== null;
   const videoReady = resolvedVideo !== null;
   const anyUploading =
     motionVideo.uploading || (charSource === "upload" && charImage.uploading);
-  const canGenerate = !loading && !anyUploading && imageReady && videoReady;
+  const durationError = motionControlRefVideoDurationError(videoDurationSec);
+  const canGenerate =
+    !loading && !anyUploading && imageReady && videoReady && !durationError;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1558,9 +1727,11 @@ function MotionControlComposer({
       modelId,
       prompt: prompt.trim(),
       mode,
-      characterOrientation: orientation,
+      characterOrientation: DEFAULT_CHARACTER_ORIENTATION,
       keepOriginalSound,
       refVideoDurationSec: videoDurationSec,
+      characterCreationId:
+        charSource === "library" && libraryChar ? libraryChar.id : undefined,
       image: resolvedCharacter,
       video: resolvedVideo,
     };
@@ -1582,7 +1753,7 @@ function MotionControlComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      let data = await response.json();
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -1600,22 +1771,29 @@ function MotionControlComposer({
         throw new Error(data.error || "Generation failed");
       }
 
+      if (response.status === 202 || data.status === "processing") {
+        data = await pollMotionControlResult(attempt.key);
+      }
+
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
       charImage.reset();
       motionVideo.reset();
       setLibraryChar(null);
     } catch (err: unknown) {
+      if (err && typeof err === "object" && "code" in err && err.code === "GENERATION_CANCELLED") {
+        attempt.settle(false);
+        setError(null);
+        return;
+      }
       attempt.settle(false);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);
     }
   };
-
-  const orientationLabel =
-    orientation === "video" ? "Facing: video (≤30s)" : "Facing: photo (≤10s)";
 
   return (
     <>
@@ -1627,7 +1805,7 @@ function MotionControlComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Motion control"
             activeId="motion_control"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -1642,7 +1820,7 @@ function MotionControlComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={MOTION_CONTROL_MODELS.map((m) => ({
+              options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatMotionControlModelCreditHint(m, videoCredits),
@@ -1711,14 +1889,22 @@ function MotionControlComposer({
                 multiple={false}
                 group={motionVideo}
                 disabled={loading}
-                hint={
-                  videoDurationSec
-                    ? `Reference video ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s. MP4/MOV.`
-                    : "Reference motion video, 3–30s. The character copies this motion. MP4/MOV."
-                }
+                hint={motionControlVideoHint({
+                  refDurationSec: videoDurationSec,
+                  billedDurationSec: billedDuration,
+                })}
               />
             )}
           </div>
+
+          {durationError ? (
+            <p className="mt-2 text-sm leading-snug text-amber-300/90">{durationError}</p>
+          ) : videoReady && videoDurationSec != null ? (
+            <p className="mt-2 text-sm leading-snug text-gray-400">
+              Motion clip limit:{" "}
+              <span className="text-gray-300">{MOTION_CONTROL_REF_DURATION_LABEL}</span>
+            </p>
+          ) : null}
 
           {/* Advanced settings (collapsed by default). The prompt is optional —
               Kling generates from just the character image + motion video — so we
@@ -1729,12 +1915,12 @@ function MotionControlComposer({
               type="button"
               onClick={() => setAdvancedOpen((o) => !o)}
               aria-expanded={advancedOpen}
-              className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 transition-colors hover:text-gray-200"
+              className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 transition-colors hover:text-gray-200"
             >
               <SlidersHorizontal className="h-3.5 w-3.5 text-purple-300" />
               Advanced settings
               {!advancedOpen && prompt.trim() && (
-                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-200">
+                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-medium text-purple-200">
                   prompt added
                 </span>
               )}
@@ -1746,13 +1932,13 @@ function MotionControlComposer({
               <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-1 flex items-center gap-2">
                   <span className="text-sm font-semibold text-gray-200">Prompt</span>
-                  <span className="text-[11px] font-medium text-gray-500">optional</span>
+                  <span className="text-sm font-medium text-gray-500">optional</span>
                 </div>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   maxLength={model.promptMaxChars}
-                  placeholder={'Describe background and scene details \u2013 e.g., "A corgi runs in" or "Snowy park setting". Motion is controlled by your reference video.'}
+                  placeholder={MOTION_CONTROL_PROMPT_PLACEHOLDER}
                   rows={3}
                   className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
                 />
@@ -1770,7 +1956,7 @@ function MotionControlComposer({
                 icon={<Maximize2 className="h-3.5 w-3.5" />}
                 value={`${mode === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(mode)}`}
                 activeId={mode}
-                tooltip="Output quality. Standard renders at 720p; Pro is sharper 1080p but costs more credits."
+                tooltip={MOTION_CONTROL_QUALITY_TOOLTIP}
                 options={model.modes.map((m) => ({
                   id: m,
                   label: `${m === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(m)}`,
@@ -1779,28 +1965,9 @@ function MotionControlComposer({
                 onSelect={(id) => setMode(id as MotionControlMode)}
                 disabled={loading}
               />
-              <ChipDropdown
-                sheetTitle="Select orientation"
-                square
-                showChevron={false}
-                icon={<Repeat className="h-3.5 w-3.5" />}
-                value={orientationLabel}
-                activeId={orientation}
-                tooltip="Which way your character faces in the result. “Photo” keeps the angle from your character image (clips up to 10s). “Video” makes the character follow the angles in your motion clip (clips up to 30s). This does not change the background."
-                options={[
-                  { id: "image", label: "Facing: photo (≤10s)" },
-                  { id: "video", label: "Facing: video (≤30s)" },
-                ]}
-                onSelect={(id) => setOrientation(id as CharacterOrientation)}
-                disabled={loading}
-              />
               <Tooltip
                 className="flex-1 lg:flex-none"
-                label={
-                  keepOriginalSound
-                    ? "On — your result keeps the reference video's original audio. Click to mute it."
-                    : "Off — the reference video's audio is removed. Click to keep it."
-                }
+                label={motionControlSoundTooltip(keepOriginalSound)}
               >
                 <button
                   type="button"
@@ -1851,8 +2018,12 @@ function MotionControlComposer({
           </div>
 
           {!imageReady || !videoReady ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
-              Add both your character image and a motion video to generate.
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
+              Upload a character photo and a motion video—both are required to generate.
+            </p>
+          ) : !durationError ? (
+            <p className="mt-3 pl-1 text-sm text-gray-500">
+              Motion clip length: {MOTION_CONTROL_REF_DURATION_LABEL}.
             </p>
           ) : null}
         </div>
@@ -1867,7 +2038,7 @@ function MotionControlComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={MOTION_CONTROL_MODELS.map((m) => ({
+              options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatMotionControlModelCreditHint(m, videoCredits),
@@ -1938,7 +2109,7 @@ function MotionControlComposer({
             <p className="text-sm text-gray-300">
               {model.modelLabel} · {mode === "std" ? "Standard" : "Pro"} · {motionControlResolutionLabel(mode)}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-sm text-gray-500">
               Find it in your history below, or generate another.
             </p>
           </div>
@@ -2120,7 +2291,7 @@ function ImportStoryboardModal({
               <>
                 <Upload className="h-6 w-6 text-gray-400" />
                 <span className="text-sm text-gray-300">Click to choose an image</span>
-                <span className="text-[11px] text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
+                <span className="text-sm text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
               </>
             )}
             <input
@@ -2131,14 +2302,20 @@ function ImportStoryboardModal({
               onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             />
             {previewUrl && (
-              <span className="text-[11px] font-semibold text-purple-300">Change image</span>
+              <span className="text-sm font-semibold text-purple-300">Change image</span>
             )}
           </label>
 
           {/* Optional description */}
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <label className="mb-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
               Description <span className="text-gray-600">(optional)</span>
+              <Tooltip label="Briefly describe what should happen in the video. Helps the AI analyze your storyboard image.">
+                <Info
+                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  aria-label="What the description is for"
+                />
+              </Tooltip>
             </label>
             <textarea
               value={description}
@@ -2202,7 +2379,7 @@ function ImportStoryboardModal({
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
+            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -2210,7 +2387,7 @@ function ImportStoryboardModal({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
-          <p className="text-[11px] text-gray-500">
+          <p className="text-sm text-gray-500">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
           <CreditActionButton
@@ -2231,13 +2408,22 @@ function ImportStoryboardModal({
 
 function StoryboardToVideoComposer({
   initialStoryboardId,
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   initialStoryboardId: string | null;
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const storyboardModels = filterEnabledCatalog(
+    STORYBOARD_VIDEO_MODEL_IDS.map((id) => getVideoModel(id)),
+    "storyboard",
+    composerEnablement
+  );
   const { videoCredits } = usePricing();
   const { balance } = useCreditBalance();
 
@@ -2247,6 +2433,18 @@ function StoryboardToVideoComposer({
   const [videoModelId, setVideoModelId] = useState<StoryboardVideoModelId>(
     DEFAULT_STORYBOARD_VIDEO_MODEL_ID
   );
+
+  useEffect(() => {
+    if (storyboardModels.length === 0) return;
+    const next = snapToEnabledModel(
+      videoModelId,
+      storyboardModels,
+      "storyboard",
+      composerEnablement
+    ) as StoryboardVideoModelId;
+    if (next !== videoModelId) setVideoModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyboardModels.map((m) => m.id).join(","), composerEnablement]);
   const [resolution, setResolution] = useState<"480p" | "720p">("480p");
   // Aspect mirrors the selected storyboard's stored orientation (locked) so the
   // clip never flips. Only editable for legacy storyboards that have no ratio.
@@ -2256,7 +2454,9 @@ function StoryboardToVideoComposer({
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
   // synchronous in-flight lock, so a double-click or a retry after a network
@@ -2370,7 +2570,8 @@ function StoryboardToVideoComposer({
 
     setLoading(true);
     setError(null);
-    setResultUrl(null);
+    setResultPath(null);
+    setResultSeed(null);
     try {
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
@@ -2414,7 +2615,8 @@ function StoryboardToVideoComposer({
           cur.map((s) => (s.id === selectedId ? { ...s, seedancePrompt: editedPrompt } : s))
         );
       }
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
     } catch (err: unknown) {
       // Keep the key so an immediate identical retry dedupes server-side
@@ -2436,7 +2638,7 @@ function StoryboardToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Storyboard to video"
             activeId="storyboard"
-            options={CREATION_TYPES.map((c) => ({
+                options={creationTypes.map((c) => ({
               id: c.id,
               label: c.label,
               hint: c.available ? undefined : "Open",
@@ -2451,14 +2653,11 @@ function StoryboardToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={storyboardVideoModel.modelLabel}
               activeId={videoModelId}
-              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
-                const m = getVideoModel(id);
-                return {
-                  id,
-                  label: m.modelLabel,
-                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
-                };
-              })}
+              options={storyboardModels.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              }))}
               onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
               disabled={loading}
             />
@@ -2468,11 +2667,17 @@ function StoryboardToVideoComposer({
         <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
               <span className="text-purple-300">
                 <ImageIcon className="h-3.5 w-3.5" />
               </span>
               Choose a storyboard
+              <Tooltip label="Pick a storyboard from Photo Studio or upload your own image. The AI turns it into a 15s video with dialogue.">
+                <Info
+                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  aria-label="How storyboard selection works"
+                />
+              </Tooltip>
             </span>
           </div>
 
@@ -2515,7 +2720,7 @@ function StoryboardToVideoComposer({
                 className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
               >
                 <Upload className="h-5 w-5" />
-                <span className="text-[11px] font-semibold">Upload your own</span>
+                <span className="text-sm font-semibold">Upload your own</span>
               </button>
               {items.map((s) => {
                 const active = s.id === selectedId;
@@ -2538,21 +2743,21 @@ function StoryboardToVideoComposer({
                       alt={s.theme}
                       className="aspect-[3/2] w-full object-cover"
                     />
-                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-gray-300">
+                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-300">
                       {s.aspectRatio && (
-                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[9px] font-semibold text-gray-200">
+                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-xs font-semibold text-gray-200">
                           {s.aspectRatio}
                         </span>
                       )}
                       <span className="truncate">{s.theme}</span>
                     </span>
                     {s.hasVideo && (
-                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-300">
                         Has video
                       </span>
                     )}
                     {s.source === "uploaded" && (
-                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-300">
+                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-300">
                         Uploaded
                       </span>
                     )}
@@ -2658,7 +2863,7 @@ function StoryboardToVideoComposer({
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((o) => !o)}
-                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200"
+                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200 sm:text-sm"
               >
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
@@ -2666,7 +2871,7 @@ function StoryboardToVideoComposer({
                 <Pencil className="h-3.5 w-3.5 text-purple-300" />
                 Advanced — edit prompt
                 {promptDirty && (
-                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[9px] font-bold text-purple-200">
+                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-bold text-purple-200">
                     Edited
                   </span>
                 )}
@@ -2679,9 +2884,9 @@ function StoryboardToVideoComposer({
                     rows={6}
                     disabled={loading}
                     placeholder="The video prompt Seedance will follow…"
-                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
                   />
-                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500">
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-gray-500">
                     <span>
                       Style, orientation &amp; language are re-applied automatically on render.
                     </span>
@@ -2708,7 +2913,7 @@ function StoryboardToVideoComposer({
                     </div>
                   </div>
                   {promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS && (
-                    <p className="mt-1 text-[11px] text-amber-300/80">
+                    <p className="mt-1 text-sm text-amber-300/80">
                       This prompt is long — it may be trimmed at a sentence boundary on render so the style, orientation &amp; language directives still fit. Shorten it for full fidelity.
                     </p>
                   )}
@@ -2718,7 +2923,7 @@ function StoryboardToVideoComposer({
           ) : null}
 
           {!selectedId && listState === "loaded" && items.length > 0 ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
               Pick a storyboard to turn into a video.
             </p>
           ) : null}
@@ -2734,14 +2939,11 @@ function StoryboardToVideoComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={storyboardVideoModel.modelLabel}
               activeId={videoModelId}
-              options={STORYBOARD_VIDEO_MODEL_IDS.map((id) => {
-                const m = getVideoModel(id);
-                return {
-                  id,
-                  label: m.modelLabel,
-                  hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
-                };
-              })}
+              options={storyboardModels.map((m) => ({
+                id: m.id,
+                label: m.modelLabel,
+                hint: formatVideoModelCreditHint(m, videoCredits, STORYBOARD_VIDEO_DURATION_SEC),
+              }))}
               onSelect={(id) => setVideoModelId(id as StoryboardVideoModelId)}
               disabled={loading}
             />
@@ -2818,7 +3020,7 @@ function StoryboardToVideoComposer({
               {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
               {selected ? ` · ${selected.theme}` : ""}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-sm text-gray-500">
               Find it in your history below, or render another resolution.
             </p>
           </div>
@@ -3052,18 +3254,29 @@ function NumberStepper({
 }
 
 function ReelsCreatorComposer({
+  creationTypes,
+  composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
+  creationTypes: VideoCreationTypeOption[];
+  composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
   const { balance } = useCreditBalance();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Engine + (Veo-only) mode.
   const [engine, setEngine] = useState<ReelsEngine>("seedance");
+
+  useEffect(() => {
+    if (reelsEngines.length === 0) return;
+    if (reelsEngines.some((e) => e.id === engine)) return;
+    setEngine(reelsEngines[0].id);
+  }, [reelsEngines, engine]);
   const [veoMode, setVeoMode] = useState<ReelsVeoMode>("single");
 
   // Shared.
@@ -3094,7 +3307,9 @@ function ReelsCreatorComposer({
   });
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
 
   // 1080p forces an 8s clip (Veo 3.1 Lite constraint) — keep state valid.
@@ -3154,7 +3369,8 @@ function ReelsCreatorComposer({
 
     setLoading(true);
     setError(null);
-    setResultUrl(null);
+    setResultPath(null);
+    setResultSeed(null);
 
     try {
       const response = await fetch("/api/generate-reels", {
@@ -3186,7 +3402,8 @@ function ReelsCreatorComposer({
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
     } catch (err: unknown) {
       attempt.settle(false);
@@ -3209,7 +3426,7 @@ function ReelsCreatorComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Reels Creator"
             activeId="reels-creator"
-            options={CREATION_TYPES.map((c) => ({ id: c.id, label: c.label }))}
+                options={creationTypes.map((c) => ({ id: c.id, label: c.label }))}
             onSelect={onSelectCreation}
             disabled={loading}
           />
@@ -3220,7 +3437,7 @@ function ReelsCreatorComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={reelsEngineLabel(engine)}
               activeId={engine}
-              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              options={reelsEngines.map((e) => ({ id: e.id, label: e.label }))}
               onSelect={(id) => setEngine(id as ReelsEngine)}
               disabled={loading}
             />
@@ -3463,7 +3680,7 @@ function ReelsCreatorComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={reelsEngineLabel(engine)}
               activeId={engine}
-              options={REELS_ENGINES.map((e) => ({ id: e.id, label: e.label }))}
+              options={reelsEngines.map((e) => ({ id: e.id, label: e.label }))}
               onSelect={(id) => setEngine(id as ReelsEngine)}
               disabled={loading}
             />
@@ -3502,14 +3719,14 @@ function ReelsCreatorComposer({
         {/* Caption styler + live preview */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400">
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400 sm:text-sm">
               <Type className="h-3.5 w-3.5 text-purple-300" />
               Caption style
             </div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Font family
                   </label>
                   <ThemedSelect
@@ -3521,7 +3738,7 @@ function ReelsCreatorComposer({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Font size
                   </label>
                   <NumberStepper
@@ -3535,7 +3752,7 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Text color
                     </label>
                     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
@@ -3548,13 +3765,13 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-[11px] text-gray-300">
+                      <span className="font-mono text-sm text-gray-300">
                         {captionStyle.highlightColor}
                       </span>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Outline
                     </label>
                     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
@@ -3567,7 +3784,7 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-[11px] text-gray-300">
+                      <span className="font-mono text-sm text-gray-300">
                         {captionStyle.outlineColor}
                       </span>
                     </div>
@@ -3577,7 +3794,7 @@ function ReelsCreatorComposer({
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Outline thickness
                   </label>
                   <NumberStepper
@@ -3593,10 +3810,10 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Vertical position
                     </label>
-                    <span className="text-[11px] font-bold text-purple-300">
+                    <span className="text-sm font-bold text-purple-300">
                       {captionStyle.marginV}%
                     </span>
                   </div>
@@ -3632,11 +3849,11 @@ function ReelsCreatorComposer({
 
           {/* Live Caption Preview — 480x854 math mirrors the server ASS MarginV. */}
           <div className="rounded-3xl border border-white/10 bg-black/40 p-4 sm:p-5">
-            <div className="mb-3 text-center text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500">
+            <div className="mb-3 text-center text-xs font-bold uppercase tracking-[0.3em] text-gray-500 sm:text-sm">
               Live caption preview
             </div>
             {engine === "veo" && (
-              <p className="mx-auto mb-3 max-w-[240px] text-center text-[10px] leading-relaxed text-amber-400/80">
+              <p className="mx-auto mb-3 max-w-[240px] text-center text-sm leading-relaxed text-amber-400/80">
                 Preview uses 480×854 math; Veo outputs 720p/1080p so vertical caption
                 position may differ slightly.
               </p>
@@ -3742,7 +3959,7 @@ function ReelsCreatorComposer({
                 Download
               </a>
               <a
-                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}${
                   theme.trim() ? `&title=${encodeURIComponent(theme.trim())}` : ""
                 }`}
                 className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"

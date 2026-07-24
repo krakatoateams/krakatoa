@@ -154,6 +154,10 @@ const FALLBACKS = {
   render: {
     rendi: { provider: "rendi", model: "default", parameters: {} },
   },
+  schedule: {
+    llm: { provider: REPLICATE, model: "google/gemini-2.5-flash", parameters: {} },
+    whisper: { provider: REPLICATE, model: WHISPER_PINNED, parameters: {} },
+  },
 } as const;
 
 function fb(group: ResolvedModel): ResolvedModel {
@@ -250,6 +254,22 @@ export async function getPhotoModel(
     configKey: tier.modelRole,
     fallback: { provider: REPLICATE, model: tier.providerModel, parameters: {} },
   });
+}
+
+/** Resolved models for Scheduler AI captions (generate-caption route). */
+export async function getScheduleModels(): Promise<{
+  llm: ResolvedModel;
+  whisper: ResolvedModel;
+}> {
+  const [llm, whisper] = await Promise.all([
+    resolveModel({ toolKey: "schedule", configKey: "llm", fallback: fb(FALLBACKS.schedule.llm) }),
+    resolveModel({
+      toolKey: "schedule",
+      configKey: "whisper",
+      fallback: fb(FALLBACKS.schedule.whisper),
+    }),
+  ]);
+  return { llm, whisper };
 }
 
 /** Resolved Rendi render config (informational; routes keep the hardcoded URL). */

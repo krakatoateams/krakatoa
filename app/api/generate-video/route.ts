@@ -16,13 +16,11 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import {
-  STORAGE_BUCKET,
-  videosStoragePath,
-  isVideosTempRefPath,
-} from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
+import { resolveRefForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   getVideoModel,
   isValidVideoModelId,
@@ -95,6 +93,56 @@ function parseCreationIdList(raw: unknown): string[] {
       .filter(Boolean);
   }
   return [];
+}
+
+async function resolveVideoRefsForPipeline(
+  userId: string,
+  refs: {
+    firstFrame: RefAttachment | null;
+    lastFrame: RefAttachment | null;
+    referenceImages: RefAttachment[];
+    referenceVideos: RefAttachment[];
+    referenceAudios: RefAttachment[];
+  }
+): Promise<{ ok: true; inputs: VideoReferenceInputs } | { ok: false; error: string }> {
+  const resolveOne = async (ref: RefAttachment | null): Promise<string | null> => {
+    if (!ref) return null;
+    return resolveRefForPipeline(userId, ref);
+  };
+  const resolveMany = async (list: RefAttachment[]): Promise<string[] | null> => {
+    const urls: string[] = [];
+    for (const ref of list) {
+      const url = await resolveRefForPipeline(userId, ref);
+      if (!url) return null;
+      urls.push(url);
+    }
+    return urls;
+  };
+
+  const firstFrame = await resolveOne(refs.firstFrame);
+  const lastFrame = await resolveOne(refs.lastFrame);
+  if (refs.firstFrame && !firstFrame) {
+    return { ok: false, error: "First frame could not be resolved." };
+  }
+  if (refs.lastFrame && !lastFrame) {
+    return { ok: false, error: "Last frame could not be resolved." };
+  }
+  const referenceImages = await resolveMany(refs.referenceImages);
+  if (referenceImages === null) {
+    return { ok: false, error: "A reference image could not be resolved." };
+  }
+  const referenceVideos = await resolveMany(refs.referenceVideos);
+  if (referenceVideos === null) {
+    return { ok: false, error: "A reference video could not be resolved." };
+  }
+  const referenceAudios = await resolveMany(refs.referenceAudios);
+  if (referenceAudios === null) {
+    return { ok: false, error: "A reference audio could not be resolved." };
+  }
+  return {
+    ok: true,
+    inputs: { firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios },
+  };
 }
 
 export async function POST(req: Request) {
@@ -206,6 +254,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
     const model = getVideoModel(modelId);
+    if (!(await isCatalogModelEnabled("reels", modelId))) {
+      return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
+    }
     jobKind = getVideoJobKind(model);
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
@@ -481,6 +532,17 @@ export async function POST(req: Request) {
     if (asset) videoAssetId = asset.id;
 
     // ---- Provider call (Seedance fetches the reference URLs directly) ----
+    const pipelineRefs = await resolveVideoRefsForPipeline(userId!, {
+      firstFrame,
+      lastFrame,
+      referenceImages,
+      referenceVideos,
+      referenceAudios,
+    });
+    if (!pipelineRefs.ok) {
+      throw new Error(pipelineRefs.error);
+    }
+
     const replicate = createReplicateClient();
     const providerInput = buildVideoProviderInput({
       model,
@@ -490,7 +552,7 @@ export async function POST(req: Request) {
       aspectRatio,
       generateAudio,
       seed,
-      references: referenceInputs,
+      references: pipelineRefs.inputs,
     });
 
     await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {
@@ -534,7 +596,8 @@ export async function POST(req: Request) {
       throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
     }
     const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosStoragePath(`video_${Date.now()}.mp4`);
+    const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
+    const storagePath = videosGeneratedVideoPath(userId!, videoMode, `video_${Date.now()}.mp4`);
 
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)
@@ -542,10 +605,7 @@ export async function POST(req: Request) {
     if (uploadError) {
       throw new Error(`Failed to save video to storage: ${uploadError.message}`);
     }
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
-    const publicUrl = urlData.publicUrl;
+    const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl });
 
     const title = prompt.slice(0, 60) || jobLabel;
@@ -569,7 +629,7 @@ export async function POST(req: Request) {
           userId: userId!,
           tool: jobKind,
           mediaType: "video",
-          mediaUrl: publicUrl,
+          mediaUrl: storagePath,
           storagePath,
           title,
           metadata: creationMetadata,
@@ -581,7 +641,6 @@ export async function POST(req: Request) {
       await safe("markAssetReady", () =>
         markAssetReady(profileId!, videoAssetId!, {
           storagePath,
-          publicUrl,
           mimeType: "video/mp4",
           durationSec: duration,
           costCredits: creditsAmount,
@@ -615,6 +674,7 @@ export async function POST(req: Request) {
 
     const successResponse = {
       videoUrl: publicUrl,
+      storagePath,
       historyItem,
       savedToCloud: true,
     };

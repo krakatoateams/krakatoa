@@ -49,7 +49,8 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
-import { validateReelsRequest } from "@/lib/reels-models";
+import { validateReelsRequest, REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
+import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
 import {
   runSeedancePipeline,
   runVeoSinglePipeline,
@@ -161,6 +162,12 @@ export async function POST(req: Request) {
     }
     const reqv = validated.value;
     jobType = reqv.jobType;
+
+    const composerEnablement = await getVideoComposerEnablement();
+    const engineCatalogModelId = REELS_ENGINE_CATALOG_MODEL_ID[reqv.engine];
+    if (!composerEnablement["reels-creator"].enabledTiers.includes(engineCatalogModelId)) {
+      return NextResponse.json({ error: "This engine isn't available." }, { status: 400 });
+    }
 
     // ---- Fail fast on misconfig BEFORE any credit spend ----
     const replicate = createReplicateClient(); // throws if REPLICATE_API_TOKEN missing
@@ -384,6 +391,7 @@ export async function POST(req: Request) {
     // ---- Build the pipeline context + dispatch ----
     const ctx: ReelsPipelineContext = {
       replicate,
+      userId: userId!,
       rendiApiKey,
       models,
       refs,
@@ -442,7 +450,6 @@ export async function POST(req: Request) {
       await safe("markAssetReady", () =>
         markAssetReady(profileId!, finalAssetId!, {
           storagePath: result.storagePath,
-          publicUrl: result.videoUrl,
           mimeType: "video/mp4",
           durationSec: result.durationSec,
           width: result.width,
@@ -480,7 +487,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: reqv.creationTool,
         mediaType: "video",
-        mediaUrl: result.videoUrl,
+        mediaUrl: result.storagePath,
         storagePath: result.storagePath,
         title: reqv.theme.slice(0, 200),
         metadata:
@@ -565,7 +572,7 @@ export async function POST(req: Request) {
 
     // Standardized response for ALL engines. Persisted on the idempotency row so
     // a duplicate same-key request replays this exact body without regenerating.
-    const successResponse = { videoUrl: result.videoUrl, historyItem };
+    const successResponse = { videoUrl: result.videoUrl, storagePath: result.storagePath, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () =>
         finishGenerationRequestSuccess({

@@ -10,6 +10,7 @@ import {
   productPhotoPricingKey,
   productPhotoProviderResolution,
   buildGeneratedFilename,
+  photoStorageModeFromGenerate,
   buildProductPhotoPrompt,
   buildCharacterSheetPrompt,
   buildPhotoProviderInput,
@@ -29,7 +30,6 @@ import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { getUserCreationForUser } from "@/lib/creations-db";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
@@ -45,6 +45,8 @@ import { getPhotoFeature } from "@/lib/creation-features";
 import { getPhotoModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { recordUsageEvent } from "@/lib/usage-events-db";
+import { resolveMentionCreations } from "@/lib/mention-assets-server";
+import { buildMentionGuidanceSuffix } from "@/lib/mention-assets";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
@@ -332,16 +334,12 @@ export async function POST(req: Request) {
         if (err) return NextResponse.json({ error: err }, { status: 400 });
         extraReferenceFiles.push(characterFile);
       } else if (characterCreationId && userId) {
-        // Use a previously generated character. Owner-scoped lookup prevents using
-        // someone else's (or an arbitrary) image as a reference.
-        const creation = await getUserCreationForUser(userId, characterCreationId);
-        if (!creation) {
-          return NextResponse.json(
-            { error: "Selected character could not be found." },
-            { status: 400 }
-          );
+        // Signed pipeline URL — Replicate must fetch a valid https URI (private bucket).
+        const resolved = await resolveMentionCreations(userId, [characterCreationId]);
+        if (!resolved.ok) {
+          return NextResponse.json({ error: "Selected character could not be found." }, { status: 400 });
         }
-        directReferenceUrls.push(creation.mediaUrl);
+        directReferenceUrls.push(resolved.items[0].url);
       }
     } else if (tier.supportsReference && referenceFile instanceof File) {
       const err = validateImageUpload(referenceFile);
@@ -371,28 +369,13 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      for (const mentionId of referenceCreationIds) {
-        const creation = await getUserCreationForUser(userId, mentionId);
-        if (!creation) {
-          return NextResponse.json(
-            { error: "A mentioned asset could not be found." },
-            { status: 400 }
-          );
-        }
-        directReferenceUrls.push(creation.mediaUrl);
-        const metaName =
-          typeof creation.metadata?.characterName === "string"
-            ? creation.metadata.characterName.trim()
-            : "";
-        const kind: "character" | "storyboard" | "image" =
-          creation.metadata?.creationKind === "character"
-            ? "character"
-            : creation.tool === "storyboard"
-              ? "storyboard"
-              : "image";
-        const fallbackName =
-          kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
-        mentionRefs.push({ name: metaName || creation.title || fallbackName, kind });
+      const resolved = await resolveMentionCreations(userId, referenceCreationIds);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      for (const item of resolved.items) {
+        directReferenceUrls.push(item.url);
+        mentionRefs.push(item.ref);
       }
     }
 
@@ -625,11 +608,7 @@ export async function POST(req: Request) {
     // @-mention guidance: tell the model that the trailing reference images depict the
     // named subjects from the prompt, so it actually uses them as visual references.
     const prompt = mentionRefs.length
-      ? `${basePrompt} ${(() => {
-          const list = mentionRefs.map((r) => `@${r.name} (${r.kind})`).join(", ");
-          const many = mentionRefs.length > 1;
-          return `The description references ${list}; matching reference image${many ? "s have" : " has"} been provided. Use ${many ? "them" : "it"} as the visual reference for ${many ? "those subjects" : "that subject"}, preserving appearance and identity.`;
-        })()}`.trim()
+      ? `${basePrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim()
       : basePrompt;
 
     // Aspect ratio comes from the chip (validated above). The builder sends only the
@@ -672,6 +651,7 @@ export async function POST(req: Request) {
 
     const saved = await saveGeneratedProductPhoto({
       userId,
+      photoMode: photoStorageModeFromGenerate(mode),
       filename,
       imageBuffer,
       poseId,
@@ -705,7 +685,6 @@ export async function POST(req: Request) {
     if (photoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, photoAssetId!, {
         storagePath: saved.storagePath,
-        publicUrl: saved.publicUrl,
         mimeType,
         costCredits: creditsAmount,
         metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },
@@ -744,6 +723,7 @@ export async function POST(req: Request) {
 
     const successResponse = {
       imageUrl: saved.publicUrl,
+      storagePath: saved.storagePath,
       historyItem: saved.historyItem,
       savedToCloud: true,
     };

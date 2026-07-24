@@ -2,12 +2,14 @@ import { getSupabase } from "@/lib/supabase";
 import { supabaseServer } from "@/lib/supabase-server";
 import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
 import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
-  PRODUCT_PHOTO_BUCKET,
-  ModelPoseId,
+  PRODUCT_PHOTO_BUCKET,  ModelPoseId,
   PhotoStyleId,
   ProductPhotoHistoryItem,
-  generatedPath,
+  PHOTO_STUDIO_MODES,
+  type PhotoStudioMode,
+  photosGeneratedPath,
   uploadsPath,
   userStoragePrefix,
   parseGeneratedFilename,
@@ -16,11 +18,6 @@ import {
 
 function storage() {
   return getSupabase().storage.from(PRODUCT_PHOTO_BUCKET);
-}
-
-export function getPublicUrl(storagePath: string): string {
-  const { data } = storage().getPublicUrl(storagePath);
-  return data.publicUrl;
 }
 
 function wrapStorageError(action: string, error: { message: string }) {
@@ -51,11 +48,13 @@ export async function uploadProductReferenceImage(
     wrapStorageError("Failed to upload product image", error);
   }
 
-  return { storagePath, publicUrl: getPublicUrl(storagePath) };
+  const { url: publicUrl } = await signStoragePathForUser(storagePath, userId, "ui");
+  return { storagePath, publicUrl };
 }
 
 export async function saveGeneratedProductPhoto(params: {
   userId: string;
+  photoMode: PhotoStudioMode;
   filename: string;
   imageBuffer: ArrayBuffer;
   poseId: ModelPoseId;
@@ -68,7 +67,7 @@ export async function saveGeneratedProductPhoto(params: {
   modelTier?: string;
   modelLabel?: string;
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
-  const storagePath = generatedPath(params.userId, params.filename);
+  const storagePath = photosGeneratedPath(params.userId, params.photoMode, params.filename);
 
   const { error } = await storage().upload(storagePath, params.imageBuffer, {
     contentType: params.contentType ?? "image/png",
@@ -80,10 +79,10 @@ export async function saveGeneratedProductPhoto(params: {
     wrapStorageError("Failed to save generated image", error);
   }
 
-  const publicUrl = getPublicUrl(storagePath);
+  const { url: publicUrl } = await signStoragePathForUser(storagePath, params.userId, "ui");
   const historyItem = await insertProductPhotoGeneration({
     userId: params.userId,
-    imageUrl: publicUrl,
+    imageUrl: storagePath,
     storagePath,
     poseId: params.poseId,
     styleId: params.styleId,
@@ -109,23 +108,31 @@ export async function saveGeneratedProductPhoto(params: {
 export async function reconcileProductPhotosFromStorage(
   userId: string
 ): Promise<number> {
-  const prefix = `${userStoragePrefix(userId)}/generated`;
+  const generatedRoot = `${userStoragePrefix(userId)}/generated`;
+  const candidates: { storagePath: string; item: ProductPhotoHistoryItem }[] = [];
 
-  const { data: files, error: listError } = await storage().list(prefix, {
-    limit: 1000,
-    sortBy: { column: "name", order: "asc" },
-  });
-  if (listError || !files?.length) return 0;
+  async function collectFromPrefix(prefix: string): Promise<void> {
+    const { data: files, error: listError } = await storage().list(prefix, {
+      limit: 1000,
+      sortBy: { column: "name", order: "asc" },
+    });
+    if (listError || !files?.length) return;
 
-  // Only files whose names encode a known pose/style are reconstructable.
-  const candidates = files
-    .filter((f) => f.name && parseGeneratedFilename(f.name))
-    .map((f) => {
+    for (const f of files) {
+      if (!f.name || f.id === null) continue; // skip folders
+      if (!parseGeneratedFilename(f.name)) continue;
       const storagePath = `${prefix}/${f.name}`;
-      const item = historyItemFromPath(storagePath, getPublicUrl(storagePath));
-      return item ? { storagePath, item } : null;
-    })
-    .filter((c): c is { storagePath: string; item: ProductPhotoHistoryItem } => c !== null);
+      const item = historyItemFromPath(storagePath, storagePath);
+      if (item) candidates.push({ storagePath, item });
+    }
+  }
+
+  // Legacy flat `generated/*.png` (pre mode subfolders).
+  await collectFromPrefix(generatedRoot);
+  // Mode subfolders: product, t2i, character, storyboard.
+  for (const mode of PHOTO_STUDIO_MODES) {
+    await collectFromPrefix(`${generatedRoot}/${mode}`);
+  }
   if (!candidates.length) return 0;
 
   // Skip anything already recorded (dedupe by storage_path for this user).

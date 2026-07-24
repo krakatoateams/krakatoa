@@ -5,8 +5,9 @@ import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
+  videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
+import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -23,6 +24,7 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
   readIdempotencyKey,
@@ -158,6 +160,9 @@ export async function POST(req: Request) {
       ? videoModelIdRaw
       : DEFAULT_STORYBOARD_VIDEO_MODEL_ID;
     const videoModel = getVideoModel(videoModelId);
+    if (!(await isCatalogModelEnabled("reels", videoModelId))) {
+      return NextResponse.json({ error: "This video model isn't available." }, { status: 400 });
+    }
     const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
@@ -210,7 +215,7 @@ export async function POST(req: Request) {
     const language: StoryboardLanguageId =
       clientLanguage ?? storedLanguage ?? DEFAULT_STORYBOARD_LANGUAGE;
 
-    const storyboardUrl = String(row.storyboard_url || "").trim();
+    const storyboardUrlRaw = String(row.storyboard_url || "").trim();
     const storedPrompt = String(row.seedance_prompt || "").trim();
     // Optional edited prompt from the Advanced "edit prompt" UI. Ownership is
     // already enforced above (row.user_id === userId), so the owner may override
@@ -221,9 +226,14 @@ export async function POST(req: Request) {
     const promptEdited = !!editedPrompt && editedPrompt !== storedPrompt;
     let seedancePrompt = promptEdited ? editedPrompt : storedPrompt;
 
-    if (!storyboardUrl.startsWith("https://")) {
+    const storyboardUrl = await resolveSignedMediaUrl({
+      userId: userId!,
+      mediaUrl: storyboardUrlRaw,
+      ttl: "pipeline",
+    });
+    if (!storyboardUrl) {
       return NextResponse.json(
-        { error: "Stored storyboard_url is not a valid public https URL." },
+        { error: "Stored storyboard sheet could not be resolved." },
         { status: 500 }
       );
     }
@@ -533,7 +543,7 @@ export async function POST(req: Request) {
     const videoBuffer = await vidRes.arrayBuffer();
 
     const filename = `video_${Date.now()}.mp4`;
-    const storagePath = videosStoryboardPath(filename);
+    const storagePath = videosStoryboardVideoPath(userId!, filename);
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -548,14 +558,12 @@ export async function POST(req: Request) {
       throw new Error(`Failed to upload video: ${uploadError.message}`);
     }
 
-    const {
-      data: { publicUrl: videoUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
+    const { url: videoUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: videoUrl });
 
     const { error: finalErr } = await supabase
       .from(STORYBOARDS_TABLE)
-      .update({ video_url: videoUrl, status: "done" })
+      .update({ video_url: storagePath, status: "done" })
       .eq("id", storyboardId);
 
     if (finalErr) {
@@ -572,7 +580,6 @@ export async function POST(req: Request) {
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath,
-        publicUrl: videoUrl,
         mimeType: "video/mp4",
         durationSec,
         width: storyboardVideoDimensions(resolution, aspectRatio).width,
@@ -650,7 +657,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: "storyboard_video",
         mediaType: "video",
-        mediaUrl: videoUrl,
+        mediaUrl: storagePath,
         storagePath,
         title: String(row.theme || "Storyboard video").slice(0, 200),
         metadata: {
@@ -666,7 +673,7 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    const successResponse = { videoUrl, aspectRatio, language, historyItem };
+    const successResponse = { videoUrl, storagePath, aspectRatio, language, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,

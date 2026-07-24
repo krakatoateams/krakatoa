@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
-import { refreshAccessToken, publishToTikTok } from "@/lib/tiktok";
+import { refreshAccessToken, publishToTikTok, publishPhotoToTikTok, resolveOrigin } from "@/lib/tiktok";
 import { removeStorageObjects } from "@/lib/creations-db";
-import { storagePathFromPublicUrl } from "@/lib/storage-buckets";
-import { isVideoUrlConfirmedMissing } from "@/lib/video-storage";
+import { resolveStoragePath, resolvePublishVideoUrl } from "@/lib/storage-signed-url";
+import { getAssetForProfile } from "@/lib/assets-db";
+import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -64,6 +65,12 @@ function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
   if (/video file no longer exists in storage|could not fetch video from storage/.test(m)) {
     return true;
   }
+  // Photo posts (openspec/changes/tiktok-photo-post): a domain/URL-prefix
+  // verification problem can't self-heal by retrying — it needs a human to
+  // re-verify in the TikTok Developer Portal.
+  if (/url_ownership_unverified|not a recognized storage url/.test(m)) {
+    return true;
+  }
   return false;
 }
 
@@ -83,7 +90,7 @@ async function cleanupPostVideo(
     // asset's public_url and the Reels Creator history gallery.
     console.log(`[cron] post ${postId} is asset-linked (asset_id=${assetId}) — skipping storage deletion`);
   } else {
-    const path = storagePathFromPublicUrl(videoUrl);
+    const path = resolveStoragePath(null, videoUrl);
     if (path) {
       await removeStorageObjects([path]);
       console.log(`[cron] storage object removed: ${path}`);
@@ -241,11 +248,30 @@ export async function GET(req: NextRequest) {
       // ── Re-verify the video still exists before spending a publish attempt ──
       // Catches the case where the file was deleted/swept sometime between
       // scheduling and now (see openspec/changes/video-existence-check).
-      if (await isVideoUrlConfirmedMissing(post.video_url)) {
+      let assetStoragePath: string | null = null;
+      if (post.asset_id && post.profile_id) {
+        const asset = await getAssetForProfile(post.profile_id, post.asset_id);
+        assetStoragePath = asset?.storage_path ?? null;
+      }
+
+      const storagePath = resolveStoragePath(assetStoragePath, post.video_url);
+      if (storagePath) {
+        const exists = await videoObjectExists(storagePath);
+        if (exists === false) {
+          throw new Error(
+            "Video file no longer exists in storage — it was deleted or swept before publishing.",
+          );
+        }
+      } else if (await isVideoUrlConfirmedMissing(post.video_url)) {
         throw new Error(
           "Video file no longer exists in storage — it was deleted or swept before publishing.",
         );
       }
+
+      const publishVideoUrl = await resolvePublishVideoUrl({
+        videoUrl: post.video_url,
+        assetStoragePath,
+      });
 
       if (post.platform === "tiktok") {
         // ── Refresh, then IMMEDIATELY persist, then publish ───────────────────
@@ -274,17 +300,34 @@ export async function GET(req: NextRequest) {
           throw new Error(`Failed to persist refreshed TikTok token: ${refreshUpsertErr.message}`);
         }
 
-        console.log(`[cron] Calling publishToTikTok for post ${post.id}`);
+        // A TikTok post is a photo post exactly when photo_urls is populated —
+        // no separate post-type column (see openspec/changes/tiktok-photo-post).
+        const isPhotoPost = Array.isArray(post.photo_urls) && post.photo_urls.length > 0;
+
+        console.log(
+          `[cron] Calling ${isPhotoPost ? "publishPhotoToTikTok" : "publishToTikTok"} for post ${post.id}`,
+        );
 
         // ── Publish to TikTok (optimistic — no status polling, see Decision 1) ──
-        const publishId = await publishToTikTok({
-          accessToken: refreshed.accessToken,
-          videoUrl: post.video_url,
-          title: post.title,
-          privacyLevel: post.tiktok_privacy_level,
-          brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
-          brandContentToggle: !!post.tiktok_brand_content_toggle,
-        });
+        const publishId = isPhotoPost
+          ? await publishPhotoToTikTok({
+              accessToken: refreshed.accessToken,
+              photoUrls: post.photo_urls,
+              title: post.title,
+              description: post.description ?? "",
+              privacyLevel: post.tiktok_privacy_level,
+              brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+              brandContentToggle: !!post.tiktok_brand_content_toggle,
+              origin: resolveOrigin(req),
+            })
+          : await publishToTikTok({
+              accessToken: refreshed.accessToken,
+              videoUrl: publishVideoUrl,
+              title: post.title,
+              privacyLevel: post.tiktok_privacy_level,
+              brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+              brandContentToggle: !!post.tiktok_brand_content_toggle,
+            });
 
         console.log(`[cron] ✓ Post ${post.id} published → TikTok publish ID: ${publishId}`);
 
@@ -313,7 +356,7 @@ export async function GET(req: NextRequest) {
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
       const youtubeId = await uploadToYouTube({
-        videoUrl: post.video_url,
+        videoUrl: publishVideoUrl,
         title: post.title,
         description: post.description ?? "",
         tags,

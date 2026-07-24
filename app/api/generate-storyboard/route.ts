@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
-import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
+import { insertUserCreation } from "@/lib/creations-db";
+import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
 } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { storyboardSheetPath } from "@/lib/product-photo";
 import {
   extractMediaUrl,
   flattenReplicateTextChunks,
@@ -361,28 +363,13 @@ export async function POST(req: Request) {
       mentionRefs.push({ name: "Theme", kind: "image" });
     }
     if (referenceCreationIds.length && userId) {
-      for (const mentionId of referenceCreationIds) {
-        const creation = await getUserCreationForUser(userId, mentionId);
-        if (!creation) {
-          return NextResponse.json(
-            { error: "A mentioned asset could not be found." },
-            { status: 400 }
-          );
-        }
-        mentionReferenceUrls.push(creation.mediaUrl);
-        const metaName =
-          typeof creation.metadata?.characterName === "string"
-            ? creation.metadata.characterName.trim()
-            : "";
-        const kind: "character" | "storyboard" | "image" =
-          creation.metadata?.creationKind === "character"
-            ? "character"
-            : creation.tool === "storyboard"
-              ? "storyboard"
-              : "image";
-        const fallbackName =
-          kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
-        mentionRefs.push({ name: metaName || creation.title || fallbackName, kind });
+      const resolved = await resolveMentionCreations(userId, referenceCreationIds);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      for (const item of resolved.items) {
+        mentionReferenceUrls.push(item.url);
+        mentionRefs.push(item.ref);
       }
     }
 
@@ -668,8 +655,8 @@ export async function POST(req: Request) {
     }
     const imageBuffer = await imgRes.arrayBuffer();
 
-    const filename = `storyboard_${Date.now()}.png`;
-    const storagePath = videosStoryboardPath(filename);
+    const filename = `image_${Date.now()}.png`;
+    const storagePath = storyboardSheetPath(userId!, filename);
     const supabase = getSupabase();
 
     console.log("[Storyboard] Uploading to Supabase:", storagePath);
@@ -686,9 +673,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to upload storyboard: ${uploadError.message}`);
     }
 
-    const {
-      data: { publicUrl: storyboardUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
+    const { url: storyboardUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: storyboardUrl });
 
     const scene_breakdown = { scenes };
@@ -698,7 +683,7 @@ export async function POST(req: Request) {
       .from(STORYBOARDS_TABLE)
       .insert({
         theme,
-        storyboard_url: storyboardUrl,
+        storyboard_url: storagePath,
         seedance_prompt: seedancePrompt,
         scene_breakdown,
         storyboard_style: storyboardStyle,
@@ -721,7 +706,6 @@ export async function POST(req: Request) {
     if (imageAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, imageAssetId!, {
         storagePath,
-        publicUrl: storyboardUrl,
         mimeType: "image/png",
         costCredits: creditsAmount,
         metadata: { storyboardId: inserted.id, storyboardStyle, aspectRatio, language, theme: theme.slice(0, 200) },
@@ -754,7 +738,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: "storyboard",
         mediaType: "image",
-        mediaUrl: storyboardUrl,
+        mediaUrl: storagePath,
         storagePath,
         title: theme.slice(0, 200),
         metadata: {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AdminUsageSkeleton } from "../admin-ui";
 
 type UsageAggregate = {
   tool: string;
@@ -99,7 +100,7 @@ export default function AdminUsagePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p className="text-sm text-gray-500">Loading usage…</p>;
+  if (loading) return <AdminUsageSkeleton />;
   if (error) return <p className="text-sm text-red-400">{error}</p>;
 
   return (

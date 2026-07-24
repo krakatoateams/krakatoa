@@ -161,6 +161,7 @@ Return ONLY raw JSON array, nothing else.`;
   // frame); keep this in sync with the live caption preview's 480x854 math.
   const assContent = buildAssContent(style, 480, 854, whisperWords, audioSpeedFactor, finalDuration);
   const { srtFilename, srtUrl } = await uploadAssCaptions(
+    ctx.userId,
     assContent,
     `captions_${Date.now()}.ass`
   );
@@ -188,8 +189,10 @@ Return ONLY raw JSON array, nothing else.`;
     "Download from Rendi + upload final MP4 to Supabase"
   );
   const { storagePath, publicUrl } = await downloadAndStoreFinal(
+    ctx.userId,
+    "reelscreator",
     rendiVideoUrl,
-    `reels_${Date.now()}.mp4`
+    `video_${Date.now()}.mp4`
   );
   await cleanupCaptions(srtFilename);
   await ctx.log.endStep({ storagePath, publicUrl });

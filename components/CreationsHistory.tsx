@@ -30,6 +30,14 @@ type Props = {
   limit?: number;
   onSelect?: (item: CreationHistoryItem) => void;
   selectedUrl?: string | null;
+  /** Multi-select mode (e.g. TikTok photo-post carousel picker): highlights
+   * every item whose mediaUrl is in `selectedUrls` (instead of the single
+   * `selectedUrl`) and shows a 1-based selection-order badge. `onSelect`
+   * still just reports "this item was clicked" — the caller decides how to
+   * toggle it in/out of their own array. Off by default; existing
+   * single-select callers are unaffected. */
+  multiSelect?: boolean;
+  selectedUrls?: string[];
   className?: string;
   /** Increment to refetch after a new generation completes */
   refreshKey?: number;
@@ -193,6 +201,8 @@ export default function CreationsHistory({
   limit = 100,
   onSelect,
   selectedUrl,
+  multiSelect = false,
+  selectedUrls,
   className = "",
   refreshKey = 0,
   enableTabs = false,
@@ -723,8 +733,14 @@ export default function CreationsHistory({
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
+            const selectionIndex = multiSelect
+              ? (selectedUrls?.indexOf(item.mediaUrl) ?? -1)
+              : -1;
+            const isSelected = multiSelect
+              ? selectionIndex !== -1
+              : selectedUrl === item.mediaUrl;
             const cardClass = `group relative text-left rounded-2xl overflow-hidden border transition-all hover:scale-[1.02] ${
-              selectedUrl === item.mediaUrl
+              isSelected
                 ? "border-indigo-400/60 ring-2 ring-indigo-400/30"
                 : "border-white/10 hover:border-white/25"
             }`;
@@ -750,9 +766,14 @@ export default function CreationsHistory({
                   />
                 )}
                 {isCharacterItem(item) && (
-                  <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                  <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
                     <User className="h-3 w-3" />
                     Character
+                  </span>
+                )}
+                {multiSelect && isSelected && (
+                  <span className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500 text-xs font-semibold text-white shadow">
+                    {selectionIndex + 1}
                   </span>
                 )}
               </div>
@@ -765,7 +786,7 @@ export default function CreationsHistory({
                     <p className="text-xs font-medium text-white truncate">
                       {item.title || item.toolLabel}
                     </p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">{item.toolLabel}</p>
+                    <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{item.toolLabel}</p>
                   </>
                 ) : (
                   isCharacterItem(item) && (
@@ -1045,7 +1066,7 @@ export default function CreationsHistory({
 
               {richUI && isCharacterItem(previewItem) && (
                 <div className="border-b border-white/10 px-4 py-4">
-                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
                     Character name
                   </label>
                   <div className="flex items-center gap-2">
@@ -1074,7 +1095,7 @@ export default function CreationsHistory({
                 <div className="space-y-4 px-4 py-4">
                   {previewPrompt && (
                     <div>
-                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
                         Prompt
                       </p>
                       <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
@@ -1085,7 +1106,7 @@ export default function CreationsHistory({
 
                   {previewScenePrompts.length > 0 && (
                     <div>
-                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
                         Scene prompts
                       </p>
                       <ol className="space-y-1.5">
@@ -1106,7 +1127,7 @@ export default function CreationsHistory({
 
                   {previewNarration && (
                     <div>
-                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
                         Narration
                       </p>
                       <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">

@@ -1,4 +1,4 @@
-import { PHOTOS_FOLDER, STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { PHOTOS_FOLDER, STORAGE_BUCKET, photosUserPrefix } from "@/lib/storage-buckets";
 
 export const PRODUCT_PHOTO_BUCKET = STORAGE_BUCKET;
 export const PRODUCT_PHOTO_ROOT = PHOTOS_FOLDER;
@@ -711,19 +711,56 @@ export function parseGeneratedFilename(name: string): {
   };
 }
 
-/** Storage prefix per authenticated user: `photos/{userId}/` */
+/** Storage prefix per authenticated user: `{userId}/photos` */
 export function userStoragePrefix(userId: string): string {
-  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
-  if (!safe) throw new Error("Invalid user id");
-  return `${PRODUCT_PHOTO_ROOT}/${safe}`;
+  return photosUserPrefix(userId);
+}
+
+/** Photo studio output modes under `photos/{userId}/generated/{mode}/`. */
+export type PhotoStudioMode = "product" | "t2i" | "character" | "storyboard";
+
+export const PHOTO_STUDIO_MODES: PhotoStudioMode[] = [
+  "product",
+  "t2i",
+  "character",
+  "storyboard",
+];
+
+/** Map generate-photo `mode` → storage folder (image → t2i, parallel to video t2v). */
+export function photoStorageModeFromGenerate(
+  mode: "product" | "image" | "character",
+): PhotoStudioMode {
+  if (mode === "image") return "t2i";
+  return mode;
+}
+
+function safePhotoModeSegment(mode: string): string {
+  const safe = mode.replace(/[^a-z0-9-]/g, "");
+  if (!safe) throw new Error(`Invalid photo mode: "${mode}"`);
+  return safe;
+}
+
+/** `photos/{userId}/generated/{mode}/{filename}` */
+export function photosGeneratedPath(
+  userId: string,
+  mode: PhotoStudioMode,
+  filename: string,
+): string {
+  return `${userStoragePrefix(userId)}/generated/${safePhotoModeSegment(mode)}/${filename}`;
 }
 
 export function uploadsPath(userId: string, filename: string): string {
-  return `${userStoragePrefix(userId)}/uploads/${filename}`;
+  return `${userStoragePrefix(userId)}/uploads/reference/${filename}`;
 }
 
+/** @deprecated Use `photosGeneratedPath(userId, mode, filename)`. */
 export function generatedPath(userId: string, filename: string): string {
   return `${userStoragePrefix(userId)}/generated/${filename}`;
+}
+
+/** Storyboard sheet images: `photos/{userId}/generated/storyboard/{filename}` */
+export function storyboardSheetPath(userId: string, filename: string): string {
+  return photosGeneratedPath(userId, "storyboard", filename);
 }
 
 /** @deprecated Use userStoragePrefix — browser client id is no longer used for storage */
