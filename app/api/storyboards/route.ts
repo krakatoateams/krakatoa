@@ -38,7 +38,12 @@ export async function GET() {
             storyboard_url: storyboardUrl ?? r.storyboard_url,
             video_url: videoUrl ?? r.video_url,
           };
-        } catch {
+        } catch (err: unknown) {
+          console.warn(
+            "[storyboards] sign failed:",
+            r.id,
+            err instanceof Error ? err.message : err,
+          );
           return r;
         }
       }),

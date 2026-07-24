@@ -668,7 +668,7 @@ export async function POST(req: Request) {
       console.warn("[Storyboard Video] History log failed:", historyErr);
     }
 
-    const successResponse = { videoUrl, aspectRatio, language, historyItem };
+    const successResponse = { videoUrl, storagePath, aspectRatio, language, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,

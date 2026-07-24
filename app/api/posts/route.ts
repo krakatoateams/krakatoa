@@ -41,7 +41,12 @@ export async function GET() {
           storagePath: path,
         });
         return signed ? { ...post, video_url: signed } : post;
-      } catch {
+      } catch (err: unknown) {
+        console.warn(
+          "[posts] sign video_url failed:",
+          path,
+          err instanceof Error ? err.message : err,
+        );
         return post;
       }
     }),

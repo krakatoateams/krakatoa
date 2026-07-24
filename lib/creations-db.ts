@@ -478,7 +478,12 @@ export async function signCreationItemsMedia(
           mediaUrl: item.mediaUrl,
         });
         return signed ? { ...item, mediaUrl: signed } : item;
-      } catch {
+      } catch (err: unknown) {
+        console.warn(
+          "[creations] sign media failed:",
+          item.storagePath || item.mediaUrl,
+          err instanceof Error ? err.message : err,
+        );
         return item;
       }
     }),

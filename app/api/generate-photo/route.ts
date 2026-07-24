@@ -741,6 +741,7 @@ export async function POST(req: Request) {
 
     const successResponse = {
       imageUrl: saved.publicUrl,
+      storagePath: saved.storagePath,
       historyItem: saved.historyItem,
       savedToCloud: true,
     };

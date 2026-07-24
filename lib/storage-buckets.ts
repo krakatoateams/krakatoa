@@ -1,13 +1,13 @@
 /**
- * Kelolako uses one public Supabase Storage bucket with top-level folders per feature.
- * Product photos live under `photos/{userId}/` — never inside `videos/`.
+ * Kelolako uses one **private** Supabase Storage bucket (`krakatoa`) with signed read URLs.
+ * Top-level folders per feature. Product photos live under `photos/{userId}/` — never inside `videos/`.
  * Video studio: `videos/{userId}/generated/video/{mode}/` (reelscreator, t2v, i2v,
  * motion-control). Storyboard i2v: `videos/{userId}/generated/storyboard/`.
  * Product photos: `photos/{userId}/generated/{mode}/` (product, t2i, character,
  * storyboard). Reference uploads: `photos/{userId}/uploads/reference/`.
- * Scheduler device uploads still use flat `videos/` (orphan-sweeped after 24h).
+ * Scheduler device uploads: `videos/{userId}/uploads/scheduler/`.
  *
- * Create the bucket in Supabase Dashboard → Storage, then add public folders as needed.
+ * Create the bucket in Supabase Dashboard → Storage (private). Reads via signed URLs.
  * Override the bucket name with SUPABASE_STORAGE_BUCKET in .env.local if needed.
  *
  * ---------------------------------------------------------------------------

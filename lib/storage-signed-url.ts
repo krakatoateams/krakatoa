@@ -7,6 +7,7 @@ import {
   PHOTOS_FOLDER,
   STORAGE_BUCKET,
   VIDEOS_FOLDER,
+  isStorageRelativePath,
   storagePathFromPublicUrl,
   storagePathFromSignedUrl,
 } from "@/lib/storage-buckets";
@@ -37,9 +38,7 @@ export function storagePathOwnerUserId(path: string): string | null {
   return m?.[1] ?? null;
 }
 
-export function isStorageRelativePath(value: string): boolean {
-  return value.startsWith(`${PHOTOS_FOLDER}/`) || value.startsWith(`${VIDEOS_FOLDER}/`);
-}
+export { isStorageRelativePath };
 
 function isAllowedStoragePath(path: string): boolean {
   return isStorageRelativePath(path) && !path.includes("..");

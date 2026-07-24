@@ -78,6 +78,7 @@ import {
 } from "@/components/studio";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 
 function describeIdempotencyError(
@@ -463,7 +464,9 @@ function PhotoOmniPage() {
     { enabledTiers: string[]; defaultTier: string | null }
   > | null>(null);
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -724,7 +727,8 @@ function PhotoOmniPage() {
       }
 
       attempt.settle(true);
-      setResultUrl(data.imageUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.imageUrl ?? null);
       if (data.warning) setWarning(data.warning);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();

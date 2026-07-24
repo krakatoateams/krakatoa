@@ -572,7 +572,7 @@ export async function POST(req: Request) {
 
     // Standardized response for ALL engines. Persisted on the idempotency row so
     // a duplicate same-key request replays this exact body without regenerating.
-    const successResponse = { videoUrl: result.videoUrl, historyItem };
+    const successResponse = { videoUrl: result.videoUrl, storagePath: result.storagePath, historyItem };
     if (generationRequestId) {
       await safe("idemSuccess", () =>
         finishGenerationRequestSuccess({

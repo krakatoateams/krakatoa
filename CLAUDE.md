@@ -136,7 +136,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
 - **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
 - **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
-- **Private access (in progress):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs sign on read. Bucket is still **public** until Phase 5 flip — deploy code first, then set bucket private in Dashboard.
+- **Private access (live):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs and `useSignedMediaUrl` sign on read. Bucket `krakatoa` is **private** (migration `049_storage_bucket_private.sql`). Legacy `/api/upload` returns 410 — use `POST /api/upload/sign`.
 
 ## Admin Config v2 (unified control panel)
 
@@ -162,7 +162,7 @@ Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/mod
    - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Public anon key if you use a browser Supabase client (see `README.md`); server pipelines here rely on the service role for Storage.
    - `SUPABASE_SERVICE_ROLE_KEY` — Server-side Storage/DB (used by generation routes and server helpers).
-   - `SUPABASE_STORAGE_BUCKET` — Optional override for the public Storage bucket name (default `krakatoa`).
+   - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
    - `CRON_SECRET` — Protects `app/api/cron` if used.

@@ -613,6 +613,7 @@ export async function POST(req: Request) {
 
     const successResponse = {
       videoUrl: publicUrl,
+      storagePath,
       historyItem,
       savedToCloud: true,
     };
