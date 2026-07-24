@@ -23,12 +23,11 @@ import {
   getMotionControlModel,
   isValidMotionControlModelId,
   isValidMotionControlMode,
-  isValidCharacterOrientation,
+  DEFAULT_CHARACTER_ORIENTATION,
   effectiveMotionControlDuration,
   motionControlRefVideoDurationError,
   buildMotionControlProviderInput,
   type MotionControlMode,
-  type CharacterOrientation,
 } from "@/lib/motion-control-models";
 import type { MotionControlJobInput } from "@/lib/motion-control-context";
 import { cleanupMotionControlTempRefs } from "@/lib/motion-control-finalize";
@@ -145,7 +144,6 @@ export async function POST(req: Request) {
     const promptRaw = String(b.prompt ?? "").trim();
     const modelId = String(b.modelId ?? "").trim();
     const mode = String(b.mode ?? "").trim();
-    const characterOrientation = String(b.characterOrientation ?? "").trim();
     const keepOriginalSound = b.keepOriginalSound !== false; // default true
     const refVideoDurationRaw = Number(b.refVideoDurationSec ?? NaN);
     const characterCreationId =
@@ -167,12 +165,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (!isValidCharacterOrientation(characterOrientation)) {
-      return NextResponse.json(
-        { error: "Character orientation must be 'image' or 'video'." },
-        { status: 400 }
-      );
-    }
+    const characterOrientation = DEFAULT_CHARACTER_ORIENTATION;
 
     // ---- Parse the required reference attachments + collect temp paths ----
     let imageRef = parseRefAttachment(b.image);
@@ -196,11 +189,8 @@ export async function POST(req: Request) {
       if (ref.path && isVideosTempRefPath(ref.path)) tempRefPaths.push(ref.path);
     }
 
-    const orientation = characterOrientation as CharacterOrientation;
-
     const durationError = motionControlRefVideoDurationError(
       Number.isFinite(refVideoDurationRaw) ? refVideoDurationRaw : null,
-      orientation,
     );
     if (durationError) {
       return NextResponse.json({ error: durationError }, { status: 400 });
@@ -209,7 +199,6 @@ export async function POST(req: Request) {
     const billedDuration = effectiveMotionControlDuration({
       model,
       refVideoDurationSec: Number.isFinite(refVideoDurationRaw) ? refVideoDurationRaw : null,
-      orientation,
     });
     const pricingKey = model.pricingKey(mode as MotionControlMode);
 
@@ -420,7 +409,7 @@ export async function POST(req: Request) {
       prompt,
       mode: mode as MotionControlMode,
       keepOriginalSound,
-      characterOrientation: orientation,
+      characterOrientation,
       imageUrl: pipelineImageUrl,
       videoUrl: pipelineVideoUrl,
     });

@@ -130,7 +130,7 @@ Defined in `lib/admin-config-tree.ts` as `VIDEO_COMPOSERS`:
 |-----|-------|-------------|
 | `text2video` | Text to video | `isTextToVideoModel` |
 | `image2video` | Image to video | `isImageToVideoModel` |
-| `motion_control` | Motion control | `MOTION_CONTROL_MODELS` only |
+| `motion_control` | Motion control | `MOTION_CONTROL_MODELS` only (Follow motion only — see `docs/video/motion-control.md`) |
 | `storyboard` | Storyboard to video | `isStoryboardVideoModelId` |
 | `reels-creator` | Reels Creator | `REELS_CREATOR_MODEL_IDS` |
 

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
+import type { ToolSidebarVisibility } from "@/lib/tool-configs-db";
 
 interface NavItem {
   label: string;
@@ -66,19 +67,20 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-type ToolVisibility = {
-  tool_key: string;
-  enabled: boolean;
-  visible_in_sidebar: boolean;
-};
+type ToolVisibility = ToolSidebarVisibility;
 
-export default function Sidebar() {
+export default function Sidebar({
+  initialToolVisibility = null,
+}: {
+  initialToolVisibility?: Record<string, ToolVisibility> | null;
+}) {
   const pathname = usePathname();
   const { status, name, email, image } = useCurrentUser();
   const [isAdmin, setIsAdmin] = useState(false);
   const [toolVisibility, setToolVisibility] = useState<Record<string, ToolVisibility> | null>(
-    null
+    initialToolVisibility
   );
+  const [toolsConfigReady, setToolsConfigReady] = useState(initialToolVisibility !== null);
 
   // Admin link visibility (cosmetic only — the real gate is the server-side
   // requireAdmin() guard on /admin pages and APIs).
@@ -90,9 +92,16 @@ export default function Sidebar() {
       .catch(() => setIsAdmin(false));
   }, [status]);
 
-  // Tool visibility from tool_configs. Fails open: if the fetch fails the
-  // sidebar shows everything (never hides a tool due to a transient error).
-  // Refetch when admin saves toggles (krakatoa:tool-config-updated) or on focus.
+  // Tool visibility from tool_configs. Server layout preloads initialToolVisibility
+  // so disabled tools never flash on first paint. Client refetch keeps admin toggles
+  // in sync (event + window focus). On fetch error after load, fail open.
+  useEffect(() => {
+    if (initialToolVisibility) {
+      setToolVisibility(initialToolVisibility);
+      setToolsConfigReady(true);
+    }
+  }, [initialToolVisibility]);
+
   useEffect(() => {
     if (status !== "authenticated") return;
     const load = () => {
@@ -103,21 +112,24 @@ export default function Sidebar() {
           for (const t of d.tools ?? []) map[t.tool_key] = t;
           setToolVisibility(map);
         })
-        .catch(() => setToolVisibility(null));
+        .catch(() => setToolVisibility(null))
+        .finally(() => setToolsConfigReady(true));
     };
-    load();
+    if (!initialToolVisibility) load();
     window.addEventListener(TOOL_CONFIG_UPDATED_EVENT, load);
     window.addEventListener("focus", load);
     return () => {
       window.removeEventListener(TOOL_CONFIG_UPDATED_EVENT, load);
       window.removeEventListener("focus", load);
     };
-  }, [status]);
+  }, [status, initialToolVisibility]);
 
-  // An item shows unless its tool config explicitly hides/disables it. Items
-  // without a toolKey (e.g. Settings) always show.
+  // Items without toolKey always show. Gated items stay hidden until config is
+  // known (fail closed) so disabled tools never flash on load.
   const isItemVisible = (item: NavItem): boolean => {
-    if (!item.toolKey || !toolVisibility) return true;
+    if (!item.toolKey) return true;
+    if (!toolsConfigReady) return false;
+    if (!toolVisibility) return true;
     const cfg = toolVisibility[item.toolKey];
     if (!cfg) return true;
     return cfg.enabled && cfg.visible_in_sidebar;
