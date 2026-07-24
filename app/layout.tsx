@@ -16,8 +16,19 @@ const dmSans = DM_Sans({
   weight: ["400", "500", "600", "700"],
 });
 
+function metadataBaseUrl(): URL {
+  const fallback = "https://kelolako.com";
+  const raw = process.env.NEXTAUTH_URL?.trim();
+  if (!raw) return new URL(fallback);
+  try {
+    return new URL(raw);
+  } catch {
+    return new URL(fallback);
+  }
+}
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXTAUTH_URL ?? "https://kelolako.com"),
+  metadataBase: metadataBaseUrl(),
   title: "Kelolako - AI-powered tools for content creators",
   description:
     "Generate faceless reels, product photos, and automate your social media — all in one place.",
