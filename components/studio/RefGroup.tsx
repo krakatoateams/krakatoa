@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Info, Loader2, Music, Plus, X } from "lucide-react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { Tooltip } from "./Tooltip";
 
 export type RefKind = "image" | "video" | "audio";
@@ -34,17 +35,19 @@ export async function uploadRefFile(file: File): Promise<{ url: string; path: st
   if (!signRes.ok || !signData) {
     throw new Error(signData?.error || "Couldn't start the upload (server error).");
   }
-  const { bucket, path, token, publicUrl } = signData as {
+  const { bucket, path, token, storagePath } = signData as {
     bucket: string;
     path: string;
     token: string;
-    publicUrl: string;
+    storagePath?: string;
   };
   const { error } = await getSupabaseBrowser()
     .storage.from(bucket)
     .uploadToSignedUrl(path, token, file, { contentType: file.type });
   if (error) throw new Error(error.message || "Upload failed.");
-  return { url: publicUrl, path };
+  const resolvedPath = storagePath || path;
+  const signed = await fetchSignedUrl({ path: resolvedPath });
+  return { url: signed.url, path: resolvedPath };
 }
 
 export type RefGroupApi = {
@@ -168,10 +171,15 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
       )}
       {item.status === "error" && (
         <div
-          className="absolute inset-0 flex items-center justify-center bg-red-900/60"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-900/60 px-1"
           title={item.error || "Upload failed"}
         >
-          <AlertCircle className="h-5 w-5 text-red-300" />
+          <AlertCircle className="h-5 w-5 shrink-0 text-red-300" />
+          {item.error ? (
+            <span className="line-clamp-2 w-full text-center text-[10px] leading-tight text-red-100">
+              {item.error}
+            </span>
+          ) : null}
         </div>
       )}
 

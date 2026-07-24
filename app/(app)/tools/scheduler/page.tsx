@@ -215,11 +215,10 @@ async function signAndUploadFile(
     throw new Error((signData && signData.error) || "Couldn't start the upload. Please try again.");
   }
 
-  const { bucket, path, token, publicUrl, storagePath } = signData as {
+  const { bucket, path, token, storagePath } = signData as {
     bucket: string;
     path: string;
     token: string;
-    publicUrl: string;
     storagePath?: string;
   };
 
@@ -228,7 +227,9 @@ async function signAndUploadFile(
     .uploadToSignedUrl(path, token, file, { contentType: file.type });
 
   if (uploadError) throw new Error(uploadError.message || "Upload failed.");
-  return { url: publicUrl, storagePath: storagePath ?? path };
+  const resolvedPath = storagePath ?? path;
+  const signed = await fetchSignedUrl({ path: resolvedPath });
+  return { url: signed.url, storagePath: resolvedPath };
 }
 
 /** Preview a scheduler photo ref (storage path or legacy signed URL). */
