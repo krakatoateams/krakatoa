@@ -129,10 +129,10 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
 ### 5. Supabase Storage (Reels Creator)
-- **Canonical paths:** `lib/storage-buckets.ts` — bucket name `STORAGE_BUCKET` from `SUPABASE_STORAGE_BUCKET` or default **`krakatoa`**.
-- **Final deliverable:** `videos/reels_<timestamp>.mp4` (Seedance) or `videos/reels_veo_<timestamp>.mp4` (Veo) — public URL returned as `videoUrl` to the client for preview and download.
-- **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** (Veo uses `captions_veo_<timestamp>.ass`) for Rendi to fetch; deleted after a successful run.
-- **Product Photo** uses **`photos/`** in the same bucket — never under `videos/`.
+- **Canonical paths:** Video studio: `videos/{userId}/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `videos/{userId}/generated/storyboard/`. Photo studio: `photos/{userId}/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `photos/{userId}/uploads/reference/`. Transient video refs: `videos/{userId}/temp/`.
+- **Final deliverable (Reels Creator):** `videos/{userId}/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
+- **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
+- **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
 
 ## Admin Config v2 (unified control panel)
 

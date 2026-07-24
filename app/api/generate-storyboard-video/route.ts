@@ -5,7 +5,7 @@ import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
+  videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
@@ -537,7 +537,7 @@ export async function POST(req: Request) {
     const videoBuffer = await vidRes.arrayBuffer();
 
     const filename = `video_${Date.now()}.mp4`;
-    const storagePath = videosStoryboardPath(filename);
+    const storagePath = videosStoryboardVideoPath(userId!, filename);
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)

@@ -391,6 +391,7 @@ export async function POST(req: Request) {
     // ---- Build the pipeline context + dispatch ----
     const ctx: ReelsPipelineContext = {
       replicate,
+      userId: userId!,
       rendiApiKey,
       models,
       refs,

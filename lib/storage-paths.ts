@@ -7,8 +7,8 @@
  *   - `assets.storage_path` (in the DB) is the source of truth; these helpers
  *     just generate canonical paths to store there.
  *
- * Legacy paths under `videos/` and `photos/` are unaffected — those continue to
- * be produced by the existing tools until they migrate to assets.
+ * Legacy flat paths under `videos/` (scheduler device uploads) are unaffected.
+ * New generations use `videos/{userId}/…` — mirrors `photos/{userId}/…`.
  */
 
 export const PLATFORM_STORAGE_BUCKET =

@@ -211,6 +211,7 @@ ${promptInstruction}`,
     finalDuration
   );
   const { srtFilename, srtUrl } = await uploadAssCaptions(
+    ctx.userId,
     assContent,
     `captions_veo_${Date.now()}.ass`
   );
@@ -220,8 +221,10 @@ ${promptInstruction}`,
   // ----- Step 7: download + upload final MP4 -----
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
   const { storagePath, publicUrl } = await downloadAndStoreFinal(
+    ctx.userId,
+    "reelscreator",
     rendiFinalUrl,
-    `reels_veo_${Date.now()}.mp4`
+    `video_${Date.now()}.mp4`
   );
   await cleanupCaptions(srtFilename);
   await ctx.log.endStep({ storagePath, publicUrl });
@@ -363,6 +366,7 @@ Return ONLY raw JSON array, nothing else.`;
   // ----- Step 4: ASS subtitles + Rendi concat/merge/burn -----
   await ctx.log.beginStep("rendi_render", "ASS subtitles + Rendi concat/merge/burn-in");
   const { srtFilename, srtUrl } = await uploadAssCaptions(
+    ctx.userId,
     assContent,
     `captions_veo_${Date.now()}.ass`
   );
@@ -390,8 +394,10 @@ Return ONLY raw JSON array, nothing else.`;
   // ----- Step 5: download + upload final MP4 -----
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
   const { storagePath, publicUrl } = await downloadAndStoreFinal(
+    ctx.userId,
+    "reelscreator",
     rendiFinalUrl,
-    `reels_veo_${Date.now()}.mp4`
+    `video_${Date.now()}.mp4`
   );
   await cleanupCaptions(srtFilename);
   await ctx.log.endStep({ storagePath, publicUrl });

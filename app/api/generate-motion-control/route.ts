@@ -19,11 +19,7 @@ import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import {
-  STORAGE_BUCKET,
-  videosStoragePath,
-  isVideosTempRefPath,
-} from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
 import {
   getMotionControlModel,
   isValidMotionControlModelId,
@@ -393,7 +389,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
     }
     const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosStoragePath(`motion_${Date.now()}.mp4`);
+    const storagePath = videosGeneratedVideoPath(userId!, "motion-control", `video_${Date.now()}.mp4`);
 
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)

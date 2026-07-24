@@ -1,5 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, VIDEOS_FOLDER, VIDEOS_TEMP_SEGMENT } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, VIDEOS_FOLDER, isVideosTempPath } from "@/lib/storage-buckets";
 
 /**
  * Storage hygiene sweep (see openspec/changes/storage-hygiene).
@@ -16,8 +16,6 @@ import { STORAGE_BUCKET, VIDEOS_FOLDER, VIDEOS_TEMP_SEGMENT } from "@/lib/storag
  *
  * Reference matching is deliberately conservative — when in doubt, keep.
  */
-
-const TEMP_PREFIX = `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/`;
 
 export const DEFAULT_SWEEP_MIN_AGE_HOURS = 24;
 
@@ -161,7 +159,7 @@ export async function planStorageSweep(
   const deletable: Array<SweepObject & { reason: "temp" | "orphan" }> = [];
 
   for (const obj of objects) {
-    const isTemp = obj.path.startsWith(TEMP_PREFIX);
+    const isTemp = isVideosTempPath(obj.path);
     // Without a timestamp we cannot prove the object is old enough → keep it.
     const isOldEnough = obj.createdAtMs !== null && obj.createdAtMs < cutoffMs;
 
