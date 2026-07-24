@@ -23,6 +23,8 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Linting**: `npm run lint`
 - **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
+- **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`
+- **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -133,6 +135,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Final deliverable (Reels Creator):** `videos/{userId}/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
 - **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
 - **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
+- **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
 
 ## Admin Config v2 (unified control panel)
 

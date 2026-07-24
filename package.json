@@ -10,6 +10,8 @@
     "icons:generate": "node scripts/generate-pwa-icons.mjs",
     "db:setup": "node scripts/setup-db.mjs",
     "db:setup-product-photo": "node scripts/setup-db.mjs",
+    "storage:migrate-layout": "node scripts/migrate-storage-layout.mjs",
+    "storage:list-orphans": "npx tsx scripts/list-storage-orphans.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {
