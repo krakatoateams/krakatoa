@@ -800,7 +800,7 @@ function VideoOmniPage() {
 
           {/* References */}
           <div className="mt-4">
-            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500">
+            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
               <Sparkles className="h-3.5 w-3.5 text-purple-300" />
               References
               <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
@@ -900,7 +900,7 @@ function VideoOmniPage() {
           </div>
 
           {!refCheck.ok && (
-            <p className="mt-2 pl-1 text-xs text-amber-300/80">{refCheck.error}</p>
+            <p className="mt-2 pl-1 text-sm text-amber-300/80">{refCheck.error}</p>
           )}
         </form>
         )}
@@ -935,7 +935,7 @@ function VideoOmniPage() {
               <p className="text-sm text-gray-300">
                 {model.modelLabel} · {duration}s · {resolution} · {ASPECT_RATIO_LABELS[aspectRatio]}
               </p>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-sm text-gray-500">
                 Find it in your history below, or generate another.
               </p>
             </div>
@@ -1443,7 +1443,7 @@ function ImageToVideoComposer({
           </div>
 
           {!frameReady ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
               {model.requiresFirstFrame
                 ? imageSource === "library"
                   ? "Pick a start image from your library."
@@ -1796,12 +1796,12 @@ function MotionControlComposer({
               type="button"
               onClick={() => setAdvancedOpen((o) => !o)}
               aria-expanded={advancedOpen}
-              className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 transition-colors hover:text-gray-200"
+              className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 transition-colors hover:text-gray-200"
             >
               <SlidersHorizontal className="h-3.5 w-3.5 text-purple-300" />
               Advanced settings
               {!advancedOpen && prompt.trim() && (
-                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-200">
+                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-medium text-purple-200">
                   prompt added
                 </span>
               )}
@@ -1813,7 +1813,7 @@ function MotionControlComposer({
               <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-1 flex items-center gap-2">
                   <span className="text-sm font-semibold text-gray-200">Prompt</span>
-                  <span className="text-[11px] font-medium text-gray-500">optional</span>
+                  <span className="text-sm font-medium text-gray-500">optional</span>
                 </div>
                 <textarea
                   value={prompt}
@@ -1918,7 +1918,7 @@ function MotionControlComposer({
           </div>
 
           {!imageReady || !videoReady ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
               Add both your character image and a motion video to generate.
             </p>
           ) : null}
@@ -2005,7 +2005,7 @@ function MotionControlComposer({
             <p className="text-sm text-gray-300">
               {model.modelLabel} · {mode === "std" ? "Standard" : "Pro"} · {motionControlResolutionLabel(mode)}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-sm text-gray-500">
               Find it in your history below, or generate another.
             </p>
           </div>
@@ -2187,7 +2187,7 @@ function ImportStoryboardModal({
               <>
                 <Upload className="h-6 w-6 text-gray-400" />
                 <span className="text-sm text-gray-300">Click to choose an image</span>
-                <span className="text-[11px] text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
+                <span className="text-sm text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
               </>
             )}
             <input
@@ -2198,13 +2198,13 @@ function ImportStoryboardModal({
               onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             />
             {previewUrl && (
-              <span className="text-[11px] font-semibold text-purple-300">Change image</span>
+              <span className="text-sm font-semibold text-purple-300">Change image</span>
             )}
           </label>
 
           {/* Optional description */}
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <label className="mb-1 block text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
               Description <span className="text-gray-600">(optional)</span>
             </label>
             <textarea
@@ -2265,7 +2265,7 @@ function ImportStoryboardModal({
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
+            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -2273,7 +2273,7 @@ function ImportStoryboardModal({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
-          <p className="text-[11px] text-gray-500">
+          <p className="text-sm text-gray-500">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
           <CreditActionButton
@@ -2553,7 +2553,7 @@ function StoryboardToVideoComposer({
         <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
               <span className="text-purple-300">
                 <ImageIcon className="h-3.5 w-3.5" />
               </span>
@@ -2600,7 +2600,7 @@ function StoryboardToVideoComposer({
                 className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
               >
                 <Upload className="h-5 w-5" />
-                <span className="text-[11px] font-semibold">Upload your own</span>
+                <span className="text-sm font-semibold">Upload your own</span>
               </button>
               {items.map((s) => {
                 const active = s.id === selectedId;
@@ -2623,21 +2623,21 @@ function StoryboardToVideoComposer({
                       alt={s.theme}
                       className="aspect-[3/2] w-full object-cover"
                     />
-                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-gray-300">
+                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-300">
                       {s.aspectRatio && (
-                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[9px] font-semibold text-gray-200">
+                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-xs font-semibold text-gray-200">
                           {s.aspectRatio}
                         </span>
                       )}
                       <span className="truncate">{s.theme}</span>
                     </span>
                     {s.hasVideo && (
-                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-300">
                         Has video
                       </span>
                     )}
                     {s.source === "uploaded" && (
-                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-300">
+                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-300">
                         Uploaded
                       </span>
                     )}
@@ -2742,7 +2742,7 @@ function StoryboardToVideoComposer({
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((o) => !o)}
-                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200"
+                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200 sm:text-sm"
               >
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
@@ -2750,7 +2750,7 @@ function StoryboardToVideoComposer({
                 <Pencil className="h-3.5 w-3.5 text-purple-300" />
                 Advanced — edit prompt
                 {promptDirty && (
-                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[9px] font-bold text-purple-200">
+                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-bold text-purple-200">
                     Edited
                   </span>
                 )}
@@ -2763,9 +2763,9 @@ function StoryboardToVideoComposer({
                     rows={6}
                     disabled={loading}
                     placeholder="The video prompt Seedance will follow…"
-                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
                   />
-                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500">
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-gray-500">
                     <span>
                       Style, orientation &amp; language are re-applied automatically on render.
                     </span>
@@ -2792,7 +2792,7 @@ function StoryboardToVideoComposer({
                     </div>
                   </div>
                   {promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS && (
-                    <p className="mt-1 text-[11px] text-amber-300/80">
+                    <p className="mt-1 text-sm text-amber-300/80">
                       This prompt is long — it may be trimmed at a sentence boundary on render so the style, orientation &amp; language directives still fit. Shorten it for full fidelity.
                     </p>
                   )}
@@ -2802,7 +2802,7 @@ function StoryboardToVideoComposer({
           ) : null}
 
           {!selectedId && listState === "loaded" && items.length > 0 ? (
-            <p className="mt-3 pl-1 text-xs text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-amber-300/80">
               Pick a storyboard to turn into a video.
             </p>
           ) : null}
@@ -2899,7 +2899,7 @@ function StoryboardToVideoComposer({
               {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
               {selected ? ` · ${selected.theme}` : ""}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-sm text-gray-500">
               Find it in your history below, or render another resolution.
             </p>
           </div>
@@ -3596,14 +3596,14 @@ function ReelsCreatorComposer({
         {/* Caption styler + live preview */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400">
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400 sm:text-sm">
               <Type className="h-3.5 w-3.5 text-purple-300" />
               Caption style
             </div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Font family
                   </label>
                   <ThemedSelect
@@ -3615,7 +3615,7 @@ function ReelsCreatorComposer({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Font size
                   </label>
                   <NumberStepper
@@ -3629,7 +3629,7 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Text color
                     </label>
                     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
@@ -3642,13 +3642,13 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-[11px] text-gray-300">
+                      <span className="font-mono text-sm text-gray-300">
                         {captionStyle.highlightColor}
                       </span>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Outline
                     </label>
                     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
@@ -3661,7 +3661,7 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-[11px] text-gray-300">
+                      <span className="font-mono text-sm text-gray-300">
                         {captionStyle.outlineColor}
                       </span>
                     </div>
@@ -3671,7 +3671,7 @@ function ReelsCreatorComposer({
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                     Outline thickness
                   </label>
                   <NumberStepper
@@ -3687,10 +3687,10 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Vertical position
                     </label>
-                    <span className="text-[11px] font-bold text-purple-300">
+                    <span className="text-sm font-bold text-purple-300">
                       {captionStyle.marginV}%
                     </span>
                   </div>
@@ -3726,11 +3726,11 @@ function ReelsCreatorComposer({
 
           {/* Live Caption Preview — 480x854 math mirrors the server ASS MarginV. */}
           <div className="rounded-3xl border border-white/10 bg-black/40 p-4 sm:p-5">
-            <div className="mb-3 text-center text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500">
+            <div className="mb-3 text-center text-xs font-bold uppercase tracking-[0.3em] text-gray-500 sm:text-sm">
               Live caption preview
             </div>
             {engine === "veo" && (
-              <p className="mx-auto mb-3 max-w-[240px] text-center text-[10px] leading-relaxed text-amber-400/80">
+              <p className="mx-auto mb-3 max-w-[240px] text-center text-sm leading-relaxed text-amber-400/80">
                 Preview uses 480×854 math; Veo outputs 720p/1080p so vertical caption
                 position may differ slightly.
               </p>

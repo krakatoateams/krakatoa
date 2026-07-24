@@ -157,7 +157,7 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
       ) : (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-gray-400">
           <Music className="h-5 w-5" />
-          <span className="max-w-full truncate px-1 text-[8px]">{item.file.name}</span>
+          <span className="max-w-full truncate px-1 text-xs">{item.file.name}</span>
         </div>
       )}
 
@@ -216,7 +216,7 @@ export function RefGroup({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
           {hint && !disabled && (
@@ -225,7 +225,7 @@ export function RefGroup({
             </Tooltip>
           )}
         </div>
-        <span className="text-[10px] text-gray-600">
+        <span className="text-xs text-gray-500">
           {group.items.length}/{group.max}
         </span>
       </div>
@@ -240,7 +240,7 @@ export function RefGroup({
             disabled={addDisabled}
             onClick={() => inputRef.current?.click()}
             title={disabled ? disabledReason : `Add ${label.toLowerCase()}`}
-            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-xs font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Plus className="h-4 w-4" />
             <span>Add</span>
@@ -249,7 +249,7 @@ export function RefGroup({
       </div>
 
       {disabled && disabledReason ? (
-        <p className="mt-2 text-[10px] text-amber-300/70">{disabledReason}</p>
+        <p className="mt-2 text-sm leading-snug text-amber-300/85">{disabledReason}</p>
       ) : null}
 
       <input

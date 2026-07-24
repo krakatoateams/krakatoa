@@ -144,7 +144,7 @@ export function ChipDropdown({
         <span className="flex items-center gap-2">
           {opt.label}
           {opt.hint && (
-            <span className="text-xs font-medium text-purple-300">{opt.hint}</span>
+            <span className="text-xs font-medium text-purple-300 sm:text-sm">{opt.hint}</span>
           )}
         </span>
         {active && <Check className="h-4 w-4 shrink-0 text-purple-400" />}
