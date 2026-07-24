@@ -2,9 +2,9 @@ import { getSupabase } from "@/lib/supabase";
 import { supabaseServer } from "@/lib/supabase-server";
 import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
 import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
-  PRODUCT_PHOTO_BUCKET,
-  ModelPoseId,
+  PRODUCT_PHOTO_BUCKET,  ModelPoseId,
   PhotoStyleId,
   ProductPhotoHistoryItem,
   PHOTO_STUDIO_MODES,
@@ -18,11 +18,6 @@ import {
 
 function storage() {
   return getSupabase().storage.from(PRODUCT_PHOTO_BUCKET);
-}
-
-export function getPublicUrl(storagePath: string): string {
-  const { data } = storage().getPublicUrl(storagePath);
-  return data.publicUrl;
 }
 
 function wrapStorageError(action: string, error: { message: string }) {
@@ -53,7 +48,8 @@ export async function uploadProductReferenceImage(
     wrapStorageError("Failed to upload product image", error);
   }
 
-  return { storagePath, publicUrl: getPublicUrl(storagePath) };
+  const { url: publicUrl } = await signStoragePathForUser(storagePath, userId, "ui");
+  return { storagePath, publicUrl };
 }
 
 export async function saveGeneratedProductPhoto(params: {
@@ -83,10 +79,10 @@ export async function saveGeneratedProductPhoto(params: {
     wrapStorageError("Failed to save generated image", error);
   }
 
-  const publicUrl = getPublicUrl(storagePath);
+  const { url: publicUrl } = await signStoragePathForUser(storagePath, params.userId, "ui");
   const historyItem = await insertProductPhotoGeneration({
     userId: params.userId,
-    imageUrl: publicUrl,
+    imageUrl: storagePath,
     storagePath,
     poseId: params.poseId,
     styleId: params.styleId,
@@ -126,7 +122,7 @@ export async function reconcileProductPhotosFromStorage(
       if (!f.name || f.id === null) continue; // skip folders
       if (!parseGeneratedFilename(f.name)) continue;
       const storagePath = `${prefix}/${f.name}`;
-      const item = historyItemFromPath(storagePath, getPublicUrl(storagePath));
+      const item = historyItemFromPath(storagePath, storagePath);
       if (item) candidates.push({ storagePath, item });
     }
   }

@@ -7,6 +7,7 @@ import {
   STORYBOARDS_TABLE,
   videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -552,14 +553,12 @@ export async function POST(req: Request) {
       throw new Error(`Failed to upload video: ${uploadError.message}`);
     }
 
-    const {
-      data: { publicUrl: videoUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
+    const { url: videoUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: videoUrl });
 
     const { error: finalErr } = await supabase
       .from(STORYBOARDS_TABLE)
-      .update({ video_url: videoUrl, status: "done" })
+      .update({ video_url: storagePath, status: "done" })
       .eq("id", storyboardId);
 
     if (finalErr) {
@@ -576,7 +575,6 @@ export async function POST(req: Request) {
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath,
-        publicUrl: videoUrl,
         mimeType: "video/mp4",
         durationSec,
         width: storyboardVideoDimensions(resolution, aspectRatio).width,
@@ -654,7 +652,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: "storyboard_video",
         mediaType: "video",
-        mediaUrl: videoUrl,
+        mediaUrl: storagePath,
         storagePath,
         title: String(row.theme || "Storyboard video").slice(0, 200),
         metadata: {

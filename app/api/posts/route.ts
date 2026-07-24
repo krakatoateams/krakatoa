@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
 import { getAssetForProfile } from "@/lib/assets-db";
-import { isVideoUrlConfirmedMissing } from "@/lib/video-storage";
+import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
+import {
+  assertPathOwnedByUser,
+  resolveSignedMediaUrl,
+  resolveStoragePath,
+} from "@/lib/storage-signed-url";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,7 +29,25 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ posts: data });
+  const posts = await Promise.all(
+    (data ?? []).map(async (row) => {
+      const post = row as Record<string, unknown>;
+      const raw = post.video_url as string | null;
+      const path = resolveStoragePath(null, raw);
+      if (!path) return post;
+      try {
+        const signed = await resolveSignedMediaUrl({
+          userId: profile.user_id,
+          storagePath: path,
+        });
+        return signed ? { ...post, video_url: signed } : post;
+      } catch {
+        return post;
+      }
+    }),
+  );
+
+  return NextResponse.json({ posts });
 }
 
 export async function POST(req: NextRequest) {
@@ -33,6 +56,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       video_url,
+      storage_path,
       title,
       description,
       tags,
@@ -46,6 +70,7 @@ export async function POST(req: NextRequest) {
       tiktok_brand_content_toggle,
     } = body as {
       video_url?: string;
+      storage_path?: string;
       title: string;
       description?: string;
       tags?: string;
@@ -147,7 +172,7 @@ export async function POST(req: NextRequest) {
 
     // ── Verify optional asset ownership + derive media URL ────────────────────
     let verifiedAssetId: string | null = null;
-    let assetPublicUrl: string | null = null;
+    let assetStoragePath: string | null = null;
     if (asset_id && profileId) {
       const asset = await getAssetForProfile(profileId, asset_id);
       if (!asset || asset.deleted_at) {
@@ -157,39 +182,59 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Asset is not ready." }, { status: 409 });
       }
       verifiedAssetId = asset.id;
-      assetPublicUrl = asset.public_url;
+      assetStoragePath = asset.storage_path;
     }
 
-    // ── Resolve media URL (manual wins; asset-derived only fills the gap) ──────
-    let resolvedVideoUrl = video_url;
-    if (!resolvedVideoUrl && verifiedAssetId) {
-      if (!assetPublicUrl) {
-        return NextResponse.json({ error: "Asset has no public URL." }, { status: 422 });
-      }
-      resolvedVideoUrl = assetPublicUrl;
-    }
+    // ── Resolve storage path (preferred) or legacy http URL ───────────────────
+    const resolvedPath = resolveStoragePath(
+      storage_path?.trim() || assetStoragePath,
+      video_url,
+    );
+    const legacyHttpUrl =
+      !resolvedPath && typeof video_url === "string" && video_url.trim().startsWith("http")
+        ? video_url.trim()
+        : null;
 
-    if (!resolvedVideoUrl || !title || !scheduled_time || !platform) {
+    if ((!resolvedPath && !legacyHttpUrl) || !title || !scheduled_time || !platform) {
       return NextResponse.json(
-        { error: "video_url, title, scheduled_time and platform are required." },
+        { error: "storage_path (or video_url), title, scheduled_time and platform are required." },
         { status: 400 },
       );
     }
 
     // ── Reject scheduling a video that's already gone from storage ────────────
-    // Fails open (never blocks) on an unparseable/external URL or a Storage
-    // API error — see openspec/changes/video-existence-check.
-    if (await isVideoUrlConfirmedMissing(resolvedVideoUrl)) {
+    if (resolvedPath) {
+      if (!userId) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
+      try {
+        await assertPathOwnedByUser(resolvedPath, userId);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Forbidden.";
+        const status = /invalid storage/i.test(message) ? 400 : 403;
+        return NextResponse.json({ error: message }, { status });
+      }
+      const exists = await videoObjectExists(resolvedPath);
+      if (exists === false) {
+        return NextResponse.json(
+          { error: "Video file no longer exists in storage. Please re-upload or regenerate the video." },
+          { status: 422 },
+        );
+      }
+    } else if (legacyHttpUrl && (await isVideoUrlConfirmedMissing(legacyHttpUrl))) {
       return NextResponse.json(
         { error: "Video file no longer exists in storage. Please re-upload or regenerate the video." },
         { status: 422 },
       );
     }
 
+    // Persist storage path in video_url when ours; legacy http URLs unchanged.
+    const persistedVideoRef = resolvedPath ?? legacyHttpUrl!;
+
     // ── Insert post ───────────────────────────────────────────────────────────
     const insertRow: Record<string, unknown> = {
       user_id: userId,
-      video_url: resolvedVideoUrl,
+      video_url: persistedVideoRef,
       title,
       description: description ?? "",
       tags: tags ?? "",

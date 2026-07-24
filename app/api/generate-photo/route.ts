@@ -703,7 +703,6 @@ export async function POST(req: Request) {
     if (photoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, photoAssetId!, {
         storagePath: saved.storagePath,
-        publicUrl: saved.publicUrl,
         mimeType,
         costCredits: creditsAmount,
         metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },

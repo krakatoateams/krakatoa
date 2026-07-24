@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosStoragePath } from "@/lib/storage-buckets";
 
@@ -58,12 +59,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(data.path);
+    const signed = await createSignedStorageUrl(data.path, "ui");
 
-    console.log("[upload] Success, public URL:", urlData.publicUrl);
-    return NextResponse.json({ url: urlData.publicUrl });
+    console.log("[upload] Success, signed URL for:", data.path);
+    return NextResponse.json({ url: signed.url, storagePath: data.path, expiresAt: signed.expiresAt });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Upload failed.";
     console.error("[upload] Unexpected error:", err);

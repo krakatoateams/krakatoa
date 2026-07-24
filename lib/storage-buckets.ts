@@ -55,6 +55,10 @@ export const VIDEOS_STORYBOARD_SEGMENT = "storyboard";
 /** Top-level folder for Product Photo (uploads + generated images) */
 export const PHOTOS_FOLDER = "photos";
 
+export function isStorageRelativePath(value: string): boolean {
+  return value.startsWith(`${PHOTOS_FOLDER}/`) || value.startsWith(`${VIDEOS_FOLDER}/`);
+}
+
 /** @deprecated Scheduler device uploads only — generations use `videosUserPrefix`. */
 export function videosStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${filename}`;
@@ -104,6 +108,11 @@ export function videosStoryboardVideoPath(userId: string, filename: string): str
 /** @deprecated Use `videosGeneratedVideoPath` with the correct mode. */
 export function videosGeneratedPath(userId: string, filename: string): string {
   return `${videosUserPrefix(userId)}/generated/${filename}`;
+}
+
+/** Scheduler device uploads: `videos/{userId}/uploads/scheduler/<filename>`. */
+export function videosSchedulerUploadPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}/uploads/scheduler/${filename}`;
 }
 
 /** Transient per-user files (captions, scratch): `videos/{userId}/temp/<filename>`. */
@@ -177,6 +186,20 @@ export function storagePathFromPublicUrl(url: string | null | undefined): string
   const idx = url.indexOf(marker);
   if (idx === -1) return null;
   return url.slice(idx + marker.length) || null;
+}
+
+/** Extract bucket-relative path from a signed read URL (`/object/sign/...`). */
+export function storagePathFromSignedUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `/object/sign/${STORAGE_BUCKET}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return url.slice(idx + marker.length).split("?")[0] || null;
+}
+
+/** Public or signed Supabase Storage URL → `photos/...` or `videos/...` path. */
+export function storagePathFromStorageUrl(url: string | null | undefined): string | null {
+  return storagePathFromPublicUrl(url) ?? storagePathFromSignedUrl(url);
 }
 
 // NOTE: this module is imported by client components too (e.g. lib/product-photo.ts,

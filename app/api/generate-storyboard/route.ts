@@ -6,6 +6,7 @@ import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
 } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import { storyboardSheetPath } from "@/lib/product-photo";
 import {
   extractMediaUrl,
@@ -686,9 +687,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to upload storyboard: ${uploadError.message}`);
     }
 
-    const {
-      data: { publicUrl: storyboardUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
+    const { url: storyboardUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: storyboardUrl });
 
     const scene_breakdown = { scenes };
@@ -698,7 +697,7 @@ export async function POST(req: Request) {
       .from(STORYBOARDS_TABLE)
       .insert({
         theme,
-        storyboard_url: storyboardUrl,
+        storyboard_url: storagePath,
         seedance_prompt: seedancePrompt,
         scene_breakdown,
         storyboard_style: storyboardStyle,
@@ -721,7 +720,6 @@ export async function POST(req: Request) {
     if (imageAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, imageAssetId!, {
         storagePath,
-        publicUrl: storyboardUrl,
         mimeType: "image/png",
         costCredits: creditsAmount,
         metadata: { storyboardId: inserted.id, storyboardStyle, aspectRatio, language, theme: theme.slice(0, 200) },
@@ -754,7 +752,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: "storyboard",
         mediaType: "image",
-        mediaUrl: storyboardUrl,
+        mediaUrl: storagePath,
         storagePath,
         title: theme.slice(0, 200),
         metadata: {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosUserTempRefPath } from "@/lib/storage-buckets";
 import { requireCurrentProfile } from "@/lib/profiles-db";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 
 /**
  * Mints a short-lived signed upload URL for a GENERATION REFERENCE file
@@ -108,15 +109,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
+    const signed = await signStoragePathForUser(storagePath, userId, "ui");
 
     return NextResponse.json({
       bucket: STORAGE_BUCKET,
       path: data.path,
       token: data.token,
-      publicUrl: urlData.publicUrl,
+      storagePath,
+      signedUrl: signed.url,
+      expiresAt: signed.expiresAt,
+      publicUrl: signed.url,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to sign upload.";

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORYBOARDS_TABLE } from "@/lib/storage-buckets";
+import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,25 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ storyboards: data ?? [] });
+    const storyboards = await Promise.all(
+      (data ?? []).map(async (row) => {
+        const r = row as Record<string, unknown>;
+        try {
+          const [storyboardUrl, videoUrl] = await Promise.all([
+            resolveSignedMediaUrl({ userId, mediaUrl: r.storyboard_url as string }),
+            resolveSignedMediaUrl({ userId, mediaUrl: r.video_url as string | null }),
+          ]);
+          return {
+            ...r,
+            storyboard_url: storyboardUrl ?? r.storyboard_url,
+            video_url: videoUrl ?? r.video_url,
+          };
+        } catch {
+          return r;
+        }
+      }),
+    );
+    return NextResponse.json({ storyboards });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: 500 });

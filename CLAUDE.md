@@ -136,6 +136,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
 - **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
 - **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
+- **Private access (in progress):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs sign on read. Bucket is still **public** until Phase 5 flip — deploy code first, then set bucket private in Dashboard.
 
 ## Admin Config v2 (unified control panel)
 

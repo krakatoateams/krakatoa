@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { fetchSignedUrl } from "@/lib/storage-sign-client";
+import { isStorageRelativePath, storagePathFromStorageUrl } from "@/lib/storage-buckets";
+import type { CreationHistoryItem } from "@/lib/creations";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
@@ -83,6 +86,8 @@ interface VideoItem {
   id: string;
   file: File | null;
   videoUrl: string | null;
+  /** Canonical bucket path — used for scheduling + preview re-sign. */
+  storagePath: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
   duration: number | null;
@@ -124,6 +129,7 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     id: crypto.randomUUID(),
     file: null,
     videoUrl: null,
+    storagePath: null,
     uploadStatus: "idle",
     uploadError: null,
     duration: null,
@@ -357,6 +363,8 @@ function InfoTooltip({ text, label = "More information" }: { text: string; label
 interface UploadCardProps {
   file: File | null;
   videoUrl: string | null;
+  /** Canonical bucket path — used for scheduling + preview re-sign. */
+  storagePath: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
   // Bulk: report one or more selected files to the parent
@@ -365,12 +373,12 @@ interface UploadCardProps {
   // Report measured duration + aspect to the parent (drives format auto-suggest)
   onMetaChange: (meta: { duration: number | null; aspect: { w: number; h: number } | null }) => void;
   // Asset source: report a picked creation's hosted URL to the parent
-  onAssetSelected: (mediaUrl: string) => void;
+  onAssetSelected: (item: CreationHistoryItem) => void;
   // Active publish format — switches the preview frame (9:16 short / 16:9 video)
   format: VideoFormat;
 }
 
-function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, onRemove, onMetaChange, onAssetSelected, format }: UploadCardProps) {
+function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, onFilesAdded, onRemove, onMetaChange, onAssetSelected, format }: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [tab, setTab] = useState<"upload" | "assets">("upload");
   // Task 2.1: local object URL for instant preview
@@ -389,6 +397,13 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }
+    if (storagePath) {
+      let cancelled = false;
+      fetchSignedUrl({ path: storagePath })
+        .then((r) => { if (!cancelled) setPreviewUrl(r.url); })
+        .catch(() => { if (!cancelled) setPreviewUrl(videoUrl); });
+      return () => { cancelled = true; };
+    }
     if (videoUrl) {
       setPreviewUrl(videoUrl);
       return;
@@ -396,7 +411,7 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
     setPreviewUrl(null);
     setDuration(null);
     onMetaChange({ duration: null, aspect: null });
-  }, [file, videoUrl, onMetaChange]);
+  }, [file, storagePath, videoUrl, onMetaChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -492,7 +507,7 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
               </div>
             </>
           )}
-          {uploadStatus === "done" && videoUrl && (
+          {uploadStatus === "done" && (videoUrl || storagePath) && (
             <>
               <CheckCircle2 className="h-8 w-8 text-green-400" />
               <div>
@@ -540,8 +555,8 @@ function UploadCard({ file, videoUrl, uploadStatus, uploadError, onFilesAdded, o
             tools={["reels_seedance", "reels_veo", "storyboard_video", "video_text2video", "video_motion_control"]}
             mediaType="video"
             limit={24}
-            selectedUrl={videoUrl}
-            onSelect={(item) => onAssetSelected(item.mediaUrl)}
+            selectedUrl={videoUrl ?? undefined}
+            onSelect={(item) => onAssetSelected(item)}
             className="!mt-0 !border-t-0 !pt-0"
           />
         )}
@@ -586,10 +601,11 @@ interface DescriptionCardProps {
   title: string;
   tags: string;
   videoUrl: string | null;
+  storagePath: string | null;
   format: VideoFormat;
 }
 
-function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, format }: DescriptionCardProps) {
+function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, storagePath, format }: DescriptionCardProps) {
   // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
   // removing the duplicated fetch logic. Behavior is preserved: Generate requires
   // a video (Whisper), Polish appears once there's content, and the two-branch
@@ -599,11 +615,11 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, form
   // Clear the transcript warning whenever the video changes (removed or replaced)
   useEffect(() => {
     ai.resetWarning();
-  }, [videoUrl, ai.resetWarning]);
+  }, [videoUrl, storagePath, ai.resetWarning]);
 
   const handleGenerate = async () => {
     try {
-      const next = await ai.generate({ title, tags, videoUrl, format });
+      const next = await ai.generate({ title, tags, videoUrl, storagePath, format });
       onCaptionChange(next);
     } catch {
       // error surfaced by the hook
@@ -643,7 +659,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, form
 
         <CaptionControls
           ai={ai}
-          hasVideo={!!videoUrl}
+          hasVideo={!!(storagePath || videoUrl)}
           hasContent={!!caption.trim()}
           hasTitle={!!title.trim()}
           generateLabel="Generate Caption"
@@ -919,6 +935,7 @@ function PlatformFields({
 
 interface ScheduleCardProps {
   videoUrl: string | null;
+  storagePath: string | null;
   caption: string;
   // Full reset (wipes the draft back to blank) — called only on full success,
   // never on partial/total failure, so a failed platform stays selected and
@@ -953,6 +970,7 @@ interface ScheduleCardProps {
 
 function ScheduleCard({
   videoUrl,
+  storagePath,
   caption,
   onSuccess,
   onPostCreated,
@@ -997,7 +1015,7 @@ function ScheduleCard({
     // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
     const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
 
-    if (!videoUrl || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
+    if ((!storagePath && !videoUrl) || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
       return;
     }
 
@@ -1022,7 +1040,7 @@ function ScheduleCard({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              video_url: videoUrl,
+              ...(storagePath ? { storage_path: storagePath } : { video_url: videoUrl }),
               title: title.trim(),
               description,
               tags,
@@ -1093,7 +1111,7 @@ function ScheduleCard({
   // defaulted — see design.md Decision 4).
   const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
   const isReady =
-    !!videoUrl && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
+    !!(storagePath || videoUrl) && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
     pendingPlatforms.length > 0 &&
     (!platforms.includes("tiktok") || !!tiktokPrivacyLevel);
 
@@ -1231,7 +1249,7 @@ function ScheduleCard({
         </button>
 
         <p className="text-center text-xs text-gray-600">
-          {!videoUrl ? "Upload a video to enable scheduling"
+          {!(storagePath || videoUrl) ? "Upload a video to enable scheduling"
             : !title.trim() ? "Add a title to schedule"
             : ""}
         </p>
@@ -1372,6 +1390,7 @@ function useCaptionAI() {
       title: string;
       tags: string;
       videoUrl: string | null;
+      storagePath?: string | null;
       format?: VideoFormat;
     }): Promise<string> => {
       setBusy("generate");
@@ -1387,6 +1406,7 @@ function useCaptionAI() {
             title: input.title,
             tags: input.tags,
             videoUrl: input.videoUrl ?? undefined,
+            storage_path: input.storagePath ?? undefined,
             format: input.format ?? "short",
           }),
         });
@@ -1609,14 +1629,20 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }
-    // Asset-backed card: preview straight from the hosted URL.
+    if (item.storagePath) {
+      let cancelled = false;
+      fetchSignedUrl({ path: item.storagePath })
+        .then((r) => { if (!cancelled) setPreviewUrl(r.url); })
+        .catch(() => { if (!cancelled) setPreviewUrl(item.videoUrl); });
+      return () => { cancelled = true; };
+    }
     setPreviewUrl(item.videoUrl);
-  }, [item.file, item.videoUrl]);
+  }, [item.file, item.storagePath, item.videoUrl]);
 
   // Clear the transcript warning when this card's video changes
   useEffect(() => {
     ai.resetWarning();
-  }, [item.videoUrl, ai.resetWarning]);
+  }, [item.videoUrl, item.storagePath, ai.resetWarning]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
@@ -1638,6 +1664,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
         title: item.title,
         tags: item.tags,
         videoUrl: item.videoUrl,
+        storagePath: item.storagePath,
         format: item.format,
       });
       onUpdate({ caption });
@@ -1865,7 +1892,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           {captionMode === "individual" && (
             <CaptionControls
               ai={ai}
-              hasVideo={!!item.videoUrl}
+              hasVideo={!!(item.storagePath || item.videoUrl)}
               hasContent={!!item.caption.trim()}
               hasTitle={!!item.title.trim()}
               generateLabel="Generate Caption"
@@ -2147,11 +2174,12 @@ export default function SchedulerDashboardPage() {
             );
           }
 
-          const { bucket, path, token, publicUrl } = signData as {
+          const { bucket, path, token, publicUrl, storagePath } = signData as {
             bucket: string;
             path: string;
             token: string;
             publicUrl: string;
+            storagePath?: string;
           };
 
           const { error: uploadError } = await getSupabaseBrowser()
@@ -2160,7 +2188,7 @@ export default function SchedulerDashboardPage() {
 
           if (uploadError) throw new Error(uploadError.message || "Upload failed.");
 
-          updateItem(it.id, { videoUrl: publicUrl, uploadStatus: "done" });
+          updateItem(it.id, { videoUrl: publicUrl, storagePath: storagePath ?? path, uploadStatus: "done" });
         } catch (err) {
           updateItem(it.id, {
             uploadStatus: "error",
@@ -2176,9 +2204,17 @@ export default function SchedulerDashboardPage() {
   // Fills the first empty draft in place (keeps single mode single); otherwise
   // appends a new card (auto-spaced like uploads) up to MAX_VIDEOS.
   const handleAssetSelected = useCallback(
-    (mediaUrl: string) => {
+    (source: CreationHistoryItem | string) => {
+      const mediaUrl = typeof source === "string" ? source : source.mediaUrl;
+      const storagePath =
+        typeof source === "string"
+          ? isStorageRelativePath(source)
+            ? source
+            : storagePathFromStorageUrl(source)
+          : source.storagePath;
       const assetPatch: Partial<VideoItem> = {
         videoUrl: mediaUrl,
+        storagePath: storagePath ?? null,
         uploadStatus: "done",
         uploadError: null,
         file: null,
@@ -2190,14 +2226,11 @@ export default function SchedulerDashboardPage() {
         scheduleError: null,
       };
 
-      // A reusable card is an empty draft OR a card whose device upload failed
-      // (it still holds a File but has no hosted URL). Reusing the errored card
-      // lets a picked asset recover it in place instead of appending a zombie
-      // card and forcing bulk mode. `assetPatch` already clears file/error.
+      const hasVideo = (i: VideoItem) => !!(i.videoUrl || i.storagePath);
       const reusableIdx = items.findIndex(
         (i) =>
-          (!i.file && !i.videoUrl) ||
-          (i.uploadStatus === "error" && !i.videoUrl),
+          (!i.file && !hasVideo(i)) ||
+          (i.uploadStatus === "error" && !hasVideo(i)),
       );
       if (reusableIdx !== -1) {
         updateItem(items[reusableIdx].id, assetPatch);
@@ -2231,7 +2264,7 @@ export default function SchedulerDashboardPage() {
       handleAssetSelected(assetUrl);
       if (title && title.trim()) {
         setItems((prev) => {
-          const idx = prev.findIndex((i) => i.videoUrl === assetUrl);
+          const idx = prev.findIndex((i) => i.videoUrl === assetUrl || i.storagePath === assetUrl);
           if (idx === -1) return prev;
           return prev.map((i, k) => (k === idx ? { ...i, title: title.trim() } : i));
         });
@@ -2255,7 +2288,7 @@ export default function SchedulerDashboardPage() {
   // Duration no longer gates scheduling — mirrors single-mode ScheduleCard.isReady.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      !!i.videoUrl && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
+      !!(i.storagePath || i.videoUrl) && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
       (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
     [],
   );
@@ -2316,7 +2349,7 @@ export default function SchedulerDashboardPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              video_url: it.videoUrl,
+              ...(it.storagePath ? { storage_path: it.storagePath } : { video_url: it.videoUrl }),
               title: it.title.trim(),
               description,
               tags: it.tags,
@@ -2410,6 +2443,7 @@ export default function SchedulerDashboardPage() {
               <UploadCard
                 file={item0.file}
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 uploadStatus={item0.uploadStatus}
                 uploadError={item0.uploadError}
                 onFilesAdded={handleFilesAdded}
@@ -2424,6 +2458,7 @@ export default function SchedulerDashboardPage() {
                 title={item0.title}
                 tags={item0.tags}
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 format={item0.format}
               />
             </div>
@@ -2431,6 +2466,7 @@ export default function SchedulerDashboardPage() {
             <div>
               <ScheduleCard
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 caption={item0.caption}
                 onSuccess={handleSuccess}
                 onPostCreated={fetchPosts}
@@ -2459,6 +2495,7 @@ export default function SchedulerDashboardPage() {
             <UploadCard
               file={null}
               videoUrl={null}
+              storagePath={null}
               uploadStatus="idle"
               uploadError={null}
               onFilesAdded={handleFilesAdded}

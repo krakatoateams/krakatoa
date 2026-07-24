@@ -450,7 +450,6 @@ export async function POST(req: Request) {
       await safe("markAssetReady", () =>
         markAssetReady(profileId!, finalAssetId!, {
           storagePath: result.storagePath,
-          publicUrl: result.videoUrl,
           mimeType: "video/mp4",
           durationSec: result.durationSec,
           width: result.width,
@@ -488,7 +487,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: reqv.creationTool,
         mediaType: "video",
-        mediaUrl: result.videoUrl,
+        mediaUrl: result.storagePath,
         storagePath: result.storagePath,
         title: reqv.theme.slice(0, 200),
         metadata:
