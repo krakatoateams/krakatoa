@@ -1,4 +1,9 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  type CreditExpirySource,
+  expiresAtFor,
+  getExpirySettings,
+} from "@/lib/expiry-settings-db";
 
 /**
  * Credit system data access.
@@ -28,6 +33,15 @@ export type CreditTransactionStatus =
   | "succeeded"
   | "failed"
   | "reversed";
+
+/** Lot source tag stamped on the credit_lots row a credit grant creates. */
+export type CreditLotSource =
+  | "regular"
+  | "purchase_bonus"
+  | "new_user_bonus"
+  | "refund"
+  | "adjustment"
+  | "legacy";
 
 export type CreditWallet = {
   id: string;
@@ -143,7 +157,16 @@ export async function addCreditTransaction(params: {
   idempotencyKey?: string;
   jobId?: string | null;
   assetId?: string | null;
+  /** Lot source for credits (defaults derived from `type` by the RPC). */
+  source?: CreditLotSource;
+  /** Absolute expiry for the created lot (credits only). null/undefined = never. */
+  expiresAt?: string | Date | null;
 }): Promise<ApplyCreditResult> {
+  const expiresAtIso =
+    params.expiresAt instanceof Date
+      ? params.expiresAt.toISOString()
+      : params.expiresAt ?? null;
+
   const { data, error } = await supabaseServer.rpc(APPLY_RPC, {
     p_profile_id: params.profileId,
     p_amount: params.amount,
@@ -155,6 +178,8 @@ export async function addCreditTransaction(params: {
     p_idempotency_key: params.idempotencyKey ?? null,
     p_job_id: params.jobId ?? null,
     p_asset_id: params.assetId ?? null,
+    p_source: params.source ?? null,
+    p_expires_at: expiresAtIso,
   });
 
   if (error) {
@@ -225,18 +250,27 @@ export async function adjustCredits(params: {
   });
 }
 
-/** Grant promotional/bonus credits (credit; does not count as purchased). */
+/**
+ * Grant promotional/bonus credits (credit; does not count as purchased). The
+ * lot's expiry is computed from the current expiry settings for `source`
+ * (defaults to the new-user bonus bucket).
+ */
 export async function addBonusCredits(params: {
   profileId: string;
   amount: number;
   idempotencyKey?: string;
   description?: string;
   metadata?: Record<string, unknown>;
+  source?: CreditExpirySource;
 }): Promise<ApplyCreditResult> {
+  const source = params.source ?? "new_user_bonus";
+  const expiresAt = expiresAtFor(source, await getExpirySettings());
   return addCreditTransaction({
     ...params,
     direction: "credit",
     type: "bonus",
+    source,
+    expiresAt,
   });
 }
 
@@ -244,6 +278,10 @@ export async function addBonusCredits(params: {
  * Add purchased credits (credit; increments lifetime_purchased). Payment
  * provider integration (e.g. Xendit) is a separate, future phase — this only
  * records the ledger effect once a purchase is known to have succeeded.
+ *
+ * `source` selects the expiry bucket: "regular" for base pack credits,
+ * "purchase_bonus" for promotional bundle credits. The lot's expiry is derived
+ * from the current expiry settings for that bucket.
  */
 export async function addPurchaseCredits(params: {
   profileId: string;
@@ -251,11 +289,16 @@ export async function addPurchaseCredits(params: {
   idempotencyKey?: string;
   description?: string;
   metadata?: Record<string, unknown>;
+  source?: Extract<CreditExpirySource, "regular" | "purchase_bonus">;
 }): Promise<ApplyCreditResult> {
+  const source = params.source ?? "regular";
+  const expiresAt = expiresAtFor(source, await getExpirySettings());
   return addCreditTransaction({
     ...params,
     direction: "credit",
     type: "purchase",
+    source,
+    expiresAt,
   });
 }
 
@@ -329,6 +372,32 @@ export async function setWalletBalance(params: {
     delta,
     applied: true,
   };
+}
+
+export type ExpireLotsResult = {
+  lots_expired: number;
+  credits_expired: number;
+  profiles_affected: number;
+  dry_run: boolean;
+};
+
+/**
+ * Expire all credit lots whose `expires_at` has passed (via the transactional
+ * `krakatoa_expire_credit_lots` RPC). Writes one `expiry` ledger row per lot and
+ * reduces the cached balance. With `dryRun`, reports what would expire without
+ * mutating anything.
+ */
+export async function expireCreditLots(opts?: {
+  dryRun?: boolean;
+  now?: Date;
+}): Promise<ExpireLotsResult> {
+  const { data, error } = await supabaseServer.rpc("krakatoa_expire_credit_lots", {
+    p_now: (opts?.now ?? new Date()).toISOString(),
+    p_dry_run: opts?.dryRun ?? false,
+  });
+
+  if (error) handleError(error, "Failed to expire credit lots.");
+  return data as ExpireLotsResult;
 }
 
 /** List a profile's ledger transactions (newest first). */

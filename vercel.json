@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/storage-sweep",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/credit-expiry",
+      "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/creation-expiry",
+      "schedule": "0 4 * * *"
     }
   ]
 }

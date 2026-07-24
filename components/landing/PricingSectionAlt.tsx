@@ -10,7 +10,7 @@ import { Check, Flame, X } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
 import { useCurrentUser } from "@/lib/auth-context";
 import {
-  CREDIT_PACKS,
+  DEFAULT_CREDIT_PACKS,
   formatIdr,
   packBonusValueIdr,
   packTotalCredits,
@@ -384,7 +384,31 @@ const SHOW_PLANS = false;
 export function PricingSectionAlt() {
   const [mode, setMode] = useState<Mode>(SHOW_PLANS ? "plans" : "credits");
   const [policyOpen, setPolicyOpen] = useState(false);
+  // Admin-managed tiers, seeded with the static defaults then refreshed from the
+  // public packs API (falls back to defaults if the fetch fails).
+  const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_CREDIT_PACKS);
   const { status } = useCurrentUser();
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPacks = () => {
+      fetch("/api/credits/packs", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { packs?: CreditPack[] } | null) => {
+          if (!cancelled && d?.packs?.length) setPacks(d.packs);
+        })
+        .catch(() => {});
+    };
+    loadPacks();
+    // Refresh tiers when the tab regains focus so admin price edits appear
+    // without a hard reload.
+    const onFocus = () => loadPacks();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
   const creditHref =
     status === "authenticated"
       ? CREDIT_CTA_HREF_AUTHED
@@ -482,7 +506,7 @@ export function PricingSectionAlt() {
               </aside>
 
               <div className="flex flex-col gap-3 lg:col-span-3 lg:gap-4">
-                {CREDIT_PACKS.map((pack) => (
+                {packs.map((pack) => (
                   <CreditRow key={pack.id} pack={pack} href={creditHref} />
                 ))}
               </div>

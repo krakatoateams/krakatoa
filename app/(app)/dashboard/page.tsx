@@ -5,6 +5,7 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, Zap, CalendarClock } from "lucide-react";
 import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
+import TrendingTemplates from "./TrendingTemplates";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
 import ToolCardThumbnail from "./ToolCardThumbnail";
@@ -93,6 +94,8 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+
+      <TrendingTemplates />
 
       <RecentCreations />
     </PageContainer>

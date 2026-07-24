@@ -4,6 +4,9 @@ export const PRODUCT_PHOTO_BUCKET = STORAGE_BUCKET;
 export const PRODUCT_PHOTO_ROOT = PHOTOS_FOLDER;
 
 export const MODEL_POSES = [
+  // "auto" is a null placeholder (empty prompt) — the model chooses the pose.
+  // Labeled "Pose" so the chip reads as the parameter name when unset.
+  { id: "auto", label: "Pose", prompt: "" },
   { id: "walking", label: "Walking", prompt: "walking confidently toward the camera" },
   { id: "sitting", label: "Sitting", prompt: "sitting elegantly in a relaxed pose" },
   { id: "standing", label: "Standing", prompt: "standing in a natural fashion model pose" },
@@ -13,6 +16,9 @@ export const MODEL_POSES = [
 ] as const;
 
 export const PHOTO_STYLES = [
+  // "auto" is a null placeholder (empty prompt) — the model chooses the backdrop.
+  // Labeled "Background" so the chip reads as the parameter name when unset.
+  { id: "auto", label: "Background", prompt: "" },
   {
     id: "minimalist-studio",
     label: "Minimalist Studio",
@@ -37,6 +43,11 @@ export const PHOTO_STYLES = [
 
 export type ModelPoseId = (typeof MODEL_POSES)[number]["id"];
 export type PhotoStyleId = (typeof PHOTO_STYLES)[number]["id"];
+
+// Default to the "auto" placeholder so pose/background are unconstrained unless
+// the user explicitly picks one.
+export const DEFAULT_MODEL_POSE: ModelPoseId = "auto";
+export const DEFAULT_PHOTO_STYLE: PhotoStyleId = "auto";
 
 /**
  * Product Photo model tiers (Pricing Config v2.3).
@@ -432,6 +443,10 @@ export function buildProductPhotoPrompt(
   const pose = POSE_BY_ID[poseId];
   const style = STYLE_BY_ID[styleId];
   const direction = (userPrompt ?? "").trim();
+  // "auto" pose/style carry an empty prompt — skip them so the model is free to
+  // choose the pose / backdrop.
+  const posePrompt = pose?.prompt?.trim() ?? "";
+  const stylePrompt = style?.prompt?.trim() ?? "";
 
   // When a character/model reference accompanies the product, the references are
   // sent as [product, character]. Spell out which image is which and demand
@@ -442,10 +457,12 @@ export function buildProductPhotoPrompt(
       "Professional commercial product photography.",
       "The FIRST reference image is the product. The SECOND reference image is the exact person to use as the model.",
       "Use that exact person as the model — preserve their face, hairstyle, skin tone, and body type precisely; do NOT replace them with a different person.",
-      `The model is ${pose.prompt}, naturally holding and showcasing the exact product from the first reference image.`,
+      posePrompt
+        ? `The model is ${posePrompt}, naturally holding and showcasing the exact product from the first reference image.`
+        : "The model naturally holds and showcases the exact product from the first reference image.",
       "Keep the product design, colors, logos, and packaging identical to the product reference — do not alter the product.",
       "Full-body or three-quarter framing, photorealistic, sharp focus on both the model and the product.",
-      style.prompt,
+      stylePrompt,
       direction ? `Creative direction from the user: ${direction}.` : "",
       "High-end advertising quality, 4K detail.",
     ]
@@ -455,10 +472,12 @@ export function buildProductPhotoPrompt(
 
   return [
     "Professional commercial product photography.",
-    `A fashion model is ${pose.prompt}, naturally holding and showcasing the exact product from the reference image.`,
+    posePrompt
+      ? `A fashion model is ${posePrompt}, naturally holding and showcasing the exact product from the reference image.`
+      : "A fashion model naturally holding and showcasing the exact product from the reference image.",
     "Keep the product design, colors, logos, and packaging identical to the reference — do not alter the product.",
     "Full-body or three-quarter framing, photorealistic, sharp focus on both model and product.",
-    style.prompt,
+    stylePrompt,
     // Optional free-text creative direction from the omni-form (/tools/photo-v2).
     // Layered in as guidance without overriding the product-fidelity constraints above.
     direction ? `Creative direction from the user: ${direction}.` : "",

@@ -10,11 +10,11 @@ import { Tooltip } from "./Tooltip";
 // Canonical orange "Generate" button styling shared by every studio tool. Change
 // the radius / gradient here once and it applies to Photo + Video everywhere.
 export const GENERATE_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+  "flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold capitalize tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
 
 // Shared "Cancel" button styling used beside Generate while a job is running.
 export const CANCEL_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold uppercase tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50";
+  "flex h-10 items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold capitalize tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50";
 
 // Generate/submit button with credit cost display, affordability gate, and an
 // insufficient-credits tooltip. `balance === null` (unknown) never blocks — the

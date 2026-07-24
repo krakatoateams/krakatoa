@@ -20,6 +20,9 @@ export default function AdminCreditsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [bonusBusyId, setBonusBusyId] = useState<string | null>(null);
+  const [bonusAmounts, setBonusAmounts] = useState<Record<string, string>>({});
+  const [bonusSource, setBonusSource] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     setLoading(true);
@@ -71,6 +74,43 @@ export default function AdminCreditsPage() {
     }
   };
 
+  const grantBonus = async (
+    wallet: AdminWallet,
+    amount: number,
+    source: string
+  ) => {
+    if (!wallet.profile_id) return;
+    if (!Number.isInteger(amount) || amount <= 0) {
+      setError("Enter a whole number of bonus credits (1 or more).");
+      return;
+    }
+    setBonusBusyId(wallet.profile_id);
+    setNotice(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/credits/grant-bonus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: wallet.profile_id, amount, source }),
+      });
+      const body = await res.json();
+      if (!res.ok)
+        throw new Error(body.error ?? `Request failed (${res.status})`);
+      const expiry = body.expiresAt
+        ? `expires ${new Date(body.expiresAt).toLocaleDateString()}`
+        : "no expiry";
+      setNotice(
+        `Granted ${amount} bonus credits to ${wallet.email} — new balance ${body.balance} (${expiry}).`
+      );
+      setBonusAmounts((prev) => ({ ...prev, [wallet.profile_id as string]: "" }));
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to grant bonus.");
+    } finally {
+      setBonusBusyId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
@@ -102,6 +142,9 @@ export default function AdminCreditsPage() {
                 </th>
                 <th className="px-4 py-2 font-semibold text-right">
                   Set balance
+                </th>
+                <th className="px-4 py-2 font-semibold text-right">
+                  Grant bonus
                 </th>
               </tr>
             </thead>
@@ -179,6 +222,67 @@ export default function AdminCreditsPage() {
                         </p>
                       )}
                     </td>
+                    <td className="px-4 py-2">
+                      {linked ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            inputMode="numeric"
+                            placeholder="e.g. 100"
+                            value={bonusAmounts[w.profile_id as string] ?? ""}
+                            onChange={(e) =>
+                              setBonusAmounts((prev) => ({
+                                ...prev,
+                                [w.profile_id as string]: e.target.value,
+                              }))
+                            }
+                            className="w-20 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                          />
+                          <select
+                            value={
+                              bonusSource[w.profile_id as string] ?? "new_user_bonus"
+                            }
+                            onChange={(e) =>
+                              setBonusSource((prev) => ({
+                                ...prev,
+                                [w.profile_id as string]: e.target.value,
+                              }))
+                            }
+                            className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                          >
+                            <option value="new_user_bonus">New-user</option>
+                            <option value="purchase_bonus">Purchase</option>
+                          </select>
+                          <button
+                            type="button"
+                            disabled={bonusBusyId === w.profile_id}
+                            onClick={() => {
+                              const raw = bonusAmounts[w.profile_id as string];
+                              const value =
+                                raw === "" || raw == null ? NaN : Number(raw);
+                              if (!Number.isFinite(value)) {
+                                setError("Enter a whole number of bonus credits.");
+                                return;
+                              }
+                              grantBonus(
+                                w,
+                                Math.trunc(value),
+                                bonusSource[w.profile_id as string] ?? "new_user_bonus"
+                              );
+                            }}
+                            className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {bonusBusyId === w.profile_id ? "Granting…" : "Grant"}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-right text-xs text-gray-600">
+                          Sign-in required
+                        </p>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -189,8 +293,10 @@ export default function AdminCreditsPage() {
 
       <p className="text-xs text-gray-600">
         Setting a balance writes a single ledger adjustment to reach the exact
-        target. Admins who have never signed in have no wallet yet and cannot be
-        topped up until their first sign-in.
+        target. Granting bonus credits adds a new bonus lot on top of the current
+        balance, tagged with the selected bonus type so it inherits that type&apos;s
+        configured expiry (see the Expiry tab). Admins who have never signed in
+        have no wallet yet and cannot be topped up until their first sign-in.
       </p>
     </div>
   );
