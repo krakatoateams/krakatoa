@@ -30,6 +30,14 @@ type Props = {
   limit?: number;
   onSelect?: (item: CreationHistoryItem) => void;
   selectedUrl?: string | null;
+  /** Multi-select mode (e.g. TikTok photo-post carousel picker): highlights
+   * every item whose mediaUrl is in `selectedUrls` (instead of the single
+   * `selectedUrl`) and shows a 1-based selection-order badge. `onSelect`
+   * still just reports "this item was clicked" — the caller decides how to
+   * toggle it in/out of their own array. Off by default; existing
+   * single-select callers are unaffected. */
+  multiSelect?: boolean;
+  selectedUrls?: string[];
   className?: string;
   /** Increment to refetch after a new generation completes */
   refreshKey?: number;
@@ -193,6 +201,8 @@ export default function CreationsHistory({
   limit = 100,
   onSelect,
   selectedUrl,
+  multiSelect = false,
+  selectedUrls,
   className = "",
   refreshKey = 0,
   enableTabs = false,
@@ -723,8 +733,14 @@ export default function CreationsHistory({
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
+            const selectionIndex = multiSelect
+              ? (selectedUrls?.indexOf(item.mediaUrl) ?? -1)
+              : -1;
+            const isSelected = multiSelect
+              ? selectionIndex !== -1
+              : selectedUrl === item.mediaUrl;
             const cardClass = `group relative text-left rounded-2xl overflow-hidden border transition-all hover:scale-[1.02] ${
-              selectedUrl === item.mediaUrl
+              isSelected
                 ? "border-indigo-400/60 ring-2 ring-indigo-400/30"
                 : "border-white/10 hover:border-white/25"
             }`;
@@ -753,6 +769,11 @@ export default function CreationsHistory({
                   <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
                     <User className="h-3 w-3" />
                     Character
+                  </span>
+                )}
+                {multiSelect && isSelected && (
+                  <span className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500 text-xs font-semibold text-white shadow">
+                    {selectionIndex + 1}
                   </span>
                 )}
               </div>

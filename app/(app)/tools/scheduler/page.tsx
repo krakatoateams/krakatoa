@@ -29,6 +29,9 @@ import {
   ArrowRight,
   Info,
   Music2,
+  Image as ImageIcon,
+  Plus,
+  FolderOpen,
 } from "lucide-react";
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -118,10 +121,20 @@ interface VideoItem {
   // Per-platform submission outcome, so a retry only resends to platforms
   // that haven't already succeeded.
   platformResults: Partial<Record<"youtube" | "tiktok", PlatformResult>>;
+  // TikTok-only (openspec/changes/tiktok-photo-post): "photo" swaps the single
+  // video for a multi-photo carousel (photoUrls, 1-35, first = cover).
+  // Auto-derived from whatever file/asset was actually dropped or picked
+  // (see handleFilesAdded/handleAssetSelected) — never set by a manual
+  // toggle. YouTube has no photo-post concept, enforced by PlatformFields
+  // disabling the YouTube checkbox outright while contentType is "photo".
+  contentType: "video" | "photo";
+  photoUrls: string[];
 }
 
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEOS = 5;
 
 function makeDraft(date: string, time = "18:00"): VideoItem {
@@ -148,6 +161,8 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     tiktokBrandOrganicToggle: false,
     tiktokBrandContentToggle: false,
     platformResults: {},
+    contentType: "video",
+    photoUrls: [],
   };
 }
 
@@ -157,6 +172,106 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function creationPhotoRef(item: CreationHistoryItem): string {
+  return item.storagePath?.trim() || item.mediaUrl;
+}
+
+// "35" cap and "first = cover" carousel concept are only meaningful once
+// there's more than one photo — surfacing them at count 0-1 reads as noise
+// on a fresh single-photo drop, so this only leans on them once they apply.
+function photoCountLabel(count: number): string {
+  if (count === 0) return "Pick photos for this TikTok post — the first one you select is the cover.";
+  if (count === 1) return "1 photo selected · add more to create a carousel (up to 35)";
+  return `${count}/35 photos selected · first = cover`;
+}
+
+// Direct-to-Supabase upload: the server only mints a tiny signed-URL payload
+// via /api/upload/sign, then the file bytes go browser → Storage via
+// uploadToSignedUrl. This bypasses the serverless request-body limit
+// (~4.5 MB on Vercel) that the old multipart /api/upload POST hit for larger
+// files. Shared by handleFilesAdded (new cards) and UploadCard's per-card
+// "add more photos → Upload new" flow (appends to an existing card).
+async function signAndUploadFile(
+  file: File,
+  mediaType: "video" | "image",
+): Promise<{ url: string; storagePath: string }> {
+  const signRes = await fetch("/api/upload/sign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type,
+      size: file.size,
+      mediaType,
+    }),
+  });
+
+  // Guard against a non-JSON error body (e.g. an upstream error page) so the
+  // user sees a readable message instead of a JSON-parse exception.
+  const signData = await signRes.json().catch(() => null);
+  if (!signRes.ok || !signData) {
+    throw new Error((signData && signData.error) || "Couldn't start the upload. Please try again.");
+  }
+
+  const { bucket, path, token, publicUrl, storagePath } = signData as {
+    bucket: string;
+    path: string;
+    token: string;
+    publicUrl: string;
+    storagePath?: string;
+  };
+
+  const { error: uploadError } = await getSupabaseBrowser()
+    .storage.from(bucket)
+    .uploadToSignedUrl(path, token, file, { contentType: file.type });
+
+  if (uploadError) throw new Error(uploadError.message || "Upload failed.");
+  return { url: publicUrl, storagePath: storagePath ?? path };
+}
+
+/** Preview a scheduler photo ref (storage path or legacy signed URL). */
+function SchedulerPhotoImg({
+  src,
+  className,
+  alt = "",
+}: {
+  src: string;
+  className?: string;
+  alt?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (src.startsWith("http")) {
+        setUrl(src);
+        return;
+      }
+      if (isStorageRelativePath(src)) {
+        try {
+          const signed = await fetchSignedUrl({ path: src });
+          if (!cancelled) setUrl(signed.url);
+        } catch {
+          if (!cancelled) setUrl(null);
+        }
+        return;
+      }
+      setUrl(src);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  if (!url) {
+    return <div className={className} aria-hidden />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className={className} />;
 }
 
 // YouTube Shorts cap (current limit is 3 minutes).
@@ -372,21 +487,57 @@ interface UploadCardProps {
   onRemove: () => void;
   // Report measured duration + aspect to the parent (drives format auto-suggest)
   onMetaChange: (meta: { duration: number | null; aspect: { w: number; h: number } | null }) => void;
-  // Asset source: report a picked creation's hosted URL to the parent
+  // Asset source: report a picked creation (video or photo) to the parent.
   onAssetSelected: (item: CreationHistoryItem) => void;
   // Active publish format — switches the preview frame (9:16 short / 16:9 video)
   format: VideoFormat;
+  // TikTok photo posts (openspec/changes/tiktok-photo-post): when "photo",
+  // this card shows a multi-select photo picker instead of the video
+  // upload/asset UI entirely. Optional + defaulted so bulk mode's "add more
+  // videos" UploadCard (which never sets these) is completely unaffected.
+  contentType?: "video" | "photo";
+  photoUrls?: string[];
+  onPhotoUrlsChange?: (urls: string[]) => void;
 }
 
-function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, onFilesAdded, onRemove, onMetaChange, onAssetSelected, format }: UploadCardProps) {
+function UploadCard({
+  file,
+  videoUrl,
+  storagePath,
+  uploadStatus,
+  uploadError,
+  onFilesAdded,
+  onRemove,
+  onMetaChange,
+  onAssetSelected,
+  format,
+  contentType = "video",
+  photoUrls = [],
+  onPhotoUrlsChange,
+}: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [tab, setTab] = useState<"upload" | "assets">("upload");
   // Task 2.1: local object URL for instant preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Photo picker (single mode only — openspec/changes/tiktok-photo-post):
+  // "add more photos" starts collapsed to a single button and only reveals
+  // the upload-vs-library choice, then the relevant UI, once the user asks
+  // for it — instead of eagerly showing the full asset grid up front.
+  const [addPhotoMode, setAddPhotoMode] = useState<"closed" | "choice" | "library">("closed");
+  const [addPhotoStatus, setAddPhotoStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const [addPhotoError, setAddPhotoError] = useState<string | null>(null);
+  const newPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
+  // Unified dropzone (openspec/changes/tiktok-photo-post Decision 6): accepts
+  // both video and image files — the parent (`onFilesAdded`) derives each
+  // file's contentType from its actual MIME type, not from anything chosen
+  // here. This card never decides "video" vs "photo" itself.
+  const ACCEPTED_TYPES = [
+    "video/mp4", "video/quicktime", "video/avi", "video/x-msvideo",
+    "image/jpeg", "image/png", "image/webp",
+  ];
 
   // Preview source: a device File's object URL, or — for an asset-backed item
   // with no File — the hosted videoUrl directly. Duration is captured the same
@@ -451,6 +602,41 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
     onMetaChange({ duration: valid, aspect });
   };
 
+  // "Upload new" branch of the add-photos choice (single mode only): appends
+  // freshly-uploaded raw photo(s) directly onto this card's photoUrls,
+  // instead of creating new cards the way the main dropzone's onFilesAdded
+  // does. Mirrors handleFilesAdded's sign-and-upload flow via the shared
+  // signAndUploadFile helper, but targets THIS card via onPhotoUrlsChange.
+  const handleAddPhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files ? Array.from(e.target.files) : [];
+    if (newPhotoInputRef.current) newPhotoInputRef.current.value = "";
+    if (selected.length === 0) return;
+
+    const room = Math.max(0, 35 - photoUrls.length);
+    const accepted = selected.filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type)).slice(0, room);
+    if (accepted.length === 0) return;
+
+    setAddPhotoStatus("uploading");
+    setAddPhotoError(null);
+    const uploaded: string[] = [];
+    let firstError: string | null = null;
+    for (const f of accepted) {
+      try {
+        const { storagePath } = await signAndUploadFile(f, "image");
+        uploaded.push(storagePath);
+      } catch (err) {
+        firstError = err instanceof Error ? err.message : "Upload failed.";
+      }
+    }
+    if (uploaded.length > 0) onPhotoUrlsChange?.([...photoUrls, ...uploaded]);
+    if (firstError) {
+      setAddPhotoStatus("error");
+      setAddPhotoError(firstError);
+    } else {
+      setAddPhotoStatus("idle");
+    }
+  };
+
   const dropZoneClass =
     isDragging ? "border-violet-500 bg-violet-500/10" :
     uploadStatus === "done" ? "border-green-500/40 bg-green-500/5" :
@@ -458,9 +644,187 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
     uploadStatus === "uploading" ? "border-violet-500/40 bg-violet-500/5 cursor-not-allowed" :
     "border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800";
 
+  // TikTok photo post: entirely different media source (multi-select photo
+  // carousel instead of a single video), so this replaces the whole card body
+  // rather than adding a third tab alongside Upload/My Assets.
+  if (contentType === "photo") {
+    const togglePhoto = (url: string) => {
+      const next = photoUrls.includes(url)
+        ? photoUrls.filter((u) => u !== url)
+        : photoUrls.length >= 35
+          ? photoUrls // already at TikTok's 35-photo cap — ignore further picks
+          : [...photoUrls, url];
+      onPhotoUrlsChange?.(next);
+    };
+
+    return (
+      <Card>
+        <CardHeader title="Select Photos" icon={<ImageIcon className="h-4 w-4" />} />
+        <div className="p-5">
+          {/* Feedback for a raw photo drop that triggered this mode — the
+              upload itself happens in the parent's handleFilesAdded; this
+              card just reflects its status. */}
+          {uploadStatus === "uploading" && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-300">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              Uploading {file?.name}…
+            </div>
+          )}
+          {uploadStatus === "error" && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {uploadError ?? "Upload failed."}
+            </div>
+          )}
+
+          {/* Selected-photos preview strip — renders straight from `photoUrls`
+              rather than the library grid, so a raw-uploaded photo always
+              shows here even though it's intentionally never written to
+              user_creations (Decision 8, ephemeral) and therefore can never
+              appear as a matching thumbnail in the "Choose from your
+              library" grid below. Fixes: single-photo drop not previewing. */}
+          {photoUrls.length > 0 && (
+            <div className="mb-4">
+              <p className="mb-2 text-sm font-semibold text-white">{photoCountLabel(photoUrls.length)}</p>
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                {photoUrls.map((url, i) => (
+                  <div
+                    key={url}
+                    className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-gray-700 bg-black"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <SchedulerPhotoImg src={url} alt="" className="h-full w-full object-cover" />
+                    {i === 0 && photoUrls.length > 1 && (
+                      <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white">
+                        Cover
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onPhotoUrlsChange?.(photoUrls.filter((u) => u !== url))}
+                      aria-label="Remove photo"
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white/80 opacity-0 backdrop-blur-sm transition-opacity hover:text-white group-hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {photoUrls.length === 0 && uploadStatus !== "uploading" && (
+            <p className="mb-3 text-xs text-amber-400">Add at least one photo to schedule this post.</p>
+          )}
+
+          {/* Choice-first add-more flow: collapsed to one button by default,
+              only reveals the upload-vs-library choice (then the relevant
+              UI) once asked for — instead of always eagerly rendering the
+              full asset grid. */}
+          {addPhotoMode === "closed" && (
+            <button
+              type="button"
+              onClick={() => setAddPhotoMode(photoUrls.length >= 35 ? "closed" : "choice")}
+              disabled={photoUrls.length >= 35}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-700 px-3 py-2.5 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add photos
+            </button>
+          )}
+
+          {addPhotoMode === "choice" && (
+            <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3.5">
+              <div className="mb-2.5 flex items-center justify-between">
+                <p className="text-sm font-semibold text-white">Add photos to this post</p>
+                <button
+                  type="button"
+                  onClick={() => setAddPhotoMode("closed")}
+                  aria-label="Cancel"
+                  className="text-gray-500 transition-colors hover:text-white"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddPhotoMode("closed");
+                    newPhotoInputRef.current?.click();
+                  }}
+                  className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                >
+                  <Upload className="h-4 w-4" />
+                  Upload new
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddPhotoMode("library")}
+                  className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Choose from your library
+                </button>
+              </div>
+            </div>
+          )}
+
+          {addPhotoMode === "library" && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-semibold text-white">Pick photos to include in this TikTok post</p>
+                <button
+                  type="button"
+                  onClick={() => setAddPhotoMode("closed")}
+                  className="text-xs font-medium text-violet-400 transition-colors hover:text-violet-300"
+                >
+                  Done
+                </button>
+              </div>
+              {/* No `tools` allowlist: any image-producing tool (product_photo,
+                  storyboard, and any future one) should be pickable here —
+                  mediaType="image" alone is what actually matters. An explicit
+                  tool-id list drifts out of sync every time a new tool ships
+                  (see openspec/changes/tiktok-photo-post bug history: it
+                  missed "storyboard" images entirely until this fix). */}
+              <CreationsHistory
+                hideHeader
+                mediaType="image"
+                limit={24}
+                multiSelect
+                selectedUrls={photoUrls}
+                onSelect={(item) => togglePhoto(creationPhotoRef(item))}
+                className="!mt-0 !border-t-0 !pt-0"
+              />
+            </div>
+          )}
+
+          {addPhotoStatus === "uploading" && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-violet-300">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Uploading…
+            </p>
+          )}
+          {addPhotoStatus === "error" && (
+            <p className="mt-2 text-xs text-red-400">{addPhotoError ?? "Upload failed."}</p>
+          )}
+          <input
+            ref={newPhotoInputRef}
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            onChange={handleAddPhotoFiles}
+            className="hidden"
+            aria-label="Upload new photo"
+          />
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card>
-      <CardHeader title="Upload Video" icon={<FileVideo className="h-4 w-4" />} />
+      <CardHeader title="Upload Media" icon={<FileVideo className="h-4 w-4" />} />
       <div className="p-5">
         <div className="mb-4 inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
           <button
@@ -487,7 +851,7 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
         <div
           role="button"
           tabIndex={uploadStatus === "uploading" ? -1 : 0}
-          aria-label="Drop zone for video upload"
+          aria-label="Drop zone for video or photo upload"
           onClick={() => uploadStatus !== "uploading" && inputRef.current?.click()}
           onKeyDown={(e) => e.key === "Enter" && uploadStatus !== "uploading" && inputRef.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -540,7 +904,7 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
                 <Upload className="h-5 w-5 text-gray-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-white">Drop your video here</p>
+                <p className="text-sm font-medium text-white">Drop your video or photo here</p>
                 <p className="mt-0.5 text-xs text-gray-500">or click to browse</p>
               </div>
             </>
@@ -549,11 +913,18 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
         )}
 
         {tab === "assets" && (
+          // No mediaType filter (mixes videos and photos in one gallery) and
+          // no `tools` allowlist either: every generation tool produces
+          // something schedulable (a photo or a video), so this shows
+          // everything rather than hand-maintaining a duplicate tool-id list
+          // that silently drops assets whenever a new tool ships — that's
+          // exactly what happened here (missed "video_image2video", then
+          // "storyboard", across two rounds of this same bug). Picking any
+          // item derives contentType from that asset's own kind (see
+          // onAssetSelected), same as a raw drop would.
           <CreationsHistory
-            title="Your video assets"
-            description="Pick a generated video to schedule — no re-upload needed."
-            tools={["reels_seedance", "reels_veo", "storyboard_video", "video_text2video", "video_motion_control"]}
-            mediaType="video"
+            title="Your assets"
+            description="Pick a generated video or photo to schedule — no re-upload needed."
             limit={24}
             selectedUrl={videoUrl ?? undefined}
             onSelect={(item) => onAssetSelected(item)}
@@ -586,8 +957,17 @@ function UploadCard({ file, videoUrl, storagePath, uploadStatus, uploadError, on
           </div>
         )}
 
-        <input ref={inputRef} type="file" multiple accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/avi,video/x-msvideo" onChange={handleChange} className="hidden" aria-label="Video file input" />
-        <p className="mt-3 text-center text-xs text-gray-600">Up to 5 videos · Shorts ≤ 3 min · MP4, MOV, AVI · Max 50MB</p>
+        <input ref={inputRef} type="file" multiple accept=".mp4,.mov,.avi,.jpg,.jpeg,.png,.webp,video/mp4,video/quicktime,video/avi,video/x-msvideo,image/jpeg,image/png,image/webp" onChange={handleChange} className="hidden" aria-label="Media file input" />
+        <p className="mt-3 text-center text-xs text-gray-600">
+          Up to 5 items · Video: MP4, MOV, AVI (≤ 50MB, Shorts ≤ 3 min) · Photo: JPEG, PNG, WebP (≤ 10MB)
+        </p>
+        {/* openspec/changes/tiktok-photo-post: dropping N photos at once makes
+            N separate single-photo cards (one-file-per-card model) — not one
+            N-photo carousel. Clarify the combine path since it's not obvious
+            on first use. */}
+        <p className="mt-1 text-center text-xs text-gray-600">
+          Dropping multiple photos creates separate posts — to combine photos into one carousel, drop one first, then add more with &ldquo;pick more from history&rdquo; on that card.
+        </p>
       </div>
     </Card>
   );
@@ -760,6 +1140,7 @@ function PlatformFields({
   onChange,
   tiktokConnected,
   tiktokPrivacyOptions,
+  contentType,
 }: {
   platforms: VideoItem["platforms"];
   platformResults: VideoItem["platformResults"];
@@ -769,13 +1150,18 @@ function PlatformFields({
   onChange: (patch: PlatformPatch) => void;
   tiktokConnected: boolean;
   tiktokPrivacyOptions: string[];
+  // openspec/changes/tiktok-photo-post (Decision 6, revised): content type is
+  // derived from what was actually dropped, never chosen here — this only
+  // reads it, to gray out YouTube (no photo-post support) when it's "photo".
+  contentType: VideoItem["contentType"];
 }) {
   // Local UI-only switch for whether the disclosure sub-checkboxes are shown.
   // Not persisted — derived once from any existing toggle so a card loaded
   // with disclosure already set opens with it visible.
   const [discloseOpen, setDiscloseOpen] = useState(tiktokBrandOrganicToggle || tiktokBrandContentToggle);
   const isSelfOnly = tiktokPrivacyLevel === "SELF_ONLY";
-  const hasYoutube = platforms.includes("youtube");
+  const isPhoto = contentType === "photo";
+  const hasYoutube = !isPhoto && platforms.includes("youtube");
   const hasTiktok = platforms.includes("tiktok");
 
   // Unchecking a platform also clears its stale result — otherwise re-checking
@@ -808,17 +1194,23 @@ function PlatformFields({
         </label>
         <div className="flex flex-wrap gap-2">
           <label
-            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
-              hasYoutube ? "border-violet-500/50 bg-violet-500/10 text-white" : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+            title={isPhoto ? "YouTube doesn't support photo posts" : undefined}
+            className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
+              isPhoto
+                ? "cursor-not-allowed border-gray-800 bg-gray-800/50 text-gray-600"
+                : hasYoutube
+                  ? "cursor-pointer border-violet-500/50 bg-violet-500/10 text-white"
+                  : "cursor-pointer border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
             }`}
           >
             <input
               type="checkbox"
               checked={hasYoutube}
+              disabled={isPhoto}
               onChange={(e) => toggleYoutube(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+              className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
             />
-            <YoutubeIcon className="h-4 w-4 text-red-400" />
+            <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-gray-600" : "text-red-400"}`} />
             YouTube
           </label>
 
@@ -841,6 +1233,9 @@ function PlatformFields({
         </div>
         {!tiktokConnected && (
           <p className="mt-1 text-xs text-gray-600">Connect TikTok in Settings to publish there too.</p>
+        )}
+        {isPhoto && (
+          <p className="mt-1 text-xs text-gray-600">YouTube doesn&apos;t support photo posts.</p>
         )}
         {platforms.length === 0 && (
           <p className="mt-1 text-xs text-amber-400">Select at least one platform.</p>
@@ -966,6 +1361,11 @@ interface ScheduleCardProps {
   onPlatformPatch: (patch: PlatformPatch) => void;
   tiktokConnected: boolean;
   tiktokPrivacyOptions: string[];
+  // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
+  // contentType is derived from what was dropped/picked (UploadCard + the
+  // top-level handlers), never set from within ScheduleCard itself.
+  contentType: VideoItem["contentType"];
+  photoUrls: string[];
 }
 
 function ScheduleCard({
@@ -991,6 +1391,8 @@ function ScheduleCard({
   onPlatformPatch,
   tiktokConnected,
   tiktokPrivacyOptions,
+  contentType,
+  photoUrls,
 }: ScheduleCardProps) {
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
@@ -1014,8 +1416,9 @@ function ScheduleCard({
     // Retry-safe: only submit platforms that haven't already succeeded on a
     // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
     const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
+    const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
 
-    if ((!storagePath && !videoUrl) || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
+    if (!hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
       return;
     }
 
@@ -1036,11 +1439,19 @@ function ScheduleCard({
           // YouTube-only — format/#Shorts is not a TikTok concept.
           const description = p === "youtube" && format === "short" ? withShortsTag(caption) : caption;
 
+          // A TikTok photo post sends photo_urls instead of video_url — never
+          // both. YouTube always sends video_url (no photo-post concept).
+          const isPhoto = p === "tiktok" && contentType === "photo";
+
           const res = await fetch("/api/posts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...(storagePath ? { storage_path: storagePath } : { video_url: videoUrl }),
+              ...(isPhoto
+                ? { photo_urls: photoUrls }
+                : storagePath
+                  ? { storage_path: storagePath }
+                  : { video_url: videoUrl }),
               title: title.trim(),
               description,
               tags,
@@ -1110,8 +1521,9 @@ function ScheduleCard({
   // A TikTok-targeted post additionally requires a chosen privacy level (never
   // defaulted — see design.md Decision 4).
   const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
+  const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
   const isReady =
-    !!(storagePath || videoUrl) && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
+    hasMedia && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
     pendingPlatforms.length > 0 &&
     (!platforms.includes("tiktok") || !!tiktokPrivacyLevel);
 
@@ -1133,6 +1545,7 @@ function ScheduleCard({
           onChange={onPlatformPatch}
           tiktokConnected={tiktokConnected}
           tiktokPrivacyOptions={tiktokPrivacyOptions}
+          contentType={contentType}
         />
 
         {/* Format — YouTube-only concept (Short vs regular Video + #Shorts tag) */}
@@ -1690,7 +2103,19 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
       <div className="flex flex-col gap-4 sm:flex-row">
         {/* Left: compact thumbnail + meta */}
         <div className="w-full shrink-0 space-y-1.5 sm:w-36">
-          {previewUrl ? (
+          {item.contentType === "photo" ? (
+            item.photoUrls.length > 0 ? (
+              <SchedulerPhotoImg
+                src={item.photoUrls[0]}
+                alt=""
+                className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
+              />
+            ) : (
+              <div className={`flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 ${frameClass}`}>
+                <ImageIcon className="h-6 w-6 text-gray-600" />
+              </div>
+            )
+          ) : previewUrl ? (
             <div className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${frameClass}`}>
               <video
                 src={previewUrl}
@@ -1715,15 +2140,19 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           )}
 
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
-            <span className="truncate">{item.file?.name ?? `Video ${index + 1}`}</span>
-            {item.duration !== null && (
+            <span className="truncate">
+              {item.contentType === "photo"
+                ? `Photo post ${index + 1} (${item.photoUrls.length}/35)`
+                : item.file?.name ?? `Video ${index + 1}`}
+            </span>
+            {item.contentType === "video" && item.duration !== null && (
               <span className={`shrink-0 ${warn ? "text-amber-400" : ""}`}>
                 {fmtDuration(item.duration)}
               </span>
             )}
           </div>
 
-          {item.platforms.includes("youtube") && warn && (
+          {item.contentType === "video" && item.platforms.includes("youtube") && warn && (
             <p className="flex items-start gap-1 text-[11px] text-amber-400">
               <AlertCircle className="mt-px h-3 w-3 shrink-0" />
               <span>{warn.replace(/^⚠️\s*/, "")}</span>
@@ -1738,7 +2167,11 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
         {/* Right: fields */}
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-white">Video {index + 1}</h2>
+            {/* Content-type-neutral heading — the caption under the thumbnail
+                (below) is where video-vs-photo detail actually lives, so it
+                isn't duplicated/contradicted here (see openspec/changes/
+                tiktok-photo-post). */}
+            <h2 className="text-sm font-semibold text-white">Post {index + 1}</h2>
             <div className="flex items-center gap-2">
               {item.scheduleStatus === "scheduling" ? (
                 <span className="flex items-center gap-1 text-xs text-violet-400">
@@ -1790,7 +2223,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               <button
                 type="button"
                 onClick={onRemove}
-                aria-label={`Remove video ${index + 1}`}
+                aria-label={`Remove post ${index + 1}`}
                 className="cursor-pointer rounded-md p-1 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
               >
                 <X className="h-3.5 w-3.5" />
@@ -1833,6 +2266,43 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             </div>
           </div>
 
+          {/* Per-card "add more photos" picker (openspec/changes/tiktok-photo-post
+              Decision 7) — only for a photo-typed card; grows past the one
+              raw-dropped/picked photo toward TikTok's 35-photo cap without
+              affecting sibling cards in the same batch. */}
+          {item.contentType === "photo" && (
+            <div>
+              <p className="mb-1.5 text-xs text-gray-500">{photoCountLabel(item.photoUrls.length)}</p>
+              {item.photoUrls.length === 0 && (
+                <p className="mb-1.5 text-xs text-amber-400">Add at least one photo to schedule this post.</p>
+              )}
+              {/* No `tools` allowlist — see the matching comment on
+                  UploadCard's photo picker above; mediaType="image" alone
+                  is what scopes this to photos, covering every image tool
+                  (including "storyboard", missed by the old allowlist). */}
+              <CreationsHistory
+                title="Your photos"
+                description="Pick photos to include in this TikTok post."
+                mediaType="image"
+                limit={24}
+                multiSelect
+                selectedUrls={item.photoUrls}
+                onSelect={(a) => {
+                  const ref = creationPhotoRef(a);
+                  const next = item.photoUrls.includes(ref)
+                    ? item.photoUrls.filter((u) => u !== ref)
+                    : item.photoUrls.length >= 35
+                      ? item.photoUrls
+                      : [...item.photoUrls, ref];
+                  onUpdate({ photoUrls: next });
+                }}
+                hideHeader
+                gridClassName="grid-cols-4 sm:grid-cols-6"
+                className="!mt-0 !border-t-0 !pt-0"
+              />
+            </div>
+          )}
+
           <PlatformFields
             platforms={item.platforms}
             platformResults={item.platformResults}
@@ -1842,6 +2312,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             onChange={onUpdate}
             tiktokConnected={tiktokConnected}
             tiktokPrivacyOptions={tiktokPrivacyOptions}
+            contentType={item.contentType}
           />
 
           <div className="grid grid-cols-2 gap-3">
@@ -2006,6 +2477,10 @@ export default function SchedulerDashboardPage() {
     (patch: Partial<VideoItem>) => updateItem(item0Id, patch),
     [updateItem, item0Id],
   );
+  const handleItem0PhotoUrls = useCallback(
+    (urls: string[]) => updateItem(item0Id, { photoUrls: urls }),
+    [updateItem, item0Id],
+  );
   const noop = useCallback(() => {}, []);
 
   // ── TikTok connection + privacy options (Decisions 4, 7) ──
@@ -2099,40 +2574,56 @@ export default function SchedulerDashboardPage() {
 
   // Accept 1..N files. 1 valid file → single mode; 2..5 → bulk mode.
   // Existing real videos are kept; the empty draft is dropped once real ones exist.
+  // Unified dropzone (openspec/changes/tiktok-photo-post Decisions 6-8):
+  // accepts a mixed batch of video + image files. Each file becomes exactly
+  // one card (no auto-grouping of multiple photos into one carousel) with
+  // its own contentType derived from the file's actual MIME type.
   const handleFilesAdded = useCallback(
     async (files: File[]) => {
-      const valid: File[] = [];
+      const valid: Array<{ file: File; contentType: "video" | "photo" }> = [];
       for (const f of files) {
-        if (!ACCEPTED_VIDEO_TYPES.includes(f.type)) {
-          setToast({ type: "error", message: `"${f.name}" skipped — only MP4, MOV, AVI.` });
-          continue;
+        if (ACCEPTED_VIDEO_TYPES.includes(f.type)) {
+          if (f.size > MAX_FILE_BYTES) {
+            setToast({ type: "error", message: `"${f.name}" skipped — over 50MB.` });
+            continue;
+          }
+          valid.push({ file: f, contentType: "video" });
+        } else if (ACCEPTED_IMAGE_TYPES.includes(f.type)) {
+          if (f.size > MAX_IMAGE_BYTES) {
+            setToast({ type: "error", message: `"${f.name}" skipped — over 10MB.` });
+            continue;
+          }
+          valid.push({ file: f, contentType: "photo" });
+        } else {
+          setToast({ type: "error", message: `"${f.name}" skipped — unsupported file type.` });
         }
-        if (f.size > MAX_FILE_BYTES) {
-          setToast({ type: "error", message: `"${f.name}" skipped — over 50MB.` });
-          continue;
-        }
-        valid.push(f);
       }
       if (valid.length === 0) return;
 
       const existingReal = items.filter((i) => i.file);
       const slots = MAX_VIDEOS - existingReal.length;
       if (slots <= 0) {
-        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos reached.` });
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} items reached.` });
         return;
       }
       const accepted = valid.slice(0, slots);
       if (valid.length > slots) {
-        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos — extra files were skipped.` });
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} items — extra files were skipped.` });
       }
 
-      const newItems: VideoItem[] = accepted.map((f) => ({
+      const newItems: VideoItem[] = accepted.map(({ file, contentType }) => ({
         ...makeDraft(today),
-        file: f,
+        file,
         uploadStatus: "uploading",
+        contentType,
+        // Photo posts are TikTok-only — YouTube has no photo-post concept
+        // (PlatformFields also disables/grays the YouTube checkbox for this
+        // card). Default to TikTok directly rather than defaulting to the
+        // usual YouTube and forcing the user to fix an unselectable state.
+        platforms: contentType === "photo" ? ["tiktok"] : ["youtube"],
       }));
 
-      // Auto-space (Prompt 4): once the batch reaches 2+ videos, lay the NEW
+      // Auto-space (Prompt 4): once the batch reaches 2+ items, lay the NEW
       // cards into 2-per-day slots (12:00 / 18:00), continuing from the existing
       // count and anchored to the first card's date. Existing cards keep their
       // date/time so any manual edits are preserved.
@@ -2147,48 +2638,17 @@ export default function SchedulerDashboardPage() {
       setItems([...existingReal, ...spacedNew]);
 
       // Sequential uploads — one at a time, updating each item as it resolves.
-      // Direct-to-Supabase: the server only mints a tiny signed-URL payload, then
-      // the file bytes go browser → Storage via uploadToSignedUrl. This bypasses
-      // the serverless request-body limit (~4.5 MB on Vercel) that the old
-      // multipart /api/upload POST hit for larger files.
       for (const it of newItems) {
         try {
           const file = it.file as File;
+          const isPhoto = it.contentType === "photo";
+          const { url, storagePath } = await signAndUploadFile(file, isPhoto ? "image" : "video");
 
-          const signRes = await fetch("/api/upload/sign", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              filename: file.name,
-              contentType: file.type,
-              size: file.size,
-            }),
-          });
-
-          // Guard against a non-JSON error body (e.g. an upstream error page) so
-          // the user sees a readable message instead of a JSON-parse exception.
-          const signData = await signRes.json().catch(() => null);
-          if (!signRes.ok || !signData) {
-            throw new Error(
-              (signData && signData.error) || "Couldn't start the upload. Please try again.",
-            );
+          if (isPhoto) {
+            updateItem(it.id, { photoUrls: [storagePath], uploadStatus: "done" });
+          } else {
+            updateItem(it.id, { videoUrl: url, storagePath, uploadStatus: "done" });
           }
-
-          const { bucket, path, token, publicUrl, storagePath } = signData as {
-            bucket: string;
-            path: string;
-            token: string;
-            publicUrl: string;
-            storagePath?: string;
-          };
-
-          const { error: uploadError } = await getSupabaseBrowser()
-            .storage.from(bucket)
-            .uploadToSignedUrl(path, token, file, { contentType: file.type });
-
-          if (uploadError) throw new Error(uploadError.message || "Upload failed.");
-
-          updateItem(it.id, { videoUrl: publicUrl, storagePath: storagePath ?? path, uploadStatus: "done" });
         } catch (err) {
           updateItem(it.id, {
             uploadStatus: "error",
@@ -2200,21 +2660,27 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
-  // Pick an existing video creation as a schedulable item — no /api/upload.
-  // Fills the first empty draft in place (keeps single mode single); otherwise
-  // appends a new card (auto-spaced like uploads) up to MAX_VIDEOS.
+  // Pick an existing creation (video OR product photo) as a schedulable item
+  // — no /api/upload. Fills the first empty draft in place (keeps single mode
+  // single); otherwise appends a new card (auto-spaced like uploads) up to
+  // MAX_VIDEOS. mediaType drives the same contentType auto-detection as a raw
+  // drop (openspec/changes/tiktok-photo-post Decision 6).
   const handleAssetSelected = useCallback(
     (source: CreationHistoryItem | string) => {
+      const isPhoto = typeof source !== "string" && source.mediaType === "image";
       const mediaUrl = typeof source === "string" ? source : source.mediaUrl;
       const storagePath =
         typeof source === "string"
           ? isStorageRelativePath(source)
             ? source
             : storagePathFromStorageUrl(source)
-          : source.storagePath;
+          : source.storagePath?.trim() || null;
+      const photoRef = isPhoto ? storagePath ?? mediaUrl : null;
       const assetPatch: Partial<VideoItem> = {
-        videoUrl: mediaUrl,
-        storagePath: storagePath ?? null,
+        videoUrl: isPhoto ? null : mediaUrl,
+        storagePath: isPhoto ? null : storagePath,
+        photoUrls: photoRef ? [photoRef] : [],
+        contentType: isPhoto ? "photo" : "video",
         uploadStatus: "done",
         uploadError: null,
         file: null,
@@ -2224,13 +2690,17 @@ export default function SchedulerDashboardPage() {
         formatTouched: false,
         scheduleStatus: "idle",
         scheduleError: null,
+        // Photo posts are TikTok-only — defensively override even if the
+        // reused/new card would otherwise default or already hold YouTube.
+        ...(isPhoto ? { platforms: ["tiktok"] as Array<"youtube" | "tiktok"> } : {}),
       };
 
-      const hasVideo = (i: VideoItem) => !!(i.videoUrl || i.storagePath);
+      const hasHostedMedia = (i: VideoItem) =>
+        !!(i.storagePath || i.videoUrl || i.photoUrls.length > 0);
       const reusableIdx = items.findIndex(
         (i) =>
-          (!i.file && !hasVideo(i)) ||
-          (i.uploadStatus === "error" && !hasVideo(i)),
+          (!i.file && !hasHostedMedia(i)) ||
+          (i.uploadStatus === "error" && !hasHostedMedia(i)),
       );
       if (reusableIdx !== -1) {
         updateItem(items[reusableIdx].id, assetPatch);
@@ -2238,7 +2708,7 @@ export default function SchedulerDashboardPage() {
       }
 
       if (items.length >= MAX_VIDEOS) {
-        setToast({ type: "error", message: `Max ${MAX_VIDEOS} videos reached.` });
+        setToast({ type: "error", message: `Max ${MAX_VIDEOS} items reached.` });
         return;
       }
 
@@ -2259,6 +2729,7 @@ export default function SchedulerDashboardPage() {
   // asset (matched by videoUrl — the prior setItems updates are already queued,
   // so this functional update sees the just-added/filled item). Finally strips
   // the query params so a refresh doesn't re-trigger and the URL stays clean.
+  // Always a video — this hand-off originates from Reels Creator.
   const handleDeepLinkAsset = useCallback(
     (assetUrl: string, title: string | null) => {
       handleAssetSelected(assetUrl);
@@ -2284,11 +2755,15 @@ export default function SchedulerDashboardPage() {
   // Empty caption is confirmed once for the whole batch, not per card.
   const [confirmEmptyBatch, setConfirmEmptyBatch] = useState(false);
 
-  // A card is schedulable when it has a hosted video, a title, and a date/time.
-  // Duration no longer gates scheduling — mirrors single-mode ScheduleCard.isReady.
+  // A card is schedulable when it has hosted media (a video URL, or at least
+  // one photo for a photo-typed card — openspec/changes/tiktok-photo-post
+  // Decision 7's empty-photo-card guard, mirroring single-mode
+  // ScheduleCard.isReady), a title, and a date/time. Duration no longer gates
+  // scheduling.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      !!(i.storagePath || i.videoUrl) && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
+      (i.contentType === "photo" ? i.photoUrls.length > 0 : !!(i.storagePath || i.videoUrl)) &&
+      !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
       (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
     [],
   );
@@ -2345,11 +2820,20 @@ export default function SchedulerDashboardPage() {
       const results = await Promise.allSettled(
         pendingPlatforms.map(async (p) => {
           const description = p === "youtube" && it.format === "short" ? withShortsTag(it.caption) : it.caption;
+          // A TikTok photo post sends photo_urls instead of video_url — same
+          // rule as single-mode ScheduleCard's submit (openspec/changes/
+          // tiktok-photo-post). YouTube is never reachable here since a
+          // photo-typed card can't have "youtube" in platforms.
+          const isPhoto = it.contentType === "photo";
           const res = await fetch("/api/posts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...(it.storagePath ? { storage_path: it.storagePath } : { video_url: it.videoUrl }),
+              ...(isPhoto
+                ? { photo_urls: it.photoUrls }
+                : it.storagePath
+                  ? { storage_path: it.storagePath }
+                  : { video_url: it.videoUrl }),
               title: it.title.trim(),
               description,
               tags: it.tags,
@@ -2451,6 +2935,9 @@ export default function SchedulerDashboardPage() {
                 onMetaChange={handleItem0Meta}
                 onAssetSelected={handleAssetSelected}
                 format={item0.format}
+                contentType={item0.contentType}
+                photoUrls={item0.photoUrls}
+                onPhotoUrlsChange={handleItem0PhotoUrls}
               />
               <DescriptionCard
                 caption={item0.caption}
@@ -2487,6 +2974,8 @@ export default function SchedulerDashboardPage() {
                 onPlatformPatch={handleItem0PlatformPatch}
                 tiktokConnected={tiktokConnected}
                 tiktokPrivacyOptions={tiktokPrivacyOptions}
+                contentType={item0.contentType}
+                photoUrls={item0.photoUrls}
               />
             </div>
           </div>

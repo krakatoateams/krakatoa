@@ -1,6 +1,9 @@
+import { PHOTOS_FOLDER, isStorageRelativePath, storagePathFromPublicUrl, storagePathFromSignedUrl } from "@/lib/storage-buckets";
+
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
 const TIKTOK_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
+const TIKTOK_CONTENT_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";
 
 // TikTok's Init Direct Post caps a single chunk at 64MB. This app's scheduler
 // already rejects uploads over 50MB (MAX_FILE_BYTES in the scheduler page), so
@@ -295,6 +298,130 @@ export async function publishToTikTok(params: TikTokPublishParams): Promise<stri
   });
 
   await uploadVideoChunks(uploadUrl, video, chunkSize, totalChunkCount);
+
+  return publishId;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo posts (openspec/changes/tiktok-photo-post) — additive only, nothing
+// above this line is touched. TikTok's photo endpoint supports ONLY
+// PULL_FROM_URL as a source (no FILE_UPLOAD equivalent), so there is no
+// upload-bytes step here at all: TikTok fetches each image itself once Init
+// succeeds, unlike the video path above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RawContentInitResponse {
+  data?: { publish_id?: string };
+  error?: { code?: string; message?: string; log_id?: string };
+}
+
+async function initPhotoPost(params: {
+  accessToken: string;
+  photoUrls: string[];
+  title: string;
+  description: string;
+  privacyLevel: string;
+  brandOrganicToggle: boolean;
+  brandContentToggle: boolean;
+}): Promise<{ publishId: string }> {
+  assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
+
+  const res = await fetch(TIKTOK_CONTENT_INIT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+    },
+    body: JSON.stringify({
+      post_info: {
+        title: params.title,
+        description: params.description,
+        privacy_level: params.privacyLevel,
+        brand_organic_toggle: params.brandOrganicToggle,
+        brand_content_toggle: params.brandContentToggle,
+      },
+      source_info: {
+        source: "PULL_FROM_URL",
+        // Cover photo picker is out of scope for this change — always the
+        // first selected photo (see design.md Non-Goals).
+        photo_cover_index: 0,
+        photo_images: params.photoUrls,
+      },
+      post_mode: "DIRECT_POST",
+      media_type: "PHOTO",
+    }),
+  });
+
+  const json = (await res.json()) as RawContentInitResponse;
+
+  if (!res.ok || (json.error?.code && json.error.code !== "ok") || !json.data?.publish_id) {
+    throw new Error(`TikTok photo Init failed: ${json.error?.message ?? res.statusText}`);
+  }
+
+  return { publishId: json.data.publish_id };
+}
+
+/**
+ * Rewrites a Supabase Storage public photo URL to this app's own
+ * `/api/tiktok-photos/` proxy — required because TikTok's PULL_FROM_URL
+ * validates the URL against a domain/prefix verified in the TikTok Developer
+ * Portal, and `*.supabase.co` isn't ours to verify (see design.md, Decision 1).
+ * Throws (rather than silently passing through the original URL) if the URL
+ * isn't a recognized `photos/`-prefixed storage URL — sending TikTok a URL
+ * that can never pass verification would just surface as a confusing
+ * TikTok-side error instead of a clear one here.
+ */
+function toProxyPhotoUrl(urlOrPath: string, origin: string): string {
+  const path = isStorageRelativePath(urlOrPath)
+    ? urlOrPath
+    : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
+  if (!path || !path.startsWith(`${PHOTOS_FOLDER}/`)) {
+    throw new Error(
+      `Photo URL is not a recognized storage URL under "${PHOTOS_FOLDER}/" — cannot proxy for TikTok: ${urlOrPath}`,
+    );
+  }
+  const rest = path.slice(PHOTOS_FOLDER.length + 1);
+  return `${origin}/api/tiktok-photos/${rest}`;
+}
+
+export interface TikTokPhotoPublishParams {
+  accessToken: string;
+  photoUrls: string[];
+  title: string;
+  description: string;
+  privacyLevel: string;
+  brandOrganicToggle: boolean;
+  brandContentToggle: boolean;
+  /** This app's own origin (e.g. from resolveOrigin(request) in the cron
+   * route) — used to build the verified-domain proxy URL for each photo. */
+  origin: string;
+}
+
+/**
+ * Publishes a photo post (carousel of 1-35 images) to TikTok via Init
+ * (`PULL_FROM_URL` source) and returns the resulting publish_id. Completion
+ * is optimistic, same as the video path — see design.md Decision 4.
+ *
+ * Unlike publishToTikTok, there is no upload step: PULL_FROM_URL means
+ * TikTok fetches the (proxied) images itself once Init succeeds.
+ */
+export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Promise<string> {
+  assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
+
+  // Sanity-check the account can actually post before spending an Init call.
+  await getCreatorInfo(params.accessToken);
+
+  const proxiedUrls = params.photoUrls.map((url) => toProxyPhotoUrl(url, params.origin));
+
+  const { publishId } = await initPhotoPost({
+    accessToken: params.accessToken,
+    photoUrls: proxiedUrls,
+    title: params.title,
+    description: params.description,
+    privacyLevel: params.privacyLevel,
+    brandOrganicToggle: params.brandOrganicToggle,
+    brandContentToggle: params.brandContentToggle,
+  });
 
   return publishId;
 }

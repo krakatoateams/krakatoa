@@ -171,6 +171,17 @@ export const USER_CREATIONS_TABLE = "user_creations";
 /** @deprecated Use USER_CREATIONS_TABLE with tool=product_photo */
 export const PRODUCT_PHOTO_GENERATIONS_TABLE = "product_photo_generations";
 
+/** Scheduler device photo uploads: `photos/{userId}/uploads/scheduler/<filename>`. */
+export function photosUserPrefix(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) throw new Error("Invalid user id");
+  return `${PHOTOS_FOLDER}/${safe}`;
+}
+
+export function photosSchedulerUploadPath(userId: string, filename: string): string {
+  return `${photosUserPrefix(userId)}/uploads/scheduler/${filename}`;
+}
+
 export function photosStoragePath(...segments: string[]): string {
   return [PHOTOS_FOLDER, ...segments].join("/");
 }

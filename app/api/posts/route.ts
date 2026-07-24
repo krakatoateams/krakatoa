@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
     const {
       video_url,
       storage_path,
+      photo_urls,
       title,
       description,
       tags,
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
     } = body as {
       video_url?: string;
       storage_path?: string;
+      photo_urls?: string[];
       title: string;
       description?: string;
       tags?: string;
@@ -88,6 +90,34 @@ export async function POST(req: NextRequest) {
       tiktok_brand_organic_toggle?: boolean;
       tiktok_brand_content_toggle?: boolean;
     };
+
+    // photo_urls (a TikTok photo-post carousel) is an alternative to video_url,
+    // never both — see openspec/changes/tiktok-photo-post. TikTok-only: YouTube
+    // has no photo-post concept.
+    const hasPhotoUrls = Array.isArray(photo_urls) && photo_urls.length > 0;
+    if (photo_urls !== undefined) {
+      if (
+        !Array.isArray(photo_urls) ||
+        photo_urls.some((u) => typeof u !== "string" || !u.trim())
+      ) {
+        return NextResponse.json(
+          { error: "photo_urls must be an array of non-empty URL strings." },
+          { status: 400 },
+        );
+      }
+      if (photo_urls.length > 35) {
+        return NextResponse.json(
+          { error: "photo_urls supports at most 35 photos." },
+          { status: 400 },
+        );
+      }
+      if (hasPhotoUrls && platform !== "tiktok") {
+        return NextResponse.json(
+          { error: "photo_urls is only supported for platform \"tiktok\"." },
+          { status: 400 },
+        );
+      }
+    }
 
     // Publish format is optional; only persist a recognized value, otherwise
     // leave it null (unknown). Never fail the request over a bad format.
@@ -200,9 +230,19 @@ export async function POST(req: NextRequest) {
         ? video_url.trim()
         : null;
 
-    if ((!resolvedPath && !legacyHttpUrl) || !title || !scheduled_time || !platform) {
+    if (platform === "tiktok" && hasPhotoUrls && (!!resolvedPath || !!legacyHttpUrl)) {
       return NextResponse.json(
-        { error: "storage_path (or video_url), title, scheduled_time and platform are required." },
+        { error: "TikTok posts can't mix photos and video — please choose one or the other." },
+        { status: 400 },
+      );
+    }
+
+    if ((!resolvedPath && !legacyHttpUrl && !hasPhotoUrls) || !title || !scheduled_time || !platform) {
+      return NextResponse.json(
+        {
+          error:
+            "storage_path (or video_url), photo_urls (TikTok photo post), title, scheduled_time and platform are required.",
+        },
         { status: 400 },
       );
     }
@@ -234,12 +274,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Persist storage path in video_url when ours; legacy http URLs unchanged.
-    const persistedVideoRef = resolvedPath ?? legacyHttpUrl!;
+    const persistedVideoRef = resolvedPath ?? legacyHttpUrl ?? null;
 
     // ── Insert post ───────────────────────────────────────────────────────────
     const insertRow: Record<string, unknown> = {
       user_id: userId,
-      video_url: persistedVideoRef,
       title,
       description: description ?? "",
       tags: tags ?? "",
@@ -247,6 +286,7 @@ export async function POST(req: NextRequest) {
       platform,
       status: "scheduled",
     };
+    if (persistedVideoRef) insertRow.video_url = persistedVideoRef;
     if (profileId) insertRow.profile_id = profileId;
     if (verifiedProjectId) insertRow.project_id = verifiedProjectId;
     if (verifiedAssetId) insertRow.asset_id = verifiedAssetId;
@@ -255,6 +295,7 @@ export async function POST(req: NextRequest) {
       insertRow.tiktok_privacy_level = tiktok_privacy_level;
       insertRow.tiktok_brand_organic_toggle = Boolean(tiktok_brand_organic_toggle);
       insertRow.tiktok_brand_content_toggle = Boolean(tiktok_brand_content_toggle);
+      if (hasPhotoUrls) insertRow.photo_urls = photo_urls;
     }
 
     const { data, error } = await supabaseServer
