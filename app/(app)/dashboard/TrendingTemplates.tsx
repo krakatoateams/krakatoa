@@ -45,7 +45,7 @@ export default function TrendingTemplates() {
     el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.8), behavior: "smooth" });
   };
 
-  const useTemplate = (videoUrl: string) => {
+  const openTemplateInMotionControl = (videoUrl: string) => {
     router.push(
       `/tools/video?type=motion_control&templateVideo=${encodeURIComponent(videoUrl)}`
     );
@@ -85,7 +85,7 @@ export default function TrendingTemplates() {
           <TemplateCard
             key={template.id}
             template={template}
-            onUse={() => useTemplate(template.videoUrl)}
+            onUse={() => openTemplateInMotionControl(template.videoUrl)}
           />
         ))}
       </div>
