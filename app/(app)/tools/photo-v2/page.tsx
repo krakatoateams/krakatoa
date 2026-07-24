@@ -7,6 +7,8 @@ import {
   Loader2,
   AlertCircle,
   User,
+  PersonStanding,
+  Image as ImageIcon,
   Check,
   X,
   Maximize2,
@@ -49,6 +51,8 @@ import {
   CHARACTER_STYLES,
   CHARACTER_GENDERS,
   CHARACTER_AGES,
+  DEFAULT_MODEL_POSE,
+  DEFAULT_PHOTO_STYLE,
   DEFAULT_PRODUCT_PHOTO_TIER,
   DEFAULT_PRODUCT_PHOTO_RESOLUTION,
   DEFAULT_PHOTO_ASPECT_RATIO,
@@ -292,8 +296,11 @@ function StoryboardComposer({
                 square
                 showChevron={false}
                 icon={<Palette className="h-3.5 w-3.5" />}
-                value={STORYBOARD_STYLE_LABELS[style]}
+                // Show the parameter name as a placeholder while unset (at default);
+                // dim it too. Once changed, show the chosen value at full emphasis.
+                value={style === DEFAULT_STORYBOARD_STYLE ? "Style" : STORYBOARD_STYLE_LABELS[style]}
                 activeId={style}
+                dimValue={style === DEFAULT_STORYBOARD_STYLE}
                 options={STORYBOARD_STYLE_KEYS.map((k) => ({
                   id: k,
                   label: STORYBOARD_STYLE_LABELS[k],
@@ -321,8 +328,9 @@ function StoryboardComposer({
                 square
                 showChevron={false}
                 icon={<Languages className="h-3.5 w-3.5" />}
-                value={storyboardLanguageLabel(language)}
+                value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
                 activeId={language}
+                dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
                 options={STORYBOARD_LANGUAGES.map((l) => ({
                   id: l.id,
                   label: l.label,
@@ -447,8 +455,8 @@ function PhotoOmniPage() {
   const [prompt, setPrompt] = useState("");
   const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
-  const [poseId, setPoseId] = useState<ModelPoseId>("standing");
-  const [styleId, setStyleId] = useState<PhotoStyleId>("minimalist-studio");
+  const [poseId, setPoseId] = useState<ModelPoseId>(DEFAULT_MODEL_POSE);
+  const [styleId, setStyleId] = useState<PhotoStyleId>(DEFAULT_PHOTO_STYLE);
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(DEFAULT_PRODUCT_PHOTO_TIER);
   const [resolution, setResolution] = useState<ProductPhotoResolution>(
     DEFAULT_PRODUCT_PHOTO_RESOLUTION
@@ -943,8 +951,13 @@ function PhotoOmniPage() {
                       square
                       showChevron={false}
                       icon={<Palette className="h-3.5 w-3.5" />}
-                      value={CHARACTER_STYLES.find((s) => s.id === characterStyle)?.label ?? "Style"}
+                      value={
+                        characterStyle === DEFAULT_CHARACTER_STYLE
+                          ? "Style"
+                          : CHARACTER_STYLES.find((s) => s.id === characterStyle)?.label ?? "Style"
+                      }
                       activeId={characterStyle}
+                      dimValue={characterStyle === DEFAULT_CHARACTER_STYLE}
                       options={CHARACTER_STYLES.map((s) => ({ id: s.id, label: s.label }))}
                       onSelect={(id) => setCharacterStyle(id as CharacterStyleId)}
                       disabled={loading}
@@ -954,8 +967,13 @@ function PhotoOmniPage() {
                       square
                       showChevron={false}
                       icon={<VenusAndMars className="h-3.5 w-3.5" />}
-                      value={CHARACTER_GENDERS.find((g) => g.id === characterGender)?.label ?? "Gender"}
+                      value={
+                        characterGender === DEFAULT_CHARACTER_GENDER
+                          ? "Gender"
+                          : CHARACTER_GENDERS.find((g) => g.id === characterGender)?.label ?? "Gender"
+                      }
                       activeId={characterGender}
+                      dimValue={characterGender === DEFAULT_CHARACTER_GENDER}
                       options={CHARACTER_GENDERS.map((g) => ({ id: g.id, label: g.label }))}
                       onSelect={(id) => setCharacterGender(id as CharacterGenderId)}
                       disabled={loading}
@@ -965,8 +983,13 @@ function PhotoOmniPage() {
                       square
                       showChevron={false}
                       icon={<Cake className="h-3.5 w-3.5" />}
-                      value={CHARACTER_AGES.find((a) => a.id === characterAge)?.label ?? "Age"}
+                      value={
+                        characterAge === DEFAULT_CHARACTER_AGE
+                          ? "Age"
+                          : CHARACTER_AGES.find((a) => a.id === characterAge)?.label ?? "Age"
+                      }
                       activeId={characterAge}
+                      dimValue={characterAge === DEFAULT_CHARACTER_AGE}
                       options={CHARACTER_AGES.map((a) => ({ id: a.id, label: a.label }))}
                       onSelect={(id) => setCharacterAge(id as CharacterAgeId)}
                       disabled={loading}
@@ -979,9 +1002,11 @@ function PhotoOmniPage() {
                       sheetTitle="Select pose"
                       square
                       showChevron={false}
-                      icon={<User className="h-3.5 w-3.5" />}
+                      icon={<PersonStanding className="h-3.5 w-3.5" />}
                       value={selectedPose?.label ?? "Pose"}
                       activeId={poseId}
+                      // Dim while unset (Auto placeholder); each chip is independent.
+                      dimValue={poseId === DEFAULT_MODEL_POSE}
                       options={MODEL_POSES.map((p) => ({ id: p.id, label: p.label }))}
                       onSelect={(id) => setPoseId(id as ModelPoseId)}
                       disabled={loading}
@@ -990,9 +1015,10 @@ function PhotoOmniPage() {
                       sheetTitle="Select photo style"
                       square
                       showChevron={false}
-                      icon={<Camera className="h-3.5 w-3.5" />}
+                      icon={<ImageIcon className="h-3.5 w-3.5" />}
                       value={selectedStyle?.label ?? "Style"}
                       activeId={styleId}
+                      dimValue={styleId === DEFAULT_PHOTO_STYLE}
                       options={PHOTO_STYLES.map((s) => ({ id: s.id, label: s.label }))}
                       onSelect={(id) => setStyleId(id as PhotoStyleId)}
                       disabled={loading}

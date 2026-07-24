@@ -17,6 +17,22 @@ import { TooltipBubble } from "./Tooltip";
 // original menu widths without per-call configuration.
 const MENU_MAX_WIDTH = 288;
 
+// The app-wide `capitalize` on buttons would render the minor word "to" as "To"
+// (e.g. "Storyboard to video" → "Storyboard To Video"). Wrap any standalone "to"
+// in a `lowercase` span so it overrides the parent capitalize and stays "to".
+function withMinorWordCase(label: string): React.ReactNode {
+  if (!/\bto\b/i.test(label)) return label;
+  return label.split(/\b(to)\b/i).map((part, i) =>
+    /^to$/i.test(part) ? (
+      <span key={i} className="lowercase">
+        {part}
+      </span>
+    ) : (
+      part
+    )
+  );
+}
+
 export function ChipDropdown({
   icon,
   value,
@@ -30,6 +46,7 @@ export function ChipDropdown({
   bare = false,
   tooltip,
   sheetTitle,
+  dimValue = false,
 }: {
   icon: React.ReactNode;
   value: string;
@@ -39,6 +56,8 @@ export function ChipDropdown({
   disabled?: boolean;
   square?: boolean;
   showChevron?: boolean;
+  /** Render the value with less emphasis (placeholder look) — e.g. an unset "Auto" param. */
+  dimValue?: boolean;
   /** On mobile, stretch the chip to fill the container width (auto on sm+). */
   fluid?: boolean;
   /** Borderless trigger (just value + chevron) — used for the inline Model row. */
@@ -142,7 +161,7 @@ export function ChipDropdown({
         } ${active ? "bg-purple-500/20 text-gray-100" : "text-gray-400 hover:bg-white/5"}`}
       >
         <span className="flex items-center gap-2">
-          {opt.label}
+          {withMinorWordCase(opt.label)}
           {opt.hint && (
             <span className="text-xs font-medium text-purple-300">{opt.hint}</span>
           )}
@@ -190,7 +209,9 @@ export function ChipDropdown({
         }
       >
         {!bare && <span className="text-purple-300">{icon}</span>}
-        <span className="font-semibold">{value}</span>
+        <span className={`font-semibold ${dimValue ? "text-gray-500" : ""}`}>
+          {withMinorWordCase(value)}
+        </span>
         {showChevron && (
           <ChevronDown
             className={`h-3.5 w-3.5 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}

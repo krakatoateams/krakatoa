@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle2,
+  Clock,
   Coins,
   Loader2,
   Sparkles,
   XCircle,
 } from "lucide-react";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
-import { CREDIT_PACKS, formatIdr } from "@/lib/credit-packs";
+import { DEFAULT_CREDIT_PACKS, formatIdr, type CreditPack } from "@/lib/credit-packs";
 
 type BalanceResponse = {
   balance: number;
@@ -41,6 +42,46 @@ const TYPE_LABELS: Record<string, string> = {
   expiry: "Expiry",
 };
 
+// Customer-friendly names for each credit lot source.
+const SOURCE_LABELS: Record<string, string> = {
+  regular: "Purchased",
+  purchase_bonus: "Purchase bonus",
+  new_user_bonus: "Welcome bonus",
+  refund: "Refund",
+  adjustment: "Adjustment",
+  legacy: "Credits",
+};
+
+type CreditBucket = {
+  source: string;
+  amount: number;
+  expiresAt: string | null;
+};
+
+type CreditLotSummary = {
+  buckets: CreditBucket[];
+  expiringSoon: { amount: number; withinDays: number; nextExpiryAt: string | null };
+  neverExpires: number;
+  totalTracked: number;
+};
+
+/** Whole days from now until `iso` (rounded up; negative if past). */
+function daysUntil(iso: string): number {
+  const ms = new Date(iso).getTime() - Date.now();
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+}
+
+function formatExpiry(iso: string): string {
+  const date = new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+  const d = daysUntil(iso);
+  const rel = d <= 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
+  return `${date} · ${rel}`;
+}
+
 function StatCard({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
@@ -58,22 +99,49 @@ export default function CreditsTab() {
   const { balance, refetch: refetchBalance } = useCreditBalance();
   const [stats, setStats] = useState<BalanceResponse | null>(null);
   const [items, setItems] = useState<TransactionItem[]>([]);
+  const [lotSummary, setLotSummary] = useState<CreditLotSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
   const [banner, setBanner] = useState<ReturnBanner | null>(null);
+  // Admin-managed tiers; seeded with the static defaults so the panel renders
+  // instantly, then refreshed from the DB-backed API.
+  const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_CREDIT_PACKS);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPacks = () => {
+      fetch("/api/credits/packs", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { packs?: CreditPack[] } | null) => {
+          if (!cancelled && d?.packs?.length) setPacks(d.packs);
+        })
+        .catch(() => {});
+    };
+    loadPacks();
+    // Re-pull tiers when the tab regains focus so admin price edits show up
+    // without a full reload.
+    const onFocus = () => loadPacks();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   const loadCredits = useCallback(async () => {
-    const [balanceData, txData] = await Promise.all([
+    const [balanceData, txData, lotData] = await Promise.all([
       fetch("/api/credits/balance").then((r) => (r.ok ? r.json() : null)),
       fetch("/api/credits/transactions").then((r) =>
         r.ok ? r.json() : { items: [] }
       ),
+      fetch("/api/credits/lots").then((r) => (r.ok ? r.json() : null)),
     ]);
     if (balanceData) setStats(balanceData as BalanceResponse);
     setItems((txData?.items as TransactionItem[]) ?? []);
+    setLotSummary((lotData as CreditLotSummary | null) ?? null);
   }, []);
 
   useEffect(() => {
@@ -211,6 +279,53 @@ export default function CreditsTab() {
         <StatCard label="Lifetime spent" value={stats?.lifetimeSpent ?? null} />
       </div>
 
+      {/* Credit breakdown: which credits expire, and when. */}
+      {lotSummary && lotSummary.buckets.length > 0 ? (
+        <div className="rounded-xl border border-gray-800 bg-gray-900">
+          <div className="flex items-center justify-between border-b border-gray-800 px-5 py-3">
+            <h3 className="text-sm font-semibold text-white">Credit breakdown</h3>
+            <span className="text-[11px] text-gray-500">
+              Earliest-expiring credits are used first
+            </span>
+          </div>
+
+          <ul className="divide-y divide-gray-800">
+            {lotSummary.buckets.map((b, i) => {
+              const soon = b.expiresAt !== null && daysUntil(b.expiresAt) <= 30;
+              return (
+                <li
+                  key={`${b.source}-${b.expiresAt ?? "never"}-${i}`}
+                  className="flex items-center justify-between gap-4 px-5 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white">
+                      {SOURCE_LABELS[b.source] ?? b.source}
+                    </p>
+                    <p
+                      className={`flex items-center gap-1 text-[11px] ${
+                        soon ? "text-amber-400" : "text-gray-500"
+                      }`}
+                    >
+                      {b.expiresAt === null ? (
+                        "Never expires"
+                      ) : (
+                        <>
+                          <Clock className="h-3 w-3" />
+                          Expires {formatExpiry(b.expiresAt)}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-white">
+                    {b.amount.toLocaleString()}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
       {/* Post-payment return banner */}
       {banner ? (
         <div
@@ -248,7 +363,7 @@ export default function CreditsTab() {
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {CREDIT_PACKS.map((pack) => {
+          {packs.map((pack) => {
             const isBusy = purchasingId === pack.id;
             const anyBusy = purchasingId !== null;
             return (

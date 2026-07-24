@@ -25,6 +25,14 @@
   body {
     @apply bg-white text-neutral-950 antialiased;
   }
+
+  /* Standardize button text to Title Case (capitalize each word) app-wide.
+     Buttons that intentionally opt out with an explicit Tailwind case utility
+     (uppercase / lowercase / normal-case) still override this, since utilities
+     rank above base styles. */
+  button {
+    text-transform: capitalize;
+  }
 }
 
 @layer utilities {

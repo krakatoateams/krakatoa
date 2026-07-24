@@ -23,16 +23,25 @@ export type CreditPack = {
   popular?: boolean;
 };
 
-export const CREDIT_PACKS: CreditPack[] = [
+/**
+ * Built-in default tiers. These are the seed source for the `credit_packs`
+ * table (migration 052) AND the runtime fallback used when the table is
+ * unavailable. Admin edits live in the DB — read them via lib/credit-packs-db.ts
+ * (server) or the public /api/credits/packs endpoint (client).
+ */
+export const DEFAULT_CREDIT_PACKS: CreditPack[] = [
   { id: "p1", credits: 100, priceIdr: 27_000, label: "Starter" },
   { id: "p3", credits: 250, priceIdr: 67_500, label: "Creator", popular: true },
   { id: "p4", credits: 500, bonusCredits: 25, priceIdr: 135_000, label: "Pro" },
   { id: "p5", credits: 1_000, bonusCredits: 100, priceIdr: 270_000, label: "Studio" },
 ];
 
-/** Resolve a pack by id, or undefined when unknown. */
+/** @deprecated Use DEFAULT_CREDIT_PACKS (fallback) or the DB-backed reader. */
+export const CREDIT_PACKS = DEFAULT_CREDIT_PACKS;
+
+/** Resolve a default pack by id, or undefined when unknown (fallback only). */
 export function getCreditPack(id: string): CreditPack | undefined {
-  return CREDIT_PACKS.find((p) => p.id === id);
+  return DEFAULT_CREDIT_PACKS.find((p) => p.id === id);
 }
 
 /** Total credits actually granted for a pack (base + bonus). */

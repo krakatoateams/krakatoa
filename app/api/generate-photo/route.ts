@@ -679,12 +679,16 @@ export async function POST(req: Request) {
       contentType: "image/png",
       prompt,
       // Non-product items aren't pose/style shots, so give the library a meaningful
-      // title instead of the misleading "Standing · Minimalist Studio".
+      // title instead of the misleading "Standing · Minimalist Studio". Product
+      // shots with both pose + style on "auto" would otherwise read "Auto · Auto",
+      // so fall back to the prompt (or a generic label) in that case too.
       title: isCharacterMode
         ? characterName || "Character"
         : mode === "image"
           ? userPrompt.slice(0, 60) || "Generated image"
-          : undefined,
+          : poseId === "auto" && styleId === "auto"
+            ? userPrompt.slice(0, 60) || "Product photo"
+            : undefined,
       // Tag character creations so the library can group/badge them.
       creationKind: isCharacterMode ? CHARACTER_CREATION_KIND : undefined,
       characterName: isCharacterMode && characterName ? characterName : undefined,

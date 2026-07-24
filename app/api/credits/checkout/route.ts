@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { getCreditPack, packTotalCredits } from "@/lib/credit-packs";
+import { packTotalCredits } from "@/lib/credit-packs";
+import { getActiveCreditPack } from "@/lib/credit-packs-db";
 import { createOrder, setOrderToken } from "@/lib/credit-orders-db";
 import { createCheckoutPayment, DokuConfigError, DokuApiError } from "@/lib/doku";
 
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as { packId?: unknown } | null;
   const packId = typeof body?.packId === "string" ? body.packId.trim() : "";
-  const pack = getCreditPack(packId);
+  const pack = await getActiveCreditPack(packId);
   if (!pack) {
     return NextResponse.json({ error: "Unknown credit pack." }, { status: 400 });
   }

@@ -228,6 +228,9 @@ function VideoOmniPage() {
             ? "reels-creator"
             : "text2video";
   const initialStoryboardId = searchParams.get("storyboardId") || null;
+  // Dashboard "Trending templates" deep-link: ?type=motion_control&templateVideo=<public url>
+  // preloads the clip as the Motion Control driving video.
+  const initialTemplateVideo = searchParams.get("templateVideo") || null;
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -878,6 +881,7 @@ function VideoOmniPage() {
 
         {creationType === "motion_control" && (
           <MotionControlComposer
+            initialTemplateVideo={initialTemplateVideo}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
               setHistoryRefreshKey((k) => k + 1);
@@ -1437,9 +1441,11 @@ function ImageToVideoComposer({
 // and keep (or drop) the reference video's audio. The output clip length follows
 // the reference video, so the cost is computed from its measured duration.
 function MotionControlComposer({
+  initialTemplateVideo,
   onSelectCreation,
   onGenerated,
 }: {
+  initialTemplateVideo?: string | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
@@ -1474,28 +1480,42 @@ function MotionControlComposer({
   const charImage = useMediaRefs("image", 1);
   const motionVideo = useMediaRefs("video", 1);
 
+  // A "Trending template" deep-link (?templateVideo=<public url>) preloads a
+  // hosted driving clip. It's a permanent public URL (path ""), so — like a
+  // library character — it's never touched by the temp-upload sweep. When set,
+  // it takes the place of an uploaded motion video.
+  const [templateUrl, setTemplateUrl] = useState<string | null>(
+    initialTemplateVideo ?? null
+  );
+
   // Measure the reference video's duration so the cost label matches what the
-  // server will bill (output length follows the reference video).
+  // server will bill (output length follows the reference video). Works for both
+  // an uploaded file (object URL) and a hosted template (public URL).
   const motionFile = motionVideo.items[0]?.file ?? null;
   useEffect(() => {
-    if (!motionFile) {
+    // Uploaded file wins over a preloaded template.
+    const objectUrl = motionFile ? URL.createObjectURL(motionFile) : null;
+    const src = objectUrl ?? templateUrl;
+    if (!src) {
       setVideoDurationSec(null);
       return;
     }
-    const url = URL.createObjectURL(motionFile);
     const el = document.createElement("video");
     el.preload = "metadata";
+    el.crossOrigin = "anonymous";
     el.onloadedmetadata = () => {
       setVideoDurationSec(Number.isFinite(el.duration) ? el.duration : null);
-      URL.revokeObjectURL(url);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
     el.onerror = () => {
       setVideoDurationSec(null);
-      URL.revokeObjectURL(url);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-    el.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [motionFile]);
+    el.src = src;
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [motionFile, templateUrl]);
 
   const billedDuration = effectiveMotionControlDuration({
     model,
@@ -1517,8 +1537,15 @@ function MotionControlComposer({
         ? { url: charImage.done[0].url, path: charImage.done[0].path }
         : null;
 
+  // The driving video comes from a preloaded template (hosted URL) or an upload.
+  const resolvedVideo: { url: string; path: string } | null = templateUrl
+    ? { url: templateUrl, path: "" }
+    : motionVideo.done[0]
+      ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
+      : null;
+
   const imageReady = resolvedCharacter !== null;
-  const videoReady = motionVideo.done.length > 0;
+  const videoReady = resolvedVideo !== null;
   const anyUploading =
     motionVideo.uploading || (charSource === "upload" && charImage.uploading);
   const canGenerate = !loading && !anyUploading && imageReady && videoReady;
@@ -1535,9 +1562,7 @@ function MotionControlComposer({
       keepOriginalSound,
       refVideoDurationSec: videoDurationSec,
       image: resolvedCharacter,
-      video: motionVideo.done[0]
-        ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
-        : null,
+      video: resolvedVideo,
     };
 
     // Stable key per attempt + synchronous in-flight lock (see hook docs).
@@ -1639,19 +1664,60 @@ function MotionControlComposer({
               onSelect={setLibraryChar}
               disabled={loading}
             />
-            <RefGroup
-              icon={<Film className="h-3.5 w-3.5" />}
-              label="Motion to copy"
-              accept={MC_VIDEO_ACCEPT}
-              multiple={false}
-              group={motionVideo}
-              disabled={loading}
-              hint={
-                videoDurationSec
-                  ? `Reference video ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s. MP4/MOV.`
-                  : "Reference motion video, 3–30s. The character copies this motion. MP4/MOV."
-              }
-            />
+            {templateUrl ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                    <span className="text-purple-300">
+                      <Film className="h-3.5 w-3.5" />
+                    </span>
+                    Motion to copy
+                    <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-200">
+                      template
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTemplateUrl(null)}
+                    disabled={loading}
+                    className="text-[10px] font-semibold text-gray-400 transition-colors hover:text-white disabled:opacity-40"
+                  >
+                    Use my own
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-black/40">
+                    <video
+                      src={templateUrl}
+                      muted
+                      loop
+                      playsInline
+                      autoPlay
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    {videoDurationSec
+                      ? `Trending template ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s.`
+                      : "Trending template loaded. Your character will copy this motion."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <RefGroup
+                icon={<Film className="h-3.5 w-3.5" />}
+                label="Motion to copy"
+                accept={MC_VIDEO_ACCEPT}
+                multiple={false}
+                group={motionVideo}
+                disabled={loading}
+                hint={
+                  videoDurationSec
+                    ? `Reference video ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s. MP4/MOV.`
+                    : "Reference motion video, 3–30s. The character copies this motion. MP4/MOV."
+                }
+              />
+            )}
           </div>
 
           {/* Advanced settings (collapsed by default). The prompt is optional —
@@ -2107,8 +2173,11 @@ function ImportStoryboardModal({
               square
               showChevron={false}
               icon={<Languages className="h-3.5 w-3.5" />}
-              value={storyboardLanguageLabel(language)}
+              // Show the parameter name as a placeholder while unset (at default);
+              // dim it too. Once changed, show the chosen value at full emphasis.
+              value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
               activeId={language}
+              dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
               tooltip="Spoken language for the video's dialogue."
               options={STORYBOARD_LANGUAGES.map((l) => ({ id: l.id, label: l.label }))}
               onSelect={(id) => setLanguage(id as StoryboardLanguageId)}
@@ -2119,8 +2188,9 @@ function ImportStoryboardModal({
               square
               showChevron={false}
               icon={<Sparkles className="h-3.5 w-3.5" />}
-              value={STORYBOARD_STYLE_LABELS[style]}
+              value={style === DEFAULT_STORYBOARD_STYLE ? "Style" : STORYBOARD_STYLE_LABELS[style]}
               activeId={style}
+              dimValue={style === DEFAULT_STORYBOARD_STYLE}
               tooltip="Visual style baked into the generated video prompt."
               options={STORYBOARD_STYLE_KEYS.map((k) => ({
                 id: k,
@@ -2541,9 +2611,10 @@ function StoryboardToVideoComposer({
                 square
                 showChevron={false}
                 icon={<Languages className="h-3.5 w-3.5" />}
-                value={storyboardLanguageLabel(language)}
-                activeId={language}
-                tooltip="Spoken language for the video's dialogue. Defaults to the storyboard's language — change it to re-voice this storyboard in another language."
+              value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
+              activeId={language}
+              dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
+              tooltip="Spoken language for the video's dialogue. Defaults to the storyboard's language — change it to re-voice this storyboard in another language."
                 options={STORYBOARD_LANGUAGES.map((l) => ({
                   id: l.id,
                   label: l.label,
@@ -3320,8 +3391,9 @@ function ReelsCreatorComposer({
                 square
                 showChevron={false}
                 icon={<Mic className="h-3.5 w-3.5" />}
-                value={humanizeReelsVoice(voiceId)}
+                value={voiceId === DEFAULT_VOICE_ID ? "Voice" : humanizeReelsVoice(voiceId)}
                 activeId={voiceId}
+                dimValue={voiceId === DEFAULT_VOICE_ID}
                 tooltip="The narrator's MiniMax voice."
                 options={REELS_ENGLISH_VOICES.map((v) => ({
                   id: v,
@@ -3335,8 +3407,9 @@ function ReelsCreatorComposer({
                 square
                 showChevron={false}
                 icon={<Smile className="h-3.5 w-3.5" />}
-                value={humanizeReelsEmotion(emotion)}
+                value={emotion === "auto" ? "Mood" : humanizeReelsEmotion(emotion)}
                 activeId={emotion}
+                dimValue={emotion === "auto"}
                 tooltip={
                   engine === "veo"
                     ? 'Spoken delivery mood. "Auto" maps to neutral for Veo.'

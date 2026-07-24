@@ -4,8 +4,34 @@ import {
   markOrderPaid,
   type CreditOrder,
 } from "@/lib/credit-orders-db";
+import { getCreditPack } from "@/lib/credit-packs";
 import { addPurchaseCredits } from "@/lib/credits-db";
 import { checkCheckoutOrderStatus, DokuConfigError } from "@/lib/doku";
+
+/** Read a non-negative integer field from order metadata, or undefined. */
+function metaInt(
+  metadata: Record<string, unknown>,
+  key: string
+): number | undefined {
+  const v = metadata?.[key];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+}
+
+/**
+ * Split an order's total credits into base ("regular") and promotional bonus
+ * ("purchase_bonus") so the two can expire on independent schedules. The base
+ * count comes from the order metadata (authoritative snapshot at checkout),
+ * falling back to the current pack catalog, then to the whole amount. The bonus
+ * is always the remainder so base + bonus === order.credits exactly.
+ */
+function splitOrderCredits(order: CreditOrder): { base: number; bonus: number } {
+  const pack = getCreditPack(order.pack_id);
+  const metaBase = metaInt(order.metadata ?? {}, "baseCredits");
+  const rawBase = metaBase ?? pack?.credits ?? order.credits;
+  const base = Math.max(0, Math.min(rawBase, order.credits));
+  const bonus = Math.max(0, order.credits - base);
+  return { base, bonus };
+}
 
 /**
  * Shared credit-order fulfillment used by BOTH the DOKU notification webhook and
@@ -13,33 +39,50 @@ import { checkCheckoutOrderStatus, DokuConfigError } from "@/lib/doku";
  * keeps the idempotency + order-transition guarantees identical no matter which
  * path confirms the payment first.
  *
- *   - addPurchaseCredits is idempotent on `purchase:doku:<invoice>`.
- *   - markOrderPaid only transitions a still-`pending` row.
- * So a webhook and a reconcile racing on the same order never double-credit.
+ * The grant is split into a base ("regular") lot and a promotional bonus
+ * ("purchase_bonus") lot so each can carry its own expiry. Each half is
+ * idempotent on a distinct key (`:base` / `:bonus`), and markOrderPaid only
+ * transitions a still-`pending` row — so a webhook and a reconcile racing on the
+ * same order never double-credit.
  */
 export async function fulfillPaidOrder(
   order: CreditOrder,
   paymentMethod: string | null
 ): Promise<void> {
-  const result = await addPurchaseCredits({
+  const { base, bonus } = splitOrderCredits(order);
+  const baseMeta = {
+    source: "doku",
+    invoiceNumber: order.invoice_number,
+    packId: order.pack_id,
+    amountIdr: order.amount_idr,
+    paymentMethod,
+  };
+
+  const baseResult = await addPurchaseCredits({
     profileId: order.profile_id,
-    amount: order.credits,
-    idempotencyKey: `purchase:doku:${order.invoice_number}`,
-    description: `Credit pack ${order.pack_id} (${order.credits} credits)`,
-    metadata: {
-      source: "doku",
-      invoiceNumber: order.invoice_number,
-      packId: order.pack_id,
-      amountIdr: order.amount_idr,
-      paymentMethod,
-    },
+    amount: base,
+    idempotencyKey: `purchase:doku:${order.invoice_number}:base`,
+    description: `Credit pack ${order.pack_id} — base (${base} credits)`,
+    source: "regular",
+    metadata: { ...baseMeta, portion: "base" },
   });
+
+  if (bonus > 0) {
+    await addPurchaseCredits({
+      profileId: order.profile_id,
+      amount: bonus,
+      idempotencyKey: `purchase:doku:${order.invoice_number}:bonus`,
+      description: `Credit pack ${order.pack_id} — bonus (${bonus} credits)`,
+      source: "purchase_bonus",
+      metadata: { ...baseMeta, portion: "bonus" },
+    });
+  }
 
   await markOrderPaid({
     invoiceNumber: order.invoice_number,
     paymentMethod,
     dokuTokenId: order.doku_token_id,
-    creditTransactionId: result.transaction.id,
+    creditTransactionId: baseResult.transaction.id,
   });
 }
 
