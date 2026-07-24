@@ -4,7 +4,7 @@ import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-serv
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { createJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
 import {
   spendCredits,
@@ -108,13 +108,6 @@ export async function POST(req: Request) {
       })
     );
     currentStepId = row?.id ?? null;
-  };
-  const endStep = async (output?: Record<string, unknown>): Promise<void> => {
-    const id = currentStepId;
-    currentStepId = null;
-    if (id && profileId) {
-      await safe("finishStep", () => finishJobStep(profileId!, id, output));
-    }
   };
 
   try {
