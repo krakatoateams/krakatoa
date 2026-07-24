@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Loader2, AlertCircle, Check } from "lucide-react";
+import { Plus, Loader2, AlertCircle, Check, Info } from "lucide-react";
+import { Tooltip } from "@/components/studio/Tooltip";
 
 export type LibraryImage = { id: string; url: string; title: string };
 
@@ -64,6 +65,7 @@ export default function PhotoLibraryPicker({
   selected,
   onSelect,
   disabled,
+  hint,
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
   libraryTool = "product_photo",
@@ -137,6 +139,14 @@ export default function PhotoLibraryPicker({
         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
+          {hint ? (
+            <Tooltip label={hint}>
+              <Info
+                className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                aria-label={hint}
+              />
+            </Tooltip>
+          ) : null}
         </span>
         <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
           {(

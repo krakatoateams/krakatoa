@@ -32,6 +32,7 @@ import {
   Download,
   Type,
   Minus,
+  Info,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -81,6 +82,15 @@ import {
   effectiveMotionControlDuration,
   formatMotionControlModelCreditHint,
   motionControlResolutionLabel,
+  characterOrientationChipLabel,
+  characterOrientationMenuLabel,
+  characterOrientationMenuHint,
+  CHARACTER_ORIENTATION_TOOLTIP,
+  MOTION_CONTROL_QUALITY_TOOLTIP,
+  motionControlVideoHint,
+  MOTION_CONTROL_CHARACTER_HINT,
+  MOTION_CONTROL_PROMPT_PLACEHOLDER,
+  motionControlSoundTooltip,
   type MotionControlModelId,
   type MotionControlMode,
   type CharacterOrientation,
@@ -213,7 +223,7 @@ function CharacterPicker({
       disabled={disabled}
       libraryKind="character"
       libraryEmptyLabel="No saved characters yet."
-      hint="A clear image with a visible face and body. JPG/PNG."
+      hint={MOTION_CONTROL_CHARACTER_HINT}
     />
   );
 }
@@ -819,7 +829,11 @@ function VideoOmniPage() {
                       ? "Remove reference images to use a first frame."
                       : undefined
                   }
-                  hint="Image-to-video starting frame."
+                  hint={
+                    blocksFramesWithRefs && hasRefImages
+                      ? "Starting frame for image-to-video. Remove reference images to use this instead."
+                      : "Starting frame for image-to-video. JPG, PNG, or WebP."
+                  }
                 />
               )}
               {model.references.lastFrame && (
@@ -837,7 +851,7 @@ function VideoOmniPage() {
                         ? "Add a first frame first."
                         : undefined
                   }
-                  hint="End frame (needs a first frame)."
+                  hint="Optional end frame for image-to-video. Upload a first frame to unlock."
                 />
               )}
               {model.references.referenceImages > 0 && (
@@ -856,9 +870,13 @@ function VideoOmniPage() {
                         : undefined
                   }
                   hint={
-                    model.providerFamily === "kling3omni"
-                      ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
-                      : "Scene elements (up to 4). Tag with @ or upload."
+                    blocksFramesWithRefs && hasFrames
+                      ? "Style and scene elements. Remove first/last frame to use reference images instead."
+                      : refImagesBlocked1080p
+                        ? "Style and scene elements. Only available at 480p or 720p — lower the resolution to use."
+                        : model.providerFamily === "kling3omni"
+                          ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
+                          : "Scene elements (up to 4). Tag with @ or upload."
                   }
                 />
               )}
@@ -874,9 +892,11 @@ function VideoOmniPage() {
                     refVideoBlocked4k ? "Reference video isn't supported at 4K." : undefined
                   }
                   hint={
-                    model.providerFamily === "kling3omni"
-                      ? "Motion/style reference (1 clip). Use [Video1] or upload."
-                      : "Motion / style transfer. Use [Video1] or upload."
+                    refVideoBlocked4k
+                      ? "Motion/style reference clip. Not available at 4K — lower the resolution to use."
+                      : model.providerFamily === "kling3omni"
+                        ? "Motion/style reference (1 clip). Use [Video1] in your prompt or upload."
+                        : "Motion / style transfer. Use [Video1] in your prompt or upload."
                   }
                 />
               )}
@@ -893,7 +913,7 @@ function VideoOmniPage() {
                       ? "Add a reference image or video to use audio."
                       : undefined
                   }
-                  hint="Audio-driven / lip-sync. Use [Audio1]…"
+                  hint="Audio-driven / lip-sync. Requires a reference image or video. Use [Audio1] in your prompt or upload."
                 />
               )}
             </div>
@@ -1337,7 +1357,7 @@ function ImageToVideoComposer({
                 multiple
                 group={refImages}
                 disabled={loading}
-                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ or upload.`}
+                hint={`Optional scene elements (up to ${model.references.referenceImages}). Tag with @ in the prompt or upload here.`}
               />
             </div>
           )}
@@ -1722,8 +1742,7 @@ function MotionControlComposer({
     }
   };
 
-  const orientationLabel =
-    orientation === "video" ? "Facing: video (≤30s)" : "Facing: photo (≤10s)";
+  const orientationLabel = characterOrientationChipLabel(orientation);
 
   return (
     <>
@@ -1779,11 +1798,10 @@ function MotionControlComposer({
               multiple={false}
               group={motionVideo}
               disabled={loading}
-              hint={
-                videoDurationSec
-                  ? `Reference video ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s. MP4/MOV.`
-                  : "Reference motion video, 3–30s. The character copies this motion. MP4/MOV."
-              }
+              hint={motionControlVideoHint({
+                refDurationSec: videoDurationSec,
+                billedDurationSec: billedDuration,
+              })}
             />
           </div>
 
@@ -1819,7 +1837,7 @@ function MotionControlComposer({
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   maxLength={model.promptMaxChars}
-                  placeholder={'Describe background and scene details \u2013 e.g., "A corgi runs in" or "Snowy park setting". Motion is controlled by your reference video.'}
+                  placeholder={MOTION_CONTROL_PROMPT_PLACEHOLDER}
                   rows={3}
                   className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
                 />
@@ -1837,7 +1855,7 @@ function MotionControlComposer({
                 icon={<Maximize2 className="h-3.5 w-3.5" />}
                 value={`${mode === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(mode)}`}
                 activeId={mode}
-                tooltip="Output quality. Standard renders at 720p; Pro is sharper 1080p but costs more credits."
+                tooltip={MOTION_CONTROL_QUALITY_TOOLTIP}
                 options={model.modes.map((m) => ({
                   id: m,
                   label: `${m === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(m)}`,
@@ -1847,27 +1865,29 @@ function MotionControlComposer({
                 disabled={loading}
               />
               <ChipDropdown
-                sheetTitle="Select orientation"
+                sheetTitle="Photo angle or follow motion?"
                 square
                 showChevron={false}
                 icon={<Repeat className="h-3.5 w-3.5" />}
                 value={orientationLabel}
                 activeId={orientation}
-                tooltip="Which way your character faces in the result. “Photo” keeps the angle from your character image (clips up to 10s). “Video” makes the character follow the angles in your motion clip (clips up to 30s). This does not change the background."
-                options={[
-                  { id: "image", label: "Facing: photo (≤10s)" },
-                  { id: "video", label: "Facing: video (≤30s)" },
-                ]}
+                tooltip={CHARACTER_ORIENTATION_TOOLTIP}
+                options={(
+                  [
+                    { id: "image" as const, orientation: "image" as const },
+                    { id: "video" as const, orientation: "video" as const },
+                  ] as const
+                ).map(({ id, orientation: o }) => ({
+                  id,
+                  label: characterOrientationMenuLabel(o),
+                  hint: characterOrientationMenuHint(o),
+                }))}
                 onSelect={(id) => setOrientation(id as CharacterOrientation)}
                 disabled={loading}
               />
               <Tooltip
                 className="flex-1 lg:flex-none"
-                label={
-                  keepOriginalSound
-                    ? "On — your result keeps the reference video's original audio. Click to mute it."
-                    : "Off — the reference video's audio is removed. Click to keep it."
-                }
+                label={motionControlSoundTooltip(keepOriginalSound)}
               >
                 <button
                   type="button"
@@ -1919,7 +1939,7 @@ function MotionControlComposer({
 
           {!imageReady || !videoReady ? (
             <p className="mt-3 pl-1 text-sm text-amber-300/80">
-              Add both your character image and a motion video to generate.
+              Upload a character photo and a motion video—both are required to generate.
             </p>
           ) : null}
         </div>
@@ -2204,8 +2224,14 @@ function ImportStoryboardModal({
 
           {/* Optional description */}
           <div>
-            <label className="mb-1 block text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
+            <label className="mb-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
               Description <span className="text-gray-600">(optional)</span>
+              <Tooltip label="Briefly describe what should happen in the video. Helps the AI analyze your storyboard image.">
+                <Info
+                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  aria-label="What the description is for"
+                />
+              </Tooltip>
             </label>
             <textarea
               value={description}
@@ -2558,6 +2584,12 @@ function StoryboardToVideoComposer({
                 <ImageIcon className="h-3.5 w-3.5" />
               </span>
               Choose a storyboard
+              <Tooltip label="Pick a storyboard from Photo Studio or upload your own image. The AI turns it into a 15s video with dialogue.">
+                <Info
+                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  aria-label="How storyboard selection works"
+                />
+              </Tooltip>
             </span>
           </div>
 

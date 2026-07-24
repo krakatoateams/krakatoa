@@ -133,6 +133,57 @@ export function isValidCharacterOrientation(orientation: string): orientation is
   return orientation === "image" || orientation === "video";
 }
 
+/** Chip trigger label for character_orientation (image = photo angle, video = follow clip). */
+export function characterOrientationChipLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "Photo angle · ≤10s" : "Follow motion · ≤30s";
+}
+
+/** Menu row label (slightly longer than the chip). */
+export function characterOrientationMenuLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "Photo angle · up to 10s" : "Follow motion · up to 30s";
+}
+
+/** Short hint beside each menu option. */
+export function characterOrientationMenuHint(orientation: CharacterOrientation): string {
+  return orientation === "image"
+    ? "Stays oriented like your photo"
+    : "Turns & poses like the clip";
+}
+
+/** Hover tooltip on the orientation chip. */
+export const CHARACTER_ORIENTATION_TOOLTIP =
+  "How your character is angled in the result. Photo angle keeps them facing like your uploaded image (max 10s). Follow motion makes them turn and pose like the person in your motion clip (max 30s). Does not change the background.";
+
+/** Hover tooltip on the quality (mode) chip. */
+export const MOTION_CONTROL_QUALITY_TOOLTIP =
+  "Output sharpness. Standard is 720p and costs less. Pro is 1080p, sharper, and uses more credits.";
+
+/** RefGroup hint for the motion reference video upload. */
+export function motionControlVideoHint(params: {
+  refDurationSec: number | null;
+  billedDurationSec: number;
+}): string {
+  if (params.refDurationSec != null) {
+    return `Short clip of the movement to copy (dance, walk, gesture, etc.). ~${Math.round(params.refDurationSec)}s uploaded · billed ${params.billedDurationSec}s. MP4 or MOV, 3–30s.`;
+  }
+  return "Short clip of the movement to copy—dance, walk, gestures, etc. Your character performs these actions. MP4 or MOV, 3–30s.";
+}
+
+/** PhotoLibraryPicker hint for the character image. */
+export const MOTION_CONTROL_CHARACTER_HINT =
+  "Photo of the person you want to animate. Their appearance in the result comes from this image. Clear face and body. JPG or PNG, max 10 MB.";
+
+/** Advanced prompt placeholder — motion always comes from the reference video. */
+export const MOTION_CONTROL_PROMPT_PLACEHOLDER =
+  'Optional—describe the scene or add details, e.g. "in a snowy park" or "wearing a red jacket". Movement always comes from your motion video.';
+
+/** Tooltip for the original-sound toggle. */
+export function motionControlSoundTooltip(keep: boolean): string {
+  return keep
+    ? "On — the sound from your motion video is included. Click to remove it."
+    : "Off — your result is silent. Click to keep the motion video's sound.";
+}
+
 /** std -> 720p, pro -> 1080p (for display + asset metadata). */
 export function motionControlResolutionLabel(mode: MotionControlMode): string {
   return mode === "std" ? "720p" : "1080p";
