@@ -24,6 +24,8 @@ export type ToolConfig = {
 
 const TOOL_CONFIGS_TABLE = "tool_configs";
 
+export { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
+
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
   if (

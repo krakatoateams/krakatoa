@@ -40,8 +40,6 @@ import {
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
-
-// Vercel Hobby plan caps every Serverless Function at maxDuration=300. Raising
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
 export const maxDuration = 300;

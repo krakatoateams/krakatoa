@@ -19,6 +19,7 @@ import {
   LogOut,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
+import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 
 interface NavItem {
   label: string;
@@ -91,16 +92,26 @@ export default function Sidebar() {
 
   // Tool visibility from tool_configs. Fails open: if the fetch fails the
   // sidebar shows everything (never hides a tool due to a transient error).
+  // Refetch when admin saves toggles (krakatoa:tool-config-updated) or on focus.
   useEffect(() => {
     if (status !== "authenticated") return;
-    fetch("/api/tools/config")
-      .then((res) => (res.ok ? res.json() : { tools: [] }))
-      .then((d: { tools?: ToolVisibility[] }) => {
-        const map: Record<string, ToolVisibility> = {};
-        for (const t of d.tools ?? []) map[t.tool_key] = t;
-        setToolVisibility(map);
-      })
-      .catch(() => setToolVisibility(null));
+    const load = () => {
+      fetch("/api/tools/config")
+        .then((res) => (res.ok ? res.json() : { tools: [] }))
+        .then((d: { tools?: ToolVisibility[] }) => {
+          const map: Record<string, ToolVisibility> = {};
+          for (const t of d.tools ?? []) map[t.tool_key] = t;
+          setToolVisibility(map);
+        })
+        .catch(() => setToolVisibility(null));
+    };
+    load();
+    window.addEventListener(TOOL_CONFIG_UPDATED_EVENT, load);
+    window.addEventListener("focus", load);
+    return () => {
+      window.removeEventListener(TOOL_CONFIG_UPDATED_EVENT, load);
+      window.removeEventListener("focus", load);
+    };
   }, [status]);
 
   // An item shows unless its tool config explicitly hides/disables it. Items

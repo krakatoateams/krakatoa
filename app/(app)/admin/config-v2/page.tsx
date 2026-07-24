@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter } from "lucide-react";
+import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import {
   type AdminCostVariant,
   type AdminFeatureToggle,
@@ -23,6 +24,9 @@ import {
   AdminToast,
   useAdminToast,
 } from "../admin-ui";
+import { PHOTO_FEATURES } from "@/lib/creation-features";
+import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
+import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 
 const INPUT =
   "w-full min-h-[36px] rounded border border-gray-700/80 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500";
@@ -74,6 +78,26 @@ function PricingNumberInput({
 
 const TH =
   "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
+
+type ToolCommitFields = { enabled?: boolean; visibleInSidebar?: boolean };
+
+function featureFilterOptions(
+  toolKey: string,
+  models: AdminModelNode[],
+): { key: string; label: string }[] {
+  const catalog =
+    toolKey === "reels"
+      ? VIDEO_COMPOSER_FEATURES
+      : toolKey === "photo"
+        ? PHOTO_FEATURES
+        : [];
+  const keys = new Set(models.flatMap((m) => m.features.map((f) => f.key)));
+  return catalog.filter((f) => keys.has(f.key)).map((f) => ({ key: f.key, label: f.label }));
+}
+
+function modelMatchesFeatureFilter(model: AdminModelNode, featureKey: string): boolean {
+  return model.features.some((f) => f.key === featureKey);
+}
 
 type DefaultOverridePrompt = {
   featureKey: string;
@@ -292,10 +316,10 @@ function VariantTable({
                 <td className="px-2 py-2 font-medium text-white">
                   {v.label}
                   {dirty ? (
-                    <span className="ml-1.5 text-[10px] font-normal text-violet-400/90">unsaved</span>
+                    <span className="ml-2 text-xs font-medium text-violet-400">unsaved</span>
                   ) : null}
                   {!dirty && custom ? (
-                    <span className="ml-1.5 text-[10px] font-normal text-amber-400/80">custom</span>
+                    <span className="ml-2 text-xs font-medium text-amber-400/90">custom</span>
                   ) : null}
                 </td>
                 <td className="px-2 py-1.5">
@@ -615,7 +639,12 @@ function ModelSection({
           )}
           <span className="text-sm font-medium text-white">{model.label}</span>
           {modeSummary ? (
-            <span className="truncate text-[11px] font-normal text-gray-500">{modeSummary}</span>
+            <>
+              <span className="text-gray-600" aria-hidden>
+                ·
+              </span>
+              <span className="truncate text-sm font-normal text-gray-500">{modeSummary}</span>
+            </>
           ) : null}
         </button>
         <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
@@ -677,7 +706,7 @@ function ToolSection({
   saving: boolean;
   savedPricing: Record<string, PricingBaseline>;
   onChange: (patch: Partial<AdminToolNode>) => void;
-  onCommitTool: () => void;
+  onCommitTool: (fields: ToolCommitFields) => void;
   onSaveVariant: (variant: AdminCostVariant) => void;
   onToggleVariant: (variant: AdminCostVariant) => void;
   onCommitMode: (featureModelId: string) => void;
@@ -685,7 +714,23 @@ function ToolSection({
   onCommitPipelineRole: (role: AdminPipelineRole) => void;
 }) {
   const [open, setOpen] = useState(tool.toolKey === "reels" || tool.toolKey === "photo");
+  const [featureFilter, setFeatureFilter] = useState("all");
   const [overridePrompt, setOverridePrompt] = useState<DefaultOverridePrompt | null>(null);
+
+  const featureOptions = featureFilterOptions(tool.toolKey, tool.models);
+  const visibleModels =
+    featureFilter === "all"
+      ? tool.models
+      : tool.models.filter((m) => modelMatchesFeatureFilter(m, featureFilter));
+
+  const featureFilterChipOptions = [
+    { id: "all", label: "All features" },
+    ...featureOptions.map((opt) => ({ id: opt.key, label: opt.label })),
+  ];
+  const featureFilterLabel =
+    featureFilter === "all"
+      ? "All features"
+      : (featureOptions.find((opt) => opt.key === featureFilter)?.label ?? "All features");
 
   const storyboardModels = tool.models
     .filter((m) => m.features.some((f) => f.key === "storyboard"))
@@ -789,19 +834,24 @@ function ToolSection({
             type="checkbox"
             checked={tool.enabled}
             onChange={(e) => {
-              onChange({ enabled: e.target.checked });
-              onCommitTool();
+              const enabled = e.target.checked;
+              onChange({ enabled });
+              onCommitTool({ enabled });
             }}
           />
           On
         </label>
-        <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+        <label
+          className="inline-flex items-center gap-1.5 text-xs text-gray-400"
+          title="Show in the dashboard sidebar. The link stays hidden while On is unchecked."
+        >
           <input
             type="checkbox"
             checked={tool.visibleInSidebar}
             onChange={(e) => {
-              onChange({ visibleInSidebar: e.target.checked });
-              onCommitTool();
+              const visibleInSidebar = e.target.checked;
+              onChange({ visibleInSidebar });
+              onCommitTool({ visibleInSidebar });
             }}
           />
           Sidebar
@@ -810,7 +860,33 @@ function ToolSection({
 
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
         <div className="px-3 py-2">
-          {tool.models.map((m) => (
+          {featureOptions.length > 0 ? (
+            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-gray-800/60 pb-2">
+              <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                Filter by feature
+              </span>
+              <ChipDropdown
+                icon={<Filter className="h-3.5 w-3.5" />}
+                value={featureFilterLabel}
+                activeId={featureFilter}
+                options={featureFilterChipOptions}
+                onSelect={setFeatureFilter}
+                square
+                sheetTitle="Filter by feature"
+              />
+              {featureFilter !== "all" ? (
+                <span className="text-xs text-gray-500">
+                  {visibleModels.length} model{visibleModels.length === 1 ? "" : "s"}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {visibleModels.length === 0 && featureFilter !== "all" ? (
+            <p className="py-4 text-sm text-gray-500">No models support this feature.</p>
+          ) : null}
+
+          {visibleModels.map((m) => (
             <ModelSection
               key={m.id}
               model={m}
@@ -1039,15 +1115,18 @@ export default function AdminConfigV2Page() {
   );
 
   const commitTool = useCallback(
-    (toolKey: string) => {
+    (toolKey: string, overrides: ToolCommitFields = {}) => {
       scheduleAutosave(`tool:${toolKey}`, async () => {
         const tool = toolsRef.current.find((t) => t.toolKey === toolKey);
         if (!tool) throw new Error("Tool not found — click Refresh, then try again.");
         await patchApi(`/api/admin/config/tools/${toolKey}`, {
-          enabled: tool.enabled,
-          visible_in_sidebar: tool.visibleInSidebar,
+          enabled: overrides.enabled ?? tool.enabled,
+          visible_in_sidebar: overrides.visibleInSidebar ?? tool.visibleInSidebar,
           sort_order: tool.sortOrder,
         });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(TOOL_CONFIG_UPDATED_EVENT));
+        }
       }, 300);
     },
     [scheduleAutosave]
@@ -1180,7 +1259,7 @@ export default function AdminConfigV2Page() {
               saving={saving}
               savedPricing={savedPricing}
               onChange={(patch) => patchTool(tool.toolKey, patch)}
-              onCommitTool={() => commitTool(tool.toolKey)}
+              onCommitTool={(fields) => commitTool(tool.toolKey, fields)}
               onSaveVariant={saveVariant}
               onToggleVariant={toggleVariant}
               onCommitMode={commitFeatureMode}
