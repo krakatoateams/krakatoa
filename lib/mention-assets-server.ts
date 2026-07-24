@@ -1,4 +1,5 @@
 import { getUserCreationForUser } from "@/lib/creations-db";
+import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
 import type { MentionAssetKind, ResolvedMentionCreation } from "@/lib/mention-assets";
 
 /** Owner-scoped lookup for @-mentioned or library-picked creations (server only). */
@@ -10,7 +11,16 @@ export async function resolveMentionCreations(
   const items: ResolvedMentionCreation[] = [];
   for (const id of unique) {
     const creation = await getUserCreationForUser(userId, id);
-    if (!creation?.mediaUrl) {
+    if (!creation?.mediaUrl && !creation?.storagePath) {
+      return { ok: false, error: "A mentioned asset could not be found." };
+    }
+    const signedUrl = await resolveSignedMediaUrl({
+      userId,
+      storagePath: creation.storagePath,
+      mediaUrl: creation.mediaUrl,
+      ttl: "pipeline",
+    });
+    if (!signedUrl) {
       return { ok: false, error: "A mentioned asset could not be found." };
     }
     const metaName =
@@ -27,7 +37,7 @@ export async function resolveMentionCreations(
       kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
     items.push({
       id,
-      url: creation.mediaUrl,
+      url: signedUrl,
       ref: { name: metaName || creation.title || fallbackName, kind },
     });
   }

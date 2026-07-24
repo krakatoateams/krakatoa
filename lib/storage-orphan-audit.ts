@@ -115,7 +115,7 @@ export async function collectStorageReferences(): Promise<string> {
       console.warn(`[orphan-audit] skip table ${table}: ${error.message}`);
       return;
     }
-    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
       for (const col of columns) {
         const v = row[col];
         if (typeof v === "string" && v) {

@@ -5,6 +5,7 @@ import {
   CreationTool,
 } from "@/lib/creations";
 import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
 
 export type UserCreationRow = {
   id: string;
@@ -460,4 +461,31 @@ export async function emptyUserTrash(userId: string): Promise<number> {
     throw new Error(delErr.message);
   }
   return rows.length;
+}
+
+
+/** Sign media URLs for API responses (private bucket ready). */
+export async function signCreationItemsMedia(
+  userId: string,
+  items: CreationHistoryItem[],
+): Promise<CreationHistoryItem[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      try {
+        const signed = await resolveSignedMediaUrl({
+          userId,
+          storagePath: item.storagePath,
+          mediaUrl: item.mediaUrl,
+        });
+        return signed ? { ...item, mediaUrl: signed } : item;
+      } catch (err: unknown) {
+        console.warn(
+          "[creations] sign media failed:",
+          item.storagePath || item.mediaUrl,
+          err instanceof Error ? err.message : err,
+        );
+        return item;
+      }
+    }),
+  );
 }

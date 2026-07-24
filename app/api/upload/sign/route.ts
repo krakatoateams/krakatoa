@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosStoragePath, photosStoragePath } from "@/lib/storage-buckets";
+import {
+  STORAGE_BUCKET,
+  photosSchedulerUploadPath,
+  videosSchedulerUploadPath,
+} from "@/lib/storage-buckets";
+import { requireCurrentProfile } from "@/lib/profiles-db";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB ceiling (matches client-side limit)
 // Same ceiling/allow-list as app/api/generate-photo/route.ts, for consistency
@@ -23,12 +29,15 @@ const ACCEPTED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/web
 // mediaType (optional, defaults to "video" for backward compatibility with
 // every existing caller that predates photo support — see
 // openspec/changes/tiktok-photo-post/design.md Decision 8): "image" targets
-// photos/scheduler-uploads/ instead of videos/, with photo-appropriate
+// photos/{userId}/uploads/scheduler/ instead of videos/, with photo-appropriate
 // validation. A raw scheduler photo upload is intentionally ephemeral (no
 // user_creations row) — same precedent as a raw scheduler video upload,
 // which also never creates one.
 export async function POST(req: NextRequest) {
   try {
+    const profile = await requireCurrentProfile();
+    const userId = profile.user_id;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
@@ -68,12 +77,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Sanitise filename and make it unique, placed under videos/ or
-    // photos/scheduler-uploads/ depending on media type.
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = isImage
-      ? photosStoragePath("scheduler-uploads", `${Date.now()}-${safeName}`)
-      : videosStoragePath(`${Date.now()}-${safeName}`);
+      ? photosSchedulerUploadPath(userId, `${Date.now()}-${safeName}`)
+      : videosSchedulerUploadPath(userId, `${Date.now()}-${safeName}`);
 
     const { data, error } = await supabaseServer.storage
       .from(STORAGE_BUCKET)
@@ -87,19 +94,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
+    const signed = await signStoragePathForUser(storagePath, userId, "ui");
 
     return NextResponse.json({
       bucket: STORAGE_BUCKET,
       path: data.path,
       token: data.token,
-      publicUrl: urlData.publicUrl,
+      storagePath,
+      signedUrl: signed.url,
+      expiresAt: signed.expiresAt,
+      publicUrl: signed.url,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to sign upload.";
+    const status = /not authenticated/i.test(message) ? 401 : 500;
     console.error("[upload/sign] Unexpected error:", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status });
   }
 }

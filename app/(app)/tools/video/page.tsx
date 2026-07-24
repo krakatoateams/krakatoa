@@ -43,6 +43,7 @@ import type { CreationHistoryItem } from "@/lib/creations";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import {
   ChipDropdown,
@@ -360,7 +361,9 @@ function VideoOmniPage() {
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
@@ -514,7 +517,8 @@ function VideoOmniPage() {
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
 
@@ -1091,7 +1095,9 @@ function ImageToVideoComposer({
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { videoCredits } = usePricing();
@@ -1202,7 +1208,8 @@ function ImageToVideoComposer({
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
       startImage.reset();
       endImage.reset();
@@ -1586,7 +1593,9 @@ function MotionControlComposer({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
@@ -1699,7 +1708,8 @@ function MotionControlComposer({
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
       charImage.reset();
       motionVideo.reset();
@@ -2330,7 +2340,9 @@ function StoryboardToVideoComposer({
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
   // synchronous in-flight lock, so a double-click or a retry after a network
@@ -2444,7 +2456,8 @@ function StoryboardToVideoComposer({
 
     setLoading(true);
     setError(null);
-    setResultUrl(null);
+    setResultPath(null);
+    setResultSeed(null);
     try {
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
@@ -2488,7 +2501,8 @@ function StoryboardToVideoComposer({
           cur.map((s) => (s.id === selectedId ? { ...s, seedancePrompt: editedPrompt } : s))
         );
       }
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
     } catch (err: unknown) {
       // Keep the key so an immediate identical retry dedupes server-side
@@ -3172,7 +3186,9 @@ function ReelsCreatorComposer({
   });
 
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [resultPath, setResultPath] = useState<string | null>(null);
+  const [resultSeed, setResultSeed] = useState<string | null>(null);
+  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
 
   // 1080p forces an 8s clip (Veo 3.1 Lite constraint) — keep state valid.
@@ -3232,7 +3248,8 @@ function ReelsCreatorComposer({
 
     setLoading(true);
     setError(null);
-    setResultUrl(null);
+    setResultPath(null);
+    setResultSeed(null);
 
     try {
       const response = await fetch("/api/generate-reels", {
@@ -3264,7 +3281,8 @@ function ReelsCreatorComposer({
       }
 
       attempt.settle(true);
-      setResultUrl(data.videoUrl);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
       onGenerated();
     } catch (err: unknown) {
       attempt.settle(false);
@@ -3818,7 +3836,7 @@ function ReelsCreatorComposer({
                 Download
               </a>
               <a
-                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultUrl)}${
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}${
                   theme.trim() ? `&title=${encodeURIComponent(theme.trim())}` : ""
                 }`}
                 className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"

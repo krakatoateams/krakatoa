@@ -1,13 +1,13 @@
 /**
- * Kelolako uses one public Supabase Storage bucket with top-level folders per feature.
- * Product photos live under `photos/{userId}/` — never inside `videos/`.
+ * Kelolako uses one **private** Supabase Storage bucket (`krakatoa`) with signed read URLs.
+ * Top-level folders per feature. Product photos live under `photos/{userId}/` — never inside `videos/`.
  * Video studio: `videos/{userId}/generated/video/{mode}/` (reelscreator, t2v, i2v,
  * motion-control). Storyboard i2v: `videos/{userId}/generated/storyboard/`.
  * Product photos: `photos/{userId}/generated/{mode}/` (product, t2i, character,
  * storyboard). Reference uploads: `photos/{userId}/uploads/reference/`.
- * Scheduler device uploads still use flat `videos/` (orphan-sweeped after 24h).
+ * Scheduler device uploads: `videos/{userId}/uploads/scheduler/`.
  *
- * Create the bucket in Supabase Dashboard → Storage, then add public folders as needed.
+ * Create the bucket in Supabase Dashboard → Storage (private). Reads via signed URLs.
  * Override the bucket name with SUPABASE_STORAGE_BUCKET in .env.local if needed.
  *
  * ---------------------------------------------------------------------------
@@ -54,6 +54,10 @@ export const VIDEOS_STORYBOARD_SEGMENT = "storyboard";
 
 /** Top-level folder for Product Photo (uploads + generated images) */
 export const PHOTOS_FOLDER = "photos";
+
+export function isStorageRelativePath(value: string): boolean {
+  return value.startsWith(`${PHOTOS_FOLDER}/`) || value.startsWith(`${VIDEOS_FOLDER}/`);
+}
 
 /** @deprecated Scheduler device uploads only — generations use `videosUserPrefix`. */
 export function videosStoragePath(filename: string): string {
@@ -104,6 +108,11 @@ export function videosStoryboardVideoPath(userId: string, filename: string): str
 /** @deprecated Use `videosGeneratedVideoPath` with the correct mode. */
 export function videosGeneratedPath(userId: string, filename: string): string {
   return `${videosUserPrefix(userId)}/generated/${filename}`;
+}
+
+/** Scheduler device uploads: `videos/{userId}/uploads/scheduler/<filename>`. */
+export function videosSchedulerUploadPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}/uploads/scheduler/${filename}`;
 }
 
 /** Transient per-user files (captions, scratch): `videos/{userId}/temp/<filename>`. */
@@ -162,6 +171,17 @@ export const USER_CREATIONS_TABLE = "user_creations";
 /** @deprecated Use USER_CREATIONS_TABLE with tool=product_photo */
 export const PRODUCT_PHOTO_GENERATIONS_TABLE = "product_photo_generations";
 
+/** Scheduler device photo uploads: `photos/{userId}/uploads/scheduler/<filename>`. */
+export function photosUserPrefix(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) throw new Error("Invalid user id");
+  return `${PHOTOS_FOLDER}/${safe}`;
+}
+
+export function photosSchedulerUploadPath(userId: string, filename: string): string {
+  return `${photosUserPrefix(userId)}/uploads/scheduler/${filename}`;
+}
+
 export function photosStoragePath(...segments: string[]): string {
   return [PHOTOS_FOLDER, ...segments].join("/");
 }
@@ -177,6 +197,20 @@ export function storagePathFromPublicUrl(url: string | null | undefined): string
   const idx = url.indexOf(marker);
   if (idx === -1) return null;
   return url.slice(idx + marker.length) || null;
+}
+
+/** Extract bucket-relative path from a signed read URL (`/object/sign/...`). */
+export function storagePathFromSignedUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const marker = `/object/sign/${STORAGE_BUCKET}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return url.slice(idx + marker.length).split("?")[0] || null;
+}
+
+/** Public or signed Supabase Storage URL → `photos/...` or `videos/...` path. */
+export function storagePathFromStorageUrl(url: string | null | undefined): string | null {
+  return storagePathFromPublicUrl(url) ?? storagePathFromSignedUrl(url);
 }
 
 // NOTE: this module is imported by client components too (e.g. lib/product-photo.ts,

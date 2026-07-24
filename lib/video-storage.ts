@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, storagePathFromPublicUrl } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { resolveStoragePath } from "@/lib/storage-signed-url";
 
 // Server-only (imports lib/supabase-server, which needs SUPABASE_SERVICE_ROLE_KEY).
 // Never import this from a client component or from lib/storage-buckets.ts itself.
@@ -31,7 +32,7 @@ export async function videoObjectExists(path: string): Promise<boolean | null> {
  * treated as "not confirmed missing" so callers never block on ambiguity.
  */
 export async function isVideoUrlConfirmedMissing(url: string | null | undefined): Promise<boolean> {
-  const path = storagePathFromPublicUrl(url);
+  const path = resolveStoragePath(null, url);
   if (!path) return false;
   const exists = await videoObjectExists(path);
   return exists === false;

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createReplicateClient, runWithRetry } from "@/lib/replicate-utils";
 import { extractAudioMp3 } from "@/lib/rendi";
+import { getSessionUserId } from "@/lib/resolve-user";
+import {
+  assertPathOwnedByUser,
+  resolveStoragePath,
+  signStoragePathForPipeline,
+} from "@/lib/storage-signed-url";
 
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
@@ -161,6 +167,32 @@ function buildGeneralPrompt(videos: { title?: string; tags?: string }[]): string
   return lines.join("\n");
 }
 
+function isSupabaseSignedUrl(url: string): boolean {
+  return url.includes("/object/sign/");
+}
+
+/** URL external services (Rendi) can fetch — never strip signed URL tokens. */
+function urlForExternalFetch(url: string): string {
+  if (isSupabaseSignedUrl(url)) return url;
+  return url.split("?")[0];
+}
+
+/** Resolve a fetchable video URL for Rendi/Whisper (pipeline TTL when ours). */
+async function resolveCaptionVideoFetchUrl(params: {
+  videoUrl: string;
+  storagePath: string;
+}): Promise<string | null> {
+  const path = resolveStoragePath(params.storagePath || null, params.videoUrl || null);
+  if (path) {
+    const userId = await getSessionUserId();
+    if (!userId) throw new Error("Not authenticated.");
+    await assertPathOwnedByUser(path, userId);
+    return signStoragePathForPipeline(path, userId);
+  }
+  if (params.videoUrl.startsWith("http")) return urlForExternalFetch(params.videoUrl);
+  return null;
+}
+
 function buildPolishPrompt(existingCaption: string): string {
   return [
     "You are a YouTube Shorts content expert.",
@@ -190,6 +222,7 @@ export async function POST(req: NextRequest) {
     const title: string = (body.title ?? "").toString().trim();
     const tags: string = (body.tags ?? "").toString().trim();
     const videoUrl: string = (body.videoUrl ?? "").toString().trim();
+    const storagePath: string = (body.storage_path ?? body.storagePath ?? "").toString().trim();
     const existingCaption: string = (body.existingCaption ?? "").toString().trim();
     const format: CaptionFormat = body.format === "video" ? "video" : "short";
 
@@ -263,11 +296,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ----- Generate mode: build a caption from video/context -----
-    if (!description && !title && !tags && !videoUrl) {
+    if (!description && !title && !tags && !videoUrl && !storagePath) {
       return NextResponse.json(
         {
           error:
-            "Provide at least one of: videoUrl, title, tags, or description.",
+            "Provide at least one of: videoUrl, storage_path, title, tags, or description.",
         },
         { status: 400 },
       );
@@ -279,14 +312,30 @@ export async function POST(req: NextRequest) {
     // "failed" = extraction/Whisper threw (e.g. missing RENDI_API_KEY, provider
     // error, timeout). Defaults to "no_audio" (incl. the no-videoUrl case).
     let transcriptStatus: "ok" | "no_audio" | "failed" = "no_audio";
-    if (videoUrl) {
-      // Strip query params so the URL ends in a real file extension (.mp4/.mov).
-      // Supabase public URLs carry no auth token in the query string, so this is safe.
-      const sourceUrl = videoUrl.split("?")[0];
+    if (videoUrl || storagePath) {
+      let sourceUrl: string;
+      try {
+        const resolved = await resolveCaptionVideoFetchUrl({ videoUrl, storagePath });
+        if (!resolved) {
+          return NextResponse.json(
+            { error: "Could not resolve a fetchable video URL." },
+            { status: 400 },
+          );
+        }
+        sourceUrl = resolved;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = /not authenticated/i.test(message)
+          ? 401
+          : /forbidden/i.test(message)
+            ? 403
+            : 400;
+        return NextResponse.json({ error: message }, { status });
+      }
       try {
         // Whisper is unreliable demuxing audio straight from a video container,
         // so extract a hosted MP3 via Rendi first, then transcribe that.
-        console.log("[generate-caption] extracting audio from:", sourceUrl);
+        console.log("[generate-caption] extracting audio from:", sourceUrl.split("?")[0]);
         const audioUrl = await extractAudioMp3(sourceUrl);
         console.log("[generate-caption] whisper audio url:", audioUrl);
 

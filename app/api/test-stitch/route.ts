@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
 import { supabase } from '@/lib/supabase';
+import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
 
 // Allow up to 5 minutes for this route (WhisperX + Rendi polling)
@@ -277,7 +278,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error(`Failed to upload captions: ${uploadError.message}`);
     }
 
-    const { data: { publicUrl: srtUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(srtFilename);
+    const { url: srtUrl } = await createSignedStorageUrl(srtFilename, "pipeline");
     console.log('[Test Step 4] SRT URL:', srtUrl);
 
     // Step 5a: Rendi - Merge video + audio and embed font into an MKV
@@ -343,7 +344,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       throw new Error(`Failed to upload final video to Supabase: ${finalUploadError.message}`);
     }
 
-    const { data: { publicUrl: finalVideoUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(finalFilename);
+    const { url: finalVideoUrl } = await createSignedStorageUrl(finalFilename, "ui");
     console.log('[Test Step 6] Final Supabase URL:', finalVideoUrl);
 
     // Step 7: Cleanup intermediate SRT file

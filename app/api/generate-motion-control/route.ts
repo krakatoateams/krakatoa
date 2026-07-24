@@ -20,6 +20,7 @@ import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   getMotionControlModel,
   isValidMotionControlModelId,
@@ -397,10 +398,7 @@ export async function POST(req: Request) {
     if (uploadError) {
       throw new Error(`Failed to save video to storage: ${uploadError.message}`);
     }
-    const { data: urlData } = supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(storagePath);
-    const publicUrl = urlData.publicUrl;
+    const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl });
 
     const title = prompt.slice(0, 60) || "Motion Control";
@@ -424,7 +422,7 @@ export async function POST(req: Request) {
           userId: userId!,
           tool: "video_motion_control",
           mediaType: "video",
-          mediaUrl: publicUrl,
+          mediaUrl: storagePath,
           storagePath,
           title,
           metadata: creationMetadata,
@@ -436,7 +434,6 @@ export async function POST(req: Request) {
       await safe("markAssetReady", () =>
         markAssetReady(profileId!, videoAssetId!, {
           storagePath,
-          publicUrl,
           mimeType: "video/mp4",
           durationSec: billedDuration,
           costCredits: creditsAmount,
@@ -470,6 +467,7 @@ export async function POST(req: Request) {
 
     const successResponse = {
       videoUrl: publicUrl,
+      storagePath,
       historyItem,
       savedToCloud: true,
     };

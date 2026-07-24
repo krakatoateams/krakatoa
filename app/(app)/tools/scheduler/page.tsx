@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { fetchSignedUrl } from "@/lib/storage-sign-client";
+import { isStorageRelativePath, storagePathFromStorageUrl } from "@/lib/storage-buckets";
+import type { CreationHistoryItem } from "@/lib/creations";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
@@ -86,6 +89,8 @@ interface VideoItem {
   id: string;
   file: File | null;
   videoUrl: string | null;
+  /** Canonical bucket path — used for scheduling + preview re-sign. */
+  storagePath: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
   duration: number | null;
@@ -137,6 +142,7 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     id: crypto.randomUUID(),
     file: null,
     videoUrl: null,
+    storagePath: null,
     uploadStatus: "idle",
     uploadError: null,
     duration: null,
@@ -168,7 +174,10 @@ function fmtDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// TikTok photo-picker helper copy (openspec/changes/tiktok-photo-post). The
+function creationPhotoRef(item: CreationHistoryItem): string {
+  return item.storagePath?.trim() || item.mediaUrl;
+}
+
 // "35" cap and "first = cover" carousel concept are only meaningful once
 // there's more than one photo — surfacing them at count 0-1 reads as noise
 // on a fresh single-photo drop, so this only leans on them once they apply.
@@ -184,7 +193,10 @@ function photoCountLabel(count: number): string {
 // (~4.5 MB on Vercel) that the old multipart /api/upload POST hit for larger
 // files. Shared by handleFilesAdded (new cards) and UploadCard's per-card
 // "add more photos → Upload new" flow (appends to an existing card).
-async function signAndUploadFile(file: File, mediaType: "video" | "image"): Promise<string> {
+async function signAndUploadFile(
+  file: File,
+  mediaType: "video" | "image",
+): Promise<{ url: string; storagePath: string }> {
   const signRes = await fetch("/api/upload/sign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -203,11 +215,12 @@ async function signAndUploadFile(file: File, mediaType: "video" | "image"): Prom
     throw new Error((signData && signData.error) || "Couldn't start the upload. Please try again.");
   }
 
-  const { bucket, path, token, publicUrl } = signData as {
+  const { bucket, path, token, publicUrl, storagePath } = signData as {
     bucket: string;
     path: string;
     token: string;
     publicUrl: string;
+    storagePath?: string;
   };
 
   const { error: uploadError } = await getSupabaseBrowser()
@@ -215,7 +228,50 @@ async function signAndUploadFile(file: File, mediaType: "video" | "image"): Prom
     .uploadToSignedUrl(path, token, file, { contentType: file.type });
 
   if (uploadError) throw new Error(uploadError.message || "Upload failed.");
-  return publicUrl;
+  return { url: publicUrl, storagePath: storagePath ?? path };
+}
+
+/** Preview a scheduler photo ref (storage path or legacy signed URL). */
+function SchedulerPhotoImg({
+  src,
+  className,
+  alt = "",
+}: {
+  src: string;
+  className?: string;
+  alt?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (src.startsWith("http")) {
+        setUrl(src);
+        return;
+      }
+      if (isStorageRelativePath(src)) {
+        try {
+          const signed = await fetchSignedUrl({ path: src });
+          if (!cancelled) setUrl(signed.url);
+        } catch {
+          if (!cancelled) setUrl(null);
+        }
+        return;
+      }
+      setUrl(src);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  if (!url) {
+    return <div className={className} aria-hidden />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={alt} className={className} />;
 }
 
 // YouTube Shorts cap (current limit is 3 minutes).
@@ -422,6 +478,8 @@ function InfoTooltip({ text, label = "More information" }: { text: string; label
 interface UploadCardProps {
   file: File | null;
   videoUrl: string | null;
+  /** Canonical bucket path — used for scheduling + preview re-sign. */
+  storagePath: string | null;
   uploadStatus: UploadStatus;
   uploadError: string | null;
   // Bulk: report one or more selected files to the parent
@@ -429,10 +487,8 @@ interface UploadCardProps {
   onRemove: () => void;
   // Report measured duration + aspect to the parent (drives format auto-suggest)
   onMetaChange: (meta: { duration: number | null; aspect: { w: number; h: number } | null }) => void;
-  // Asset source: report a picked creation's hosted URL + its actual media
-  // type to the parent — the parent derives contentType from this, same as
-  // from a raw drop (see openspec/changes/tiktok-photo-post Decision 6).
-  onAssetSelected: (mediaUrl: string, mediaType: "video" | "image") => void;
+  // Asset source: report a picked creation (video or photo) to the parent.
+  onAssetSelected: (item: CreationHistoryItem) => void;
   // Active publish format — switches the preview frame (9:16 short / 16:9 video)
   format: VideoFormat;
   // TikTok photo posts (openspec/changes/tiktok-photo-post): when "photo",
@@ -447,6 +503,7 @@ interface UploadCardProps {
 function UploadCard({
   file,
   videoUrl,
+  storagePath,
   uploadStatus,
   uploadError,
   onFilesAdded,
@@ -491,6 +548,13 @@ function UploadCard({
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }
+    if (storagePath) {
+      let cancelled = false;
+      fetchSignedUrl({ path: storagePath })
+        .then((r) => { if (!cancelled) setPreviewUrl(r.url); })
+        .catch(() => { if (!cancelled) setPreviewUrl(videoUrl); });
+      return () => { cancelled = true; };
+    }
     if (videoUrl) {
       setPreviewUrl(videoUrl);
       return;
@@ -498,7 +562,7 @@ function UploadCard({
     setPreviewUrl(null);
     setDuration(null);
     onMetaChange({ duration: null, aspect: null });
-  }, [file, videoUrl, onMetaChange]);
+  }, [file, storagePath, videoUrl, onMetaChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -558,7 +622,8 @@ function UploadCard({
     let firstError: string | null = null;
     for (const f of accepted) {
       try {
-        uploaded.push(await signAndUploadFile(f, "image"));
+        const { storagePath } = await signAndUploadFile(f, "image");
+        uploaded.push(storagePath);
       } catch (err) {
         firstError = err instanceof Error ? err.message : "Upload failed.";
       }
@@ -628,7 +693,7 @@ function UploadCard({
                     className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-gray-700 bg-black"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="" className="h-full w-full object-cover" />
+                    <SchedulerPhotoImg src={url} alt="" className="h-full w-full object-cover" />
                     {i === 0 && photoUrls.length > 1 && (
                       <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white">
                         Cover
@@ -728,7 +793,7 @@ function UploadCard({
                 limit={24}
                 multiSelect
                 selectedUrls={photoUrls}
-                onSelect={(item) => togglePhoto(item.mediaUrl)}
+                onSelect={(item) => togglePhoto(creationPhotoRef(item))}
                 className="!mt-0 !border-t-0 !pt-0"
               />
             </div>
@@ -806,7 +871,7 @@ function UploadCard({
               </div>
             </>
           )}
-          {uploadStatus === "done" && videoUrl && (
+          {uploadStatus === "done" && (videoUrl || storagePath) && (
             <>
               <CheckCircle2 className="h-8 w-8 text-green-400" />
               <div>
@@ -861,8 +926,8 @@ function UploadCard({
             title="Your assets"
             description="Pick a generated video or photo to schedule — no re-upload needed."
             limit={24}
-            selectedUrl={videoUrl}
-            onSelect={(item) => onAssetSelected(item.mediaUrl, item.mediaType)}
+            selectedUrl={videoUrl ?? undefined}
+            onSelect={(item) => onAssetSelected(item)}
             className="!mt-0 !border-t-0 !pt-0"
           />
         )}
@@ -916,10 +981,11 @@ interface DescriptionCardProps {
   title: string;
   tags: string;
   videoUrl: string | null;
+  storagePath: string | null;
   format: VideoFormat;
 }
 
-function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, format }: DescriptionCardProps) {
+function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, storagePath, format }: DescriptionCardProps) {
   // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
   // removing the duplicated fetch logic. Behavior is preserved: Generate requires
   // a video (Whisper), Polish appears once there's content, and the two-branch
@@ -929,11 +995,11 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, form
   // Clear the transcript warning whenever the video changes (removed or replaced)
   useEffect(() => {
     ai.resetWarning();
-  }, [videoUrl, ai.resetWarning]);
+  }, [videoUrl, storagePath, ai.resetWarning]);
 
   const handleGenerate = async () => {
     try {
-      const next = await ai.generate({ title, tags, videoUrl, format });
+      const next = await ai.generate({ title, tags, videoUrl, storagePath, format });
       onCaptionChange(next);
     } catch {
       // error surfaced by the hook
@@ -973,7 +1039,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, form
 
         <CaptionControls
           ai={ai}
-          hasVideo={!!videoUrl}
+          hasVideo={!!(storagePath || videoUrl)}
           hasContent={!!caption.trim()}
           hasTitle={!!title.trim()}
           generateLabel="Generate Caption"
@@ -1264,6 +1330,7 @@ function PlatformFields({
 
 interface ScheduleCardProps {
   videoUrl: string | null;
+  storagePath: string | null;
   caption: string;
   // Full reset (wipes the draft back to blank) — called only on full success,
   // never on partial/total failure, so a failed platform stays selected and
@@ -1303,6 +1370,7 @@ interface ScheduleCardProps {
 
 function ScheduleCard({
   videoUrl,
+  storagePath,
   caption,
   onSuccess,
   onPostCreated,
@@ -1348,7 +1416,7 @@ function ScheduleCard({
     // Retry-safe: only submit platforms that haven't already succeeded on a
     // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
     const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-    const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!videoUrl;
+    const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
 
     if (!hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
       return;
@@ -1379,7 +1447,11 @@ function ScheduleCard({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...(isPhoto ? { photo_urls: photoUrls } : { video_url: videoUrl }),
+              ...(isPhoto
+                ? { photo_urls: photoUrls }
+                : storagePath
+                  ? { storage_path: storagePath }
+                  : { video_url: videoUrl }),
               title: title.trim(),
               description,
               tags,
@@ -1449,7 +1521,7 @@ function ScheduleCard({
   // A TikTok-targeted post additionally requires a chosen privacy level (never
   // defaulted — see design.md Decision 4).
   const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-  const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!videoUrl;
+  const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
   const isReady =
     hasMedia && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
     pendingPlatforms.length > 0 &&
@@ -1590,7 +1662,7 @@ function ScheduleCard({
         </button>
 
         <p className="text-center text-xs text-gray-600">
-          {!videoUrl ? "Upload a video to enable scheduling"
+          {!(storagePath || videoUrl) ? "Upload a video to enable scheduling"
             : !title.trim() ? "Add a title to schedule"
             : ""}
         </p>
@@ -1731,6 +1803,7 @@ function useCaptionAI() {
       title: string;
       tags: string;
       videoUrl: string | null;
+      storagePath?: string | null;
       format?: VideoFormat;
     }): Promise<string> => {
       setBusy("generate");
@@ -1746,6 +1819,7 @@ function useCaptionAI() {
             title: input.title,
             tags: input.tags,
             videoUrl: input.videoUrl ?? undefined,
+            storage_path: input.storagePath ?? undefined,
             format: input.format ?? "short",
           }),
         });
@@ -1968,14 +2042,20 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     }
-    // Asset-backed card: preview straight from the hosted URL.
+    if (item.storagePath) {
+      let cancelled = false;
+      fetchSignedUrl({ path: item.storagePath })
+        .then((r) => { if (!cancelled) setPreviewUrl(r.url); })
+        .catch(() => { if (!cancelled) setPreviewUrl(item.videoUrl); });
+      return () => { cancelled = true; };
+    }
     setPreviewUrl(item.videoUrl);
-  }, [item.file, item.videoUrl]);
+  }, [item.file, item.storagePath, item.videoUrl]);
 
   // Clear the transcript warning when this card's video changes
   useEffect(() => {
     ai.resetWarning();
-  }, [item.videoUrl, ai.resetWarning]);
+  }, [item.videoUrl, item.storagePath, ai.resetWarning]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
@@ -1997,6 +2077,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
         title: item.title,
         tags: item.tags,
         videoUrl: item.videoUrl,
+        storagePath: item.storagePath,
         format: item.format,
       });
       onUpdate({ caption });
@@ -2024,8 +2105,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
         <div className="w-full shrink-0 space-y-1.5 sm:w-36">
           {item.contentType === "photo" ? (
             item.photoUrls.length > 0 ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <SchedulerPhotoImg
                 src={item.photoUrls[0]}
                 alt=""
                 className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
@@ -2208,11 +2288,12 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 multiSelect
                 selectedUrls={item.photoUrls}
                 onSelect={(a) => {
-                  const next = item.photoUrls.includes(a.mediaUrl)
-                    ? item.photoUrls.filter((u) => u !== a.mediaUrl)
+                  const ref = creationPhotoRef(a);
+                  const next = item.photoUrls.includes(ref)
+                    ? item.photoUrls.filter((u) => u !== ref)
                     : item.photoUrls.length >= 35
                       ? item.photoUrls
-                      : [...item.photoUrls, a.mediaUrl];
+                      : [...item.photoUrls, ref];
                   onUpdate({ photoUrls: next });
                 }}
                 hideHeader
@@ -2282,7 +2363,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           {captionMode === "individual" && (
             <CaptionControls
               ai={ai}
-              hasVideo={!!item.videoUrl}
+              hasVideo={!!(item.storagePath || item.videoUrl)}
               hasContent={!!item.caption.trim()}
               hasTitle={!!item.title.trim()}
               generateLabel="Generate Caption"
@@ -2561,12 +2642,12 @@ export default function SchedulerDashboardPage() {
         try {
           const file = it.file as File;
           const isPhoto = it.contentType === "photo";
-          const publicUrl = await signAndUploadFile(file, isPhoto ? "image" : "video");
+          const { url, storagePath } = await signAndUploadFile(file, isPhoto ? "image" : "video");
 
           if (isPhoto) {
-            updateItem(it.id, { photoUrls: [publicUrl], uploadStatus: "done" });
+            updateItem(it.id, { photoUrls: [storagePath], uploadStatus: "done" });
           } else {
-            updateItem(it.id, { videoUrl: publicUrl, uploadStatus: "done" });
+            updateItem(it.id, { videoUrl: url, storagePath, uploadStatus: "done" });
           }
         } catch (err) {
           updateItem(it.id, {
@@ -2585,11 +2666,20 @@ export default function SchedulerDashboardPage() {
   // MAX_VIDEOS. mediaType drives the same contentType auto-detection as a raw
   // drop (openspec/changes/tiktok-photo-post Decision 6).
   const handleAssetSelected = useCallback(
-    (mediaUrl: string, mediaType: "video" | "image") => {
-      const isPhoto = mediaType === "image";
+    (source: CreationHistoryItem | string) => {
+      const isPhoto = typeof source !== "string" && source.mediaType === "image";
+      const mediaUrl = typeof source === "string" ? source : source.mediaUrl;
+      const storagePath =
+        typeof source === "string"
+          ? isStorageRelativePath(source)
+            ? source
+            : storagePathFromStorageUrl(source)
+          : source.storagePath?.trim() || null;
+      const photoRef = isPhoto ? storagePath ?? mediaUrl : null;
       const assetPatch: Partial<VideoItem> = {
         videoUrl: isPhoto ? null : mediaUrl,
-        photoUrls: isPhoto ? [mediaUrl] : [],
+        storagePath: isPhoto ? null : storagePath,
+        photoUrls: photoRef ? [photoRef] : [],
         contentType: isPhoto ? "photo" : "video",
         uploadStatus: "done",
         uploadError: null,
@@ -2605,15 +2695,12 @@ export default function SchedulerDashboardPage() {
         ...(isPhoto ? { platforms: ["tiktok"] as Array<"youtube" | "tiktok"> } : {}),
       };
 
-      // A reusable card is an empty draft OR a card whose device upload failed
-      // (it still holds a File but has no hosted media). Reusing the errored
-      // card lets a picked asset recover it in place instead of appending a
-      // zombie card and forcing bulk mode. `assetPatch` already clears
-      // file/error.
+      const hasHostedMedia = (i: VideoItem) =>
+        !!(i.storagePath || i.videoUrl || i.photoUrls.length > 0);
       const reusableIdx = items.findIndex(
         (i) =>
-          (!i.file && !i.videoUrl && i.photoUrls.length === 0) ||
-          (i.uploadStatus === "error" && !i.videoUrl && i.photoUrls.length === 0),
+          (!i.file && !hasHostedMedia(i)) ||
+          (i.uploadStatus === "error" && !hasHostedMedia(i)),
       );
       if (reusableIdx !== -1) {
         updateItem(items[reusableIdx].id, assetPatch);
@@ -2645,10 +2732,10 @@ export default function SchedulerDashboardPage() {
   // Always a video — this hand-off originates from Reels Creator.
   const handleDeepLinkAsset = useCallback(
     (assetUrl: string, title: string | null) => {
-      handleAssetSelected(assetUrl, "video");
+      handleAssetSelected(assetUrl);
       if (title && title.trim()) {
         setItems((prev) => {
-          const idx = prev.findIndex((i) => i.videoUrl === assetUrl);
+          const idx = prev.findIndex((i) => i.videoUrl === assetUrl || i.storagePath === assetUrl);
           if (idx === -1) return prev;
           return prev.map((i, k) => (k === idx ? { ...i, title: title.trim() } : i));
         });
@@ -2675,7 +2762,7 @@ export default function SchedulerDashboardPage() {
   // scheduling.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      (i.contentType === "photo" ? i.photoUrls.length > 0 : !!i.videoUrl) &&
+      (i.contentType === "photo" ? i.photoUrls.length > 0 : !!(i.storagePath || i.videoUrl)) &&
       !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
       (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
     [],
@@ -2742,7 +2829,11 @@ export default function SchedulerDashboardPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...(isPhoto ? { photo_urls: it.photoUrls } : { video_url: it.videoUrl }),
+              ...(isPhoto
+                ? { photo_urls: it.photoUrls }
+                : it.storagePath
+                  ? { storage_path: it.storagePath }
+                  : { video_url: it.videoUrl }),
               title: it.title.trim(),
               description,
               tags: it.tags,
@@ -2836,6 +2927,7 @@ export default function SchedulerDashboardPage() {
               <UploadCard
                 file={item0.file}
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 uploadStatus={item0.uploadStatus}
                 uploadError={item0.uploadError}
                 onFilesAdded={handleFilesAdded}
@@ -2853,6 +2945,7 @@ export default function SchedulerDashboardPage() {
                 title={item0.title}
                 tags={item0.tags}
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 format={item0.format}
               />
             </div>
@@ -2860,6 +2953,7 @@ export default function SchedulerDashboardPage() {
             <div>
               <ScheduleCard
                 videoUrl={item0.videoUrl}
+                storagePath={item0.storagePath}
                 caption={item0.caption}
                 onSuccess={handleSuccess}
                 onPostCreated={fetchPosts}
@@ -2890,6 +2984,7 @@ export default function SchedulerDashboardPage() {
             <UploadCard
               file={null}
               videoUrl={null}
+              storagePath={null}
               uploadStatus="idle"
               uploadError={null}
               onFilesAdded={handleFilesAdded}

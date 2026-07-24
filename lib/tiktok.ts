@@ -1,4 +1,4 @@
-import { PHOTOS_FOLDER, storagePathFromPublicUrl } from "@/lib/storage-buckets";
+import { PHOTOS_FOLDER, isStorageRelativePath, storagePathFromPublicUrl, storagePathFromSignedUrl } from "@/lib/storage-buckets";
 
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
@@ -371,11 +371,13 @@ async function initPhotoPost(params: {
  * that can never pass verification would just surface as a confusing
  * TikTok-side error instead of a clear one here.
  */
-function toProxyPhotoUrl(publicUrl: string, origin: string): string {
-  const path = storagePathFromPublicUrl(publicUrl);
+function toProxyPhotoUrl(urlOrPath: string, origin: string): string {
+  const path = isStorageRelativePath(urlOrPath)
+    ? urlOrPath
+    : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
   if (!path || !path.startsWith(`${PHOTOS_FOLDER}/`)) {
     throw new Error(
-      `Photo URL is not a recognized storage URL under "${PHOTOS_FOLDER}/" — cannot proxy for TikTok: ${publicUrl}`,
+      `Photo URL is not a recognized storage URL under "${PHOTOS_FOLDER}/" — cannot proxy for TikTok: ${urlOrPath}`,
     );
   }
   const rest = path.slice(PHOTOS_FOLDER.length + 1);

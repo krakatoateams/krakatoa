@@ -14,6 +14,7 @@ import {
   stripMarkdownFences,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
+import { signStoragePathForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
 import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
@@ -168,10 +169,7 @@ export async function POST(req: Request) {
     // Public URL of the transient upload — GPT-5 vision fetches it directly.
     // (rawPath is the non-null source path; tempPath/permanentPath stay nullable
     // for the cleanup closure, so TS can't narrow them at the storage calls.)
-    const { data: tempUrlData } = supabase.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(rawPath);
-    const tempPublicUrl = tempUrlData.publicUrl;
+    const tempPublicUrl = await signStoragePathForPipeline(rawPath, userId!);
     if (!tempPublicUrl.startsWith("https://")) {
       return NextResponse.json(
         { error: "Uploaded image is not reachable over https." },
@@ -365,9 +363,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to move uploaded storyboard: ${moveErr.message}`);
     }
     movedToPermanent = true;
-    const {
-      data: { publicUrl: storyboardUrl },
-    } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(destPath);
+    const { url: storyboardUrl } = await signStoragePathForUser(destPath, userId!, "ui");
     await endStep({ storagePath: destPath, publicUrl: storyboardUrl });
 
     // ---- Insert the storyboards row ----
@@ -376,7 +372,7 @@ export async function POST(req: Request) {
       .from(STORYBOARDS_TABLE)
       .insert({
         theme,
-        storyboard_url: storyboardUrl,
+        storyboard_url: destPath,
         seedance_prompt: seedancePrompt,
         scene_breakdown: { scenes: analysis.scenes },
         storyboard_style: storyboardStyle,
@@ -397,7 +393,6 @@ export async function POST(req: Request) {
     if (imageAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, imageAssetId!, {
         storagePath: permanentPath!,
-        publicUrl: storyboardUrl,
         mimeType: ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png",
         costCredits: creditsAmount,
         metadata: { storyboardId: inserted.id, source: "uploaded", storyboardStyle, aspectRatio, language },
@@ -429,7 +424,7 @@ export async function POST(req: Request) {
         userId: userId as string,
         tool: "storyboard",
         mediaType: "image",
-        mediaUrl: storyboardUrl,
+        mediaUrl: permanentPath!,
         storagePath: permanentPath,
         title: theme,
         metadata: { storyboardId: inserted.id, source: "uploaded", storyboardStyle, aspectRatio, language },
