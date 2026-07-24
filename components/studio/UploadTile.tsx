@@ -72,7 +72,7 @@ export function UploadTile({
       className={`group relative flex h-16 items-center justify-center overflow-hidden border font-semibold uppercase tracking-wide transition-colors ${
         fluid
           ? "w-full flex-1 flex-row gap-2 rounded-[16px] text-xs"
-          : "w-16 shrink-0 flex-col gap-1 rounded-[4px] text-[10px]"
+          : "w-16 shrink-0 flex-col gap-1 rounded-[4px] text-xs"
       } ${
         upload.preview
           ? "border-purple-400/50"
@@ -211,7 +211,7 @@ export function CharacterTile({
         className={`group flex h-16 items-center justify-center border border-white/10 bg-white/5 font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white ${
           fluid
             ? "w-full flex-row gap-2 rounded-[16px] text-xs"
-            : "w-16 flex-col gap-1 rounded-[4px] text-[10px]"
+            : "w-16 flex-col gap-1 rounded-[4px] text-xs"
         }`}
         title="Add character"
       >

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Loader2, AlertCircle, Check } from "lucide-react";
+import { Plus, Loader2, AlertCircle, Check, Info } from "lucide-react";
+import { Tooltip } from "@/components/studio/Tooltip";
 
 export type LibraryImage = { id: string; url: string; title: string };
 
@@ -34,7 +35,7 @@ function RefTile({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.preview} alt="" className="h-full w-full object-cover" />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-500">
+        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500">
           {item.status === "uploading" ? (
             <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
           ) : (
@@ -64,6 +65,7 @@ export default function PhotoLibraryPicker({
   selected,
   onSelect,
   disabled,
+  hint,
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
   libraryTool = "product_photo",
@@ -134,9 +136,17 @@ export default function PhotoLibraryPicker({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
+          {hint ? (
+            <Tooltip label={hint}>
+              <Info
+                className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                aria-label={hint}
+              />
+            </Tooltip>
+          ) : null}
         </span>
         <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
           {(
@@ -150,7 +160,7 @@ export default function PhotoLibraryPicker({
               type="button"
               disabled={disabled}
               onClick={() => onSourceChange(opt.id)}
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-40 ${
                 source === opt.id
                   ? "bg-purple-500/25 text-white"
                   : "text-gray-400 hover:text-white"
@@ -172,7 +182,7 @@ export default function PhotoLibraryPicker({
                 type="button"
                 disabled={disabled}
                 onClick={() => inputRef.current?.click()}
-                className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-xs font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add</span>
@@ -191,12 +201,12 @@ export default function PhotoLibraryPicker({
           />
         </>
       ) : loadState === "loading" || loadState === "idle" ? (
-        <div className="flex h-16 items-center gap-2 text-[11px] text-gray-500">
+        <div className="flex h-16 items-center gap-2 text-sm text-gray-500">
           <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
           Loading your library…
         </div>
       ) : loadState === "error" ? (
-        <div className="flex h-16 flex-wrap items-center gap-2 text-[11px] text-red-300">
+        <div className="flex h-16 flex-wrap items-center gap-2 text-sm text-red-300">
           <AlertCircle className="h-4 w-4 shrink-0" />
           Couldn&apos;t load your library.
           <button
@@ -208,7 +218,7 @@ export default function PhotoLibraryPicker({
           </button>
         </div>
       ) : items.length === 0 ? (
-        <div className="flex h-16 flex-col justify-center gap-1 text-[11px] text-gray-500">
+        <div className="flex h-16 flex-col justify-center gap-1 text-sm text-gray-500">
           <span>{libraryEmptyLabel}</span>
           <a href={libraryHref} className="font-semibold text-purple-300 hover:text-purple-200">
             Create one in Photo Studio →
@@ -249,7 +259,7 @@ export default function PhotoLibraryPicker({
       )}
 
       {source === "library" && selected ? (
-        <p className="mt-2 text-[10px] text-gray-600">Selected: {selected.title}</p>
+        <p className="mt-2 text-xs text-gray-500 sm:text-sm">Selected: {selected.title}</p>
       ) : null}
     </div>
   );

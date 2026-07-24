@@ -35,7 +35,7 @@ function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.Re
 
 function KindBadge({ kind }: { kind: MentionAsset["kind"] }) {
   return (
-    <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
+    <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs uppercase tracking-wide text-gray-400">
       {kind === "character" ? (
         <User className="h-3 w-3" />
       ) : kind === "storyboard" ? (
@@ -182,7 +182,7 @@ export default function MentionTextarea({
         </div>
       )}
       {query !== null && matches.length === 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-xs text-gray-400 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-gray-400 shadow-2xl shadow-black/50">
           No matching library images.
         </div>
       )}

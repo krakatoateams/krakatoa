@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Info, Loader2, Music, Plus, X } from "lucide-react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { Tooltip } from "./Tooltip";
 
 export type RefKind = "image" | "video" | "audio";
@@ -34,17 +35,19 @@ export async function uploadRefFile(file: File): Promise<{ url: string; path: st
   if (!signRes.ok || !signData) {
     throw new Error(signData?.error || "Couldn't start the upload (server error).");
   }
-  const { bucket, path, token, publicUrl } = signData as {
+  const { bucket, path, token, storagePath } = signData as {
     bucket: string;
     path: string;
     token: string;
-    publicUrl: string;
+    storagePath?: string;
   };
   const { error } = await getSupabaseBrowser()
     .storage.from(bucket)
     .uploadToSignedUrl(path, token, file, { contentType: file.type });
   if (error) throw new Error(error.message || "Upload failed.");
-  return { url: publicUrl, path };
+  const resolvedPath = storagePath || path;
+  const signed = await fetchSignedUrl({ path: resolvedPath });
+  return { url: signed.url, path: resolvedPath };
 }
 
 export type RefGroupApi = {
@@ -157,7 +160,7 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
       ) : (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-gray-400">
           <Music className="h-5 w-5" />
-          <span className="max-w-full truncate px-1 text-[8px]">{item.file.name}</span>
+          <span className="max-w-full truncate px-1 text-xs">{item.file.name}</span>
         </div>
       )}
 
@@ -168,10 +171,15 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
       )}
       {item.status === "error" && (
         <div
-          className="absolute inset-0 flex items-center justify-center bg-red-900/60"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-900/60 px-1"
           title={item.error || "Upload failed"}
         >
-          <AlertCircle className="h-5 w-5 text-red-300" />
+          <AlertCircle className="h-5 w-5 shrink-0 text-red-300" />
+          {item.error ? (
+            <span className="line-clamp-2 w-full text-center text-[10px] leading-tight text-red-100">
+              {item.error}
+            </span>
+          ) : null}
         </div>
       )}
 
@@ -216,16 +224,19 @@ export function RefGroup({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
-          {hint && !disabled && (
+          {hint ? (
             <Tooltip label={hint}>
-              <Info className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300" />
+              <Info
+                className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                aria-label={hint}
+              />
             </Tooltip>
-          )}
+          ) : null}
         </div>
-        <span className="text-[10px] text-gray-600">
+        <span className="text-xs text-gray-500">
           {group.items.length}/{group.max}
         </span>
       </div>
@@ -240,7 +251,7 @@ export function RefGroup({
             disabled={addDisabled}
             onClick={() => inputRef.current?.click()}
             title={disabled ? disabledReason : `Add ${label.toLowerCase()}`}
-            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-xs font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Plus className="h-4 w-4" />
             <span>Add</span>
@@ -249,7 +260,7 @@ export function RefGroup({
       </div>
 
       {disabled && disabledReason ? (
-        <p className="mt-2 text-[10px] text-amber-300/70">{disabledReason}</p>
+        <p className="mt-2 text-sm leading-snug text-amber-300/85">{disabledReason}</p>
       ) : null}
 
       <input

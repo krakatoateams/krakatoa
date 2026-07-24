@@ -133,6 +133,87 @@ export function isValidCharacterOrientation(orientation: string): orientation is
   return orientation === "image" || orientation === "video";
 }
 
+/** Kling rejects reference videos at exactly 10.0s for image orientation (strict < 10). */
+export const MOTION_CONTROL_IMAGE_MAX_REF_SEC = 10;
+
+/** Human-readable motion-clip length for the selected orientation (provider-safe). */
+export function motionControlRefDurationRangeLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "3–9s" : "3–30s";
+}
+
+export function motionControlRefVideoDurationError(
+  durationSec: number | null | undefined,
+  orientation: CharacterOrientation,
+): string | null {
+  const min = 3;
+  const max = orientation === "video" ? 30 : MOTION_CONTROL_IMAGE_MAX_REF_SEC;
+  if (durationSec == null || !Number.isFinite(durationSec)) return null;
+  if (durationSec < min) {
+    return `Motion clip must be at least ${min} seconds (yours is ${durationSec.toFixed(1)}s).`;
+  }
+  if (orientation === "image" && durationSec >= max) {
+    return `Photo angle allows motion clips under 10 seconds — use 9s or less to be safe (yours is ${durationSec.toFixed(1)}s). Switch to Follow motion for clips up to 30s, or trim the video.`;
+  }
+  if (orientation === "video" && durationSec > max) {
+    return `Follow motion allows motion clips up to ${max} seconds (yours is ${durationSec.toFixed(1)}s). Trim the video or pick a shorter clip.`;
+  }
+  return null;
+}
+
+/** Chip trigger label for character_orientation (image = photo angle, video = follow clip). */
+export function characterOrientationChipLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "Photo angle · 3–9s" : "Follow motion · 3–30s";
+}
+
+/** Menu row label (slightly longer than the chip). */
+export function characterOrientationMenuLabel(orientation: CharacterOrientation): string {
+  return orientation === "image" ? "Photo angle" : "Follow motion";
+}
+
+/** Short hint beside each menu option — includes duration limits. */
+export function characterOrientationMenuHint(orientation: CharacterOrientation): string {
+  return orientation === "image"
+    ? "Face like your photo · motion clip 3–9s"
+    : "Turns like the clip · motion clip 3–30s";
+}
+
+/** Hover tooltip on the orientation chip. */
+export const CHARACTER_ORIENTATION_TOOLTIP =
+  "Photo angle: character faces like your photo — motion clip 3–9s (provider max 10s; exactly 10s often fails). Follow motion: character moves like the clip — motion clip 3–30s. Use Follow motion for dance, tai chi, or any clip around 10s+.";
+
+/** Hover tooltip on the quality (mode) chip. */
+export const MOTION_CONTROL_QUALITY_TOOLTIP =
+  "Output sharpness. Standard is 720p and costs less. Pro is 1080p, sharper, and uses more credits.";
+
+/** RefGroup hint for the motion reference video upload. */
+export function motionControlVideoHint(params: {
+  refDurationSec: number | null;
+  billedDurationSec: number;
+  orientation: CharacterOrientation;
+}): string {
+  const limit = motionControlRefDurationRangeLabel(params.orientation);
+  const modeLabel = params.orientation === "image" ? "Photo angle" : "Follow motion";
+  if (params.refDurationSec != null) {
+    return `Movement to copy (dance, walk, gestures). Yours: ${params.refDurationSec.toFixed(1)}s · billed ${params.billedDurationSec}s. With ${modeLabel}, keep the clip within ${limit}. MP4 or MOV, max 100 MB.`;
+  }
+  return `Movement to copy — your character performs these actions. Photo angle: motion clip 3–9s. Follow motion: motion clip 3–30s. MP4 or MOV, max 100 MB.`;
+}
+
+/** PhotoLibraryPicker hint for the character image. */
+export const MOTION_CONTROL_CHARACTER_HINT =
+  "Photo of the person you want to animate. Their appearance in the result comes from this image. Clear face and body. JPG or PNG, max 10 MB.";
+
+/** Advanced prompt placeholder — motion always comes from the reference video. */
+export const MOTION_CONTROL_PROMPT_PLACEHOLDER =
+  'Optional—describe the scene or add details, e.g. "in a snowy park" or "wearing a red jacket". Movement always comes from your motion video.';
+
+/** Tooltip for the original-sound toggle. */
+export function motionControlSoundTooltip(keep: boolean): string {
+  return keep
+    ? "On — the sound from your motion video is included. Click to remove it."
+    : "Off — your result is silent. Click to keep the motion video's sound.";
+}
+
 /** std -> 720p, pro -> 1080p (for display + asset metadata). */
 export function motionControlResolutionLabel(mode: MotionControlMode): string {
   return mode === "std" ? "720p" : "1080p";
@@ -152,7 +233,12 @@ export function effectiveMotionControlDuration(params: {
   const raw = params.refVideoDurationSec;
   // Unknown duration → assume the cap (conservative; never undercharge).
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return cap;
-  return Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
+  const billed = Math.min(Math.max(Math.round(raw), params.model.minDurationSec), cap);
+  // Image orientation: provider rejects duration >= 10s — bill at most 9s when at the limit.
+  if (params.orientation === "image" && billed >= MOTION_CONTROL_IMAGE_MAX_REF_SEC) {
+    return MOTION_CONTROL_IMAGE_MAX_REF_SEC - 1;
+  }
+  return billed;
 }
 
 /** Build the Replicate input for Kling Motion Control (v2.6 / v3 — same shape). */

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
-import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
+import { insertUserCreation } from "@/lib/creations-db";
+import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
@@ -362,28 +363,13 @@ export async function POST(req: Request) {
       mentionRefs.push({ name: "Theme", kind: "image" });
     }
     if (referenceCreationIds.length && userId) {
-      for (const mentionId of referenceCreationIds) {
-        const creation = await getUserCreationForUser(userId, mentionId);
-        if (!creation) {
-          return NextResponse.json(
-            { error: "A mentioned asset could not be found." },
-            { status: 400 }
-          );
-        }
-        mentionReferenceUrls.push(creation.mediaUrl);
-        const metaName =
-          typeof creation.metadata?.characterName === "string"
-            ? creation.metadata.characterName.trim()
-            : "";
-        const kind: "character" | "storyboard" | "image" =
-          creation.metadata?.creationKind === "character"
-            ? "character"
-            : creation.tool === "storyboard"
-              ? "storyboard"
-              : "image";
-        const fallbackName =
-          kind === "character" ? "Character" : kind === "storyboard" ? "Storyboard" : "Image";
-        mentionRefs.push({ name: metaName || creation.title || fallbackName, kind });
+      const resolved = await resolveMentionCreations(userId, referenceCreationIds);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      for (const item of resolved.items) {
+        mentionReferenceUrls.push(item.url);
+        mentionRefs.push(item.ref);
       }
     }
 
