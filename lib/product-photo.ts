@@ -1,4 +1,4 @@
-import { PHOTOS_FOLDER, STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { PHOTOS_FOLDER, STORAGE_BUCKET, photosUserPrefix } from "@/lib/storage-buckets";
 
 export const PRODUCT_PHOTO_BUCKET = STORAGE_BUCKET;
 export const PRODUCT_PHOTO_ROOT = PHOTOS_FOLDER;
@@ -692,11 +692,9 @@ export function parseGeneratedFilename(name: string): {
   };
 }
 
-/** Storage prefix per authenticated user: `photos/{userId}/` */
+/** Storage prefix per authenticated user: `{userId}/photos` */
 export function userStoragePrefix(userId: string): string {
-  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
-  if (!safe) throw new Error("Invalid user id");
-  return `${PRODUCT_PHOTO_ROOT}/${safe}`;
+  return photosUserPrefix(userId);
 }
 
 /** Photo studio output modes under `photos/{userId}/generated/{mode}/`. */

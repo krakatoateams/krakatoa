@@ -1,9 +1,9 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, VIDEOS_FOLDER, isVideosTempPath } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, isVideosTempPath } from "@/lib/storage-buckets";
 import {
   collectStorageReferences,
   isReferenced,
-  listAllObjects,
+  listAllUserMediaObjects,
 } from "@/lib/storage-orphan-audit";
 
 /**
@@ -57,10 +57,11 @@ export { isReferenced };
 export async function planStorageSweep(
   minAgeHours: number = DEFAULT_SWEEP_MIN_AGE_HOURS,
 ): Promise<SweepPlan> {
-  const [objects, refBlob] = await Promise.all([
-    listAllObjects(VIDEOS_FOLDER),
+  const [allObjects, refBlob] = await Promise.all([
+    listAllUserMediaObjects(),
     collectStorageReferences(),
   ]);
+  const objects = allObjects.filter((o) => o.root === "videos");
 
   const cutoffMs = Date.now() - minAgeHours * 60 * 60 * 1000;
 

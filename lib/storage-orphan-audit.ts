@@ -1,13 +1,16 @@
 /**
- * List orphan / transient storage objects under `videos/` and `photos/`.
+ * List orphan / transient storage objects under user media paths.
  * Read-only audit — use `runStorageSweep` to delete videos/ only.
  */
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   PHOTOS_FOLDER,
+  PROFILES_FOLDER,
   STORAGE_BUCKET,
   VIDEOS_FOLDER,
+  isUserMediaRootFolder,
   isVideosTempPath,
+  storagePathMediaKind,
 } from "@/lib/storage-buckets";
 
 export const DEFAULT_ORPHAN_MIN_AGE_HOURS = 24;
@@ -54,10 +57,10 @@ function toMs(value?: string | null): number | null {
 }
 
 /** Recursively list every object under a prefix (folders have id === null). */
-export async function listAllObjects(prefix: string): Promise<StorageObjectRow[]> {
-  const root: "videos" | "photos" = prefix.startsWith(`${PHOTOS_FOLDER}/`)
-    ? "photos"
-    : "videos";
+export async function listAllObjects(
+  prefix: string,
+  defaultRoot?: "videos" | "photos",
+): Promise<StorageObjectRow[]> {
   const out: StorageObjectRow[] = [];
 
   async function walk(p: string): Promise<void> {
@@ -74,11 +77,12 @@ export async function listAllObjects(prefix: string): Promise<StorageObjectRow[]
         if (e.id === null) {
           await walk(full);
         } else {
+          const kind = storagePathMediaKind(full) ?? defaultRoot ?? "videos";
           out.push({
             path: full,
             size: e.metadata?.size ?? 0,
             createdAtMs: toMs(e.created_at) ?? toMs(e.updated_at),
-            root: full.startsWith(`${PHOTOS_FOLDER}/`) ? "photos" : root,
+            root: kind,
           });
         }
       }
@@ -89,6 +93,41 @@ export async function listAllObjects(prefix: string): Promise<StorageObjectRow[]
 
   await walk(prefix);
   return out;
+}
+
+const SKIP_ROOT_FOLDERS = new Set([PROFILES_FOLDER, PHOTOS_FOLDER, VIDEOS_FOLDER]);
+
+/** List all user media objects (user-first layout + legacy top-level trees). */
+export async function listAllUserMediaObjects(): Promise<StorageObjectRow[]> {
+  const byPath = new Map<string, StorageObjectRow>();
+
+  const add = (rows: StorageObjectRow[]) => {
+    for (const row of rows) byPath.set(row.path, row);
+  };
+
+  add(await listAllObjects(VIDEOS_FOLDER, "videos"));
+  add(await listAllObjects(PHOTOS_FOLDER, "photos"));
+
+  let offset = 0;
+  const limit = 1000;
+  for (;;) {
+    const { data, error } = await supabaseServer.storage
+      .from(STORAGE_BUCKET)
+      .list("", { limit, offset, sortBy: { column: "name", order: "asc" } });
+    if (error) throw new Error(`storage.list failed at bucket root: ${error.message}`);
+    const entries = (data ?? []) as StorageListEntry[];
+    for (const e of entries) {
+      if (e.id !== null || SKIP_ROOT_FOLDERS.has(e.name) || !isUserMediaRootFolder(e.name)) {
+        continue;
+      }
+      add(await listAllObjects(`${e.name}/${PHOTOS_FOLDER}`, "photos"));
+      add(await listAllObjects(`${e.name}/${VIDEOS_FOLDER}`, "videos"));
+    }
+    if (entries.length < limit) break;
+    offset += limit;
+  }
+
+  return Array.from(byPath.values());
 }
 
 function basename(path: string): string {
@@ -158,12 +197,10 @@ export async function planOrphanAudit(
   opts?: { includeYoungOrphans?: boolean },
 ): Promise<OrphanAuditPlan> {
   const includeYoung = opts?.includeYoungOrphans ?? false;
-  const [videoObjects, photoObjects, refBlob] = await Promise.all([
-    listAllObjects(VIDEOS_FOLDER),
-    listAllObjects(PHOTOS_FOLDER),
+  const [objects, refBlob] = await Promise.all([
+    listAllUserMediaObjects(),
     collectStorageReferences(),
   ]);
-  const objects = [...videoObjects, ...photoObjects];
   const cutoffMs = Date.now() - minAgeHours * 60 * 60 * 1000;
 
   const referenced: OrphanAuditRow[] = [];

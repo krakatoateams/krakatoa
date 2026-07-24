@@ -24,6 +24,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
 - **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`
+- **Migrate to user-first paths** (`photos|videos/{userId}` → `{userId}/photos|videos`): `npm run storage:migrate-user-first` (dry-run, scans DB + storage) / `npm run storage:migrate-user-first -- --execute` / optional `--prune-stale-db` `--delete-global-temp`
 - **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
 
 ## Project Structure
@@ -131,10 +132,10 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
 ### 5. Supabase Storage (Reels Creator)
-- **Canonical paths:** Video studio: `videos/{userId}/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `videos/{userId}/generated/storyboard/`. Photo studio: `photos/{userId}/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `photos/{userId}/uploads/reference/`. Transient video refs: `videos/{userId}/temp/`.
-- **Final deliverable (Reels Creator):** `videos/{userId}/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
-- **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
-- **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
+- **Canonical paths:** User media is scoped under `{userId}/` first. Video studio: `{userId}/videos/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `{userId}/videos/generated/storyboard/`. Photo studio: `{userId}/photos/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `{userId}/photos/uploads/reference/`. Transient video refs: `{userId}/videos/temp/`. Legacy `photos|videos/{userId}/…` paths remain readable until `npm run storage:migrate-user-first -- --execute`.
+- **Final deliverable (Reels Creator):** `{userId}/videos/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
+- **Transient captions:** `.ass` under **`{userId}/videos/temp/`** for Rendi; deleted after a successful run.
+- **Product Photo** uses **`{userId}/photos/`** in the same bucket — never under `videos/`.
 - **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
 - **Private access (live):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs and `useSignedMediaUrl` sign on read. Bucket `krakatoa` is **private** (migration `049_storage_bucket_private.sql`). Legacy `/api/upload` returns 410 — use `POST /api/upload/sign`.
 
