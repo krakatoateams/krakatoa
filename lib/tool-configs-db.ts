@@ -24,6 +24,8 @@ export type ToolConfig = {
 
 const TOOL_CONFIGS_TABLE = "tool_configs";
 
+export { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
+
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
   if (
@@ -47,6 +49,27 @@ export async function listToolConfigs(): Promise<ToolConfig[]> {
 
   handleError(error, "Failed to list tool configs.");
   return (data as ToolConfig[] | null) ?? [];
+}
+
+/** Sidebar visibility slice (server layout + client Sidebar). */
+export type ToolSidebarVisibility = Pick<
+  ToolConfig,
+  "tool_key" | "enabled" | "visible_in_sidebar"
+>;
+
+export function toToolSidebarVisibilityMap(
+  tools: ToolConfig[]
+): Record<string, ToolSidebarVisibility> {
+  return Object.fromEntries(
+    tools.map((t) => [
+      t.tool_key,
+      {
+        tool_key: t.tool_key,
+        enabled: t.enabled,
+        visible_in_sidebar: t.visible_in_sidebar,
+      },
+    ])
+  );
 }
 
 export type ToolConfigPatch = {
