@@ -13,7 +13,7 @@ export type PipelineGroupSpec = {
   key: string;
   label: string;
   description?: string;
-  adminToolKey: "reels" | "photo";
+  adminToolKey: "reels" | "photo" | "schedule";
   roles: PipelineRoleSpec[];
   pricingKeys?: { pricingKey: string; label: string }[];
 };
@@ -78,6 +78,22 @@ export const PIPELINE_GROUP_SPECS: PipelineGroupSpec[] = [
       { pricingKey: "storyboard_gpt_image_2_medium_per_image", label: "Image · Medium" },
       { pricingKey: "storyboard_gpt_image_2_auto_per_image", label: "Image · Auto" },
       { pricingKey: "storyboard_import_vision_per_image", label: "Import · Vision" },
+    ],
+  },
+  {
+    adminToolKey: "schedule",
+    key: "caption",
+    label: "AI captions",
+    description:
+      "Caption LLM and Whisper transcription when creators use AI caption in the Scheduler.",
+    roles: [
+      { modelConfigToolKey: "schedule", configKey: "llm", label: "Caption LLM" },
+      {
+        modelConfigToolKey: "schedule",
+        configKey: "whisper",
+        label: "Transcription (Whisper)",
+        description: "Transcribes uploaded video audio before caption generation.",
+      },
     ],
   },
 ];

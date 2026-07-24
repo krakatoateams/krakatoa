@@ -7,13 +7,11 @@ import {
   resolveStoragePath,
   signStoragePathForPipeline,
 } from "@/lib/storage-signed-url";
+import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { getScheduleModels, replicateRef } from "@/lib/model-resolver";
 
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
-
-const WHISPER_MODEL =
-  "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c";
-const LLM_MODEL = "google/gemini-2.5-flash";
 
 function joinReplicateOutput(output: unknown): string {
   if (Array.isArray(output)) {
@@ -216,6 +214,15 @@ function buildPolishPrompt(existingCaption: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    try {
+      await assertToolEnabled("schedule");
+    } catch (e) {
+      if (e instanceof ToolDisabledError) {
+        return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+      }
+      throw e;
+    }
+
     const body = await req.json();
     const mode: string = (body.mode ?? "generate").toString();
     const description: string = (body.description ?? "").toString().trim();
@@ -227,6 +234,9 @@ export async function POST(req: NextRequest) {
     const format: CaptionFormat = body.format === "video" ? "video" : "short";
 
     const replicate = createReplicateClient();
+    const { llm, whisper } = await getScheduleModels();
+    const llmModel = replicateRef(llm);
+    const whisperModel = replicateRef(whisper);
 
     // ----- General mode: one shared caption for a batch, no transcription -----
     if (mode === "general") {
@@ -248,7 +258,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const generalOutput = await runWithRetry(replicate, LLM_MODEL, {
+      const generalOutput = await runWithRetry(replicate, llmModel, {
         input: {
           prompt: buildGeneralPrompt(videos),
           max_tokens: 300,
@@ -276,7 +286,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const polishOutput = await runWithRetry(replicate, LLM_MODEL, {
+      const polishOutput = await runWithRetry(replicate, llmModel, {
         input: {
           prompt: buildPolishPrompt(existingCaption),
           max_tokens: 300,
@@ -339,7 +349,7 @@ export async function POST(req: NextRequest) {
         const audioUrl = await extractAudioMp3(sourceUrl);
         console.log("[generate-caption] whisper audio url:", audioUrl);
 
-        const wRes = await runWithRetry(replicate, WHISPER_MODEL, {
+        const wRes = await runWithRetry(replicate, whisperModel, {
           input: {
             audio: audioUrl,
             // No `language` pin → Whisper auto-detects the spoken language.
@@ -379,7 +389,7 @@ export async function POST(req: NextRequest) {
       format,
     });
 
-    const output = await runWithRetry(replicate, LLM_MODEL, {
+    const output = await runWithRetry(replicate, llmModel, {
       input: {
         prompt,
         // Long-form descriptions get more room than the 300-char Shorts caption.

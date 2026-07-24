@@ -520,7 +520,7 @@ export function buildAdminConfigTree(params: {
       : [];
 
     const pipelines =
-      toolKey === "reels" || toolKey === "photo"
+      toolKey === "reels" || toolKey === "photo" || toolKey === "schedule"
         ? buildPipelineGroupsForTool(toolKey, params.modelConfigs, pmap, params.billingSettings)
         : [];
 
