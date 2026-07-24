@@ -1,4 +1,9 @@
-import { PHOTOS_FOLDER, isStorageRelativePath, storagePathFromPublicUrl, storagePathFromSignedUrl } from "@/lib/storage-buckets";
+import {
+  isStorageRelativePath,
+  photoStoragePathToProxyRest,
+  storagePathFromPublicUrl,
+  storagePathFromSignedUrl,
+} from "@/lib/storage-buckets";
 
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
@@ -375,12 +380,12 @@ function toProxyPhotoUrl(urlOrPath: string, origin: string): string {
   const path = isStorageRelativePath(urlOrPath)
     ? urlOrPath
     : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
-  if (!path || !path.startsWith(`${PHOTOS_FOLDER}/`)) {
+  const rest = path ? photoStoragePathToProxyRest(path) : null;
+  if (!rest) {
     throw new Error(
-      `Photo URL is not a recognized storage URL under "${PHOTOS_FOLDER}/" — cannot proxy for TikTok: ${urlOrPath}`,
+      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${urlOrPath}`,
     );
   }
-  const rest = path.slice(PHOTOS_FOLDER.length + 1);
   return `${origin}/api/tiktok-photos/${rest}`;
 }
 

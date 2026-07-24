@@ -4,12 +4,11 @@
  */
 import { supabaseServer } from "@/lib/supabase-server";
 import {
-  PHOTOS_FOLDER,
   STORAGE_BUCKET,
-  VIDEOS_FOLDER,
   isStorageRelativePath,
   storagePathFromPublicUrl,
   storagePathFromSignedUrl,
+  storagePathOwnerUserId,
 } from "@/lib/storage-buckets";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { getSessionUserId } from "@/lib/resolve-user";
@@ -32,13 +31,7 @@ function ttlSec(kind: SignTtlKind | number): number {
   return typeof kind === "number" ? kind : SIGN_TTL[kind];
 }
 
-/** `photos/{userId}/...` or `videos/{userId}/...` → userId segment. */
-export function storagePathOwnerUserId(path: string): string | null {
-  const m = path.match(new RegExp(`^(?:${PHOTOS_FOLDER}|${VIDEOS_FOLDER})/([a-zA-Z0-9-]+)/`));
-  return m?.[1] ?? null;
-}
-
-export { isStorageRelativePath };
+export { isStorageRelativePath, storagePathOwnerUserId };
 
 function isAllowedStoragePath(path: string): boolean {
   return isStorageRelativePath(path) && !path.includes("..");

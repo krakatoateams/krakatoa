@@ -8,7 +8,8 @@
  *     just generate canonical paths to store there.
  *
  * Legacy flat paths under `videos/` (scheduler device uploads) are unaffected.
- * New generations use `videos/{userId}/…` — mirrors `photos/{userId}/…`.
+ * User media uses `{userId}/photos/…` and `{userId}/videos/…` (legacy `photos|videos/{userId}/…`
+ * still readable until `npm run storage:migrate-user-first -- --execute`).
  */
 
 export const PLATFORM_STORAGE_BUCKET =
