@@ -5,7 +5,7 @@ import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
+  videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
@@ -23,6 +23,7 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
   readIdempotencyKey,
@@ -158,6 +159,9 @@ export async function POST(req: Request) {
       ? videoModelIdRaw
       : DEFAULT_STORYBOARD_VIDEO_MODEL_ID;
     const videoModel = getVideoModel(videoModelId);
+    if (!(await isCatalogModelEnabled("reels", videoModelId))) {
+      return NextResponse.json({ error: "This video model isn't available." }, { status: 400 });
+    }
     const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
@@ -533,7 +537,7 @@ export async function POST(req: Request) {
     const videoBuffer = await vidRes.arrayBuffer();
 
     const filename = `video_${Date.now()}.mp4`;
-    const storagePath = videosStoryboardPath(filename);
+    const storagePath = videosStoryboardVideoPath(userId!, filename);
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)

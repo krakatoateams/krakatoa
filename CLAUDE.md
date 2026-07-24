@@ -21,7 +21,10 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Run development server**: `npm run dev`
 - **Build for production**: `npm run build`
 - **Linting**: `npm run lint`
+- **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
+- **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`
+- **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -43,6 +46,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
 - `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
 - `public/`: Static assets (images, fonts, icons).
+  - **PWA**: `public/icons/` (16–512px + maskable + apple-touch), `public/sw.js` (minimal install SW), source logo `Logo White transparent.svg`. Next.js serves `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png`, and `app/manifest.ts` → `/manifest.webmanifest`. Regenerate with `npm run icons:generate`.
 
 ## Platform Foundation & Credits
 Krakatoa's product identity, observability, and billing primitives live in seven Postgres tables that all in-scope generation routes read/write through typed helpers in `lib/`. Ownership boundary is `profile_id`; server routes use the service role and enforce ownership in application code (RLS is enabled on every table as deny-by-default).
@@ -127,10 +131,23 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
 ### 5. Supabase Storage (Reels Creator)
-- **Canonical paths:** `lib/storage-buckets.ts` — bucket name `STORAGE_BUCKET` from `SUPABASE_STORAGE_BUCKET` or default **`krakatoa`**.
-- **Final deliverable:** `videos/reels_<timestamp>.mp4` (Seedance) or `videos/reels_veo_<timestamp>.mp4` (Veo) — public URL returned as `videoUrl` to the client for preview and download.
-- **Transient captions:** `.ass` uploaded to **`videos/temp/captions_<timestamp>.ass`** (Veo uses `captions_veo_<timestamp>.ass`) for Rendi to fetch; deleted after a successful run.
-- **Product Photo** uses **`photos/`** in the same bucket — never under `videos/`.
+- **Canonical paths:** Video studio: `videos/{userId}/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `videos/{userId}/generated/storyboard/`. Photo studio: `photos/{userId}/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `photos/{userId}/uploads/reference/`. Transient video refs: `videos/{userId}/temp/`.
+- **Final deliverable (Reels Creator):** `videos/{userId}/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
+- **Transient captions:** `.ass` under **`videos/{userId}/temp/`** for Rendi; deleted after a successful run.
+- **Product Photo** uses **`photos/{userId}/`** in the same bucket — never under `videos/`.
+- **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
+
+## Admin Config v2 (unified control panel)
+
+**Status:** Cutover complete. Photo + Video mode matrices and per-model catalog on/off persist via `feature_model_configs` and `model_catalog_configs`.
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/admin/admin-config-v2-plan.md`](docs/admin/admin-config-v2-plan.md) | Authoritative plan for agents (architecture, phases, parity checklist) |
+| [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
+| [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |
+
+Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/model-catalog-configs.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
 
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.

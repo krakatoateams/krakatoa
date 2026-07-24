@@ -123,6 +123,15 @@ The `POST /api/generate-reels` endpoint runs the full pipeline:
 
 See [`CLAUDE.md`](./CLAUDE.md) for an in-depth architecture description and the rationale behind specific implementation choices (LLM choice, no reference-video chaining, concat input normalization, etc.).
 
+## Documentation
+
+| Topic | Path |
+| --- | --- |
+| Monorepo & pipelines | [`CLAUDE.md`](./CLAUDE.md) |
+| Admin Config v2 (unified panel) | [`docs/admin/admin-config-v2-plan.md`](./docs/admin/admin-config-v2-plan.md) |
+| Admin Config v2 (ringkasan ID) | [`docs/admin/admin-config-v2-ringkasan.md`](./docs/admin/admin-config-v2-ringkasan.md) |
+| Pricing Config v2 | [`docs/billing/pricing-config-v2-plan.md`](./docs/billing/pricing-config-v2-plan.md) |
+
 ## Deployment
 
 Deployable to [Vercel](https://vercel.com) out of the box. Make sure to set the environment variables above in your Vercel project settings.

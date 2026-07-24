@@ -456,7 +456,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
 /** Reset defaults keyed by tool_key (mirrors seed 6b). */
 export const TOOL_DEFAULTS: Record<string, ToolDefault> = {
   dashboard: { display_name: "Dashboard", enabled: true, visible_in_sidebar: true, sort_order: 0 },
-  reels: { display_name: "ReelsGen", enabled: true, visible_in_sidebar: true, sort_order: 1 },
+  reels: { display_name: "Video", enabled: true, visible_in_sidebar: true, sort_order: 1 },
   photo: { display_name: "Product Photo", enabled: true, visible_in_sidebar: true, sort_order: 2 },
   ig: { display_name: "IG Automation", enabled: true, visible_in_sidebar: true, sort_order: 3 },
   schedule: { display_name: "Schedule", enabled: true, visible_in_sidebar: true, sort_order: 4 },

@@ -16,13 +16,10 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import {
-  STORAGE_BUCKET,
-  videosStoragePath,
-  isVideosTempRefPath,
-} from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
 import {
   getMotionControlModel,
   isValidMotionControlModelId,
@@ -152,6 +149,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown motion control model." }, { status: 400 });
     }
     const model = getMotionControlModel(modelId);
+    if (!(await isCatalogModelEnabled("reels", modelId))) {
+      return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
+    }
     const prompt = promptRaw.slice(0, model.promptMaxChars);
 
     if (!isValidMotionControlMode(model, mode)) {
@@ -389,7 +389,7 @@ export async function POST(req: Request) {
       throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
     }
     const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosStoragePath(`motion_${Date.now()}.mp4`);
+    const storagePath = videosGeneratedVideoPath(userId!, "motion-control", `video_${Date.now()}.mp4`);
 
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)

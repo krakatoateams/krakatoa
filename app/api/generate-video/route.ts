@@ -16,13 +16,10 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
+import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import {
-  STORAGE_BUCKET,
-  videosStoragePath,
-  isVideosTempRefPath,
-} from "@/lib/storage-buckets";
+import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
 import {
   getVideoModel,
   isValidVideoModelId,
@@ -206,6 +203,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
     const model = getVideoModel(modelId);
+    if (!(await isCatalogModelEnabled("reels", modelId))) {
+      return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
+    }
     jobKind = getVideoJobKind(model);
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
@@ -534,7 +534,8 @@ export async function POST(req: Request) {
       throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
     }
     const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosStoragePath(`video_${Date.now()}.mp4`);
+    const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
+    const storagePath = videosGeneratedVideoPath(userId!, videoMode, `video_${Date.now()}.mp4`);
 
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)

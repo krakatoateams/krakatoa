@@ -6,6 +6,15 @@ import {
   isPhotoFeatureKey,
   type PhotoFeatureKey,
 } from "@/lib/creation-features";
+import {
+  defaultModelForComposer,
+  defaultVideoComposerRows,
+  eligibleModelsForComposer,
+  isVideoComposerKey,
+  VIDEO_COMPOSER_KEYS,
+  type VideoComposerKey,
+} from "@/lib/video-composer-features";
+import { getEnabledCatalogModelIds } from "@/lib/model-catalog-configs-db";
 
 /**
  * Per-feature model enablement data access (service-role) — Admin Config v3.
@@ -89,7 +98,7 @@ export async function ensureFeatureModelRows(): Promise<FeatureModelConfig[]> {
     existing.map((r) => `${r.tool_key}:${r.feature_key}:${r.model_tier}`)
   );
 
-  const missing = defaultFeatureModelRows()
+  const missing = [...defaultFeatureModelRows(), ...defaultVideoComposerRows()]
     .filter((d) => !seen.has(`${d.toolKey}:${d.featureKey}:${d.modelTier}`))
     .map((d) => ({
       tool_key: d.toolKey,
@@ -149,6 +158,8 @@ export async function updateFeatureModelConfig(
     .maybeSingle();
 
   handleError(error, "Failed to update feature model config.");
+  cache = { map: null, expiresAt: 0 };
+  videoCache = { map: null, expiresAt: 0 };
   return (data as FeatureModelConfig | null) ?? null;
 }
 
@@ -161,8 +172,13 @@ export async function resetFeatureModelConfig(
   if (!row) return null;
 
   const isDefault =
+    row.tool_key === "photo" &&
     isPhotoFeatureKey(row.feature_key) &&
-    defaultTierForFeature(row.feature_key) === row.model_tier;
+    defaultTierForFeature(row.feature_key) === row.model_tier
+      ? true
+      : row.tool_key === "reels" &&
+          isVideoComposerKey(row.feature_key) &&
+          defaultModelForComposer(row.feature_key) === row.model_tier;
 
   // Clearing/setting default mirrors the single-default-per-feature invariant.
   if (isDefault) {
@@ -195,12 +211,18 @@ export type FeatureEnablement = {
   defaultTier: string;
 };
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 0;
 type EnablementCache = {
   map: Record<PhotoFeatureKey, FeatureEnablement> | null;
   expiresAt: number;
 };
 let cache: EnablementCache = { map: null, expiresAt: 0 };
+
+type VideoEnablementCache = {
+  map: Record<VideoComposerKey, FeatureEnablement> | null;
+  expiresAt: number;
+};
+let videoCache: VideoEnablementCache = { map: null, expiresAt: 0 };
 
 /** Pure code-default enablement (every eligible tier enabled; code default tier). */
 function codeDefaults(): Record<PhotoFeatureKey, FeatureEnablement> {
@@ -227,7 +249,10 @@ export async function getPhotoFeatureEnablement(): Promise<
   if (cache.map && now < cache.expiresAt) return cache.map;
 
   try {
-    const rows = await listFeatureModelConfigs();
+    const [rows, catalogEnabled] = await Promise.all([
+      listFeatureModelConfigs(),
+      getEnabledCatalogModelIds("photo"),
+    ]);
     const byKey = new Map<string, FeatureModelConfig>();
     for (const r of rows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
 
@@ -235,8 +260,9 @@ export async function getPhotoFeatureEnablement(): Promise<
     for (const featureKey of ["image", "product", "character"] as PhotoFeatureKey[]) {
       const eligible = eligibleTiersForFeature(featureKey);
       const enabledTiers = eligible.filter((tier) => {
+        if (!catalogEnabled.has(tier)) return false;
         const row = byKey.get(`${featureKey}:${tier}`);
-        return row ? row.enabled : true; // missing row => shipped default (enabled)
+        return row ? row.enabled : true;
       });
 
       // Default: an enabled, eligible row flagged is_default wins; otherwise the
@@ -258,5 +284,64 @@ export async function getPhotoFeatureEnablement(): Promise<
   } catch (e) {
     console.warn("[feature-model-configs] DB read failed, using code defaults:", e);
     return codeDefaults();
+  }
+}
+
+function codeVideoDefaults(): Record<VideoComposerKey, FeatureEnablement> {
+  const out = {} as Record<VideoComposerKey, FeatureEnablement>;
+  for (const composerKey of VIDEO_COMPOSER_KEYS) {
+    out[composerKey] = {
+      enabledTiers: eligibleModelsForComposer(composerKey),
+      defaultTier: defaultModelForComposer(composerKey),
+    };
+  }
+  return out;
+}
+
+/**
+ * Resolve enabled models + default per Video composer, merging admin DB overrides
+ * over the code catalog. Eligibility is always enforced in code. Cached ~60s.
+ */
+export async function getVideoComposerEnablement(): Promise<
+  Record<VideoComposerKey, FeatureEnablement>
+> {
+  const now = Date.now();
+  if (videoCache.map && now < videoCache.expiresAt) return videoCache.map;
+
+  try {
+    const [rows, catalogEnabled] = await Promise.all([
+      listFeatureModelConfigs(),
+      getEnabledCatalogModelIds("reels"),
+    ]);
+    const reelsRows = rows.filter((r) => r.tool_key === "reels");
+    const byKey = new Map<string, FeatureModelConfig>();
+    for (const r of reelsRows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
+
+    const out = {} as Record<VideoComposerKey, FeatureEnablement>;
+    for (const composerKey of VIDEO_COMPOSER_KEYS) {
+      const eligible = eligibleModelsForComposer(composerKey);
+      const enabledTiers = eligible.filter((tier) => {
+        if (!catalogEnabled.has(tier)) return false;
+        const row = byKey.get(`${composerKey}:${tier}`);
+        return row ? row.enabled : true;
+      });
+
+      const dbDefault = eligible.find((tier) => {
+        const row = byKey.get(`${composerKey}:${tier}`);
+        return row?.is_default && enabledTiers.includes(tier);
+      });
+      const codeDefault = defaultModelForComposer(composerKey);
+      const defaultTier =
+        dbDefault ??
+        (enabledTiers.includes(codeDefault) ? codeDefault : enabledTiers[0] ?? codeDefault);
+
+      out[composerKey] = { enabledTiers, defaultTier };
+    }
+
+    videoCache = { map: out, expiresAt: now + CACHE_TTL_MS };
+    return out;
+  } catch (e) {
+    console.warn("[feature-model-configs] video DB read failed, using code defaults:", e);
+    return codeVideoDefaults();
   }
 }

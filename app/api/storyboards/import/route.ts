@@ -5,9 +5,9 @@ import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
   isVideosTempRefPath,
 } from "@/lib/storage-buckets";
+import { storyboardSheetPath } from "@/lib/product-photo";
 import {
   flattenReplicateTextChunks,
   runReplicateWithRetry,
@@ -355,8 +355,8 @@ export async function POST(req: Request) {
     // ---- Move the upload to the permanent storyboard path ----
     await beginStep("storage_move", "Move uploaded storyboard to permanent path");
     const ext = (rawPath.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
-    const filename = `storyboard_uploaded_${Date.now()}.${ext}`;
-    const destPath = videosStoryboardPath(filename);
+    const filename = `image_uploaded_${Date.now()}.${ext}`;
+    const destPath = storyboardSheetPath(userId!, filename);
     permanentPath = destPath;
     const { error: moveErr } = await supabase.storage
       .from(STORAGE_BUCKET)

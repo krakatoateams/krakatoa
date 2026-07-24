@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AdminOverviewSkeleton } from "./admin-ui";
 
 type Summary = {
   jobs: {
@@ -58,7 +59,7 @@ export default function AdminOverviewPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p className="text-sm text-gray-500">Loading overview…</p>;
+  if (loading) return <AdminOverviewSkeleton />;
   if (error) return <p className="text-sm text-red-400">{error}</p>;
   if (!data) return null;
 

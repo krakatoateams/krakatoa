@@ -10,6 +10,7 @@ import {
   productPhotoPricingKey,
   productPhotoProviderResolution,
   buildGeneratedFilename,
+  photoStorageModeFromGenerate,
   buildProductPhotoPrompt,
   buildCharacterSheetPrompt,
   buildPhotoProviderInput,
@@ -672,6 +673,7 @@ export async function POST(req: Request) {
 
     const saved = await saveGeneratedProductPhoto({
       userId,
+      photoMode: photoStorageModeFromGenerate(mode),
       filename,
       imageBuffer,
       poseId,

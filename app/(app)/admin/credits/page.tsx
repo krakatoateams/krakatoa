@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AdminTableSkeleton } from "../admin-ui";
 
 type AdminWallet = {
   email: string;
@@ -87,7 +88,7 @@ export default function AdminCreditsPage() {
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading wallets…</p>
+        <AdminTableSkeleton rows={6} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-800">
           <table className="w-full text-left text-sm">

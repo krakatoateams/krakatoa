@@ -5,8 +5,8 @@ import { getSupabase } from "@/lib/supabase";
 import {
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
-  videosStoryboardPath,
 } from "@/lib/storage-buckets";
+import { storyboardSheetPath } from "@/lib/product-photo";
 import {
   extractMediaUrl,
   flattenReplicateTextChunks,
@@ -668,8 +668,8 @@ export async function POST(req: Request) {
     }
     const imageBuffer = await imgRes.arrayBuffer();
 
-    const filename = `storyboard_${Date.now()}.png`;
-    const storagePath = videosStoryboardPath(filename);
+    const filename = `image_${Date.now()}.png`;
+    const storagePath = storyboardSheetPath(userId!, filename);
     const supabase = getSupabase();
 
     console.log("[Storyboard] Uploading to Supabase:", storagePath);

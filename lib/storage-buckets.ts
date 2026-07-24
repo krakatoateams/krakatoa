@@ -1,7 +1,11 @@
 /**
  * Kelolako uses one public Supabase Storage bucket with top-level folders per feature.
- * Product photos live under `photos/` — never inside `videos/`.
- * ReelsGen: final MP4s under `videos/`; transient caption files under `videos/temp/`; Storyboard tab under `videos/storyboard/`.
+ * Product photos live under `photos/{userId}/` — never inside `videos/`.
+ * Video studio: `videos/{userId}/generated/video/{mode}/` (reelscreator, t2v, i2v,
+ * motion-control). Storyboard i2v: `videos/{userId}/generated/storyboard/`.
+ * Product photos: `photos/{userId}/generated/{mode}/` (product, t2i, character,
+ * storyboard). Reference uploads: `photos/{userId}/uploads/reference/`.
+ * Scheduler device uploads still use flat `videos/` (orphan-sweeped after 24h).
  *
  * Create the bucket in Supabase Dashboard → Storage, then add public folders as needed.
  * Override the bucket name with SUPABASE_STORAGE_BUCKET in .env.local if needed.
@@ -51,36 +55,102 @@ export const VIDEOS_STORYBOARD_SEGMENT = "storyboard";
 /** Top-level folder for Product Photo (uploads + generated images) */
 export const PHOTOS_FOLDER = "photos";
 
-/** Final ReelsGen outputs (e.g. `reels_*.mp4`) — public download URLs. */
+/** @deprecated Scheduler device uploads only — generations use `videosUserPrefix`. */
 export function videosStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${filename}`;
 }
 
-/** Transient ReelsGen files under `videos/temp/` (captions, scratch uploads). */
+/** @deprecated Legacy global temp — new generations use `videosUserTempPath`. */
 export function videosTempStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/${filename}`;
 }
 
-/** Prefix for transient generation reference uploads (`videos/temp/refs/`). */
+/** Path segment that marks transient reference uploads (legacy or per-user). */
+const TEMP_REFS_SEGMENT_PATH = `/${VIDEOS_TEMP_SEGMENT}/${VIDEOS_TEMP_REFS_SEGMENT}/`;
+
+/** @deprecated Legacy global refs prefix — use `videosUserTempRefPath`. */
 export const VIDEOS_TEMP_REFS_PREFIX = `${VIDEOS_FOLDER}/${VIDEOS_TEMP_SEGMENT}/${VIDEOS_TEMP_REFS_SEGMENT}/`;
 
+/** Storage prefix per authenticated user: `videos/{userId}/` (mirrors `photos/{userId}/`). */
+export function videosUserPrefix(userId: string): string {
+  const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) throw new Error("Invalid user id");
+  return `${VIDEOS_FOLDER}/${safe}`;
+}
+
+/** Video studio modes under `generated/video/` (sibling folders, one per tool). */
+export type VideoStudioMode = "reelscreator" | "t2v" | "i2v" | "motion-control";
+
+function safeModeSegment(mode: string, label: string): string {
+  const safe = mode.replace(/[^a-z0-9-]/g, "");
+  if (!safe) throw new Error(`Invalid ${label}: "${mode}"`);
+  return safe;
+}
+
+/** `videos/{userId}/generated/video/{mode}/{filename}` */
+export function videosGeneratedVideoPath(
+  userId: string,
+  mode: VideoStudioMode,
+  filename: string,
+): string {
+  return `${videosUserPrefix(userId)}/generated/video/${safeModeSegment(mode, "video mode")}/${filename}`;
+}
+
+/** Storyboard tab i2v output: `videos/{userId}/generated/storyboard/{filename}` */
+export function videosStoryboardVideoPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}/generated/storyboard/${filename}`;
+}
+
+/** @deprecated Use `videosGeneratedVideoPath` with the correct mode. */
+export function videosGeneratedPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}/generated/${filename}`;
+}
+
+/** Transient per-user files (captions, scratch): `videos/{userId}/temp/<filename>`. */
+export function videosUserTempPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}/${VIDEOS_TEMP_SEGMENT}/${filename}`;
+}
+
 /**
- * Transient generation reference uploads under `videos/temp/refs/<filename>`.
- * Covered by the `videos/temp/` storage sweep, and explicitly removed by the
- * generation route's `finally` cleanup after success/failure/insufficient-credits.
+ * Transient generation reference uploads under `videos/{userId}/temp/refs/<filename>`.
+ * Covered by the storage sweep AND explicitly removed by generation routes after run.
  */
+export function videosUserTempRefPath(userId: string, filename: string): string {
+  return `${videosUserPrefix(userId)}${TEMP_REFS_SEGMENT_PATH}${filename}`;
+}
+
+/** @deprecated Use `videosUserTempRefPath` — kept for call-site grep during migration. */
 export function videosTempRefPath(filename: string): string {
   return `${VIDEOS_TEMP_REFS_PREFIX}${filename}`;
 }
 
-/** Whether a storage path lives under the transient reference-uploads prefix. */
+/** Whether a storage path lives under a transient reference-uploads folder. */
 export function isVideosTempRefPath(path: string): boolean {
-  return typeof path === "string" && path.startsWith(VIDEOS_TEMP_REFS_PREFIX);
+  return (
+    typeof path === "string" &&
+    path.startsWith(`${VIDEOS_FOLDER}/`) &&
+    path.includes(TEMP_REFS_SEGMENT_PATH)
+  );
 }
 
-/** Storyboard tab assets: `videos/storyboard/<filename>` */
+/** @deprecated Use `videosStoryboardVideoPath` or `storyboardSheetPath` (product-photo). */
+export function videosUserStoryboardPath(userId: string, filename: string): string {
+  return videosStoryboardVideoPath(userId, filename);
+}
+
+/** @deprecated Use `videosUserStoryboardPath` — legacy flat storyboard folder. */
 export function videosStoryboardPath(filename: string): string {
   return `${VIDEOS_FOLDER}/${VIDEOS_STORYBOARD_SEGMENT}/${filename}`;
+}
+
+/** True when a path is under any user's (or legacy global) `temp/` segment. */
+export function isVideosTempPath(path: string): boolean {
+  if (!path.startsWith(`${VIDEOS_FOLDER}/`)) return false;
+  const rest = path.slice(VIDEOS_FOLDER.length + 1);
+  return (
+    rest.startsWith(`${VIDEOS_TEMP_SEGMENT}/`) ||
+    rest.includes(`/${VIDEOS_TEMP_SEGMENT}/`)
+  );
 }
 
 /** Postgres table for Storyboard metadata (public URLs only — never Replicate prediction URLs). */
