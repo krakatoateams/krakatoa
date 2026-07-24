@@ -20,7 +20,7 @@ import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
-import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { resolveRefForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   getMotionControlModel,
   isValidMotionControlModelId,
@@ -40,6 +40,7 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import { resolveMentionCreations } from "@/lib/mention-assets-server";
 
 // Vercel Hobby plan caps every Serverless Function at maxDuration=300. Raising
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
@@ -144,6 +145,8 @@ export async function POST(req: Request) {
     const characterOrientation = String(b.characterOrientation ?? "").trim();
     const keepOriginalSound = b.keepOriginalSound !== false; // default true
     const refVideoDurationRaw = Number(b.refVideoDurationSec ?? NaN);
+    const characterCreationId =
+      typeof b.characterCreationId === "string" ? b.characterCreationId.trim() : "";
 
     // ---- Validate model + options (all before any job/spend/provider) ----
     if (!modelId || !isValidMotionControlModelId(modelId)) {
@@ -169,8 +172,17 @@ export async function POST(req: Request) {
     }
 
     // ---- Parse the required reference attachments + collect temp paths ----
-    const imageRef = parseRefAttachment(b.image);
+    let imageRef = parseRefAttachment(b.image);
     const videoRef = parseRefAttachment(b.video);
+
+    if (characterCreationId && userId) {
+      const resolved = await resolveMentionCreations(userId, [characterCreationId]);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      imageRef = { url: resolved.items[0].url, path: "" };
+    }
+
     if (!imageRef) {
       return NextResponse.json({ error: "A reference image is required." }, { status: 400 });
     }
@@ -215,6 +227,7 @@ export async function POST(req: Request) {
       keepOriginalSound,
       billedDuration,
       pricingKey,
+      characterCreationId,
       image: imageRef.url,
       video: videoRef.url,
     });
@@ -338,14 +351,20 @@ export async function POST(req: Request) {
     if (asset) videoAssetId = asset.id;
 
     // ---- Provider call (Kling fetches the reference URLs directly) ----
+    const pipelineImageUrl = await resolveRefForPipeline(userId!, imageRef);
+    const pipelineVideoUrl = await resolveRefForPipeline(userId!, videoRef);
+    if (!pipelineImageUrl || !pipelineVideoUrl) {
+      throw new Error("Reference attachments could not be resolved.");
+    }
+
     const replicate = createReplicateClient();
     const providerInput = buildMotionControlProviderInput({
       prompt,
       mode: mode as MotionControlMode,
       keepOriginalSound,
       characterOrientation: orientation,
-      imageUrl: imageRef.url,
-      videoUrl: videoRef.url,
+      imageUrl: pipelineImageUrl,
+      videoUrl: pipelineVideoUrl,
     });
 
     await beginStep("motion_control_generation", `${model.modelLabel} motion control generation`, {

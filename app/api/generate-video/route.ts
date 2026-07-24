@@ -20,7 +20,7 @@ import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
-import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { resolveRefForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   getVideoModel,
   isValidVideoModelId,
@@ -93,6 +93,56 @@ function parseCreationIdList(raw: unknown): string[] {
       .filter(Boolean);
   }
   return [];
+}
+
+async function resolveVideoRefsForPipeline(
+  userId: string,
+  refs: {
+    firstFrame: RefAttachment | null;
+    lastFrame: RefAttachment | null;
+    referenceImages: RefAttachment[];
+    referenceVideos: RefAttachment[];
+    referenceAudios: RefAttachment[];
+  }
+): Promise<{ ok: true; inputs: VideoReferenceInputs } | { ok: false; error: string }> {
+  const resolveOne = async (ref: RefAttachment | null): Promise<string | null> => {
+    if (!ref) return null;
+    return resolveRefForPipeline(userId, ref);
+  };
+  const resolveMany = async (list: RefAttachment[]): Promise<string[] | null> => {
+    const urls: string[] = [];
+    for (const ref of list) {
+      const url = await resolveRefForPipeline(userId, ref);
+      if (!url) return null;
+      urls.push(url);
+    }
+    return urls;
+  };
+
+  const firstFrame = await resolveOne(refs.firstFrame);
+  const lastFrame = await resolveOne(refs.lastFrame);
+  if (refs.firstFrame && !firstFrame) {
+    return { ok: false, error: "First frame could not be resolved." };
+  }
+  if (refs.lastFrame && !lastFrame) {
+    return { ok: false, error: "Last frame could not be resolved." };
+  }
+  const referenceImages = await resolveMany(refs.referenceImages);
+  if (referenceImages === null) {
+    return { ok: false, error: "A reference image could not be resolved." };
+  }
+  const referenceVideos = await resolveMany(refs.referenceVideos);
+  if (referenceVideos === null) {
+    return { ok: false, error: "A reference video could not be resolved." };
+  }
+  const referenceAudios = await resolveMany(refs.referenceAudios);
+  if (referenceAudios === null) {
+    return { ok: false, error: "A reference audio could not be resolved." };
+  }
+  return {
+    ok: true,
+    inputs: { firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios },
+  };
 }
 
 export async function POST(req: Request) {
@@ -482,6 +532,17 @@ export async function POST(req: Request) {
     if (asset) videoAssetId = asset.id;
 
     // ---- Provider call (Seedance fetches the reference URLs directly) ----
+    const pipelineRefs = await resolveVideoRefsForPipeline(userId!, {
+      firstFrame,
+      lastFrame,
+      referenceImages,
+      referenceVideos,
+      referenceAudios,
+    });
+    if (!pipelineRefs.ok) {
+      throw new Error(pipelineRefs.error);
+    }
+
     const replicate = createReplicateClient();
     const providerInput = buildVideoProviderInput({
       model,
@@ -491,7 +552,7 @@ export async function POST(req: Request) {
       aspectRatio,
       generateAudio,
       seed,
-      references: referenceInputs,
+      references: pipelineRefs.inputs,
     });
 
     await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {

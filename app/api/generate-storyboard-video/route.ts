@@ -7,7 +7,7 @@ import {
   STORYBOARDS_TABLE,
   videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
-import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -215,7 +215,7 @@ export async function POST(req: Request) {
     const language: StoryboardLanguageId =
       clientLanguage ?? storedLanguage ?? DEFAULT_STORYBOARD_LANGUAGE;
 
-    const storyboardUrl = String(row.storyboard_url || "").trim();
+    const storyboardUrlRaw = String(row.storyboard_url || "").trim();
     const storedPrompt = String(row.seedance_prompt || "").trim();
     // Optional edited prompt from the Advanced "edit prompt" UI. Ownership is
     // already enforced above (row.user_id === userId), so the owner may override
@@ -226,9 +226,14 @@ export async function POST(req: Request) {
     const promptEdited = !!editedPrompt && editedPrompt !== storedPrompt;
     let seedancePrompt = promptEdited ? editedPrompt : storedPrompt;
 
-    if (!storyboardUrl.startsWith("https://")) {
+    const storyboardUrl = await resolveSignedMediaUrl({
+      userId: userId!,
+      mediaUrl: storyboardUrlRaw,
+      ttl: "pipeline",
+    });
+    if (!storyboardUrl) {
       return NextResponse.json(
-        { error: "Stored storyboard_url is not a valid public https URL." },
+        { error: "Stored storyboard sheet could not be resolved." },
         { status: 500 }
       );
     }

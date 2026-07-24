@@ -1657,19 +1657,15 @@ function MotionControlComposer({
   const pricingKey = model.pricingKey(mode);
   const cost = videoCredits(pricingKey, billedDuration);
 
-  // Resolve the character image from whichever source is active. A library
-  // character is a permanent creation (public URL), so it carries no temp path —
-  // the server only sweeps temp upload paths, never library items.
+  // Resolve the character image from whichever source is active. Library characters
+  // are resolved server-side via characterCreationId (pipeline-signed URL).
   const resolvedCharacter: { url: string; path: string } | null =
-    charSource === "library"
-      ? libraryChar
-        ? { url: libraryChar.url, path: "" }
-        : null
-      : charImage.done[0]
-        ? { url: charImage.done[0].url, path: charImage.done[0].path }
-        : null;
+    charSource === "upload" && charImage.done[0]
+      ? { url: charImage.done[0].url, path: charImage.done[0].path }
+      : null;
 
-  const imageReady = resolvedCharacter !== null;
+  const imageReady =
+    charSource === "library" ? libraryChar !== null : resolvedCharacter !== null;
   const videoReady = motionVideo.done.length > 0;
   const anyUploading =
     motionVideo.uploading || (charSource === "upload" && charImage.uploading);
@@ -1686,6 +1682,8 @@ function MotionControlComposer({
       characterOrientation: orientation,
       keepOriginalSound,
       refVideoDurationSec: videoDurationSec,
+      characterCreationId:
+        charSource === "library" && libraryChar ? libraryChar.id : undefined,
       image: resolvedCharacter,
       video: motionVideo.done[0]
         ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }

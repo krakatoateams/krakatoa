@@ -160,6 +160,20 @@ export async function signStoragePathForPipeline(
   return signed.url;
 }
 
+/** Resolve a client ref attachment to a fetchable URL for Replicate/Rendi (pipeline TTL). */
+export async function resolveRefForPipeline(
+  userId: string,
+  ref: { url?: string | null; path?: string | null },
+): Promise<string | null> {
+  const path = resolveStoragePath(ref.path, ref.url);
+  if (path) {
+    return signStoragePathForPipeline(path, userId);
+  }
+  const raw = ref.url?.trim();
+  if (raw?.startsWith("http")) return raw;
+  return null;
+}
+
 /** Prefer storage_path; fall back to legacy public URL; external URLs pass through. */
 export async function resolveSignedMediaUrl(params: {
   userId: string;
