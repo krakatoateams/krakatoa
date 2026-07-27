@@ -638,11 +638,17 @@ function UploadCard({
     }
   };
 
+  // True once a video is selected, whether or not it's actually been
+  // uploaded to Storage yet — upload is deferred until "Schedule" is clicked
+  // (see handleFilesAdded/ScheduleCard.handleSubmit), so a staged `file`
+  // alone (uploadStatus still "idle") already counts as "ready" here.
+  const hasSelectedMedia = !!(file || videoUrl || storagePath);
+
   const dropZoneClass =
     isDragging ? "border-violet-500 bg-violet-500/10" :
-    uploadStatus === "done" ? "border-green-500/40 bg-green-500/5" :
     uploadStatus === "error" ? "border-red-500/40 bg-red-500/5" :
     uploadStatus === "uploading" ? "border-violet-500/40 bg-violet-500/5 cursor-not-allowed" :
+    hasSelectedMedia ? "border-green-500/40 bg-green-500/5" :
     "border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800";
 
   // TikTok photo post: entirely different media source (multi-select photo
@@ -678,16 +684,40 @@ function UploadCard({
             </div>
           )}
 
-          {/* Selected-photos preview strip — renders straight from `photoUrls`
-              rather than the library grid, so a raw-uploaded photo always
-              shows here even though it's intentionally never written to
-              user_creations (Decision 8, ephemeral) and therefore can never
-              appear as a matching thumbnail in the "Choose from your
-              library" grid below. Fixes: single-photo drop not previewing. */}
-          {photoUrls.length > 0 && (
+          {/* Selected-photos preview strip. Renders straight from `photoUrls`
+              (a raw-uploaded photo always shows here even though it's
+              intentionally never written to user_creations — Decision 8,
+              ephemeral — and therefore can never appear as a matching
+              thumbnail in the "Choose from your library" grid below), plus a
+              leading tile from the local `file` blob when a raw photo is
+              staged but not yet uploaded (upload is deferred until Schedule
+              is clicked — see ScheduleCard.handleSubmit). That staged file
+              is always the eventual cover (position 0 once uploaded). */}
+          {(photoUrls.length > 0 || file) && (
             <div className="mb-4">
-              <p className="mb-2 text-sm font-semibold text-white">{photoCountLabel(photoUrls.length)}</p>
+              <p className="mb-2 text-sm font-semibold text-white">
+                {photoCountLabel(photoUrls.length + (file ? 1 : 0))}
+              </p>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                {file && previewUrl && (
+                  <div className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-gray-700 bg-black">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={previewUrl} alt="" className="h-full w-full object-cover" />
+                    {(photoUrls.length > 0 || uploadStatus === "uploading") && (
+                      <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white">
+                        {uploadStatus === "uploading" ? "Uploading…" : "Cover"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleRemove}
+                      aria-label="Remove photo"
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white/80 opacity-0 backdrop-blur-sm transition-opacity hover:text-white group-hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
                 {photoUrls.map((url, i) => (
                   <div
                     key={url}
@@ -695,7 +725,7 @@ function UploadCard({
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <SchedulerPhotoImg src={url} alt="" className="h-full w-full object-cover" />
-                    {i === 0 && photoUrls.length > 1 && (
+                    {i === 0 && !file && photoUrls.length > 1 && (
                       <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white">
                         Cover
                       </span>
@@ -713,7 +743,7 @@ function UploadCard({
               </div>
             </div>
           )}
-          {photoUrls.length === 0 && uploadStatus !== "uploading" && (
+          {photoUrls.length === 0 && !file && uploadStatus !== "uploading" && (
             <p className="mb-3 text-xs text-amber-400">Add at least one photo to schedule this post.</p>
           )}
 
@@ -872,11 +902,13 @@ function UploadCard({
               </div>
             </>
           )}
-          {uploadStatus === "done" && (videoUrl || storagePath) && (
+          {uploadStatus !== "uploading" && uploadStatus !== "error" && hasSelectedMedia && (
             <>
               <CheckCircle2 className="h-8 w-8 text-green-400" />
               <div>
-                <p className="text-sm font-semibold text-green-400">✓ Video ready</p>
+                <p className="text-sm font-semibold text-green-400">
+                  {uploadStatus === "done" ? "✓ Video ready" : "✓ Video selected"}
+                </p>
                 <p className="mt-0.5 text-xs text-gray-400">{file?.name}</p>
                 <p className="mt-0.5 text-xs text-gray-500">
                   {file ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : ""}
@@ -899,7 +931,7 @@ function UploadCard({
               </button>
             </>
           )}
-          {uploadStatus === "idle" && (
+          {uploadStatus !== "uploading" && uploadStatus !== "error" && !hasSelectedMedia && (
             <>
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-800">
                 <Upload className="h-5 w-5 text-gray-400" />
@@ -936,7 +968,7 @@ function UploadCard({
         {/* Video preview + duration. Frame adapts to the chosen format:
             9:16 for a Short, 16:9 for a Video. object-contain letterboxes
             gracefully when the real ratio differs from the frame. */}
-        {previewUrl && uploadStatus === "done" && (
+        {previewUrl && uploadStatus !== "uploading" && uploadStatus !== "error" && (
           <div className="mt-4 space-y-2">
             <div
               className={`mx-auto w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${
@@ -1332,6 +1364,10 @@ function PlatformFields({
 interface ScheduleCardProps {
   videoUrl: string | null;
   storagePath: string | null;
+  // Staged raw file not yet uploaded to Storage (upload is deferred until
+  // "Schedule Post" is clicked — see handleFilesAdded/uploadStagedMedia).
+  // Null for an item sourced from "Choose from Assets" (already hosted).
+  file: File | null;
   caption: string;
   // Full reset (wipes the draft back to blank) — called only on full success,
   // never on partial/total failure, so a failed platform stays selected and
@@ -1360,6 +1396,12 @@ interface ScheduleCardProps {
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
   onPlatformPatch: (patch: PlatformPatch) => void;
+  // Persists the result of the deferred upload (see handleSubmit) into the
+  // parent's item state — a distinct, narrower prop from onPlatformPatch so
+  // this component doesn't need a fully generic Partial<VideoItem> setter.
+  onMediaUploaded: (
+    patch: Partial<Pick<VideoItem, "videoUrl" | "storagePath" | "photoUrls" | "file" | "uploadStatus">>,
+  ) => void;
   tiktokConnected: boolean;
   tiktokPrivacyOptions: string[];
   // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
@@ -1372,6 +1414,7 @@ interface ScheduleCardProps {
 function ScheduleCard({
   videoUrl,
   storagePath,
+  file,
   caption,
   onSuccess,
   onPostCreated,
@@ -1390,6 +1433,7 @@ function ScheduleCard({
   tiktokBrandOrganicToggle,
   tiktokBrandContentToggle,
   onPlatformPatch,
+  onMediaUploaded,
   tiktokConnected,
   tiktokPrivacyOptions,
   contentType,
@@ -1398,6 +1442,11 @@ function ScheduleCard({
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
   const [submitting, setSubmitting] = useState(false);
+  // Distinct from `submitting` only for button copy — the upload (deferred
+  // until this click) happens before the actual schedule POST, and a large
+  // video can take a few seconds, so "Uploading…" vs "Scheduling…" avoids it
+  // looking frozen.
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [confirmEmptyCaption, setConfirmEmptyCaption] = useState(false);
 
   const set = (key: keyof ScheduleForm) =>
@@ -1417,7 +1466,9 @@ function ScheduleCard({
     // Retry-safe: only submit platforms that haven't already succeeded on a
     // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
     const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-    const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
+    // A staged raw file (not yet uploaded — upload is deferred until this
+    // click) counts as "has media" too, alongside an already-resolved ref.
+    const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
 
     if (!hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
       return;
@@ -1430,6 +1481,40 @@ function ScheduleCard({
     }
 
     setSubmitting(true);
+
+    // Upload the staged file now, if there is one — this is the point upload
+    // was deferred to (see handleFilesAdded). Resolve local variables rather
+    // than relying on the parent re-rendering with fresh props in time; also
+    // persist the result via onPlatformPatch so a retry after a later
+    // failure doesn't re-upload.
+    let effectiveVideoUrl = videoUrl;
+    let effectiveStoragePath = storagePath;
+    let effectivePhotoUrls = photoUrls;
+
+    if (file) {
+      setUploadingMedia(true);
+      try {
+        const isPhotoFile = contentType === "photo";
+        const uploaded = await signAndUploadFile(file, isPhotoFile ? "image" : "video");
+        if (isPhotoFile) {
+          // The staged file is always the cover (position 0) — it was the
+          // first photo selected for this card, matching the previous
+          // immediate-upload behavior.
+          effectivePhotoUrls = [uploaded.storagePath, ...photoUrls];
+          onMediaUploaded({ photoUrls: effectivePhotoUrls, file: null, uploadStatus: "done" });
+        } else {
+          effectiveVideoUrl = uploaded.url;
+          effectiveStoragePath = uploaded.storagePath;
+          onMediaUploaded({ videoUrl: uploaded.url, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
+        }
+      } catch (err) {
+        onToast({ type: "error", message: err instanceof Error ? err.message : "Upload failed. Please try again." });
+        setUploadingMedia(false);
+        setSubmitting(false);
+        return;
+      }
+      setUploadingMedia(false);
+    }
 
     try {
       const scheduled_time = new Date(`${form.date}T${form.time}:00`).toISOString();
@@ -1449,10 +1534,10 @@ function ScheduleCard({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...(isPhoto
-                ? { photo_urls: photoUrls }
-                : storagePath
-                  ? { storage_path: storagePath }
-                  : { video_url: videoUrl }),
+                ? { photo_urls: effectivePhotoUrls }
+                : effectiveStoragePath
+                  ? { storage_path: effectiveStoragePath }
+                  : { video_url: effectiveVideoUrl }),
               title: title.trim(),
               description,
               tags,
@@ -1522,7 +1607,7 @@ function ScheduleCard({
   // A TikTok-targeted post additionally requires a chosen privacy level (never
   // defaulted — see design.md Decision 4).
   const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-  const hasMedia = contentType === "photo" ? photoUrls.length > 0 : !!(storagePath || videoUrl);
+  const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
   const isReady =
     hasMedia && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
     pendingPlatforms.length > 0 &&
@@ -1657,13 +1742,15 @@ function ScheduleCard({
           disabled={!isReady || submitting}
           className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
-          {submitting
-            ? <><RefreshCw className="h-4 w-4 animate-spin" />Scheduling…</>
-            : <><Calendar className="h-4 w-4" />Schedule Post</>}
+          {uploadingMedia
+            ? <><RefreshCw className="h-4 w-4 animate-spin" />Uploading…</>
+            : submitting
+              ? <><RefreshCw className="h-4 w-4 animate-spin" />Scheduling…</>
+              : <><Calendar className="h-4 w-4" />Schedule Post</>}
         </button>
 
         <p className="text-center text-xs text-gray-600">
-          {!(storagePath || videoUrl) ? "Upload a video to enable scheduling"
+          {!hasMedia ? (contentType === "photo" ? "Add a photo to enable scheduling" : "Add a video to enable scheduling")
             : !title.trim() ? "Add a title to schedule"
             : ""}
         </p>
@@ -2111,6 +2198,17 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 alt=""
                 className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
               />
+            ) : previewUrl ? (
+              // Staged raw photo, not yet uploaded (upload is deferred until
+              // Schedule All is clicked) — preview straight from the local
+              // File via the same previewUrl/URL.createObjectURL the video
+              // branch below already uses.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt=""
+                className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
+              />
             ) : (
               <div className={`flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 ${frameClass}`}>
                 <ImageIcon className="h-6 w-6 text-gray-600" />
@@ -2143,7 +2241,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
             <span className="truncate">
               {item.contentType === "photo"
-                ? `Photo post ${index + 1} (${item.photoUrls.length}/35)`
+                ? `Photo post ${index + 1} (${item.photoUrls.length + (item.file ? 1 : 0)}/35)`
                 : item.file?.name ?? `Video ${index + 1}`}
             </span>
             {item.contentType === "video" && item.duration !== null && (
@@ -2273,8 +2371,10 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               affecting sibling cards in the same batch. */}
           {item.contentType === "photo" && (
             <div>
-              <p className="mb-1.5 text-xs text-gray-500">{photoCountLabel(item.photoUrls.length)}</p>
-              {item.photoUrls.length === 0 && (
+              <p className="mb-1.5 text-xs text-gray-500">
+                {photoCountLabel(item.photoUrls.length + (item.file ? 1 : 0))}
+              </p>
+              {item.photoUrls.length === 0 && !item.file && (
                 <p className="mb-1.5 text-xs text-amber-400">Add at least one photo to schedule this post.</p>
               )}
               {/* No `tools` allowlist — see the matching comment on
@@ -2615,7 +2715,11 @@ export default function SchedulerDashboardPage() {
       const newItems: VideoItem[] = accepted.map(({ file, contentType }) => ({
         ...makeDraft(today),
         file,
-        uploadStatus: "uploading",
+        // Upload is deferred until "Schedule" is clicked (see
+        // ScheduleCard.handleSubmit / handleScheduleAll) — selecting a file
+        // here only stages it locally; its preview renders straight from the
+        // File object (URL.createObjectURL), no network call yet.
+        uploadStatus: "idle",
         contentType,
         // Photo posts are TikTok-only — YouTube has no photo-post concept
         // (PlatformFields also disables/grays the YouTube checkbox for this
@@ -2637,28 +2741,8 @@ export default function SchedulerDashboardPage() {
           }))
         : newItems;
       setItems([...existingReal, ...spacedNew]);
-
-      // Sequential uploads — one at a time, updating each item as it resolves.
-      for (const it of newItems) {
-        try {
-          const file = it.file as File;
-          const isPhoto = it.contentType === "photo";
-          const { url, storagePath } = await signAndUploadFile(file, isPhoto ? "image" : "video");
-
-          if (isPhoto) {
-            updateItem(it.id, { photoUrls: [storagePath], uploadStatus: "done" });
-          } else {
-            updateItem(it.id, { videoUrl: url, storagePath, uploadStatus: "done" });
-          }
-        } catch (err) {
-          updateItem(it.id, {
-            uploadStatus: "error",
-            uploadError: err instanceof Error ? err.message : "Upload failed.",
-          });
-        }
-      }
     },
-    [items, today, updateItem],
+    [items, today],
   );
 
   // Pick an existing creation (video OR product photo) as a schedulable item
@@ -2763,7 +2847,9 @@ export default function SchedulerDashboardPage() {
   // scheduling.
   const itemReady = useCallback(
     (i: VideoItem) =>
-      (i.contentType === "photo" ? i.photoUrls.length > 0 : !!(i.storagePath || i.videoUrl)) &&
+      // A staged raw file (not yet uploaded — upload is deferred until
+      // Schedule All is clicked) counts as "has media" too.
+      (i.contentType === "photo" ? (i.photoUrls.length > 0 || !!i.file) : !!(i.storagePath || i.videoUrl || i.file)) &&
       !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
       (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
     [],
@@ -2815,6 +2901,41 @@ export default function SchedulerDashboardPage() {
     // created a `posts` row.
     let success = 0;
     for (const it of targets) {
+      // Upload the staged file now, if there is one — this is the point
+      // upload was deferred to (see handleFilesAdded). A failure here skips
+      // straight to the next target rather than attempting a POST with no
+      // media; the card is marked "failed" so the user can see and retry it.
+      let effectiveVideoUrl = it.videoUrl;
+      let effectiveStoragePath = it.storagePath;
+      let effectivePhotoUrls = it.photoUrls;
+
+      if (it.file) {
+        updateItem(it.id, { uploadStatus: "uploading" });
+        try {
+          const isPhotoFile = it.contentType === "photo";
+          const uploaded = await signAndUploadFile(it.file, isPhotoFile ? "image" : "video");
+          if (isPhotoFile) {
+            // The staged file is always the cover (position 0) — it was the
+            // first photo selected for this card.
+            effectivePhotoUrls = [uploaded.storagePath, ...it.photoUrls];
+            updateItem(it.id, { photoUrls: effectivePhotoUrls, file: null, uploadStatus: "done" });
+          } else {
+            effectiveVideoUrl = uploaded.url;
+            effectiveStoragePath = uploaded.storagePath;
+            updateItem(it.id, { videoUrl: uploaded.url, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
+          }
+        } catch (err) {
+          const uploadMessage = err instanceof Error ? err.message : "Upload failed.";
+          updateItem(it.id, {
+            scheduleStatus: "failed",
+            scheduleError: uploadMessage,
+            uploadStatus: "error",
+            uploadError: uploadMessage,
+          });
+          continue;
+        }
+      }
+
       const scheduled_time = new Date(`${it.date}T${it.time}:00`).toISOString();
       const pendingPlatforms = it.platforms.filter((p) => it.platformResults[p]?.status !== "success");
 
@@ -2831,10 +2952,10 @@ export default function SchedulerDashboardPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...(isPhoto
-                ? { photo_urls: it.photoUrls }
-                : it.storagePath
-                  ? { storage_path: it.storagePath }
-                  : { video_url: it.videoUrl }),
+                ? { photo_urls: effectivePhotoUrls }
+                : effectiveStoragePath
+                  ? { storage_path: effectiveStoragePath }
+                  : { video_url: effectiveVideoUrl }),
               title: it.title.trim(),
               description,
               tags: it.tags,
@@ -2955,6 +3076,7 @@ export default function SchedulerDashboardPage() {
               <ScheduleCard
                 videoUrl={item0.videoUrl}
                 storagePath={item0.storagePath}
+                file={item0.file}
                 caption={item0.caption}
                 onSuccess={handleSuccess}
                 onPostCreated={fetchPosts}
@@ -2973,6 +3095,7 @@ export default function SchedulerDashboardPage() {
                 tiktokBrandOrganicToggle={item0.tiktokBrandOrganicToggle}
                 tiktokBrandContentToggle={item0.tiktokBrandContentToggle}
                 onPlatformPatch={handleItem0PlatformPatch}
+                onMediaUploaded={handleItem0PlatformPatch}
                 tiktokConnected={tiktokConnected}
                 tiktokPrivacyOptions={tiktokPrivacyOptions}
                 contentType={item0.contentType}

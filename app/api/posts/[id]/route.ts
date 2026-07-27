@@ -92,13 +92,19 @@ export async function PATCH(
 
   // Status transition. Re-arming to "scheduled" (Retry, or saving an edited
   // failed post) MUST reset the bounded-retry counter + clear the last error,
-  // otherwise the cron immediately gives up again.
+  // otherwise the cron immediately gives up again. failed_at MUST also be
+  // cleared here — it's what the 7-day storage safety-net cleanup queries
+  // against, and this is the only place a post ever transitions out of
+  // "failed" (cron never does) — a stale failed_at left over from the
+  // original failure could otherwise cause that cleanup to delete storage
+  // out from under an actively-retried post.
   if (status !== undefined) {
     updates.status = status;
     if (status === "scheduled") {
       updates.publish_attempts = 0;
       updates.last_error = null;
       updates.publish_started_at = null;
+      updates.failed_at = null;
     }
   } else if (hasContentEdit && existing.status === "failed") {
     // Saving an edit to a failed post re-arms it for a clean retry.
@@ -106,6 +112,7 @@ export async function PATCH(
     updates.publish_attempts = 0;
     updates.last_error = null;
     updates.publish_started_at = null;
+    updates.failed_at = null;
   }
 
   const { data, error } = await supabaseServer

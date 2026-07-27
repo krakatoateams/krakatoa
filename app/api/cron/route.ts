@@ -8,10 +8,10 @@ import {
   resolveOrigin,
   waitForTikTokPublishOutcome,
 } from "@/lib/tiktok";
-import { removeStorageObjects } from "@/lib/creations-db";
 import { resolveStoragePath, resolvePublishVideoUrl } from "@/lib/storage-signed-url";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
+import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -78,34 +78,6 @@ function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
     return true;
   }
   return false;
-}
-
-/**
- * Best-effort: delete the video file from storage (only when the post has no
- * asset_id — asset-owned files must not be removed here) and null out
- * video_url on the post row. Logs but never throws — a storage failure must
- * not unwind a successful YouTube publish.
- */
-async function cleanupPostVideo(
-  postId: string,
-  videoUrl: string | null | undefined,
-  assetId: string | null | undefined,
-): Promise<void> {
-  if (assetId) {
-    // The file belongs to an asset row — deleting it here would break the
-    // asset's public_url and the Reels Creator history gallery.
-    console.log(`[cron] post ${postId} is asset-linked (asset_id=${assetId}) — skipping storage deletion`);
-  } else {
-    const path = resolveStoragePath(null, videoUrl);
-    if (path) {
-      await removeStorageObjects([path]);
-      console.log(`[cron] storage object removed: ${path}`);
-    } else if (videoUrl) {
-      console.warn(`[cron] could not extract storage path from video_url: ${videoUrl}`);
-    }
-  }
-  const { error } = await supabaseServer.from("posts").update({ video_url: null }).eq("id", postId);
-  if (error) console.warn(`[cron] failed to null video_url for post ${postId}:`, error.message);
 }
 
 /**
@@ -229,6 +201,7 @@ export async function GET(req: NextRequest) {
         .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
         .eq("id", post.id);
       await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+      await cleanupPostPhotos(post.id, post.photo_urls);
       published++;
       continue;
     }
@@ -444,6 +417,7 @@ export async function GET(req: NextRequest) {
           .eq("id", post.id);
 
         await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+        await cleanupPostPhotos(post.id, post.photo_urls);
         published++;
         continue;
       }
@@ -481,6 +455,7 @@ export async function GET(req: NextRequest) {
         .eq("id", post.id);
 
       await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+      await cleanupPostPhotos(post.id, post.photo_urls);
       published++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -510,6 +485,10 @@ export async function GET(req: NextRequest) {
           last_error: message.slice(0, 1000),
           publish_started_at: null,
           publish_attempts: attempts,
+          // Only set on the transition INTO "failed" — this is what the
+          // 7-day storage safety-net cleanup queries against. Left untouched
+          // on a transient retry (status stays "scheduled").
+          ...(giveUp ? { failed_at: new Date().toISOString() } : {}),
         })
         .eq("id", post.id);
 
