@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Instruksi Penghapusan Data",
-    effectiveDate: "Terakhir diperbarui: 23 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 27 Juli 2026",
     intro: "Halaman ini menjelaskan cara meminta penghapusan data pribadi Anda dari Kelolako, termasuk data yang terhubung melalui platform yang Anda hubungkan, seperti YouTube dan TikTok.",
     sections: [
       {
@@ -24,10 +24,11 @@ const content: LegalContent = {
           { type: "p", text: "Setelah permintaan diverifikasi, kami akan menghapus:" },
           { type: "ul", items: [
             "Informasi akun (email, nama, foto profil);",
-            "Konten yang Anda unggah (video, foto);",
+            "Konten yang Anda unggah maupun yang dihasilkan melalui fitur AI kami (video, foto, caption);",
             "Token otorisasi platform terhubung yang sudah aktif (YouTube, TikTok);",
             "Riwayat transaksi kredit.",
           ]},
+          { type: "p", text: "Catatan: data transaksi yang tersimpan di sistem penyedia pembayaran kami (DOKU) tunduk pada kebijakan retensi dan hukum mereka sendiri, dan mungkin tidak terhapus sepenuhnya melalui permintaan ini." },
           { type: "p", text: "Instagram direncanakan sebagai integrasi platform tambahan di masa mendatang. Kami belum mengumpulkan atau menyimpan data otorisasi apa pun untuk Instagram, sehingga tidak ada data Instagram yang perlu dihapus saat ini." },
         ],
       },
@@ -47,7 +48,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Data Deletion Instructions",
-    effectiveDate: "Last updated: July 23, 2026",
+    effectiveDate: "Last updated: July 27, 2026",
     intro: "This page explains how to request deletion of your personal data from Kelolako, including data connected via platforms you've linked, such as YouTube and TikTok.",
     sections: [
       {
@@ -62,10 +63,11 @@ const content: LegalContent = {
           { type: "p", text: "Upon verification, we will delete:" },
           { type: "ul", items: [
             "Account information (email, name, profile photo);",
-            "Content you've uploaded (videos, photos);",
+            "Content you've uploaded as well as content generated through our AI features (videos, photos, captions);",
             "Authorization tokens for connected platforms that are already active (YouTube, TikTok);",
             "Credit transaction history.",
           ]},
+          { type: "p", text: "Note: transaction data held by our payment provider (DOKU) is subject to their own retention policies and applicable regulations, and may not be fully deleted through this request." },
           { type: "p", text: "Instagram is planned as an additional platform integration in the future. We do not yet collect or store any authorization data for Instagram, so there is no Instagram data to delete at this time." },
         ],
       },
