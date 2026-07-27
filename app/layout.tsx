@@ -17,7 +17,7 @@ const dmSans = DM_Sans({
 });
 
 function metadataBaseUrl(): URL {
-  const fallback = "https://kelolako.com";
+  const fallback = "https://www.kelolako.com";
   const raw = process.env.NEXTAUTH_URL?.trim();
   if (!raw) return new URL(fallback);
   try {
