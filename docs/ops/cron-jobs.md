@@ -113,7 +113,7 @@ Code: `app/api/cron/creation-expiry/route.ts`
 
 **User merasakan:** Cancel/timeout tidak membuat kredit “nyangkut” tanpa refund. Recovery window 24h default.
 
-**Jadwal Vercel:** **setiap 30 menit** (`*/30 * * * *`)
+**Jadwal Vercel:** **setiap hari 05:00 UTC** (12:00 WIB) — plan Hobby hanya mengizinkan cron harian (`*/30 * * * *` bikin deployment gagal). Untuk cadence lebih rapat, trigger eksternal endpoint ini tiap 30 menit dengan `Authorization: Bearer $CRON_SECRET`, sama seperti publisher `/api/cron`. Naikkan ke `*/30 * * * *` kalau sudah Pro.
 
 Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel-hardening`](generation/generation-cancel-hardening-plan.md), [`pipeline-recovery`](generation/pipeline-recovery-plan.md)
 
@@ -137,10 +137,10 @@ Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel
 storage-sweep         → 0 3 * * *    (harian 03:00 UTC)
 credit-expiry         → 30 3 * * *   (harian 03:30 UTC)
 creation-expiry       → 0 4 * * *    (harian 04:00 UTC)
-generation-reconcile  → */30 * * * * (tiap 30 menit)
+generation-reconcile  → 0 5 * * *    (harian 05:00 UTC)
 ```
 
-Publisher (`/api/cron`) sengaja **di luar** `vercel.json` karena plan Hobby membatasi cron Vercel; trigger eksternal lebih sering.
+Publisher (`/api/cron`) sengaja **di luar** `vercel.json` karena plan Hobby membatasi cron Vercel; trigger eksternal lebih sering. Alasan yang sama bikin `generation-reconcile` harian di sini — pakai trigger eksternal kalau butuh tiap 30 menit.
 
 ---
 
