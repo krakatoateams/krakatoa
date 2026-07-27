@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/creation-expiry",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-failed-posts",
+      "schedule": "30 4 * * *"
     }
   ]
 }
