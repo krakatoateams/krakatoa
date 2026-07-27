@@ -8,8 +8,16 @@ import {
   videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
-import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
+import { extractMediaUrl, runReplicateWithRetry, isCancellation } from "@/lib/replicate-server";
+import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
+import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
+import {
+  checkpointRemoteVideo,
+  markRecoverableIfArtifacts,
+} from "@/lib/pipeline-recovery/video-upload-recovery";
+import { RecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
@@ -33,6 +41,8 @@ import {
   beginGenerationRequest,
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
+  finishGenerationRequestRecoverable,
+  buildRecoverableGenerationJson,
 } from "@/lib/generation-idempotency";
 import {
   resolveStoryboardStyle,
@@ -84,6 +94,8 @@ export async function POST(req: Request) {
   // 'video_generating' on cancellation/failure (declared before the try).
   let storyboardIdForCleanup: string | null = null;
   let supabaseForCleanup: ReturnType<typeof getSupabase> | null = null;
+  let userId: string | null = null;
+  let pipelineRecovery: ReturnType<typeof createPipelineRecoveryHandle> | undefined;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -98,7 +110,6 @@ export async function POST(req: Request) {
     // STRICT profile resolution — this route now charges credits.
     //   profile.id      -> platform tables (jobs / job_steps / assets) + credits
     //   profile.user_id -> legacy storyboards ownership + user_creations (= users.id)
-    let userId: string | null = null;
     try {
       const profile = await requireCurrentProfile();
       profileId = profile.id;
@@ -338,6 +349,16 @@ export async function POST(req: Request) {
     if (begin.action === "replay") {
       return NextResponse.json(begin.response);
     }
+    if (begin.action === "recoverable") {
+      return NextResponse.json(
+        buildRecoverableGenerationJson({
+          jobId: begin.jobId,
+          message:
+            typeof begin.errorJson.message === "string" ? begin.errorJson.message : undefined,
+        }),
+        { status: 503 },
+      );
+    }
     generationRequestId = begin.id;
 
     // ---- Platform job (best-effort observability) ----
@@ -349,6 +370,7 @@ export async function POST(req: Request) {
       provider: resolvedVideoModel.provider,
       model: resolvedVideoModel.model,
       input: {
+        userId: userId!,
         storyboardId,
         videoModelId,
         resolution,
@@ -361,6 +383,14 @@ export async function POST(req: Request) {
     if (job) {
       jobId = job.id;
       await safe("startJob", () => startJob(profileId!, jobId!));
+      if (userId) {
+        pipelineRecovery = createPipelineRecoveryHandle({
+          profileId: profileId!,
+          userId: userId!,
+          jobId: job.id,
+          existingJob: job,
+        });
+      }
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
@@ -484,20 +514,14 @@ export async function POST(req: Request) {
     await beginStep("video_generation", "Seedance video from storyboard reference");
     // If the user already hit Cancel between spend and provider call, abort now so
     // we never start (and pay for) a provider run we're about to throw away.
-    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
     console.log(
       `[Storyboard Video] Calling ${videoModel.modelLabel} (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`
     );
     // Record each Replicate prediction id so POST /api/generations/cancel can stop
     // this run mid-flight (the SDK progress callback fires on create + each poll).
-    const recordPredictionTick = makePredictionRecorder({
-      generationRequestId,
-      profileId,
-      jobId,
-      kind: "storyboard_video",
-    });
     const providerInput = buildVideoProviderInput({
       model: videoModel,
       prompt: seedancePrompt,
@@ -514,15 +538,20 @@ export async function POST(req: Request) {
         input: providerInput,
       },
       10,
-      { onPrediction: recordPredictionTick }
+      makeReplicateCancelHooks({
+        generationRequestId,
+        profileId,
+        jobId,
+        kind: "storyboard_video",
+      }),
     );
 
     // Post-run cancel safety net: if the user cancelled while the prediction was
     // still in the provider's initial (pre-poll) window — before its id was
     // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
     // refunding and NOT delivering the result, rather than charging for an unwanted clip.
-    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     const videoRemoteUrl = extractMediaUrl(videoResult);
@@ -532,7 +561,25 @@ export async function POST(req: Request) {
     }
     await endStep({ videoRemoteUrl });
 
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_video_generation",
+      });
+    }
+
+    await checkpointRemoteVideo(
+      pipelineRecovery,
+      videoRemoteUrl,
+      `source_${Date.now()}.mp4`,
+      "storyboard_video",
+    );
+
     await beginStep("storage_upload", "Download Seedance MP4 + upload to Supabase");
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     console.log("[Storyboard Video] Downloading MP4...");
     const vidRes = await fetch(videoRemoteUrl);
     if (!vidRes.ok) {
@@ -542,8 +589,16 @@ export async function POST(req: Request) {
     }
     const videoBuffer = await vidRes.arrayBuffer();
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     const filename = `video_${Date.now()}.mp4`;
     const storagePath = videosStoryboardVideoPath(userId!, filename);
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -555,11 +610,18 @@ export async function POST(req: Request) {
 
     if (uploadError) {
       console.error("[Storyboard Video] Upload error:", uploadError);
-      throw new Error(`Failed to upload video: ${uploadError.message}`);
+      throw new RecoverablePipelineError(
+        `Failed to upload video: ${uploadError.message}`,
+        "upload",
+      );
     }
 
     const { url: videoUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: videoUrl });
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     const { error: finalErr } = await supabase
       .from(STORYBOARDS_TABLE)
@@ -577,6 +639,9 @@ export async function POST(req: Request) {
     // source storyboard image via asset_relations (storyboard_for).
     // costCredits on both markAssetReady and finishJob is a display snapshot —
     // credit_transactions is the billing source of truth.
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath,
@@ -674,6 +739,9 @@ export async function POST(req: Request) {
     }
 
     const successResponse = { videoUrl, storagePath, aspectRatio, language, historyItem };
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,
@@ -682,11 +750,32 @@ export async function POST(req: Request) {
         responseJson: successResponse,
       }));
     }
+    if (jobId && userId) {
+      await safe("purgeResumable", () => purgeResumableJobStorage(userId!, jobId!));
+    }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
+    const recoverableHandled =
+      jobId &&
+      profileId &&
+      (await markRecoverableIfArtifacts({
+        error,
+        profileId: profileId!,
+        jobId: jobId!,
+        recovery: pipelineRecovery,
+        finalAssetId: videoAssetId,
+        errorJson: {
+          message: error instanceof Error ? error.message : String(error),
+          code: "PIPELINE_RECOVERABLE",
+        },
+      }));
+    const recoverable = recoverableHandled || error instanceof RecoverablePipelineError;
     // User-initiated cancellation is a normal outcome, not a failure: the job is
     // marked 'cancelled' (not 'failed') and credits are refunded below.
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     const message = cancelled
       ? "Generation cancelled."
       : error instanceof Error
@@ -700,19 +789,19 @@ export async function POST(req: Request) {
     // Best-effort failure marking — must not throw or mask the original error.
     const errJson = cancelled
       ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
+      : recoverable
+        ? { message, code: "PIPELINE_RECOVERABLE" }
+        : pricingMissing
+          ? { message, code: "PRICING_CONFIG_MISSING" }
+          : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
     }
-    if (videoAssetId && profileId) {
+    if (videoAssetId && profileId && !recoverable) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
-    // Reset the storyboard out of 'video_generating' back to 'ready' so a
-    // cancelled/failed run does not leave it stuck spinning, and the user can
-    // immediately retry video generation.
+    // Reset storyboard out of video_generating so the list is not stuck spinning.
     if (storyboardIdForCleanup && supabaseForCleanup) {
       await safe("resetStoryboardStatus", async () => {
         await supabaseForCleanup!
@@ -724,14 +813,15 @@ export async function POST(req: Request) {
     if (jobId && profileId) {
       if (cancelled) {
         await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-      } else {
+        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
+      } else if (!recoverable) {
         await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
       }
     }
 
-    // Best-effort refund. Fires whenever spendCredits succeeded — covers both
-    // failures and user cancellations (the user must not pay for a cancelled run).
-    if (creditsSpent && profileId && creditsAmount > 0) {
+    // Best-effort refund on failure/cancel. Skip when recoverable (credits held).
+    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
         amount: creditsAmount,
@@ -747,17 +837,39 @@ export async function POST(req: Request) {
     }
 
     if (generationRequestId) {
-      await safe("idemFailure", () => finishGenerationRequestFailure({
-        id: generationRequestId!,
-        jobId: jobId ?? null,
-        errorJson: errJson,
-      }));
+      if (recoverable && jobId) {
+        await safe("idemRecoverable", () =>
+          finishGenerationRequestRecoverable({
+            id: generationRequestId!,
+            jobId: jobId!,
+            errorJson: errJson,
+          })
+        );
+      } else {
+        await safe("idemFailure", () => finishGenerationRequestFailure({
+          id: generationRequestId!,
+          jobId: jobId ?? null,
+          errorJson: errJson,
+        }));
+      }
     }
 
     if (cancelled) {
       return NextResponse.json(
         { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
         { status: 409 }
+      );
+    }
+    if (recoverable) {
+      return NextResponse.json(
+        {
+          recoverable: true,
+          jobId,
+          error: message,
+          code: "PIPELINE_RECOVERABLE",
+          refunded: false,
+        },
+        { status: 503 },
       );
     }
     return NextResponse.json(

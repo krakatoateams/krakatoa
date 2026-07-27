@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 export type JobStatus =
   | "queued"
   | "running"
+  | "recoverable"
   | "succeeded"
   | "failed"
   | "cancelled";
@@ -36,6 +37,91 @@ function handleError(error: { message: string } | null, fallback: string): void 
     );
   }
   throw new Error(error.message || fallback);
+}
+
+/** Fetch a single job (ownership-checked). */
+export async function getJob(profileId: string, jobId: string): Promise<Job | null> {
+  const { data, error } = await supabaseServer
+    .from(JOBS_TABLE)
+    .select("*")
+    .eq("id", jobId)
+    .eq("profile_id", profileId)
+    .maybeSingle();
+
+  handleError(error, "Failed to fetch job.");
+  return (data as Job | null) ?? null;
+}
+
+/** Persist recovery manifest while job is still running (checkpoint during pipeline). */
+export async function updateJobRecoveryOutput(
+  profileId: string,
+  jobId: string,
+  recovery: Record<string, unknown>,
+): Promise<Job | null> {
+  const existing = await getJob(profileId, jobId);
+  if (!existing) return null;
+  const output = { ...existing.output, recovery };
+
+  const { data, error } = await supabaseServer
+    .from(JOBS_TABLE)
+    .update({ output })
+    .eq("id", jobId)
+    .eq("profile_id", profileId)
+    .select("*")
+    .maybeSingle();
+
+  handleError(error, "Failed to update job recovery output.");
+  return (data as Job | null) ?? null;
+}
+
+/** Mark job recoverable — holds credits until terminal resume/TTL/cancel. */
+export async function markJobRecoverable(
+  profileId: string,
+  jobId: string,
+  params: {
+    recovery: Record<string, unknown>;
+    outputExtra?: Record<string, unknown>;
+    error?: Record<string, unknown>;
+  },
+): Promise<Job | null> {
+  const existing = await getJob(profileId, jobId);
+  if (!existing) return null;
+  const output = {
+    ...existing.output,
+    ...params.outputExtra,
+    recovery: params.recovery,
+  };
+  const patch: Record<string, unknown> = {
+    status: "recoverable",
+    output,
+  };
+  if (params.error) patch.error = params.error;
+
+  const { data, error } = await supabaseServer
+    .from(JOBS_TABLE)
+    .update(patch)
+    .eq("id", jobId)
+    .eq("profile_id", profileId)
+    .select("*")
+    .maybeSingle();
+
+  handleError(error, "Failed to mark job recoverable.");
+  return (data as Job | null) ?? null;
+}
+
+/** Resume a recoverable job back to running (ownership-checked). */
+export async function resumeJobRunning(profileId: string, jobId: string): Promise<Job | null> {
+  const { data, error } = await supabaseServer
+    .from(JOBS_TABLE)
+    .update({ status: "running", error: null })
+    .eq("id", jobId)
+    .eq("profile_id", profileId)
+    .eq("status", "recoverable")
+    .select("*")
+    .maybeSingle();
+
+  handleError(error, "Failed to resume job.");
+  return (data as Job | null) ?? null;
 }
 
 /** Create a job in 'queued' state at the start of a generation. */

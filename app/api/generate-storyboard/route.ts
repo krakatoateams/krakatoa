@@ -14,9 +14,10 @@ import {
   flattenReplicateTextChunks,
   runReplicateWithRetry,
   stripMarkdownFences,
+  isCancellation,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import {
@@ -38,6 +39,11 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  assertNotCancelled,
+  makeReplicateCancelHooks,
+} from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import {
   resolveStoryboardStyle,
   STORYBOARD_STYLE_INSTRUCTIONS,
@@ -522,6 +528,13 @@ export async function POST(req: Request) {
     }));
     if (asset) imageAssetId = asset.id;
 
+    const replicateHooks = makeReplicateCancelHooks({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "storyboard_image",
+    });
+
     // Step-recording helpers (best-effort; manage currentStepId).
     const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
       if (!jobId || !profileId) return;
@@ -547,22 +560,35 @@ export async function POST(req: Request) {
       ? "\n\nA visual theme reference image will be supplied to the storyboard artist. Write visual_descriptions that align with that reference's color palette, mood, lighting, and overall aesthetic."
       : "";
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     await beginStep("scene_breakdown", "GPT-5 scene breakdown + seedance prompt");
     const MAX_JSON_ATTEMPTS = 3;
     let breakdown: { scenes: SceneBreakdown[]; seedancePrompt: string } | null =
       null;
 
     for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt++) {
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
       console.log(`[Storyboard] Scene breakdown via ${sceneLlmRef} (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
-      const gptOut = await runReplicateWithRetry(replicate, sceneLlmRef, {
-        input: {
-          system_prompt: buildSceneSystemPrompt(aspectRatio, languageLabel),
-          prompt: `Video theme: ${theme}${themeRefSceneNote}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
-          reasoning_effort: "low",
-          verbosity: "high",
-          max_completion_tokens: 8192,
+      const gptOut = await runReplicateWithRetry(
+        replicate,
+        sceneLlmRef,
+        {
+          input: {
+            system_prompt: buildSceneSystemPrompt(aspectRatio, languageLabel),
+            prompt: `Video theme: ${theme}${themeRefSceneNote}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
+            reasoning_effort: "low",
+            verbosity: "high",
+            max_completion_tokens: 8192,
+          },
         },
-      });
+        10,
+        replicateHooks,
+      );
 
       const rawText = stripMarkdownFences(
         flattenReplicateTextChunks(gptOut).trim()
@@ -618,6 +644,10 @@ export async function POST(req: Request) {
     }
     inputImages.push(...mentionReferenceUrls.slice(0, MAX_INPUT_IMAGES - inputImages.length));
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     await beginStep("image_generation", "GPT Image storyboard sheet");
     console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
     const imageResult = await runReplicateWithRetry(
@@ -632,11 +662,16 @@ export async function POST(req: Request) {
           quality: "auto",
           background: "opaque",
           moderation: "auto",
-          // gpt-image-2 reference images: uploaded theme + @-mentioned assets.
           ...(inputImages.length ? { input_images: inputImages } : {}),
         },
-      }
+      },
+      10,
+      replicateHooks,
     );
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     const rawUrl = extractMediaUrl(imageResult);
     if (!rawUrl || !rawUrl.startsWith("http")) {
@@ -645,7 +680,18 @@ export async function POST(req: Request) {
     }
     await endStep({ imageUrl: rawUrl });
 
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_image_generation",
+      });
+    }
+
     await beginStep("storage_upload", "Download storyboard image + upload to Supabase");
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     console.log("[Storyboard] Downloading image from Replicate...");
     const imgRes = await fetch(rawUrl);
     if (!imgRes.ok) {
@@ -698,6 +744,10 @@ export async function POST(req: Request) {
     if (insertError || !inserted?.id) {
       console.error("[Storyboard] DB insert error:", insertError);
       throw new Error(insertError?.message || "Failed to save storyboard record.");
+    }
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     // Attach storyboardId into the asset metadata only AFTER the legacy storyboards
@@ -773,16 +823,23 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : String(error ?? "Unknown error");
-    console.error("[Storyboard] Error:", error);
-    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
-    // and any provider call, so no credits were charged and no provider ran.
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
+    if (cancelled) console.log("[Storyboard] Cancelled by user.");
+    else console.error("[Storyboard] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;
-    // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error ?? "Unknown error");
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -791,10 +848,13 @@ export async function POST(req: Request) {
       await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when spendCredits actually succeeded.
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -803,8 +863,13 @@ export async function POST(req: Request) {
           ? `refund:storyboard_image:${jobId}`
           : `refund:storyboard_image:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after generation failure",
-        metadata: { reason: "generation_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after generation failure",
+        metadata: {
+          reason: cancelled ? "generation_cancelled" : "generation_failed",
+          originalError: errJson,
+        },
       }));
     }
 
@@ -814,6 +879,13 @@ export async function POST(req: Request) {
         jobId: jobId ?? null,
         errorJson: errJson,
       }));
+    }
+
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
     }
 
     return NextResponse.json(

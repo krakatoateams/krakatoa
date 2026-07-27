@@ -1,3 +1,5 @@
+import { isCancellation } from "@/lib/replicate-server";
+
 /**
  * Shared client for Rendi (cloud FFmpeg API: https://rendi.dev).
  *
@@ -28,6 +30,8 @@ export interface RunRendiOptions {
   pollIntervalMs?: number;
   /** Maximum number of polls before timing out. Default 120 (~6 min at 3s). */
   maxAttempts?: number;
+  /** Polled before each status check; throw to abort (e.g. user cancelled generation). */
+  abortCheck?: () => Promise<void>;
 }
 
 export function getRendiApiKey(): string {
@@ -77,6 +81,9 @@ export async function runRendiCommand(
   }
 
   for (let attempts = 0; attempts < maxAttempts; attempts++) {
+    if (options.abortCheck) {
+      await options.abortCheck();
+    }
     await new Promise((r) => setTimeout(r, pollIntervalMs));
     const poll = await fetch(`${RENDI_BASE}/commands/${command_id}`, {
       headers: { "X-API-KEY": apiKey },
@@ -94,6 +101,30 @@ export async function runRendiCommand(
   }
 
   throw new Error("Rendi polling timed out.");
+}
+
+const RENDI_MAX_RETRIES = 3;
+
+/** Run Rendi with bounded retries on transient failures (not for user cancel). */
+export async function runRendiCommandWithRetry(
+  ffmpegCommand: string,
+  inputFiles: Record<string, string>,
+  outputFiles: Record<string, string>,
+  options: RunRendiOptions = {},
+): Promise<RendiPollData> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < RENDI_MAX_RETRIES; attempt++) {
+    try {
+      return await runRendiCommand(ffmpegCommand, inputFiles, outputFiles, options);
+    } catch (e) {
+      if (isCancellation(e)) throw e;
+      lastError = e;
+      if (attempt < RENDI_MAX_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /** Read a hosted output URL from a successful Rendi poll result. */

@@ -51,6 +51,7 @@ DOKU_SECRET_KEY=your_doku_secret_key
 DOKU_ENV=sandbox            # or "production"
 # DOKU_API_BASE=             # optional override; defaults by DOKU_ENV
 # DOKU_NOTIFICATION_URL=     # optional per-request webhook override (same PATH as Back Office)
+# CRON_SECRET=               # Bearer token for GET /api/cron/* — see docs/ops/cron-jobs.md
 ```
 
 `DOKU_NOTIFICATION_URL` is handy for local development: set it to your public
@@ -131,6 +132,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for an in-depth architecture description and the 
 | Admin Config v2 (unified panel) | [`docs/admin/admin-config-v2-plan.md`](./docs/admin/admin-config-v2-plan.md) |
 | Admin Config v2 (ringkasan ID) | [`docs/admin/admin-config-v2-ringkasan.md`](./docs/admin/admin-config-v2-ringkasan.md) |
 | Pricing Config v2 | [`docs/billing/pricing-config-v2-plan.md`](./docs/billing/pricing-config-v2-plan.md) |
+| Cron jobs & `CRON_SECRET` | [`docs/ops/cron-jobs.md`](./docs/ops/cron-jobs.md) |
+| Generation cancel | [`docs/generation/generation-cancel-hardening-plan.md`](./docs/generation/generation-cancel-hardening-plan.md) |
 
 ## Deployment
 

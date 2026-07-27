@@ -12,10 +12,11 @@ import {
   flattenReplicateTextChunks,
   runReplicateWithRetry,
   stripMarkdownFences,
+  isCancellation,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { signStoragePathForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import {
@@ -36,6 +37,11 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  assertNotCancelled,
+  makeReplicateCancelHooks,
+} from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import {
   resolveStoryboardStyle,
   storyboardVideoStyleDirective,
@@ -295,6 +301,13 @@ export async function POST(req: Request) {
     }));
     if (asset) imageAssetId = asset.id;
 
+    const replicateHooks = makeReplicateCancelHooks({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "storyboard_import",
+    });
+
     const beginStep = async (stepKey: string, stepName: string, input?: Record<string, unknown>): Promise<void> => {
       if (!jobId || !profileId) return;
       const row = await safe(`beginStep:${stepKey}`, () => createJobStep({
@@ -316,21 +329,33 @@ export async function POST(req: Request) {
     };
 
     // ---- GPT-5 vision: synthesize the seedance_prompt from the uploaded sheet ----
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     await beginStep("vision_analysis", "GPT-5 vision storyboard analysis");
     const videoStyleDirective = storyboardVideoStyleDirective(storyboardStyle);
     const MAX_JSON_ATTEMPTS = 3;
     let analysis: { scenes: unknown[]; seedancePrompt: string } | null = null;
     for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt++) {
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
       console.log(`[storyboard-import] Vision via ${sceneLlmRef} (attempt ${attempt}/${MAX_JSON_ATTEMPTS})...`);
-      const out = await runReplicateWithRetry(replicate, sceneLlmRef, {
-        input: {
-          system_prompt: buildImportVisionSystemPrompt(aspectRatio, languageLabel),
-          prompt: buildImportUserPrompt(description, videoStyleDirective),
-          image_input: [tempPublicUrl],
-          reasoning_effort: "low",
-          max_completion_tokens: 8192,
+      const out = await runReplicateWithRetry(
+        replicate,
+        sceneLlmRef,
+        {
+          input: {
+            system_prompt: buildImportVisionSystemPrompt(aspectRatio, languageLabel),
+            prompt: buildImportUserPrompt(description, videoStyleDirective),
+            image_input: [tempPublicUrl],
+            reasoning_effort: "low",
+            max_completion_tokens: 8192,
+          },
         },
-      });
+        10,
+        replicateHooks,
+      );
       const rawText = stripMarkdownFences(flattenReplicateTextChunks(out).trim());
       try {
         analysis = parseImportPayload(rawText);
@@ -342,6 +367,18 @@ export async function POST(req: Request) {
     }
     if (!analysis) throw new Error("Vision model did not return a usable storyboard analysis.");
     await endStep({ scenes: analysis.scenes.length });
+
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_import_vision",
+      });
+    }
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     let seedancePrompt = analysis.seedancePrompt;
     if (!/\[Image1\]/i.test(seedancePrompt)) {
@@ -388,6 +425,10 @@ export async function POST(req: Request) {
     if (insertError || !inserted?.id) {
       console.error("[storyboard-import] DB insert error:", insertError);
       throw new Error(insertError?.message || "Failed to save imported storyboard.");
+    }
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     if (imageAssetId && profileId) {
@@ -453,13 +494,23 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : String(error ?? "Unknown error");
-    console.error("[storyboard-import] Error:", error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
+    if (cancelled) console.log("[storyboard-import] Cancelled by user.");
+    else console.error("[storyboard-import] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error ?? "Unknown error");
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -468,10 +519,13 @@ export async function POST(req: Request) {
       await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund (only when the spend actually succeeded).
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -480,12 +534,16 @@ export async function POST(req: Request) {
           ? `refund:storyboard_import:${jobId}`
           : `refund:storyboard_import:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after import failure",
-        metadata: { reason: "import_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after import failure",
+        metadata: {
+          reason: cancelled ? "generation_cancelled" : "import_failed",
+          originalError: errJson,
+        },
       }));
     }
 
-    // Drop whichever copy of the upload exists so failures never orphan storage.
     await cleanupStorage();
 
     if (generationRequestId) {
@@ -494,6 +552,13 @@ export async function POST(req: Request) {
         jobId: jobId ?? null,
         errorJson: errJson,
       }));
+    }
+
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
     }
 
     return NextResponse.json(

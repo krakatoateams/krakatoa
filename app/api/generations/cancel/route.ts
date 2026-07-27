@@ -1,12 +1,23 @@
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { getExistingGenerationRequest } from "@/lib/generation-idempotency";
+import { getJob } from "@/lib/jobs-db";
+import {
+  getExistingGenerationRequest,
+  finishGenerationRequestsForJob,
+  isPipelineRecoverableErrorJson,
+} from "@/lib/generation-idempotency";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
+import { commitLockedFromCancelAllowed } from "@/lib/generation-commit-pure";
 import {
   requestCancel,
   listPredictionIds,
   cancelReplicatePredictions,
 } from "@/lib/generation-cancel";
+import {
+  abandonRecoverableJob,
+  userIdFromJob,
+} from "@/lib/pipeline-recovery/failure";
 
 // Cancellation is a fast control-plane call (DB flip + Replicate cancel calls);
 // it never waits on a generation. Keep it short.
@@ -15,26 +26,19 @@ export const maxDuration = 60;
 /**
  * POST /api/generations/cancel
  *
- * Cancel an in-flight generation. The client passes the same Idempotency-Key it
- * used for the original generate request (its handle on the attempt). We:
- *   1. Resolve the row by (profile_id, idempotencyKey) — ownership enforced.
- *   2. Short-circuit if the attempt already finished (succeeded/failed).
- *   3. Flip generation_requests.cancel_requested = true.
- *   4. Cancel every recorded Replicate prediction for the attempt.
+ * Cancel an in-flight generation or abandon a recoverable job.
  *
- * The still-running generate request detects the cancellation (its provider poll
- * loop sees status `canceled`), marks the job 'cancelled', and refunds. This
- * endpoint never refunds or finalizes the job itself — that keeps a single owner
- * of the refund and avoids double-refund races.
- *
- * Body: { idempotencyKey: string }
+ * Body: `{ idempotencyKey: string }` — cancel in-flight attempt (same as generate).
+ * Body: `{ jobId: string }` — abandon recoverable job, purge storage (no refund — provider cost committed).
  */
 export async function POST(req: Request) {
   let profileId: string;
+  let authUserId: string;
   try {
     try {
       const profile = await requireCurrentProfile();
       profileId = profile.id;
+      authUserId = profile.user_id;
     } catch (e) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -42,37 +46,138 @@ export async function POST(req: Request) {
       console.error("[generations/cancel] profile resolution failed (non-auth):", e);
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     const body = await req.json().catch(() => null);
+    const jobId = body && typeof body.jobId === "string" ? body.jobId.trim() : "";
+
+    if (jobId) {
+      const job = await getJob(profileId, jobId);
+      if (!job) {
+        return NextResponse.json({ error: "Job not found." }, { status: 404 });
+      }
+      if (job.status !== "recoverable") {
+        return NextResponse.json(
+          { error: "Job is not recoverable.", status: job.status },
+          { status: 409 },
+        );
+      }
+      const userId = userIdFromJob(job, authUserId);
+      if (!userId) {
+        return NextResponse.json({ error: "Could not resolve user for job." }, { status: 500 });
+      }
+      await abandonRecoverableJob({
+        profileId,
+        userId,
+        jobId,
+        jobType: job.job_type,
+        creditsAmount: job.cost_credits,
+        reason: "Recovery abandoned by user.",
+      });
+      await finishGenerationRequestsForJob({
+        profileId,
+        jobId,
+        errorJson: {
+          code: "GENERATION_ABANDONED",
+          message: "Recovery abandoned by user.",
+        },
+      });
+      return NextResponse.json({ status: "abandoned", refunded: false });
+    }
+
     const idempotencyKey =
       body && typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
     if (!idempotencyKey) {
       return NextResponse.json(
-        { error: "idempotencyKey is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
-        { status: 400 }
+        { error: "idempotencyKey or jobId is required.", code: "IDEMPOTENCY_KEY_REQUIRED" },
+        { status: 400 },
       );
     }
 
     const existing = await getExistingGenerationRequest(profileId, idempotencyKey);
     if (!existing) {
-      // No attempt under this key (yet). Nothing to cancel.
       return NextResponse.json({ status: "not_found" }, { status: 404 });
     }
 
-    // Already terminal — nothing to stop.
     if (existing.status === "succeeded") {
       return NextResponse.json({ status: "already_completed" });
     }
+
     if (existing.status === "failed") {
+      if (
+        isPipelineRecoverableErrorJson(existing.error_json as Record<string, unknown>) &&
+        existing.job_id
+      ) {
+        const job = await getJob(profileId, existing.job_id);
+        if (job?.status === "recoverable") {
+          const userId = userIdFromJob(job, authUserId);
+          if (!userId) {
+            return NextResponse.json({ error: "Could not resolve user for job." }, { status: 500 });
+          }
+          await abandonRecoverableJob({
+            profileId,
+            userId,
+            jobId: existing.job_id,
+            jobType: job.job_type,
+            creditsAmount: job.cost_credits,
+            reason: "Recovery abandoned by user.",
+          });
+          await finishGenerationRequestsForJob({
+            profileId,
+            jobId: existing.job_id,
+            errorJson: {
+              code: "GENERATION_ABANDONED",
+              message: "Recovery abandoned by user.",
+            },
+          });
+          return NextResponse.json({ status: "abandoned", refunded: false });
+        }
+      }
       return NextResponse.json({ status: "already_failed" });
     }
 
-    // Flag it cancelled (so any not-yet-created provider step aborts early), then
-    // stop every Replicate prediction we've recorded for this attempt.
-    await requestCancel(profileId, existing.id);
+    if (existing.cancel_requested) {
+      return NextResponse.json({ status: "already_cancelling" });
+    }
+
+    if (commitLockedFromCancelAllowed(existing.cancel_allowed)) {
+      return NextResponse.json(
+        {
+          code: "CANCEL_NOT_ALLOWED",
+          message: "Generation can no longer be cancelled.",
+          cancelAllowed: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (await isProviderCommitLocked(profileId, existing.id)) {
+      return NextResponse.json(
+        {
+          code: "CANCEL_NOT_ALLOWED",
+          message: "Generation can no longer be cancelled.",
+          cancelAllowed: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    const cancelAccepted = await requestCancel(profileId, existing.id);
+    if (!cancelAccepted) {
+      if (await isProviderCommitLocked(profileId, existing.id)) {
+        return NextResponse.json(
+          {
+            code: "CANCEL_NOT_ALLOWED",
+            message: "Generation can no longer be cancelled.",
+            cancelAllowed: false,
+          },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ error: "Generation not found." }, { status: 404 });
+    }
 
     let ids: string[] = [];
     try {
