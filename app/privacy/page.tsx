@@ -33,7 +33,7 @@ const content: LegalContent = {
           { type: "h3", text: "1.4 Data Transaksi dan Kredit" },
           { type: "ul", items: [
             "Riwayat pembelian dan penggunaan Kredit virtual;",
-            "Data transaksi pembayaran diproses oleh mitra gerbang pembayaran kami (DOKU) — Kelolako tidak menyimpan detail kartu pembayaran Anda.",
+            "Data transaksi pembayaran diproses oleh mitra gerbang pembayaran kami (saat ini DOKU, dan dapat bertambah dengan penyedia lain di masa mendatang) — Kelolako tidak menyimpan detail kartu pembayaran Anda.",
           ]},
           { type: "h3", text: "1.5 Data Teknis" },
           { type: "ul", items: [
@@ -49,7 +49,7 @@ const content: LegalContent = {
             "Memproses konten Anda melalui penyedia AI pihak ketiga (Replicate, termasuk Google Gemini dan OpenAI Whisper) untuk menghasilkan caption dan mentranskripsi audio;",
             "Memproses video melalui penyedia pemrosesan video pihak ketiga (Rendi) untuk ekstraksi audio dan operasi video lainnya;",
             "Mempublikasikan konten Anda ke Platform Terhubung sesuai instruksi Anda;",
-            "Memproses pembayaran Kredit melalui DOKU;",
+            "Memproses pembayaran Kredit melalui penyedia gerbang pembayaran kami (saat ini DOKU);",
             "Berkomunikasi dengan Anda terkait akun dan pembaruan Layanan;",
             "Meningkatkan dan mengembangkan fitur Layanan.",
           ]},
@@ -64,7 +64,7 @@ const content: LegalContent = {
             "Supabase — penyedia basis data, penyimpanan file, dan sistem autentikasi kami;",
             "Replicate — penyedia model AI untuk pembuatan video, foto, dan caption (termasuk model Google Gemini dan OpenAI Whisper);",
             "Rendi — penyedia pemrosesan video (ekstraksi audio, dll.);",
-            "DOKU — penyedia gerbang pembayaran untuk pembelian Kredit;",
+            "DOKU — penyedia gerbang pembayaran kami saat ini untuk pembelian Kredit; penyedia tambahan dapat digunakan di masa mendatang dan akan dicantumkan di sini apabila diterapkan.",
             "Resend — penyedia layanan pengiriman email untuk email otentikasi (verifikasi akun, reset kata sandi, dan notifikasi terkait akun lainnya);",
             "Vercel — penyedia hosting infrastruktur aplikasi kami;",
             "TikTok — untuk otentikasi (TikTok Login Kit) serta publikasi video dan foto melalui TikTok Content Posting API; kami menyimpan token akses dan token refresh yang diperlukan untuk menjaga koneksi Anda tetap aktif dan mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
@@ -84,6 +84,7 @@ const content: LegalContent = {
         heading: "5. Retensi Data",
         blocks: [
           { type: "p", text: "Kami menyimpan data Anda selama akun Anda aktif. Setelah publikasi konten berhasil ke Platform Terhubung, file video sumber dapat dihapus secara otomatis dari penyimpanan kami untuk efisiensi (metadata publikasi tetap disimpan). Anda dapat meminta penghapusan seluruh data akun Anda dengan menghubungi kami (lihat Bagian 8)." },
+          { type: "p", text: "Untuk konten yang gagal dipublikasikan, file media sumber akan tetap disimpan sementara untuk memungkinkan Anda mencoba kembali (retry) proses publikasi. Jika konten tersebut tetap dalam status gagal selama lebih dari 7 (tujuh) hari tanpa percobaan ulang yang berhasil, file media tersebut akan dihapus secara otomatis dari penyimpanan kami." },
         ],
       },
       {
@@ -139,7 +140,7 @@ const content: LegalContent = {
           { type: "h3", text: "1.4 Transaction and Credit Data" },
           { type: "ul", items: [
             "Purchase and usage history of virtual Credits;",
-            "Payment transaction data is processed by our payment gateway partner (DOKU) — Kelolako does not store your payment card details.",
+            "Payment transaction data is processed by our payment gateway partner(s) (currently DOKU, with additional providers possibly added in the future) — Kelolako does not store your payment card details.",
           ]},
           { type: "h3", text: "1.5 Technical Data" },
           { type: "ul", items: [
@@ -155,7 +156,7 @@ const content: LegalContent = {
             "To process your content through third-party AI providers (Replicate, including Google Gemini and OpenAI Whisper) to generate captions and transcribe audio;",
             "To process video through our third-party video processing provider (Rendi) for audio extraction and other video operations;",
             "To publish your content to Connected Platforms according to your instructions;",
-            "To process Credit payments through DOKU;",
+            "To process Credit payments through our payment gateway provider(s) (currently DOKU);",
             "To communicate with you regarding your account and Service updates;",
             "To improve and develop Service features.",
           ]},
@@ -170,7 +171,7 @@ const content: LegalContent = {
             "Supabase — our database, file storage, and authentication system provider;",
             "Replicate — AI model provider for video, photo, and caption generation (including Google Gemini and OpenAI Whisper models);",
             "Rendi — video processing provider (audio extraction, etc.);",
-            "DOKU — payment gateway provider for Credit purchases;",
+            "DOKU — our current payment gateway provider for Credit purchases; additional providers may be used in the future and will be listed here if adopted.",
             "Resend — email delivery service provider for authentication emails (account verification, password reset, and other account-related notifications);",
             "Vercel — our application hosting infrastructure provider;",
             "TikTok — for authentication (TikTok Login Kit) and video and photo publishing via the TikTok Content Posting API; we store the access and refresh tokens needed to keep your connection active and publish content on your behalf according to your instructions.",
@@ -190,6 +191,7 @@ const content: LegalContent = {
         heading: "5. Data Retention",
         blocks: [
           { type: "p", text: "We retain your data for as long as your account remains active. After successful content publication to a Connected Platform, source video files may be automatically deleted from our storage for efficiency (publication metadata is retained). You may request deletion of all your account data by contacting us (see Section 8)." },
+          { type: "p", text: "For content that fails to publish, the source media file will be temporarily retained to allow you to retry the publishing process. If the content remains in a failed status for more than 7 (seven) days without a successful retry, the media file will be automatically deleted from our storage." },
         ],
       },
       {
