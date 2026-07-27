@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import {
@@ -621,6 +622,14 @@ export async function POST(req: Request) {
     }
     await endStep({ generatedVideoUrl });
 
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "video_generation",
+      });
+    }
+
     await checkpointRemoteVideo(
       pipelineRecovery,
       generatedVideoUrl,
@@ -761,7 +770,10 @@ export async function POST(req: Request) {
       }));
     const recoverable = recoverableHandled || error instanceof RecoverablePipelineError;
     // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     const message = cancelled
       ? "Generation cancelled."
       : error instanceof Error

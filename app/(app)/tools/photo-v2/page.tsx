@@ -74,7 +74,7 @@ import {
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
-  CANCEL_BTN_CLASS,
+  GenerationCancelButton,
   UploadTile,
   CharacterTile,
   useImageUpload,
@@ -84,6 +84,7 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 
 function describeIdempotencyError(
   status: number,
@@ -153,7 +154,8 @@ function StoryboardComposer({
   // Photo studio's reference upload tile.
   const themeReference = useImageUpload();
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   // Load the assets that can be @-mentioned: saved characters + storyboards.
   const loadMentionAssets = useCallback(async () => {
@@ -356,23 +358,12 @@ function StoryboardComposer({
                 loading={loading}
                 label="Generate"
               />
-              {loading && (
-                <button
-                  type="button"
-                  onClick={() => cancelSubmit()}
-                  disabled={cancelling}
-                  className={CANCEL_BTN_CLASS}
-                >
-                  {cancelling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Cancelling</span>
-                    </>
-                  ) : (
-                    <span>Cancel</span>
-                  )}
-                </button>
-              )}
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
             </div>
           </div>
         </div>
@@ -387,23 +378,12 @@ function StoryboardComposer({
             label="Generate"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
-          {loading && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={loading}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
         </div>
         <p className="mt-2 pl-1 text-xs text-gray-500">
           Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
@@ -526,7 +506,8 @@ function PhotoOmniPage() {
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
 
@@ -1104,23 +1085,12 @@ function PhotoOmniPage() {
                   loading={loading}
                   label="Generate"
                 />
-                {loading && (
-                  <button
-                    type="button"
-                    onClick={() => cancelSubmit()}
-                    disabled={cancelling}
-                    className={CANCEL_BTN_CLASS}
-                  >
-                    {cancelling ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Cancelling</span>
-                      </>
-                    ) : (
-                      <span>Cancel</span>
-                    )}
-                  </button>
-                )}
+                <GenerationCancelButton
+                  visible={loading}
+                  cancelling={cancelling}
+                  cancelAllowed={cancelAllowed}
+                  onCancel={() => cancelSubmit()}
+                />
               </div>
             </div>
           </div>
@@ -1158,23 +1128,12 @@ function PhotoOmniPage() {
               label="Generate"
               className={`${GENERATE_BTN_CLASS} flex-1`}
             />
-            {loading && (
-              <button
-                type="button"
-                onClick={() => cancelSubmit()}
-                disabled={cancelling}
-                className={CANCEL_BTN_CLASS}
-              >
-                {cancelling ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Cancelling</span>
-                  </>
-                ) : (
-                  <span>Cancel</span>
-                )}
-              </button>
-            )}
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
           </div>
 
           {!creationSupported ? (

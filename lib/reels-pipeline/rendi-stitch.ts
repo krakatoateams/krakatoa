@@ -12,6 +12,7 @@ import {
   runRendiCommandWithRetry,
   getRendiOutputUrl,
   extractAudioMp3,
+  type RunRendiOptions,
 } from "@/lib/rendi";
 
 // Remote Google Fonts (TTF for FFmpeg/libass). Pinned to commit ca9288e18a —
@@ -39,7 +40,8 @@ export async function concatScenes(
   sceneVideoUrls: string[],
   perSceneDurStr: string,
   targetW: number,
-  targetH: number
+  targetH: number,
+  rendiOptions?: RunRendiOptions,
 ): Promise<string> {
   const vInputFiles: Record<string, string> = {};
   sceneVideoUrls.forEach((url, i) => {
@@ -58,14 +60,16 @@ export async function concatScenes(
     const result = await runRendiCommandWithRetry(
       `${vInputArgs} -filter_complex "${normalizedStreams}" -map "[v0]" -c:v libx264 -crf 20 -pix_fmt yuv420p {{out_v}}`,
       vInputFiles,
-      { out_v: "combined_video.mp4" }
+      { out_v: "combined_video.mp4" },
+      rendiOptions,
     );
     return getRendiOutputUrl(result, "out_v");
   }
   const result = await runRendiCommandWithRetry(
     `${vInputArgs} -filter_complex "${normalizedStreams};${concatInputs}concat=n=${sceneVideoUrls.length}:v=1:a=0[v]" -map "[v]" -c:v libx264 -crf 20 -pix_fmt yuv420p {{out_v}}`,
     vInputFiles,
-    { out_v: "combined_video.mp4" }
+    { out_v: "combined_video.mp4" },
+    rendiOptions,
   );
   return getRendiOutputUrl(result, "out_v");
 }
@@ -84,6 +88,7 @@ export async function mergeVideoAudioSubs(opts: {
   audioSpeedFactor: number;
   finalDuration: number;
   shortest: boolean;
+  rendiOptions?: RunRendiOptions;
 }): Promise<string> {
   let mergeCommand = `-i {{in_video}} -i {{in_audio}} -i {{in_srt}}`;
   const mergeInputs: Record<string, string> = {
@@ -106,9 +111,12 @@ export async function mergeVideoAudioSubs(opts: {
     opts.shortest ? " -shortest" : ""
   } {{out_merged}}`;
 
-  const result = await runRendiCommandWithRetry(mergeCommand, mergeInputs, {
-    out_merged: "merged.mkv",
-  });
+  const result = await runRendiCommandWithRetry(
+    mergeCommand,
+    mergeInputs,
+    { out_merged: "merged.mkv" },
+    opts.rendiOptions,
+  );
   return getRendiOutputUrl(result, "out_merged");
 }
 
@@ -117,16 +125,24 @@ export async function mergeVideoAudioSubs(opts: {
  * than reading the embedded subtitle stream on multi-scene concats). Keeps any
  * existing audio track (`-map 0:a:0?`) — important for Veo single's native audio.
  */
-export async function burnSubtitles(videoUrl: string, srtUrl: string): Promise<string> {
+export async function burnSubtitles(
+  videoUrl: string,
+  srtUrl: string,
+  rendiOptions?: RunRendiOptions,
+): Promise<string> {
   const result = await runRendiCommandWithRetry(
     `-i {{in_video}} -i {{in_srt}} -vf "subtitles={{in_srt}}" -map 0:v:0 -map 0:a:0? -c:v libx264 -crf 20 -c:a copy {{out_final}}`,
     { in_video: videoUrl, in_srt: srtUrl },
-    { out_final: "final_video.mp4" }
+    { out_final: "final_video.mp4" },
+    rendiOptions,
   );
   return getRendiOutputUrl(result, "out_final");
 }
 
 /** Extract the first audio stream from a Veo clip as a hosted MP3 (single mode). */
-export async function extractVeoAudio(videoUrl: string): Promise<string> {
-  return extractAudioMp3(videoUrl);
+export async function extractVeoAudio(
+  videoUrl: string,
+  rendiOptions?: RunRendiOptions,
+): Promise<string> {
+  return extractAudioMp3(videoUrl, rendiOptions);
 }

@@ -45,11 +45,12 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 import {
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
-  CANCEL_BTN_CLASS,
+  GenerationCancelButton,
   Tooltip,
   RefGroup,
   useMediaRefs,
@@ -434,7 +435,8 @@ function VideoOmniPage() {
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   const { videoCredits } = usePricing();
 
@@ -832,23 +834,12 @@ function VideoOmniPage() {
                   loading={loading}
                   label="Generate"
                 />
-                {loading && (
-                  <button
-                    type="button"
-                    onClick={() => cancelSubmit()}
-                    disabled={cancelling}
-                    className={CANCEL_BTN_CLASS}
-                  >
-                    {cancelling ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Cancelling</span>
-                      </>
-                    ) : (
-                      <span>Cancel</span>
-                    )}
-                  </button>
-                )}
+                <GenerationCancelButton
+                  visible={loading}
+                  cancelling={cancelling}
+                  cancelAllowed={cancelAllowed}
+                  onCancel={() => cancelSubmit()}
+                />
               </div>
             </div>
           </div>
@@ -884,23 +875,12 @@ function VideoOmniPage() {
               label="Generate"
               className={`${GENERATE_BTN_CLASS} flex-1`}
             />
-            {loading && (
-              <button
-                type="button"
-                onClick={() => cancelSubmit()}
-                disabled={cancelling}
-                className={CANCEL_BTN_CLASS}
-              >
-                {cancelling ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Cancelling</span>
-                  </>
-                ) : (
-                  <span>Cancel</span>
-                )}
-              </button>
-            )}
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
           </div>
 
           {/* References */}
@@ -1224,7 +1204,8 @@ function ImageToVideoComposer({
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
 
@@ -1584,23 +1565,12 @@ function ImageToVideoComposer({
                 loading={loading}
                 label="Generate"
               />
-              {loading && (
-                <button
-                  type="button"
-                  onClick={() => cancelSubmit()}
-                  disabled={cancelling}
-                  className={CANCEL_BTN_CLASS}
-                >
-                  {cancelling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Cancelling</span>
-                    </>
-                  ) : (
-                    <span>Cancel</span>
-                  )}
-                </button>
-              )}
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
             </div>
           </div>
 
@@ -1646,23 +1616,12 @@ function ImageToVideoComposer({
             label="Generate"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
-          {loading && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={loading}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
         </div>
       </form>
 
@@ -1770,7 +1729,8 @@ function MotionControlComposer({
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -2125,23 +2085,12 @@ function MotionControlComposer({
                 loading={loading}
                 label="Generate"
               />
-              {loading && (
-                <button
-                  type="button"
-                  onClick={() => cancelSubmit()}
-                  disabled={cancelling}
-                  className={CANCEL_BTN_CLASS}
-                >
-                  {cancelling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Cancelling</span>
-                    </>
-                  ) : (
-                    <span>Cancel</span>
-                  )}
-                </button>
-              )}
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
             </div>
           </div>
 
@@ -2187,23 +2136,12 @@ function MotionControlComposer({
             label="Generate"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
-          {loading && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={loading}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
         </div>
       </form>
 
@@ -2300,7 +2238,8 @@ function ImportStoryboardModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   const cost = imageCredits("storyboard_import_vision_per_image", 1);
 
@@ -2523,23 +2462,12 @@ function ImportStoryboardModal({
           <p className="mr-auto hidden text-sm text-gray-500 sm:block">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
-          {busy && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={busy}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
           <CreditActionButton
             type="button"
             onClick={analyze}
@@ -2612,7 +2540,8 @@ function StoryboardToVideoComposer({
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
   // synchronous in-flight lock, so a double-click or a retry after a network
   // blip can never spawn a second Replicate run for the same storyboard.
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   // "Upload your own storyboard" modal.
   const [showUpload, setShowUpload] = useState(false);
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
@@ -3025,23 +2954,12 @@ function StoryboardToVideoComposer({
                 loading={loading}
                 label="Create video"
               />
-              {loading && (
-                <button
-                  type="button"
-                  onClick={() => cancelSubmit()}
-                  disabled={cancelling}
-                  className={CANCEL_BTN_CLASS}
-                >
-                  {cancelling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Cancelling</span>
-                    </>
-                  ) : (
-                    <span>Cancel</span>
-                  )}
-                </button>
-              )}
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
             </div>
           </div>
 
@@ -3148,23 +3066,12 @@ function StoryboardToVideoComposer({
             label="Create video"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
-          {loading && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={loading}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
         </div>
       </form>
 
@@ -3463,7 +3370,8 @@ function ReelsCreatorComposer({
   const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   // Engine + (Veo-only) mode.
   const [engine, setEngine] = useState<ReelsEngine>("seedance");
@@ -3884,23 +3792,12 @@ function ReelsCreatorComposer({
                 loading={loading}
                 label="Generate"
               />
-              {loading && (
-                <button
-                  type="button"
-                  onClick={() => cancelSubmit()}
-                  disabled={cancelling}
-                  className={CANCEL_BTN_CLASS}
-                >
-                  {cancelling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Cancelling</span>
-                    </>
-                  ) : (
-                    <span>Cancel</span>
-                  )}
-                </button>
-              )}
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
             </div>
           </div>
         </div>
@@ -3932,23 +3829,12 @@ function ReelsCreatorComposer({
             label="Generate"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
-          {loading && (
-            <button
-              type="button"
-              onClick={() => cancelSubmit()}
-              disabled={cancelling}
-              className={CANCEL_BTN_CLASS}
-            >
-              {cancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-          )}
+          <GenerationCancelButton
+            visible={loading}
+            cancelling={cancelling}
+            cancelAllowed={cancelAllowed}
+            onCancel={() => cancelSubmit()}
+          />
         </div>
 
         {/* Caption styler + live preview */}

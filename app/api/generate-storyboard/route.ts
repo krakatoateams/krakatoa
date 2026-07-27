@@ -41,8 +41,9 @@ import {
 } from "@/lib/generation-idempotency";
 import {
   assertNotCancelled,
-  makePredictionRecorder,
+  makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import {
   resolveStoryboardStyle,
   STORYBOARD_STYLE_INSTRUCTIONS,
@@ -527,7 +528,7 @@ export async function POST(req: Request) {
     }));
     if (asset) imageAssetId = asset.id;
 
-    const recordPredictionTick = makePredictionRecorder({
+    const replicateHooks = makeReplicateCancelHooks({
       generationRequestId,
       profileId,
       jobId,
@@ -586,7 +587,7 @@ export async function POST(req: Request) {
           },
         },
         10,
-        { onPrediction: recordPredictionTick }
+        replicateHooks,
       );
 
       const rawText = stripMarkdownFences(
@@ -665,7 +666,7 @@ export async function POST(req: Request) {
         },
       },
       10,
-      { onPrediction: recordPredictionTick }
+      replicateHooks,
     );
 
     if (generationRequestId && profileId) {
@@ -678,6 +679,14 @@ export async function POST(req: Request) {
       throw new Error("Failed to resolve storyboard image URL from model output.");
     }
     await endStep({ imageUrl: rawUrl });
+
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_image_generation",
+      });
+    }
 
     await beginStep("storage_upload", "Download storyboard image + upload to Supabase");
     if (generationRequestId && profileId) {
@@ -814,7 +823,10 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     if (cancelled) console.log("[Storyboard] Cancelled by user.");
     else console.error("[Storyboard] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;

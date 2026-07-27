@@ -10,6 +10,7 @@ import {
 import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import {
@@ -560,6 +561,14 @@ export async function POST(req: Request) {
     }
     await endStep({ videoRemoteUrl });
 
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_video_generation",
+      });
+    }
+
     await checkpointRemoteVideo(
       pipelineRecovery,
       videoRemoteUrl,
@@ -763,7 +772,10 @@ export async function POST(req: Request) {
     const recoverable = recoverableHandled || error instanceof RecoverablePipelineError;
     // User-initiated cancellation is a normal outcome, not a failure: the job is
     // marked 'cancelled' (not 'failed') and credits are refunded below.
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     const message = cancelled
       ? "Generation cancelled."
       : error instanceof Error

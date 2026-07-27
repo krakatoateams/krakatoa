@@ -150,6 +150,7 @@ export async function beginGenerationRequest(params: {
       job_id: null,
       asset_id: null,
       cancel_requested: false,
+      cancel_allowed: true,
     })
     .eq("id", existing.id)
     .eq("updated_at", existing.updated_at)

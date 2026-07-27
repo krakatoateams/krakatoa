@@ -11,7 +11,7 @@
  * video + metadata.
  */
 import { runWithRetry } from "@/lib/reels-helpers";
-import { extractMediaUrl, ReplicateCancellationError } from "@/lib/replicate-server";
+import { extractMediaUrl, ReplicateCancellationError, isCancellation } from "@/lib/replicate-server";
 import { buildAssContent } from "./ass";
 import { generateVeoStyle, generateScenes } from "./llm";
 import { runTtsPipeline, parseWhisperWords } from "./tts-whisper";
@@ -88,6 +88,10 @@ function mapWhisperToPerSceneVideoTimeline(
 
 async function abortIfCancelled(ctx: ReelsPipelineContext): Promise<void> {
   if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+}
+
+function rendiPollOpts(ctx: ReelsPipelineContext) {
+  return { abortCheck: () => abortIfCancelled(ctx) };
 }
 
 export async function runVeoSinglePipeline(
@@ -189,14 +193,19 @@ ${promptInstruction}`,
   if (ctx.recovery) {
     veoVideoRef = await ctx.recovery.copyReplicateVideo(veoVideoUrl, "veo_clip.mp4");
   }
+  if (ctx.onProviderCommitted) {
+    await ctx.onProviderCommitted();
+  }
 
   // ----- Step 4: extract audio (Veo provides native audio) -----
   await abortIfCancelled(ctx);
   await ctx.log.beginStep("audio_extraction", "Rendi extract audio track from Veo clip");
   let audioMp3Url: string;
+  const rendiPoll = rendiPollOpts(ctx);
   try {
-    audioMp3Url = await extractVeoAudio(veoVideoUrl);
+    audioMp3Url = await extractVeoAudio(veoVideoUrl, rendiPoll);
   } catch (e: unknown) {
+    if (isCancellation(e)) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
       `Could not extract audio from the generated Veo video (required for captions). ${msg} If the file has no audio track, try a different theme or prompt.`
@@ -259,7 +268,7 @@ ${promptInstruction}`,
   let rendiFinalUrl: string;
   try {
     await abortIfCancelled(ctx);
-    rendiFinalUrl = await burnSubtitles(burnInputUrl, srtUrl);
+    rendiFinalUrl = await burnSubtitles(burnInputUrl, srtUrl, rendiPoll);
   } catch (e) {
     throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
     throw e;
@@ -405,6 +414,9 @@ Return ONLY raw JSON array, nothing else.`;
       } else {
         sceneVideoRefs.push(url);
       }
+      if (sceneVideoRefs.length === 1 && ctx.onProviderCommitted) {
+        await ctx.onProviderCommitted();
+      }
     } catch (e) {
       throwRecoverableIfCheckpointed(ctx.recovery, "scenes", e);
       throw e;
@@ -493,9 +505,16 @@ Return ONLY raw JSON array, nothing else.`;
   let combinedVideoUrl: string;
   let mergedVideoUrl: string;
   let rendiFinalUrl: string;
+  const rendiPoll = rendiPollOpts(ctx);
   try {
     await abortIfCancelled(ctx);
-    combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
+    combinedVideoUrl = await concatScenes(
+      sceneVideoUrls,
+      perSceneDurStr,
+      targetW,
+      targetH,
+      rendiPoll,
+    );
     const fontUrl = getFontUrl(style.fontname);
     await abortIfCancelled(ctx);
     mergedVideoUrl = await mergeVideoAudioSubs({
@@ -506,9 +525,10 @@ Return ONLY raw JSON array, nothing else.`;
       audioSpeedFactor,
       finalDuration,
       shortest: true,
+      rendiOptions: rendiPoll,
     });
     await abortIfCancelled(ctx);
-    rendiFinalUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+    rendiFinalUrl = await burnSubtitles(mergedVideoUrl, srtUrl, rendiPoll);
   } catch (e) {
     throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
     throw e;

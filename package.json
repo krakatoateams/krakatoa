@@ -14,6 +14,7 @@
     "storage:migrate-user-first": "node scripts/migrate-storage-user-first.mjs",
     "storage:list-orphans": "npx tsx scripts/list-storage-orphans.ts",
     "test:idempotency": "npx tsx lib/generation-idempotency-self-check.ts",
+    "test:generation-commit": "npx tsx lib/generation-commit-self-check.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {

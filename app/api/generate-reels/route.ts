@@ -29,7 +29,8 @@ import {
   markAssetFailed,
 } from "@/lib/assets-db";
 import { isCancellation } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
+import { makeReplicateCancelHooks, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import { isRecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
@@ -429,14 +430,22 @@ export async function POST(req: Request) {
         generationRequestId && profileId
           ? isCancelRequested(profileId, generationRequestId)
           : false,
-      recorder: {
-        onPrediction: makePredictionRecorder({
+      recorder:
+        makeReplicateCancelHooks({
           generationRequestId,
           profileId,
           jobId,
           kind: reqv.jobType,
-        }),
-      },
+        }) ?? {},
+      onProviderCommitted:
+        generationRequestId && profileId
+          ? () =>
+              markProviderCommitted({
+                generationRequestId: generationRequestId!,
+                profileId: profileId!,
+                reason: "reels_first_scene_or_veo_clip",
+              })
+          : undefined,
       recovery,
     };
 
@@ -625,7 +634,10 @@ export async function POST(req: Request) {
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const recoverable = isRecoverablePipelineError(error);
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     if (cancelled) console.log("[reels] Cancelled by user.");
     else if (recoverable) console.warn("[reels] Recoverable pipeline error:", error);
     else console.error("[reels] pipeline error:", error);

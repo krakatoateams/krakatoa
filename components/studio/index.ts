@@ -6,6 +6,7 @@ export {
   GENERATE_BTN_CLASS,
   CANCEL_BTN_CLASS,
 } from "./CreditButton";
+export { GenerationCancelButton } from "./GenerationCancelButton";
 export {
   StudioForm,
   StudioFormCard,

@@ -22,6 +22,7 @@ export type GenerationRequestRow = {
   error_json: Record<string, unknown> | null;
   locked_until: string | null;
   cancel_requested?: boolean;
+  cancel_allowed?: boolean;
   created_at: string;
   updated_at: string;
 };

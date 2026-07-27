@@ -98,6 +98,11 @@ export function useIdempotentSubmit() {
         body: JSON.stringify({ idempotencyKey: key }),
       });
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409 && data?.code === "CANCEL_NOT_ALLOWED") {
+          setCancelling(false);
+          return false;
+        }
         // Let the user try again; the generate request is still running.
         setCancelling(false);
         return false;

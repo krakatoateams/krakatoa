@@ -1,5 +1,6 @@
 import { markJobRecoverable } from "@/lib/jobs-db";
 import { isRecoverablePipelineError } from "./errors";
+import { isCancellation } from "@/lib/replicate-server";
 import type { PipelineRecoveryHandle } from "./handle";
 
 /** After Replicate returns a video URL, copy to resumable storage for resume. */
@@ -24,6 +25,7 @@ export async function markRecoverableIfArtifacts(params: {
   finalAssetId?: string | null;
   errorJson: Record<string, unknown>;
 }): Promise<boolean> {
+  if (isCancellation(params.error)) return false;
   const recoverable =
     isRecoverablePipelineError(params.error) ||
     (params.recovery &&

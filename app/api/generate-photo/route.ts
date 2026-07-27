@@ -58,8 +58,9 @@ import {
 } from "@/lib/generation-idempotency";
 import {
   assertNotCancelled,
-  makePredictionRecorder,
+  makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -571,7 +572,7 @@ export async function POST(req: Request) {
     }));
     if (asset) photoAssetId = asset.id;
 
-    const recordPredictionTick = makePredictionRecorder({
+    const replicateHooks = makeReplicateCancelHooks({
       generationRequestId,
       profileId,
       jobId,
@@ -647,7 +648,7 @@ export async function POST(req: Request) {
       photoModelRef,
       { input: providerInput },
       10,
-      { onPrediction: recordPredictionTick }
+      replicateHooks,
     );
 
     if (generationRequestId && profileId) {
@@ -659,6 +660,14 @@ export async function POST(req: Request) {
       throw new Error("Nano Banana did not return a valid image URL");
     }
     await endStep({ generatedImageUrl });
+
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "image_generation",
+      });
+    }
 
     await beginStep("storage_upload", "Download generated image + save to Supabase");
     if (generationRequestId && profileId) {
@@ -768,7 +777,10 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     if (cancelled) console.log("[Product Photo] Cancelled by user.");
     else console.error("[Product Photo] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;

@@ -39,8 +39,9 @@ import {
 } from "@/lib/generation-idempotency";
 import {
   assertNotCancelled,
-  makePredictionRecorder,
+  makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import {
   resolveStoryboardStyle,
   storyboardVideoStyleDirective,
@@ -300,7 +301,7 @@ export async function POST(req: Request) {
     }));
     if (asset) imageAssetId = asset.id;
 
-    const recordPredictionTick = makePredictionRecorder({
+    const replicateHooks = makeReplicateCancelHooks({
       generationRequestId,
       profileId,
       jobId,
@@ -353,7 +354,7 @@ export async function POST(req: Request) {
           },
         },
         10,
-        { onPrediction: recordPredictionTick }
+        replicateHooks,
       );
       const rawText = stripMarkdownFences(flattenReplicateTextChunks(out).trim());
       try {
@@ -366,6 +367,14 @@ export async function POST(req: Request) {
     }
     if (!analysis) throw new Error("Vision model did not return a usable storyboard analysis.");
     await endStep({ scenes: analysis.scenes.length });
+
+    if (generationRequestId && profileId) {
+      await markProviderCommitted({
+        generationRequestId,
+        profileId,
+        reason: "storyboard_import_vision",
+      });
+    }
 
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
@@ -485,7 +494,10 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    const cancelled = isCancellation(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     if (cancelled) console.log("[storyboard-import] Cancelled by user.");
     else console.error("[storyboard-import] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;

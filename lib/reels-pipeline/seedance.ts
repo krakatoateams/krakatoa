@@ -38,6 +38,10 @@ async function abortIfCancelled(ctx: ReelsPipelineContext): Promise<void> {
   if (await ctx.isCancelled()) throw new ReplicateCancellationError();
 }
 
+function rendiPollOpts(ctx: ReelsPipelineContext) {
+  return { abortCheck: () => abortIfCancelled(ctx) };
+}
+
 export async function runSeedancePipeline(
   ctx: ReelsPipelineContext,
   params: SeedancePipelineParams
@@ -178,6 +182,9 @@ Return ONLY raw JSON array, nothing else.`;
       } else {
         sceneVideoRefs.push(url);
       }
+      if (sceneVideoRefs.length === 1 && ctx.onProviderCommitted) {
+        await ctx.onProviderCommitted();
+      }
     } catch (e) {
       throwRecoverableIfCheckpointed(ctx.recovery, "scenes", e);
       throw e;
@@ -228,9 +235,16 @@ Return ONLY raw JSON array, nothing else.`;
   let combinedVideoUrl: string;
   let mergedVideoUrl: string;
   let rendiVideoUrl: string;
+  const rendiPoll = rendiPollOpts(ctx);
   try {
     await abortIfCancelled(ctx);
-    combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
+    combinedVideoUrl = await concatScenes(
+      sceneVideoUrls,
+      perSceneDurStr,
+      targetW,
+      targetH,
+      rendiPoll,
+    );
     const fontUrl = getFontUrl(style.fontname);
     await abortIfCancelled(ctx);
     mergedVideoUrl = await mergeVideoAudioSubs({
@@ -241,9 +255,10 @@ Return ONLY raw JSON array, nothing else.`;
       audioSpeedFactor,
       finalDuration,
       shortest: false,
+      rendiOptions: rendiPoll,
     });
     await abortIfCancelled(ctx);
-    rendiVideoUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+    rendiVideoUrl = await burnSubtitles(mergedVideoUrl, srtUrl, rendiPoll);
   } catch (e) {
     throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
     throw e;

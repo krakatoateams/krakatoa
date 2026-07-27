@@ -4,6 +4,7 @@ import {
   type ReplicateRunHooks,
 } from "@/lib/replicate-server";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { supabaseServer } from "@/lib/supabase-server";
 
 /**
@@ -112,7 +113,7 @@ export function makeReplicateCancelHooks(params: {
   };
 }
 
-/** Flip cancel_requested true for an attempt (ownership-checked). Returns true when a row matched. */
+/** Flip cancel_requested true when cancel is still allowed (ownership-checked). */
 export async function requestCancel(
   profileId: string,
   generationRequestId: string
@@ -122,6 +123,7 @@ export async function requestCancel(
     .update({ cancel_requested: true })
     .eq("id", generationRequestId)
     .eq("profile_id", profileId)
+    .eq("cancel_allowed", true)
     .select("id")
     .maybeSingle();
 
@@ -144,6 +146,9 @@ export async function isCancelRequested(
   profileId: string,
   generationRequestId: string
 ): Promise<boolean> {
+  if (await isProviderCommitLocked(profileId, generationRequestId)) {
+    return false;
+  }
   for (let attempt = 0; attempt < CANCEL_READ_RETRIES; attempt++) {
     try {
       const { data, error } = await supabaseServer

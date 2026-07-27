@@ -7,6 +7,8 @@ import {
   finishGenerationRequestsForJob,
   isPipelineRecoverableErrorJson,
 } from "@/lib/generation-idempotency";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
+import { commitLockedFromCancelAllowed } from "@/lib/generation-commit-pure";
 import {
   requestCancel,
   listPredictionIds,
@@ -140,7 +142,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: "already_cancelling" });
     }
 
-    await requestCancel(profileId, existing.id);
+    if (commitLockedFromCancelAllowed(existing.cancel_allowed)) {
+      return NextResponse.json(
+        {
+          code: "CANCEL_NOT_ALLOWED",
+          message: "Generation can no longer be cancelled.",
+          cancelAllowed: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (await isProviderCommitLocked(profileId, existing.id)) {
+      return NextResponse.json(
+        {
+          code: "CANCEL_NOT_ALLOWED",
+          message: "Generation can no longer be cancelled.",
+          cancelAllowed: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    const cancelAccepted = await requestCancel(profileId, existing.id);
+    if (!cancelAccepted) {
+      if (await isProviderCommitLocked(profileId, existing.id)) {
+        return NextResponse.json(
+          {
+            code: "CANCEL_NOT_ALLOWED",
+            message: "Generation can no longer be cancelled.",
+            cancelAllowed: false,
+          },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ error: "Generation not found." }, { status: 404 });
+    }
 
     let ids: string[] = [];
     try {
