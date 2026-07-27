@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Kebijakan Privasi",
-    effectiveDate: "Terakhir diperbarui: 23 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 27 Juli 2026",
     intro: "Kebijakan Privasi ini menjelaskan bagaimana Kelolako (\"kami\") mengumpulkan, menggunakan, menyimpan, dan melindungi informasi Anda saat menggunakan platform Kelolako (\"Layanan\"). Pengendali data untuk Layanan ini adalah Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta.",
     sections: [
       {
@@ -65,6 +65,7 @@ const content: LegalContent = {
             "Replicate — penyedia model AI untuk pembuatan video, foto, dan caption (termasuk model Google Gemini dan OpenAI Whisper);",
             "Rendi — penyedia pemrosesan video (ekstraksi audio, dll.);",
             "DOKU — penyedia gerbang pembayaran untuk pembelian Kredit;",
+            "Resend — penyedia layanan pengiriman email untuk email otentikasi (verifikasi akun, reset kata sandi, dan notifikasi terkait akun lainnya);",
             "Vercel — penyedia hosting infrastruktur aplikasi kami;",
             "TikTok — untuk otentikasi (TikTok Login Kit) serta publikasi video dan foto melalui TikTok Content Posting API; kami menyimpan token akses dan token refresh yang diperlukan untuk menjaga koneksi Anda tetap aktif dan mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
             "Instagram/Meta — direncanakan sebagai integrasi mendatang; belum ada data yang dibagikan ke pihak ini hingga fitur tersebut aktif.",
@@ -114,7 +115,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Privacy Policy",
-    effectiveDate: "Last updated: July 23, 2026",
+    effectiveDate: "Last updated: July 27, 2026",
     intro: "This Privacy Policy explains how Kelolako (\"we\") collects, uses, stores, and protects your information when you use the Kelolako platform (\"Service\"). The data controller for this Service is an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta.",
     sections: [
       {
@@ -170,6 +171,7 @@ const content: LegalContent = {
             "Replicate — AI model provider for video, photo, and caption generation (including Google Gemini and OpenAI Whisper models);",
             "Rendi — video processing provider (audio extraction, etc.);",
             "DOKU — payment gateway provider for Credit purchases;",
+            "Resend — email delivery service provider for authentication emails (account verification, password reset, and other account-related notifications);",
             "Vercel — our application hosting infrastructure provider;",
             "TikTok — for authentication (TikTok Login Kit) and video and photo publishing via the TikTok Content Posting API; we store the access and refresh tokens needed to keep your connection active and publish content on your behalf according to your instructions.",
             "Instagram/Meta — planned as a future integration; no data is shared with this party until that feature is active.",
