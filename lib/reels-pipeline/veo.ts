@@ -23,6 +23,11 @@ import {
   getFontUrl,
 } from "./rendi-stitch";
 import { uploadAssCaptions, downloadAndStoreFinal, cleanupCaptions } from "./storage";
+import {
+  artifactFetchUrl,
+  resolveSceneUrls,
+  throwRecoverableIfCheckpointed,
+} from "./recovery-helpers";
 import type {
   ReelsPipelineContext,
   ReelsPipelineResult,
@@ -92,6 +97,10 @@ export async function runVeoSinglePipeline(
   const { theme, duration, resolution, voiceId, emotion, singlePromptScenes, style } =
     params;
   const { w: targetW, h: targetH } = dimsForResolution(resolution);
+
+  if (ctx.recovery) {
+    await ctx.recovery.setPipeline("reels_veo_single");
+  }
 
   // ----- Step 1: style anchor + negative -----
   await abortIfCancelled(ctx);
@@ -176,6 +185,11 @@ ${promptInstruction}`,
   }
   await ctx.log.endStep({ veoVideoUrl });
 
+  let veoVideoRef = veoVideoUrl;
+  if (ctx.recovery) {
+    veoVideoRef = await ctx.recovery.copyReplicateVideo(veoVideoUrl, "veo_clip.mp4");
+  }
+
   // ----- Step 4: extract audio (Veo provides native audio) -----
   await abortIfCancelled(ctx);
   await ctx.log.beginStep("audio_extraction", "Rendi extract audio track from Veo clip");
@@ -219,25 +233,63 @@ ${promptInstruction}`,
     audioSpeedFactor,
     finalDuration
   );
-  const { srtFilename, srtUrl } = await uploadAssCaptions(
-    ctx.userId,
-    assContent,
-    `captions_veo_${Date.now()}.ass`
-  );
-  await abortIfCancelled(ctx);
-  const rendiFinalUrl = await burnSubtitles(veoVideoUrl, srtUrl);
+  let srtFilename: string | undefined;
+  let srtUrl: string;
+  if (ctx.recovery) {
+    const captionsPath = await ctx.recovery.uploadCaptions(assContent);
+    srtUrl = await artifactFetchUrl(captionsPath, ctx.userId);
+    await ctx.recovery.setRendiParams({
+      targetW,
+      targetH,
+      audioSpeedFactor,
+      finalDuration,
+      fontname: style.fontname,
+    });
+    await ctx.recovery.setStep("rendi");
+  } else {
+    const uploaded = await uploadAssCaptions(
+      ctx.userId,
+      assContent,
+      `captions_veo_${Date.now()}.ass`
+    );
+    srtFilename = uploaded.srtFilename;
+    srtUrl = uploaded.srtUrl;
+  }
+  const burnInputUrl = await artifactFetchUrl(veoVideoRef, ctx.userId);
+  let rendiFinalUrl: string;
+  try {
+    await abortIfCancelled(ctx);
+    rendiFinalUrl = await burnSubtitles(burnInputUrl, srtUrl);
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
+    throw e;
+  }
   await ctx.log.endStep({ rendiFinalUrl });
 
   // ----- Step 7: download + upload final MP4 -----
   await abortIfCancelled(ctx);
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
-  const { storagePath, publicUrl } = await downloadAndStoreFinal(
-    ctx.userId,
-    "reelscreator",
-    rendiFinalUrl,
-    `video_${Date.now()}.mp4`
-  );
-  await cleanupCaptions(srtFilename);
+  let storagePath: string;
+  let publicUrl: string;
+  try {
+    const stored = await downloadAndStoreFinal(
+      ctx.userId,
+      "reelscreator",
+      rendiFinalUrl,
+      `video_${Date.now()}.mp4`
+    );
+    storagePath = stored.storagePath;
+    publicUrl = stored.publicUrl;
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "upload", e);
+    throw e;
+  }
+  if (srtFilename) {
+    await cleanupCaptions(srtFilename);
+  }
+  if (ctx.recovery) {
+    await ctx.recovery.setStep("done");
+  }
   await ctx.log.endStep({ storagePath, publicUrl });
 
   return {
@@ -261,6 +313,10 @@ export async function runVeoPerScenePipeline(
   const DURATION = duration;
   const TOTAL_DURATION = SCENE_COUNT * DURATION;
   const MAX_WORDS_PER_SCENE = Math.max(6, Math.floor(DURATION * 1.7));
+
+  if (ctx.recovery) {
+    await ctx.recovery.setPipeline("reels_veo_per_scene");
+  }
 
   // ----- Step 1: style anchor + negative -----
   await abortIfCancelled(ctx);
@@ -307,38 +363,63 @@ Return ONLY raw JSON array, nothing else.`;
   if (!fullNarration) throw new Error("All scene narrations are empty.");
   await ctx.log.endStep({ scenes: scenes.length });
 
-  // ----- Step 3: parallel Veo scene videos concurrent with the TTS pipeline -----
+  // ----- Step 3: Veo scene videos concurrent with TTS -----
   await abortIfCancelled(ctx);
-  const videoPromises = scenes.map((scene) =>
-    runWithRetry(
-      ctx.replicate,
-      ctx.refs.videoRef,
-      { input: { prompt: scene.video_prompt, aspect_ratio: "9:16", duration: DURATION, resolution } },
-      10,
-      ctx.recorder
-    )
-  );
   await ctx.log.beginStep(
     "video_generation",
     "Parallel Veo scene videos (with concurrent TTS pipeline)",
     { scenes: SCENE_COUNT, perSceneDuration: DURATION, resolution }
   );
-  const [videoResponses, ttsPack] = await Promise.all([
-    Promise.all(videoPromises),
-    runTtsPipeline(ctx, {
-      fullNarration,
-      voiceId,
-      emotion,
-      totalDuration: TOTAL_DURATION,
-      initialSpeed: 0.95,
-    }),
-  ]);
+  const ttsPromise = runTtsPipeline(ctx, {
+    fullNarration,
+    voiceId,
+    emotion,
+    totalDuration: TOTAL_DURATION,
+    initialSpeed: 0.95,
+  });
+  const sceneVideoRefs: string[] = [];
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i]!;
+    await abortIfCancelled(ctx);
+    try {
+      const res = await runWithRetry(
+        ctx.replicate,
+        ctx.refs.videoRef,
+        {
+          input: {
+            prompt: scene.video_prompt,
+            aspect_ratio: "9:16",
+            duration: DURATION,
+            resolution,
+          },
+        },
+        10,
+        ctx.recorder
+      );
+      const url = extractMediaUrl(res);
+      if (!url.startsWith("http")) {
+        throw new Error(`Failed to get video URL for scene ${scene.scene_id}`);
+      }
+      if (ctx.recovery) {
+        sceneVideoRefs.push(await ctx.recovery.copySceneFromUrl(i, url));
+      } else {
+        sceneVideoRefs.push(url);
+      }
+    } catch (e) {
+      throwRecoverableIfCheckpointed(ctx.recovery, "scenes", e);
+      throw e;
+    }
+  }
+  const ttsPack = await ttsPromise;
   await abortIfCancelled(ctx);
   const fullAudioUrl = ttsPack.audioUrl;
   const whisperWords = ttsPack.words;
   const audioEndTotal = ttsPack.audioEndTotal;
   const audioSpeedFactor = ttsPack.audioSpeedFactor;
-  await ctx.log.endStep({ scenes: videoResponses.length });
+  if (ctx.recovery) {
+    await ctx.recovery.copyAudioFromUrl(fullAudioUrl);
+  }
+  await ctx.log.endStep({ scenes: sceneVideoRefs.length });
 
   await ctx.log.beginStep(
     "tts_generation",
@@ -379,45 +460,85 @@ Return ONLY raw JSON array, nothing else.`;
   // ----- Step 4: ASS subtitles + Rendi concat/merge/burn -----
   await abortIfCancelled(ctx);
   await ctx.log.beginStep("rendi_render", "ASS subtitles + Rendi concat/merge/burn-in");
-  const { srtFilename, srtUrl } = await uploadAssCaptions(
-    ctx.userId,
-    assContent,
-    `captions_veo_${Date.now()}.ass`
-  );
-  const sceneVideoUrls = videoResponses.map((res, i) => {
-    const url = extractMediaUrl(res);
-    if (!url.startsWith("http")) {
-      throw new Error(`Failed to get video URL for scene ${scenes[i].scene_id}`);
-    }
-    return url;
-  });
-  await abortIfCancelled(ctx);
-  const combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
-  const fontUrl = getFontUrl(style.fontname);
-  await abortIfCancelled(ctx);
-  const mergedVideoUrl = await mergeVideoAudioSubs({
-    combinedVideoUrl,
-    fullAudioUrl,
-    srtUrl,
-    fontUrl,
-    audioSpeedFactor,
-    finalDuration,
-    shortest: true,
-  });
-  await abortIfCancelled(ctx);
-  const rendiFinalUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+  let srtFilename: string | undefined;
+  let srtUrl: string;
+  if (ctx.recovery) {
+    const captionsPath = await ctx.recovery.uploadCaptions(assContent);
+    srtUrl = await artifactFetchUrl(captionsPath, ctx.userId);
+  } else {
+    const uploaded = await uploadAssCaptions(
+      ctx.userId,
+      assContent,
+      `captions_veo_${Date.now()}.ass`
+    );
+    srtFilename = uploaded.srtFilename;
+    srtUrl = uploaded.srtUrl;
+  }
+  if (ctx.recovery) {
+    await ctx.recovery.setRendiParams({
+      targetW,
+      targetH,
+      perSceneDurStr,
+      audioSpeedFactor,
+      finalDuration,
+      shortest: true,
+      fontname: style.fontname,
+    });
+    await ctx.recovery.setStep("rendi");
+  }
+  const sceneVideoUrls = await resolveSceneUrls(sceneVideoRefs, ctx.userId);
+  const audioForMerge = ctx.recovery?.getManifest().artifacts.audio
+    ? await artifactFetchUrl(ctx.recovery.getManifest().artifacts.audio!, ctx.userId)
+    : fullAudioUrl;
+  let combinedVideoUrl: string;
+  let mergedVideoUrl: string;
+  let rendiFinalUrl: string;
+  try {
+    await abortIfCancelled(ctx);
+    combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
+    const fontUrl = getFontUrl(style.fontname);
+    await abortIfCancelled(ctx);
+    mergedVideoUrl = await mergeVideoAudioSubs({
+      combinedVideoUrl,
+      fullAudioUrl: audioForMerge,
+      srtUrl,
+      fontUrl,
+      audioSpeedFactor,
+      finalDuration,
+      shortest: true,
+    });
+    await abortIfCancelled(ctx);
+    rendiFinalUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
+    throw e;
+  }
   await ctx.log.endStep({ combinedVideoUrl, mergedVideoUrl, rendiFinalUrl });
 
   // ----- Step 5: download + upload final MP4 -----
   await abortIfCancelled(ctx);
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
-  const { storagePath, publicUrl } = await downloadAndStoreFinal(
-    ctx.userId,
-    "reelscreator",
-    rendiFinalUrl,
-    `video_${Date.now()}.mp4`
-  );
-  await cleanupCaptions(srtFilename);
+  let storagePath: string;
+  let publicUrl: string;
+  try {
+    const stored = await downloadAndStoreFinal(
+      ctx.userId,
+      "reelscreator",
+      rendiFinalUrl,
+      `video_${Date.now()}.mp4`
+    );
+    storagePath = stored.storagePath;
+    publicUrl = stored.publicUrl;
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "upload", e);
+    throw e;
+  }
+  if (srtFilename) {
+    await cleanupCaptions(srtFilename);
+  }
+  if (ctx.recovery) {
+    await ctx.recovery.setStep("done");
+  }
   await ctx.log.endStep({ storagePath, publicUrl });
 
   return {

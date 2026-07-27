@@ -1,7 +1,9 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { LOCK_TTL_MS, finishGenerationRequestFailure } from "@/lib/generation-idempotency";
-import { failJob } from "@/lib/jobs-db";
+import { LOCK_TTL_MS, finishGenerationRequestFailure, finishGenerationRequestRecoverable, PIPELINE_RECOVERABLE_CODE } from "@/lib/generation-idempotency";
+import { failJob, markJobRecoverable, getJob } from "@/lib/jobs-db";
 import { refundCredits } from "@/lib/credits-db";
+import { runResumableStorageReconcile } from "@/lib/pipeline-recovery/reconcile";
+import { parseRecoveryManifest } from "@/lib/pipeline-recovery/manifest";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
@@ -10,6 +12,8 @@ export type GenerationReconcileResult = {
   staleJobs: number;
   refundedJobs: number;
   staleRequests: number;
+  expiredRecoverable: number;
+  sweptResumableFolders: number;
   errors: string[];
 };
 
@@ -47,12 +51,19 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
     staleJobs: 0,
     refundedJobs: 0,
     staleRequests: 0,
+    expiredRecoverable: 0,
+    sweptResumableFolders: 0,
     errors: [],
   };
 
+  const resumableResult = await runResumableStorageReconcile();
+  result.expiredRecoverable = resumableResult.expiredRecoverable;
+  result.sweptResumableFolders = resumableResult.sweptFolders;
+  result.errors.push(...resumableResult.errors);
+
   const { data: staleJobs, error: jobsError } = await supabaseServer
     .from("jobs")
-    .select("id, profile_id, cost_credits")
+    .select("id, profile_id, cost_credits, output, job_type")
     .eq("status", "running")
     .lt("updated_at", cutoff)
     .limit(50);
@@ -60,9 +71,28 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
   if (jobsError) {
     result.errors.push(`jobs query: ${jobsError.message}`);
   } else {
-    for (const row of (staleJobs as { id: string; profile_id: string; cost_credits?: number }[] | null) ?? []) {
+    for (const row of (staleJobs as {
+      id: string;
+      profile_id: string;
+      cost_credits?: number;
+      output?: Record<string, unknown>;
+      job_type?: string;
+    }[] | null) ?? []) {
       result.staleJobs += 1;
       try {
+        const recovery = parseRecoveryManifest(row.output);
+        if (recovery) {
+          await markJobRecoverable(row.profile_id, row.id, {
+            recovery: recovery as unknown as Record<string, unknown>,
+            error: {
+              code: "STALE_RECOVERABLE",
+              message:
+                "Generation interrupted with recoverable artifacts. Resume from the app or wait for expiry.",
+            },
+          });
+          continue;
+        }
+
         const refunded = await hasRefundForJob(row.id);
         if (!refunded) {
           const amount = await spendAmountForJob(row.id);
@@ -91,7 +121,7 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
 
   const { data: staleRequests, error: reqError } = await supabaseServer
     .from("generation_requests")
-    .select("id, job_id")
+    .select("id, job_id, profile_id")
     .eq("status", "started")
     .lt("locked_until", new Date().toISOString())
     .limit(50);
@@ -99,9 +129,30 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
   if (reqError) {
     result.errors.push(`generation_requests query: ${reqError.message}`);
   } else {
-    for (const row of (staleRequests as { id: string; job_id: string | null }[] | null) ?? []) {
+    for (const row of (staleRequests as {
+      id: string;
+      job_id: string | null;
+      profile_id: string;
+    }[] | null) ?? []) {
       result.staleRequests += 1;
       try {
+        if (row.job_id) {
+          const job = await getJob(row.profile_id, row.job_id);
+          if (job?.status === "recoverable") {
+            await finishGenerationRequestRecoverable({
+              id: row.id,
+              jobId: row.job_id,
+              errorJson: {
+                code: PIPELINE_RECOVERABLE_CODE,
+                message:
+                  typeof job.error?.message === "string"
+                    ? job.error.message
+                    : "Generation paused for recovery.",
+              },
+            });
+            continue;
+          }
+        }
         await finishGenerationRequestFailure({
           id: row.id,
           jobId: row.job_id,

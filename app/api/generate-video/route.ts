@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
 import { makePredictionRecorder, assertNotCancelled } from "@/lib/generation-cancel";
+import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
+import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
+import {
+  checkpointRemoteVideo,
+  markRecoverableIfArtifacts,
+} from "@/lib/pipeline-recovery/video-upload-recovery";
+import { RecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { insertUserCreation } from "@/lib/creations-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
@@ -41,6 +48,8 @@ import {
   beginGenerationRequest,
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
+  finishGenerationRequestRecoverable,
+  buildRecoverableGenerationJson,
 } from "@/lib/generation-idempotency";
 import {
   buildMentionGuidanceSuffix,
@@ -155,6 +164,8 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
+  let userId: string | null = null;
+  let pipelineRecovery: ReturnType<typeof createPipelineRecoveryHandle> | undefined;
   let jobKind: VideoJobKind = "video_text2video";
   let jobLabel = "Text to Video";
   // Transient reference uploads to remove once we're done (success/failure/402).
@@ -199,7 +210,6 @@ export async function POST(req: Request) {
 
   try {
     // STRICT profile resolution (this route charges credits).
-    let userId: string | null = null;
     try {
       const profile = await requireCurrentProfile();
       profileId = profile.id;
@@ -436,6 +446,16 @@ export async function POST(req: Request) {
     if (begin.action === "replay") {
       return NextResponse.json(begin.response);
     }
+    if (begin.action === "recoverable") {
+      return NextResponse.json(
+        buildRecoverableGenerationJson({
+          jobId: begin.jobId,
+          message:
+            typeof begin.errorJson.message === "string" ? begin.errorJson.message : undefined,
+        }),
+        { status: 503 },
+      );
+    }
     generationRequestId = begin.id;
 
     // ---- Platform job (best-effort observability) ----
@@ -446,12 +466,21 @@ export async function POST(req: Request) {
         jobType: jobKind,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
-        input: { modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
+        input: { userId: userId!, modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
       })
     );
     if (job) {
       jobId = job.id;
       await safe("startJob", () => startJob(profileId!, jobId!));
+      pipelineRecovery =
+        userId
+          ? createPipelineRecoveryHandle({
+              profileId: profileId!,
+              userId: userId!,
+              jobId: job.id,
+              existingJob: job,
+            })
+          : undefined;
     }
 
     // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
@@ -589,6 +618,13 @@ export async function POST(req: Request) {
     }
     await endStep({ generatedVideoUrl });
 
+    await checkpointRemoteVideo(
+      pipelineRecovery,
+      generatedVideoUrl,
+      `source_${Date.now()}.mp4`,
+      "video",
+    );
+
     // ---- Download the MP4 + persist to videos/ (so the sweep keeps it) ----
     await beginStep("storage_upload", "Download generated video + save to Supabase");
     if (generationRequestId && profileId) {
@@ -609,7 +645,10 @@ export async function POST(req: Request) {
       .from(STORAGE_BUCKET)
       .upload(storagePath, videoBuffer, { contentType: "video/mp4", upsert: false });
     if (uploadError) {
-      throw new Error(`Failed to save video to storage: ${uploadError.message}`);
+      throw new RecoverablePipelineError(
+        `Failed to save video to storage: ${uploadError.message}`,
+        "upload",
+      );
     }
     const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl });
@@ -697,8 +736,27 @@ export async function POST(req: Request) {
         })
       );
     }
+    if (jobId && userId) {
+      await safe("purgeResumable", () => purgeResumableJobStorage(userId!, jobId!));
+    }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
+    const recoverableHandled =
+      jobId &&
+      profileId &&
+      (await markRecoverableIfArtifacts({
+        error,
+        profileId: profileId!,
+        jobId: jobId!,
+        recovery: pipelineRecovery,
+        finalAssetId: videoAssetId,
+        errorJson: {
+          message:
+            error instanceof Error ? error.message : String(error),
+          code: "PIPELINE_RECOVERABLE",
+        },
+      }));
+    const recoverable = recoverableHandled || error instanceof RecoverablePipelineError;
     // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
     const cancelled = isCancellation(error);
     const message = cancelled
@@ -711,27 +769,31 @@ export async function POST(req: Request) {
     const pricingMissing = error instanceof PricingConfigError;
     const errJson = cancelled
       ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
+      : recoverable
+        ? { message, code: "PIPELINE_RECOVERABLE" }
+        : pricingMissing
+          ? { message, code: "PRICING_CONFIG_MISSING" }
+          : { message };
 
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
     }
-    if (videoAssetId && profileId) {
+    if (videoAssetId && profileId && !recoverable) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
     if (jobId && profileId) {
       if (cancelled) {
         await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-      } else {
+        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
+      } else if (!recoverable) {
         await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
       }
     }
 
-    // Best-effort refund. Fires on both failures and user cancellations.
-    if (creditsSpent && profileId && creditsAmount > 0) {
+    // Best-effort refund. Skip when recoverable (credits held).
+    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable && !cancelled) {
       await safe("refundCredits", () =>
         refundCredits({
           profileId: profileId!,
@@ -749,19 +811,41 @@ export async function POST(req: Request) {
     }
 
     if (generationRequestId) {
-      await safe("idemFailure", () =>
-        finishGenerationRequestFailure({
-          id: generationRequestId!,
-          jobId: jobId ?? null,
-          errorJson: errJson,
-        })
-      );
+      if (recoverable && jobId) {
+        await safe("idemRecoverable", () =>
+          finishGenerationRequestRecoverable({
+            id: generationRequestId!,
+            jobId: jobId!,
+            errorJson: errJson,
+          })
+        );
+      } else {
+        await safe("idemFailure", () =>
+          finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: errJson,
+          })
+        );
+      }
     }
 
     if (cancelled) {
       return NextResponse.json(
         { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
         { status: 409 }
+      );
+    }
+    if (recoverable) {
+      return NextResponse.json(
+        {
+          recoverable: true,
+          jobId,
+          error: message,
+          code: "PIPELINE_RECOVERABLE",
+          refunded: false,
+        },
+        { status: 503 },
       );
     }
     return NextResponse.json(

@@ -4,14 +4,32 @@
  * after a successful run. The final MP4 is downloaded from Rendi and re-uploaded
  * under `videos/{userId}/generated/video/{mode}/`.
  */
-import { supabase } from "@/lib/supabase";
+import { uploadToResumable } from "@/lib/pipeline-recovery/storage";
+import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
+import { supabaseServer } from "@/lib/supabase-server";
 import {
   STORAGE_BUCKET,
   videosGeneratedVideoPath,
   type VideoStudioMode,
   videosUserTempPath,
 } from "@/lib/storage-buckets";
-import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
+
+/** Upload captions to resumable staging for recovery-aware pipelines. */
+export async function uploadAssCaptionsResumable(
+  userId: string,
+  jobId: string,
+  assContent: string,
+): Promise<{ storagePath: string; signedUrl: string }> {
+  const storagePath = await uploadToResumable(
+    userId,
+    jobId,
+    "captions.ass",
+    assContent,
+    "text/plain",
+  );
+  const signedUrl = await signStoragePathForPipeline(storagePath, userId);
+  return { storagePath, signedUrl };
+}
 
 /** Upload an .ass caption file and return its transient path + public URL. */
 export async function uploadAssCaptions(
@@ -20,7 +38,7 @@ export async function uploadAssCaptions(
   filename: string
 ): Promise<{ srtFilename: string; srtUrl: string }> {
   const srtFilename = videosUserTempPath(userId, filename);
-  const { error } = await supabase.storage
+  const { error } = await supabaseServer.storage
     .from(STORAGE_BUCKET)
     .upload(srtFilename, assContent, {
       contentType: "text/plain",
@@ -48,7 +66,7 @@ export async function downloadAndStoreFinal(
   }
   const buffer = await resp.arrayBuffer();
   const storagePath = videosGeneratedVideoPath(userId, mode, filename);
-  const { error } = await supabase.storage
+  const { error } = await supabaseServer.storage
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
       contentType: "video/mp4",
@@ -65,7 +83,7 @@ export async function downloadAndStoreFinal(
 /** Best-effort removal of the transient caption file (never throws). */
 export async function cleanupCaptions(srtFilename: string): Promise<void> {
   try {
-    await supabase.storage.from(STORAGE_BUCKET).remove([srtFilename]);
+    await supabaseServer.storage.from(STORAGE_BUCKET).remove([srtFilename]);
   } catch (e) {
     console.warn("[reels-pipeline] caption cleanup (non-fatal):", e);
   }

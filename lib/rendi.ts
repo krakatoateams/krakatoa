@@ -96,6 +96,29 @@ export async function runRendiCommand(
   throw new Error("Rendi polling timed out.");
 }
 
+const RENDI_MAX_RETRIES = 3;
+
+/** Run Rendi with bounded retries on transient failures (not for user cancel). */
+export async function runRendiCommandWithRetry(
+  ffmpegCommand: string,
+  inputFiles: Record<string, string>,
+  outputFiles: Record<string, string>,
+  options: RunRendiOptions = {},
+): Promise<RendiPollData> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < RENDI_MAX_RETRIES; attempt++) {
+    try {
+      return await runRendiCommand(ffmpegCommand, inputFiles, outputFiles, options);
+    } catch (e) {
+      lastError = e;
+      if (attempt < RENDI_MAX_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 /** Read a hosted output URL from a successful Rendi poll result. */
 export function getRendiOutputUrl(pollData: RendiPollData, alias: string): string {
   const url = pollData.output_files?.[alias]?.storage_url;

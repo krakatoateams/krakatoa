@@ -67,6 +67,7 @@ export type ReelsPipelineContext = {
   isCancelled: () => Promise<boolean>;
   /** Records every Replicate prediction id so a separate cancel request can stop it. */
   recorder: ReplicateRunHooks;
+  recovery?: import("@/lib/pipeline-recovery/handle").PipelineRecoveryHandle;
 };
 
 export type ReelsPipelineResult = {

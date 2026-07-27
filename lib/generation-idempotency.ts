@@ -1,5 +1,13 @@
-import { createHash } from "crypto";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  LOCK_TTL_MS,
+  type GenerationRequestRow,
+  type BeginResult,
+  type LinkedJobRow,
+  resolveLinkedJobBeginAction,
+} from "./generation-idempotency-pure";
+
+export * from "./generation-idempotency-pure";
 
 /**
  * Generation request-level idempotency (Double-Charge Protection v1).
@@ -16,37 +24,23 @@ import { supabaseServer } from "@/lib/supabase-server";
 
 const TABLE = "generation_requests";
 
-/** Lock window for an in-flight attempt. Must exceed the routes' maxDuration
- *  (300s) with buffer, so a still-running attempt is never treated as stale. */
-export const LOCK_TTL_MS = 15 * 60 * 1000;
-export const MIN_KEY_LEN = 8;
-export const MAX_KEY_LEN = 200;
+/** Replay or recoverable gate based on the generation_request's linked job. */
+async function linkedJobBeginAction(
+  profileId: string,
+  existing: GenerationRequestRow,
+): Promise<BeginResult | null> {
+  if (!existing.job_id) return null;
 
-export type GenerationRequestStatus = "started" | "succeeded" | "failed";
+  const { data, error } = await supabaseServer
+    .from("jobs")
+    .select("status, output, error")
+    .eq("id", existing.job_id)
+    .eq("profile_id", profileId)
+    .maybeSingle();
 
-export type GenerationRequestRow = {
-  id: string;
-  profile_id: string;
-  idempotency_key: string;
-  tool_key: string;
-  route_key: string;
-  request_hash: string;
-  status: GenerationRequestStatus;
-  job_id: string | null;
-  asset_id: string | null;
-  response_json: Record<string, unknown> | null;
-  error_json: Record<string, unknown> | null;
-  locked_until: string | null;
-  cancel_requested?: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type BeginResult =
-  | { action: "proceed"; id: string }
-  | { action: "replay"; response: Record<string, unknown> }
-  | { action: "in_progress" }
-  | { action: "conflict" };
+  if (error || !data) return null;
+  return resolveLinkedJobBeginAction(existing, data as LinkedJobRow);
+}
 
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
@@ -61,56 +55,9 @@ function handleError(error: { message: string } | null, fallback: string): void 
   throw new Error(error.message || fallback);
 }
 
-// ---------------------------------------------------------------------------
-// Key + hashing utilities (pure)
-// ---------------------------------------------------------------------------
-
-/** Read the `Idempotency-Key` HTTP header (trimmed). Returns null when absent/blank. */
-export function readIdempotencyKey(req: Request): string | null {
-  const raw = req.headers.get("Idempotency-Key");
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-/** Validate the opaque key shape (length bounds only; any opaque string/UUID is fine). */
-export function isValidIdempotencyKey(key: string | null | undefined): key is string {
-  if (typeof key !== "string") return false;
-  const k = key.trim();
-  return k.length >= MIN_KEY_LEN && k.length <= MAX_KEY_LEN;
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortValue);
-  if (value && typeof value === "object") {
-    const input = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(input).sort()) {
-      out[k] = sortValue(input[k]);
-    }
-    return out;
-  }
-  return value;
-}
-
-/** Deterministic JSON with recursively sorted keys, so equivalent payloads match. */
-export function normalizeRequestForHash(obj: unknown): string {
-  return JSON.stringify(sortValue(obj));
-}
-
-/** SHA-256 (hex) of the normalized request. Hash client inputs only — never the
- *  idempotency key, resolved pricing, or resolved model config. */
-export function computeRequestHash(obj: unknown): string {
-  return createHash("sha256").update(normalizeRequestForHash(obj)).digest("hex");
-}
-
-// ---------------------------------------------------------------------------
-// Data access
-// ---------------------------------------------------------------------------
-
 export async function getExistingGenerationRequest(
   profileId: string,
-  idempotencyKey: string
+  idempotencyKey: string,
 ): Promise<GenerationRequestRow | null> {
   const { data, error } = await supabaseServer
     .from(TABLE)
@@ -141,8 +88,6 @@ export async function beginGenerationRequest(params: {
 }): Promise<BeginResult> {
   const lockedUntil = new Date(Date.now() + LOCK_TTL_MS).toISOString();
 
-  // 1) Insert-first. unique(profile_id, idempotency_key) admits exactly one
-  //    concurrent insert; everyone else hits the 23505 unique violation.
   const { data: inserted, error: insertError } = await supabaseServer
     .from(TABLE)
     .insert({
@@ -161,15 +106,12 @@ export async function beginGenerationRequest(params: {
     return { action: "proceed", id: (inserted as { id: string }).id };
   }
 
-  // A non-unique-violation error is a real failure.
   if (insertError && (insertError as { code?: string }).code !== "23505") {
     handleError(insertError, "Failed to begin generation request.");
   }
 
-  // 2) Unique violation: a row already exists for this (profile, key).
   const existing = await getExistingGenerationRequest(params.profileId, params.idempotencyKey);
   if (!existing) {
-    // Row vanished between insert and select (cascade delete). Treat conservatively.
     return { action: "in_progress" };
   }
 
@@ -181,6 +123,11 @@ export async function beginGenerationRequest(params: {
     return { action: "replay", response: existing.response_json };
   }
 
+  const linkedAction = await linkedJobBeginAction(params.profileId, existing);
+  if (linkedAction) {
+    return linkedAction;
+  }
+
   const lockFresh =
     existing.status === "started" &&
     existing.locked_until !== null &&
@@ -190,9 +137,6 @@ export async function beginGenerationRequest(params: {
     return { action: "in_progress" };
   }
 
-  // 3) Failed OR stale-started: race-safe optimistic takeover. We match the
-  //    exact `updated_at` we observed; any competing takeover/finish bumps
-  //    updated_at (via the trigger), so the loser updates 0 rows -> in_progress.
   const { data: takeover, error: takeoverError } = await supabaseServer
     .from(TABLE)
     .update({
@@ -205,7 +149,6 @@ export async function beginGenerationRequest(params: {
       response_json: null,
       job_id: null,
       asset_id: null,
-      // A re-run of the same key must not inherit a stale cancel flag.
       cancel_requested: false,
     })
     .eq("id", existing.id)
@@ -257,4 +200,70 @@ export async function finishGenerationRequestFailure(params: {
     .eq("id", params.id);
 
   handleError(error, "Failed to record generation request failure.");
+}
+
+/** Mark idempotency row failed but keep job link for recoverable resume (blocks re-spend). */
+export async function finishGenerationRequestRecoverable(params: {
+  id: string;
+  jobId: string;
+  errorJson: Record<string, unknown>;
+}): Promise<void> {
+  const { error } = await supabaseServer
+    .from(TABLE)
+    .update({
+      status: "failed",
+      job_id: params.jobId,
+      error_json: params.errorJson,
+      locked_until: null,
+    })
+    .eq("id", params.id);
+
+  handleError(error, "Failed to record recoverable generation request.");
+}
+
+/** Terminal close for generation_requests linked to a job (e.g. abandon/cancel recoverable). */
+export async function finishGenerationRequestsForJob(params: {
+  profileId: string;
+  jobId: string;
+  errorJson: Record<string, unknown>;
+}): Promise<void> {
+  const { error } = await supabaseServer
+    .from(TABLE)
+    .update({
+      status: "failed",
+      error_json: params.errorJson,
+      locked_until: null,
+    })
+    .eq("profile_id", params.profileId)
+    .eq("job_id", params.jobId)
+    .neq("status", "succeeded");
+
+  if (error) {
+    console.warn("[generation-idempotency] finishGenerationRequestsForJob:", error.message);
+  }
+}
+
+/** Mark linked generation_requests succeeded (e.g. after resume completes the job). */
+export async function finishGenerationRequestsForJobSuccess(params: {
+  profileId: string;
+  jobId: string;
+  responseJson: Record<string, unknown>;
+  assetId?: string | null;
+}): Promise<void> {
+  const { error } = await supabaseServer
+    .from(TABLE)
+    .update({
+      status: "succeeded",
+      response_json: params.responseJson,
+      error_json: null,
+      locked_until: null,
+      asset_id: params.assetId ?? null,
+    })
+    .eq("profile_id", params.profileId)
+    .eq("job_id", params.jobId)
+    .neq("status", "succeeded");
+
+  if (error) {
+    console.warn("[generation-idempotency] finishGenerationRequestsForJobSuccess:", error.message);
+  }
 }

@@ -9,6 +9,7 @@
  * storyboard). Reference uploads: `{userId}/photos/uploads/reference/`.
  * Scheduler device uploads: `{userId}/videos/uploads/scheduler/` (photos mirror under photos/).
  * Transient refs: `{userId}/videos/temp/refs/`.
+ * Pipeline recovery staging: `{userId}/resumable/{jobId}/` (outside photos/ and videos/).
  *
  * Legacy layout (`photos|videos/{userId}/…`) is still recognized by readers until
  * `npm run storage:migrate-user-first -- --execute` completes.
@@ -24,6 +25,9 @@ export const VIDEOS_FOLDER = "videos";
 
 /** Ephemeral ReelsGen assets (e.g. .ass passed to Rendi, then deleted) */
 export const VIDEOS_TEMP_SEGMENT = "temp";
+
+/** Pipeline recovery staging — sibling to photos/ and videos/ under `{userId}/`. */
+export const RESUMABLE_SEGMENT = "resumable";
 
 /** Transient generation reference uploads (first/last frame, ref images/videos/audios). */
 export const VIDEOS_TEMP_REFS_SEGMENT = "refs";
@@ -189,6 +193,36 @@ export function videosUserStoryboardPath(userId: string, filename: string): stri
 /** @deprecated Use `videosUserStoryboardPath` — legacy flat storyboard folder. */
 export function videosStoryboardPath(filename: string): string {
   return `${VIDEOS_FOLDER}/${VIDEOS_STORYBOARD_SEGMENT}/${filename}`;
+}
+
+/** `{userId}/resumable/{jobId}` prefix for pipeline recovery artifacts. */
+export function userResumablePrefix(userId: string, jobId: string): string {
+  return `${safeUserIdSegment(userId)}/${RESUMABLE_SEGMENT}/${requireIdSegment(jobId, "jobId")}`;
+}
+
+/** `{userId}/resumable/{jobId}/{relativePath}` */
+export function userResumablePath(
+  userId: string,
+  jobId: string,
+  relativePath: string,
+): string {
+  const rel = relativePath.replace(/^\/+/, "").replace(/\.\./g, "");
+  if (!rel) throw new Error("Invalid resumable relative path");
+  return `${userResumablePrefix(userId, jobId)}/${rel}`;
+}
+
+function requireIdSegment(value: string, label: string): string {
+  const safe = String(value || "").trim().replace(/[^a-zA-Z0-9-]/g, "");
+  if (!safe) throw new Error(`Invalid ${label} for storage path`);
+  return safe;
+}
+
+/** True when path is under `{userId}/resumable/…` (not inside photos/ or videos/). */
+export function isResumablePath(path: string): boolean {
+  if (!path || path.includes("..")) return false;
+  if (path.includes(`/${RESUMABLE_SEGMENT}/`)) return true;
+  const m = path.match(/^([a-zA-Z0-9-]+)\/resumable\//);
+  return m !== null && isUserMediaRootFolder(m[1]!);
 }
 
 /** True when a path is under any user's (or legacy global) `temp/` segment. */

@@ -6,10 +6,12 @@ import { supabaseServer } from "@/lib/supabase-server";
 import {
   PHOTOS_FOLDER,
   PROFILES_FOLDER,
+  RESUMABLE_SEGMENT,
   STORAGE_BUCKET,
   VIDEOS_FOLDER,
   isUserMediaRootFolder,
   isVideosTempPath,
+  isResumablePath,
   storagePathMediaKind,
 } from "@/lib/storage-buckets";
 
@@ -122,6 +124,7 @@ export async function listAllUserMediaObjects(): Promise<StorageObjectRow[]> {
       }
       add(await listAllObjects(`${e.name}/${PHOTOS_FOLDER}`, "photos"));
       add(await listAllObjects(`${e.name}/${VIDEOS_FOLDER}`, "videos"));
+      add(await listAllObjects(`${e.name}/${RESUMABLE_SEGMENT}`, "videos"));
     }
     if (entries.length < limit) break;
     offset += limit;
@@ -175,11 +178,29 @@ export async function collectStorageReferences(): Promise<string> {
   await pull("posts", ["video_url"]);
   await pull("storyboards", ["video_url", "storyboard_url"]);
 
+  const { data: jobRows, error: jobsError } = await supabaseServer
+    .from("jobs")
+    .select("output")
+    .in("status", ["running", "recoverable"])
+    .limit(500);
+  if (!jobsError && jobRows) {
+    for (const row of jobRows as { output?: Record<string, unknown> }[]) {
+      const out = row.output;
+      if (!out) continue;
+      const recovery = out.recovery;
+      if (recovery && typeof recovery === "object") {
+        const prefix = (recovery as { storagePrefix?: string }).storagePrefix;
+        if (prefix) refs.push(prefix);
+      }
+      if (typeof out.storagePath === "string") refs.push(out.storagePath);
+    }
+  }
+
   return refs.join("\n");
 }
 
 function isTransientPath(path: string): boolean {
-  return isVideosTempPath(path);
+  return isVideosTempPath(path) || isResumablePath(path);
 }
 
 function ageHours(createdAtMs: number | null): number | null {

@@ -18,7 +18,16 @@ import {
   burnSubtitles,
   getFontUrl,
 } from "./rendi-stitch";
-import { uploadAssCaptions, downloadAndStoreFinal, cleanupCaptions } from "./storage";
+import {
+  uploadAssCaptions,
+  downloadAndStoreFinal,
+  cleanupCaptions,
+} from "./storage";
+import {
+  artifactFetchUrl,
+  resolveSceneUrls,
+  throwRecoverableIfCheckpointed,
+} from "./recovery-helpers";
 import type {
   ReelsPipelineContext,
   ReelsPipelineResult,
@@ -40,6 +49,10 @@ export async function runSeedancePipeline(
   const DURATION_PER_SCENE = durationPerScene;
   const TOTAL_DURATION = SCENE_COUNT * DURATION_PER_SCENE;
   const RESOLUTION = resolution;
+
+  if (ctx.recovery) {
+    await ctx.recovery.setPipeline("reels_seedance");
+  }
 
   // ----- Step 1A: style anchor + negative prompt + narrator emotion -----
   await abortIfCancelled(ctx);
@@ -119,6 +132,10 @@ Return ONLY raw JSON array, nothing else.`;
   });
   await ctx.log.endStep({ wordCount: whisperWords.length, measuredDuration: audioEndTotal });
 
+  if (ctx.recovery) {
+    await ctx.recovery.copyAudioFromUrl(fullAudioUrl);
+  }
+
   const finalDuration = TOTAL_DURATION;
   const perSceneDuration = DURATION_PER_SCENE;
 
@@ -130,9 +147,12 @@ Return ONLY raw JSON array, nothing else.`;
   });
   // Abort before kicking off the expensive parallel runs if cancelled during LLM/TTS.
   await abortIfCancelled(ctx);
-  const videoResponses = await Promise.all(
-    scenes.map((scene) =>
-      runWithRetry(
+  const sceneVideoRefs: string[] = [];
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i]!;
+    await abortIfCancelled(ctx);
+    try {
+      const res = await runWithRetry(
         ctx.replicate,
         ctx.refs.videoRef,
         {
@@ -147,20 +167,25 @@ Return ONLY raw JSON array, nothing else.`;
         },
         10,
         ctx.recorder
-      )
-    )
-  );
+      );
+      const url = extractMediaUrl(res);
+      if (!url || !url.startsWith("http")) {
+        throw new Error(`Failed to generate video for scene ${scene.scene_id}.`);
+      }
+      if (ctx.recovery) {
+        const path = await ctx.recovery.copySceneFromUrl(i, url);
+        sceneVideoRefs.push(path);
+      } else {
+        sceneVideoRefs.push(url);
+      }
+    } catch (e) {
+      throwRecoverableIfCheckpointed(ctx.recovery, "scenes", e);
+      throw e;
+    }
+  }
   // Post-run cancel safety net (refund + no delivery, skip the costly Rendi stitch).
   await abortIfCancelled(ctx);
-  const sceneVideoUrls = videoResponses.map((res, i) => {
-    const url = extractMediaUrl(res);
-    if (!url || !url.startsWith("http")) {
-      console.error(`Failed to extract video URL for scene ${scenes[i].scene_id}:`, res);
-      throw new Error(`Failed to generate video for scene ${scenes[i].scene_id}.`);
-    }
-    return url;
-  });
-  await ctx.log.endStep({ scenes: sceneVideoUrls.length });
+  await ctx.log.endStep({ scenes: sceneVideoRefs.length });
 
   // ----- Step 6: ASS subtitles + Rendi stitch/merge/burn -----
   await abortIfCancelled(ctx);
@@ -168,30 +193,61 @@ Return ONLY raw JSON array, nothing else.`;
   // Seedance renders against a fixed 480x854 PlayRes (libass scales to the real
   // frame); keep this in sync with the live caption preview's 480x854 math.
   const assContent = buildAssContent(style, 480, 854, whisperWords, audioSpeedFactor, finalDuration);
-  const { srtFilename, srtUrl } = await uploadAssCaptions(
-    ctx.userId,
-    assContent,
-    `captions_${Date.now()}.ass`
-  );
+  let srtFilename: string | undefined;
+  let srtUrl: string;
+  if (ctx.recovery) {
+    const captionsPath = await ctx.recovery.uploadCaptions(assContent);
+    srtUrl = await artifactFetchUrl(captionsPath, ctx.userId);
+  } else {
+    const uploaded = await uploadAssCaptions(ctx.userId, assContent, `captions_${Date.now()}.ass`);
+    srtFilename = uploaded.srtFilename;
+    srtUrl = uploaded.srtUrl;
+  }
 
   const targetW = RESOLUTION === "720p" ? 720 : 480;
   const targetH = RESOLUTION === "720p" ? 1280 : 854;
   const perSceneDurStr = perSceneDuration.toFixed(3);
-  await abortIfCancelled(ctx);
-  const combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
-  const fontUrl = getFontUrl(style.fontname);
-  await abortIfCancelled(ctx);
-  const mergedVideoUrl = await mergeVideoAudioSubs({
-    combinedVideoUrl,
-    fullAudioUrl,
-    srtUrl,
-    fontUrl,
-    audioSpeedFactor,
-    finalDuration,
-    shortest: false,
-  });
-  await abortIfCancelled(ctx);
-  const rendiVideoUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+  if (ctx.recovery) {
+    await ctx.recovery.setRendiParams({
+      targetW,
+      targetH,
+      perSceneDurStr,
+      audioSpeedFactor,
+      finalDuration,
+      shortest: false,
+      fontname: style.fontname,
+    });
+    await ctx.recovery.setStep("rendi");
+  }
+
+  const sceneVideoUrls = await resolveSceneUrls(sceneVideoRefs, ctx.userId);
+  const audioForMerge = ctx.recovery?.getManifest().artifacts.audio
+    ? await artifactFetchUrl(ctx.recovery.getManifest().artifacts.audio!, ctx.userId)
+    : fullAudioUrl;
+
+  let combinedVideoUrl: string;
+  let mergedVideoUrl: string;
+  let rendiVideoUrl: string;
+  try {
+    await abortIfCancelled(ctx);
+    combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
+    const fontUrl = getFontUrl(style.fontname);
+    await abortIfCancelled(ctx);
+    mergedVideoUrl = await mergeVideoAudioSubs({
+      combinedVideoUrl,
+      fullAudioUrl: audioForMerge,
+      srtUrl,
+      fontUrl,
+      audioSpeedFactor,
+      finalDuration,
+      shortest: false,
+    });
+    await abortIfCancelled(ctx);
+    rendiVideoUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "rendi", e);
+    throw e;
+  }
   await ctx.log.endStep({ combinedVideoUrl, mergedVideoUrl, rendiVideoUrl });
 
   // ----- Step 7: download from Rendi + upload final MP4 to Supabase -----
@@ -200,13 +256,27 @@ Return ONLY raw JSON array, nothing else.`;
     "storage_upload",
     "Download from Rendi + upload final MP4 to Supabase"
   );
-  const { storagePath, publicUrl } = await downloadAndStoreFinal(
-    ctx.userId,
-    "reelscreator",
-    rendiVideoUrl,
-    `video_${Date.now()}.mp4`
-  );
-  await cleanupCaptions(srtFilename);
+  let storagePath: string;
+  let publicUrl: string;
+  try {
+    const stored = await downloadAndStoreFinal(
+      ctx.userId,
+      "reelscreator",
+      rendiVideoUrl,
+      `video_${Date.now()}.mp4`
+    );
+    storagePath = stored.storagePath;
+    publicUrl = stored.publicUrl;
+  } catch (e) {
+    throwRecoverableIfCheckpointed(ctx.recovery, "upload", e);
+    throw e;
+  }
+  if (srtFilename) {
+    await cleanupCaptions(srtFilename);
+  }
+  if (ctx.recovery) {
+    await ctx.recovery.setStep("done");
+  }
   await ctx.log.endStep({ storagePath, publicUrl });
 
   return {

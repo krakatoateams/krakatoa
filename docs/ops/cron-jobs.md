@@ -107,13 +107,15 @@ Code: `app/api/cron/creation-expiry/route.ts`
 **Untuk apa:** Backstop kalau generate **mati** (Vercel timeout 300s, crash tanpa `catch`):
 
 - Job tetap `running` > ~20 menit → refund (jika belum ada refund) + mark `failed` (`STALE_GENERATION`)
+- Job `recoverable` dengan TTL habis → refund + purge folder `{userId}/resumable/{jobId}/`
+- Sweep folder resumable untuk job terminal yang masih punya artifact
 - `generation_requests` status `started` tapi lock expired → close sebagai failed
 
-**User merasakan:** Cancel/timeout tidak membuat kredit “nyangkut” tanpa refund.
+**User merasakan:** Cancel/timeout tidak membuat kredit “nyangkut” tanpa refund. Recovery window 24h default.
 
 **Jadwal Vercel:** **setiap 30 menit** (`*/30 * * * *`)
 
-Code: `app/api/cron/generation-reconcile/route.ts` · Plan: [`docs/generation/generation-cancel-hardening-plan.md`](generation/generation-cancel-hardening-plan.md)
+Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel-hardening`](generation/generation-cancel-hardening-plan.md), [`pipeline-recovery`](generation/pipeline-recovery-plan.md)
 
 ---
 

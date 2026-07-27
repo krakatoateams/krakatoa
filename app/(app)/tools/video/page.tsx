@@ -145,6 +145,40 @@ function describeIdempotencyError(
   return null;
 }
 
+function recoverableGenerationMessage(data: { error?: string }): string {
+  return (
+    data.error ||
+    "The provider finished but upload or editing failed. Credits stay on hold — tap Try again."
+  );
+}
+
+function GenerationRecoverableBanner({
+  message,
+  loading,
+  onResume,
+}: {
+  message: string;
+  loading: boolean;
+  onResume: () => void;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        <span>{message}</span>
+      </div>
+      <button
+        type="button"
+        onClick={onResume}
+        disabled={loading}
+        className="rounded-xl bg-amber-500 px-4 py-2 font-medium text-black transition hover:bg-amber-400 disabled:opacity-50"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 async function pollMotionControlResult(idempotencyKey: string): Promise<{
   videoUrl?: string;
   storagePath?: string;
@@ -398,6 +432,7 @@ function VideoOmniPage() {
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
@@ -485,6 +520,36 @@ function VideoOmniPage() {
   const canGenerate =
     !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
 
+  const handleResumeRecoverable = async () => {
+    if (!recoverableJobId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/generations/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: recoverableJobId }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "PIPELINE_RECOVERABLE") {
+          setError(data.error || "Upload still failing. Try again in a moment.");
+          return;
+        }
+        throw new Error(data.error || "Resume failed");
+      }
+      setRecoverableJobId(null);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
+      setHistoryRefreshKey((k) => k + 1);
+      refetchCredits();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
@@ -517,6 +582,7 @@ function VideoOmniPage() {
 
     setLoading(true);
     setError(null);
+    setRecoverableJobId(null);
 
     try {
       const response = await fetch("/api/generate-video", {
@@ -543,6 +609,12 @@ function VideoOmniPage() {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? videoCost}, current: ${data.currentBalance ?? 0}.`
           );
+        }
+        if (response.status === 503 && data.recoverable && data.jobId) {
+          attempt.settle(false);
+          setRecoverableJobId(data.jobId);
+          setError(recoverableGenerationMessage(data));
+          return;
         }
         const idemMsg = describeIdempotencyError(response.status, data);
         if (idemMsg) throw new Error(idemMsg);
@@ -948,7 +1020,15 @@ function VideoOmniPage() {
         </form>
         )}
 
-        {creationType === "text2video" && error && (
+        {creationType === "text2video" && recoverableJobId && (
+          <GenerationRecoverableBanner
+            message={error ?? recoverableGenerationMessage({})}
+            loading={loading}
+            onResume={handleResumeRecoverable}
+          />
+        )}
+
+        {creationType === "text2video" && error && !recoverableJobId && (
           <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{error}</span>
@@ -1143,6 +1223,7 @@ function ImageToVideoComposer({
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -1188,6 +1269,35 @@ function ImageToVideoComposer({
     refImages.uploading;
   const canGenerate = !loading && !anyUploading && frameReady && prompt.trim().length > 0;
 
+  const handleResumeRecoverable = async () => {
+    if (!recoverableJobId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/generations/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: recoverableJobId }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "PIPELINE_RECOVERABLE") {
+          setError(data.error || "Upload still failing. Try again in a moment.");
+          return;
+        }
+        throw new Error(data.error || "Resume failed");
+      }
+      setRecoverableJobId(null);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
+      onGenerated();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
@@ -1223,6 +1333,7 @@ function ImageToVideoComposer({
 
     setLoading(true);
     setError(null);
+    setRecoverableJobId(null);
 
     try {
       const response = await fetch("/api/generate-video", {
@@ -1246,6 +1357,12 @@ function ImageToVideoComposer({
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
           );
+        }
+        if (response.status === 503 && data.recoverable && data.jobId) {
+          attempt.settle(false);
+          setRecoverableJobId(data.jobId);
+          setError(recoverableGenerationMessage(data));
+          return;
         }
         const idemMsg = describeIdempotencyError(response.status, data);
         if (idemMsg) throw new Error(idemMsg);
@@ -1549,7 +1666,15 @@ function ImageToVideoComposer({
         </div>
       </form>
 
-      {error && (
+      {recoverableJobId && (
+        <GenerationRecoverableBanner
+          message={error ?? recoverableGenerationMessage({})}
+          loading={loading}
+          onResume={handleResumeRecoverable}
+        />
+      )}
+
+      {error && !recoverableJobId && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
@@ -2483,6 +2608,7 @@ function StoryboardToVideoComposer({
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
   // synchronous in-flight lock, so a double-click or a retry after a network
   // blip can never spawn a second Replicate run for the same storyboard.
@@ -2573,6 +2699,35 @@ function StoryboardToVideoComposer({
     setShowUpload(false);
   };
 
+  const handleResumeRecoverable = async () => {
+    if (!recoverableJobId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/generations/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: recoverableJobId }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "PIPELINE_RECOVERABLE") {
+          setError(data.error || "Upload still failing. Try again in a moment.");
+          return;
+        }
+        throw new Error(data.error || "Resume failed");
+      }
+      setRecoverableJobId(null);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
+      onGenerated();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate || !selectedId) return;
@@ -2595,6 +2750,7 @@ function StoryboardToVideoComposer({
 
     setLoading(true);
     setError(null);
+    setRecoverableJobId(null);
     setResultPath(null);
     setResultSeed(null);
     try {
@@ -2626,6 +2782,12 @@ function StoryboardToVideoComposer({
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
           );
+        }
+        if (response.status === 503 && data.recoverable && data.jobId) {
+          attempt.settle(false);
+          setRecoverableJobId(data.jobId);
+          setError(recoverableGenerationMessage(data));
+          return;
         }
         const idemMsg = describeIdempotencyError(response.status, data);
         if (idemMsg) throw new Error(idemMsg);
@@ -3013,11 +3175,19 @@ function StoryboardToVideoComposer({
         />
       )}
 
-      {error && (
+      {error && !recoverableJobId && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
+      )}
+
+      {recoverableJobId && (
+        <GenerationRecoverableBanner
+          message={error ?? recoverableGenerationMessage({})}
+          loading={loading}
+          onResume={handleResumeRecoverable}
+        />
       )}
 
       {loading && (
@@ -3337,6 +3507,36 @@ function ReelsCreatorComposer({
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+
+  const handleResumeRecoverable = async () => {
+    if (!recoverableJobId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/generations/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: recoverableJobId }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "PIPELINE_RECOVERABLE") {
+          setError(data.error || "Editing still failing. Try again in a moment.");
+          return;
+        }
+        throw new Error(data.error || "Resume failed");
+      }
+      setRecoverableJobId(null);
+      setResultPath(pickGenerateStoragePath(data));
+      setResultSeed(data.videoUrl ?? null);
+      onGenerated();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 1080p forces an 8s clip (Veo 3.1 Lite constraint) — keep state valid.
   const onVeoResolution = (r: VeoResolution) => {
@@ -3395,6 +3595,7 @@ function ReelsCreatorComposer({
 
     setLoading(true);
     setError(null);
+    setRecoverableJobId(null);
     setResultPath(null);
     setResultSeed(null);
 
@@ -3421,6 +3622,14 @@ function ReelsCreatorComposer({
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
           );
+        }
+        if (data.recoverable && data.jobId) {
+          attempt.settle(false);
+          setRecoverableJobId(data.jobId);
+          setError(
+            "Scene videos finished but editing failed. Credits stay on hold — tap Try again.",
+          );
+          return;
         }
         const idemMsg = describeIdempotencyError(response.status, data);
         if (idemMsg) throw new Error(idemMsg);
@@ -3942,7 +4151,24 @@ function ReelsCreatorComposer({
         </div>
       </form>
 
-      {error && (
+      {recoverableJobId && (
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+            <span>{error ?? "Editing failed. You can try again without an extra charge."}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleResumeRecoverable()}
+            disabled={loading}
+            className="rounded-xl bg-amber-500 px-4 py-2 font-medium text-black transition hover:bg-amber-400 disabled:opacity-50"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {error && !recoverableJobId && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
