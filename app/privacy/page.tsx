@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Kebijakan Privasi",
-    effectiveDate: "Terakhir diperbarui: 3 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 23 Juli 2026",
     intro: "Kebijakan Privasi ini menjelaskan bagaimana Kelolako (\"kami\") mengumpulkan, menggunakan, menyimpan, dan melindungi informasi Anda saat menggunakan platform Kelolako (\"Layanan\"). Pengendali data untuk Layanan ini adalah Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta.",
     sections: [
       {
@@ -27,7 +27,8 @@ const content: LegalContent = {
           ]},
           { type: "h3", text: "1.3 Data Koneksi Platform Pihak Ketiga" },
           { type: "ul", items: [
-            "Token otorisasi OAuth (access token, refresh token) untuk platform yang Anda hubungkan, seperti YouTube, dan di masa depan TikTok/Instagram — digunakan semata-mata untuk mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
+            "Token otorisasi OAuth (access token, refresh token) untuk platform yang sudah aktif dan Anda hubungkan — YouTube dan TikTok — digunakan semata-mata untuk mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
+            "Instagram direncanakan sebagai integrasi platform tambahan di masa mendatang; kami belum mengumpulkan atau menyimpan data otorisasi apa pun untuk Instagram sampai fitur tersebut aktif.",
           ]},
           { type: "h3", text: "1.4 Data Transaksi dan Kredit" },
           { type: "ul", items: [
@@ -65,7 +66,8 @@ const content: LegalContent = {
             "Rendi — penyedia pemrosesan video (ekstraksi audio, dll.);",
             "DOKU — penyedia gerbang pembayaran untuk pembelian Kredit;",
             "Vercel — penyedia hosting infrastruktur aplikasi kami;",
-            "TikTok dan Instagram/Meta — [PLACEHOLDER: akan ditambahkan setelah integrasi API disetujui].",
+            "TikTok — untuk otentikasi (TikTok Login Kit) serta publikasi video dan foto melalui TikTok Content Posting API; kami menyimpan token akses dan token refresh yang diperlukan untuk menjaga koneksi Anda tetap aktif dan mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
+            "Instagram/Meta — direncanakan sebagai integrasi mendatang; belum ada data yang dibagikan ke pihak ini hingga fitur tersebut aktif.",
           ]},
           { type: "p", text: "Setiap penyedia layanan di atas memiliki kebijakan privasi masing-masing yang independen dari kebijakan ini." },
         ],
@@ -105,14 +107,14 @@ const content: LegalContent = {
         heading: "8. Perubahan Kebijakan dan Kontak",
         blocks: [
           { type: "p", text: "Kami dapat memperbarui Kebijakan Privasi ini dari waktu ke waktu. Perubahan material akan diberitahukan melalui email atau pemberitahuan dalam aplikasi." },
-          { type: "p", text: "Untuk pertanyaan, permintaan akses data, atau permintaan penghapusan data, silakan hubungi kami di: krakatoateams@gmail.com" },
+          { type: "p", text: "Untuk pertanyaan, permintaan akses data, atau permintaan penghapusan data, silakan hubungi kami di: support@kelolako.com" },
         ],
       },
     ],
   },
   english: {
     pageTitle: "Privacy Policy",
-    effectiveDate: "Last updated: July 3, 2026",
+    effectiveDate: "Last updated: July 23, 2026",
     intro: "This Privacy Policy explains how Kelolako (\"we\") collects, uses, stores, and protects your information when you use the Kelolako platform (\"Service\"). The data controller for this Service is an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta.",
     sections: [
       {
@@ -130,7 +132,8 @@ const content: LegalContent = {
           ]},
           { type: "h3", text: "1.3 Third-Party Platform Connection Data" },
           { type: "ul", items: [
-            "OAuth authorization tokens (access token, refresh token) for platforms you connect, such as YouTube, and in the future TikTok/Instagram — used solely to publish content on your behalf according to your instructions.",
+            "OAuth authorization tokens (access token, refresh token) for platforms that are already active and that you connect — YouTube and TikTok — used solely to publish content on your behalf according to your instructions.",
+            "Instagram is planned as an additional platform integration in the future; we do not yet collect or store any authorization data for Instagram until that feature is active.",
           ]},
           { type: "h3", text: "1.4 Transaction and Credit Data" },
           { type: "ul", items: [
@@ -168,7 +171,8 @@ const content: LegalContent = {
             "Rendi — video processing provider (audio extraction, etc.);",
             "DOKU — payment gateway provider for Credit purchases;",
             "Vercel — our application hosting infrastructure provider;",
-            "TikTok and Instagram/Meta — [PLACEHOLDER: to be added once API integration is approved].",
+            "TikTok — for authentication (TikTok Login Kit) and video and photo publishing via the TikTok Content Posting API; we store the access and refresh tokens needed to keep your connection active and publish content on your behalf according to your instructions.",
+            "Instagram/Meta — planned as a future integration; no data is shared with this party until that feature is active.",
           ]},
           { type: "p", text: "Each service provider listed above has its own privacy policy independent of this one." },
         ],
@@ -208,7 +212,7 @@ const content: LegalContent = {
         heading: "8. Changes to This Policy and Contact",
         blocks: [
           { type: "p", text: "We may update this Privacy Policy from time to time. Material changes will be notified via email or in-app notice." },
-          { type: "p", text: "For questions, data access requests, or data deletion requests, please contact us at: krakatoateams@gmail.com" },
+          { type: "p", text: "For questions, data access requests, or data deletion requests, please contact us at: support@kelolako.com" },
         ],
       },
     ],

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Syarat dan Ketentuan Layanan",
-    effectiveDate: "Terakhir diperbarui: 3 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 23 Juli 2026",
     intro: "Dengan mengakses atau menggunakan Kelolako (\"Layanan\", \"kami\", \"Kelolako\"), Anda menyetujui untuk terikat oleh Syarat dan Ketentuan (\"Syarat\") ini. Jika Anda tidak menyetujui Syarat ini, mohon untuk tidak menggunakan Layanan kami. Layanan ini dioperasikan oleh Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta, selanjutnya disebut \"Kelolako\".",
     sections: [
       {
@@ -19,8 +19,9 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Menghasilkan konten video dan foto menggunakan model kecerdasan buatan (AI);",
             "Menghasilkan caption/keterangan konten secara otomatis;",
-            "Menjadwalkan dan mempublikasikan konten secara otomatis ke platform media sosial pihak ketiga, termasuk namun tidak terbatas pada YouTube, TikTok, dan Instagram (\"Platform Terhubung\").",
+            "Menjadwalkan dan mempublikasikan konten secara otomatis ke platform media sosial pihak ketiga, termasuk namun tidak terbatas pada YouTube dan TikTok (\"Platform Terhubung\").",
           ]},
+          { type: "p", text: "Kami berencana untuk menambahkan Instagram sebagai platform publikasi tambahan di masa mendatang; ketentuan yang mengatur data yang diproses melalui integrasi tersebut akan berlaku sejak fitur itu diaktifkan." },
           { type: "p", text: "Kelolako dapat menambah, mengubah, atau menghentikan fitur tertentu dari Layanan kapan saja dengan atau tanpa pemberitahuan sebelumnya." },
         ],
       },
@@ -124,14 +125,14 @@ const content: LegalContent = {
         heading: "13. Hukum yang Berlaku dan Kontak",
         blocks: [
           { type: "p", text: "Syarat ini diatur oleh dan ditafsirkan sesuai dengan hukum Negara Republik Indonesia, dengan domisili hukum di Jakarta Barat, DKI Jakarta." },
-          { type: "p", text: "Jika Anda memiliki pertanyaan mengenai Syarat ini, silakan hubungi kami di: krakatoateams@gmail.com" },
+          { type: "p", text: "Jika Anda memiliki pertanyaan mengenai Syarat ini, silakan hubungi kami di: support@kelolako.com" },
         ],
       },
     ],
   },
   english: {
     pageTitle: "Terms of Service",
-    effectiveDate: "Last updated: July 3, 2026",
+    effectiveDate: "Last updated: July 23, 2026",
     intro: "By accessing or using Kelolako (\"Service\", \"we\", \"Kelolako\"), you agree to be bound by these Terms of Service (\"Terms\"). If you do not agree to these Terms, please do not use our Service. The Service is operated by an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta, hereinafter referred to as \"Kelolako\".",
     sections: [
       {
@@ -141,8 +142,9 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Generate video and photo content using artificial intelligence (AI) models;",
             "Automatically generate captions/descriptions for content;",
-            "Schedule and automatically publish content to third-party social media platforms, including but not limited to YouTube, TikTok, and Instagram (\"Connected Platforms\").",
+            "Schedule and automatically publish content to third-party social media platforms, including but not limited to YouTube and TikTok (\"Connected Platforms\").",
           ]},
+          { type: "p", text: "We plan to add Instagram as an additional publishing destination in the future; terms governing data processed through this integration will take effect once the feature is active." },
           { type: "p", text: "Kelolako may add, modify, or discontinue certain features of the Service at any time, with or without prior notice." },
         ],
       },
@@ -246,7 +248,7 @@ const content: LegalContent = {
         heading: "13. Governing Law and Contact",
         blocks: [
           { type: "p", text: "These Terms are governed by and construed in accordance with the laws of the Republic of Indonesia, with legal domicile in West Jakarta, DKI Jakarta." },
-          { type: "p", text: "If you have questions about these Terms, please contact us at: krakatoateams@gmail.com" },
+          { type: "p", text: "If you have questions about these Terms, please contact us at: support@kelolako.com" },
         ],
       },
     ],

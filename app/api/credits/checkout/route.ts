@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     const origin = siteOrigin();
     const successUrl = `${origin}/dashboard/settings?tab=credits&status=success&order=${encodeURIComponent(invoiceNumber)}`;
 
-    const customerEmail = email || `user-${profileId}@krakatoa.app`;
+    const customerEmail = email || `user-${profileId}@kelolako.com`;
     const customerName = displayName || email || "Kelolako Customer";
 
     // Optional: override the Back Office notification URL per request (handy when
