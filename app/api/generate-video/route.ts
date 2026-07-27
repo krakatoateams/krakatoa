@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
-import { makePredictionRecorder, assertNotCancelled } from "@/lib/generation-cancel";
+import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import {
@@ -596,15 +596,18 @@ export async function POST(req: Request) {
     console.log(
       `[${jobLabel}] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
     );
-    const recordPredictionTick = makePredictionRecorder({
-      generationRequestId,
-      profileId,
-      jobId,
-      kind: jobKind,
-    });
-    const output = await runWithRetry(replicate, modelRef, { input: providerInput }, 10, {
-      onPrediction: recordPredictionTick,
-    });
+    const output = await runWithRetry(
+      replicate,
+      modelRef,
+      { input: providerInput },
+      10,
+      makeReplicateCancelHooks({
+        generationRequestId,
+        profileId,
+        jobId,
+        kind: jobKind,
+      }),
+    );
 
     // Post-run cancel safety net (see generate-storyboard-video): honor a cancel
     // that landed in the provider's pre-poll window with a refund + no delivery.
@@ -792,8 +795,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // Best-effort refund. Skip when recoverable (credits held).
-    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable && !cancelled) {
+    // Best-effort refund on failure/cancel. Skip when recoverable (credits held).
+    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable) {
       await safe("refundCredits", () =>
         refundCredits({
           profileId: profileId!,

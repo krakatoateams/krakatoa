@@ -1,5 +1,8 @@
 import type Replicate from "replicate";
-import { ReplicateCancellationError } from "@/lib/replicate-server";
+import {
+  ReplicateCancellationError,
+  type ReplicateRunHooks,
+} from "@/lib/replicate-server";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { supabaseServer } from "@/lib/supabase-server";
 
@@ -86,6 +89,26 @@ export function makePredictionRecorder(params: {
       kind: params.kind,
       status: tick.status,
     });
+  };
+}
+
+/**
+ * Hooks for `runReplicateWithRetry`: record prediction ids + poll cancel_requested
+ * on every provider wait tick so UI cancel stops Replicate without waiting for
+ * the full generation to finish.
+ */
+export function makeReplicateCancelHooks(params: {
+  generationRequestId: string | null;
+  profileId: string | null;
+  jobId?: string | null;
+  kind?: string;
+}): ReplicateRunHooks | undefined {
+  const { generationRequestId, profileId } = params;
+  if (!generationRequestId || !profileId) return undefined;
+  const onPrediction = makePredictionRecorder(params);
+  return {
+    onPrediction,
+    abortCheck: () => assertNotCancelled(profileId, generationRequestId),
   };
 }
 

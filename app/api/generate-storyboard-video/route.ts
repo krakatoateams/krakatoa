@@ -9,7 +9,7 @@ import {
 } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
 import { extractMediaUrl, runReplicateWithRetry, isCancellation } from "@/lib/replicate-server";
-import { makePredictionRecorder, assertNotCancelled } from "@/lib/generation-cancel";
+import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import {
@@ -521,12 +521,6 @@ export async function POST(req: Request) {
     );
     // Record each Replicate prediction id so POST /api/generations/cancel can stop
     // this run mid-flight (the SDK progress callback fires on create + each poll).
-    const recordPredictionTick = makePredictionRecorder({
-      generationRequestId,
-      profileId,
-      jobId,
-      kind: "storyboard_video",
-    });
     const providerInput = buildVideoProviderInput({
       model: videoModel,
       prompt: seedancePrompt,
@@ -543,7 +537,12 @@ export async function POST(req: Request) {
         input: providerInput,
       },
       10,
-      { onPrediction: recordPredictionTick }
+      makeReplicateCancelHooks({
+        generationRequestId,
+        profileId,
+        jobId,
+        kind: "storyboard_video",
+      }),
     );
 
     // Post-run cancel safety net: if the user cancelled while the prediction was
@@ -809,8 +808,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // Best-effort refund. Skip when recoverable (credits held).
-    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable && !cancelled) {
+    // Best-effort refund on failure/cancel. Skip when recoverable (credits held).
+    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
         amount: creditsAmount,

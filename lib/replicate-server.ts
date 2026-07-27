@@ -39,7 +39,117 @@ export type ReplicateRunHooks = {
    * work); exceptions are swallowed so they never break generation.
    */
   onPrediction?: (tick: PredictionTick) => void;
+  /**
+   * Polled on each wait tick (after the prediction id is recorded). Throw
+   * `ReplicateCancellationError` to abort the provider run and stop Replicate.
+   */
+  abortCheck?: () => Promise<void>;
 };
+
+type ReplicatePrediction = {
+  id: string;
+  status: string;
+  output?: unknown;
+  error?: string;
+};
+
+/** Parse `owner/name` or `owner/name:version` (same rule as the Replicate SDK). */
+function parseModelRef(ref: string): { owner: string; name: string; version?: string } {
+  const match = ref.match(/^([^/]+)\/([^/:]+)(?::(.+))?$/);
+  if (!match?.[1] || !match[2]) {
+    throw new Error(
+      `Invalid reference to model version: ${ref}. Expected format: owner/name or owner/name:version`
+    );
+  }
+  const owner = match[1];
+  const name = match[2];
+  const version = match[3];
+  return version ? { owner, name, version } : { owner, name };
+}
+
+async function createPredictionFromRef(
+  replicate: Replicate,
+  ref: string,
+  input: Record<string, unknown>
+): Promise<ReplicatePrediction> {
+  const { owner, name, version } = parseModelRef(ref);
+  if (version) {
+    return (await replicate.predictions.create({
+      version,
+      input,
+    })) as ReplicatePrediction;
+  }
+  return (await replicate.predictions.create({
+    model: `${owner}/${name}`,
+    input,
+  })) as ReplicatePrediction;
+}
+
+function emitPredictionTick(
+  prediction: { id?: string; status?: string },
+  hooks?: ReplicateRunHooks
+): void {
+  if (!prediction || typeof prediction !== "object") return;
+  const id = prediction.id;
+  if (hooks?.onPrediction && typeof id === "string" && id) {
+    try {
+      hooks.onPrediction({ id, status: String(prediction.status ?? "") });
+    } catch {
+      /* hooks must never break generation */
+    }
+  }
+}
+
+function isCancelledStatus(status: string | undefined): boolean {
+  return status === "canceled" || status === "aborted";
+}
+
+/**
+ * Create + wait loop (instead of `replicate.run`) so we can poll `abortCheck`
+ * between provider polls and record the prediction id before the first wait tick.
+ */
+async function runReplicateOnce(
+  replicate: Replicate,
+  model: string,
+  options: { input: Record<string, unknown> },
+  hooks?: ReplicateRunHooks
+): Promise<unknown> {
+  const prediction = await createPredictionFromRef(replicate, model, options.input);
+  emitPredictionTick(prediction, hooks);
+
+  const final = await replicate.wait(prediction as any, { interval: 500 }, async (updated) => {
+    emitPredictionTick(updated, hooks);
+    if (isCancelledStatus(updated.status)) {
+      throw new ReplicateCancellationError();
+    }
+    if (hooks?.abortCheck) {
+      try {
+        await hooks.abortCheck();
+      } catch (e) {
+        if (e instanceof ReplicateCancellationError) {
+          try {
+            await replicate.predictions.cancel(updated.id);
+          } catch {
+            /* best-effort — cancel endpoint may have already stopped it */
+          }
+          throw e;
+        }
+        throw e;
+      }
+    }
+    return false;
+  });
+
+  if (isCancelledStatus(final.status)) {
+    throw new ReplicateCancellationError();
+  }
+  if (final.status === "failed") {
+    throw new Error(`Prediction failed: ${final.error ?? "unknown error"}`);
+  }
+
+  // `replicate.run` transforms output to FileOutput; routes normalize via extractMediaUrl.
+  return final.output;
+}
 
 /** Shared Replicate 429 backoff used across the generation routes. */
 export async function runReplicateWithRetry(
@@ -50,29 +160,8 @@ export async function runReplicateWithRetry(
   hooks?: ReplicateRunHooks
 ): Promise<unknown> {
   for (let i = 0; i < maxRetries; i++) {
-    // Track the last status seen by the progress callback for THIS attempt so we
-    // can distinguish a user cancellation from a normal completion/failure.
-    let lastStatus: string | undefined;
-    const progress = (prediction: any) => {
-      if (!prediction || typeof prediction !== "object") return;
-      lastStatus = prediction.status;
-      const id = prediction.id;
-      if (hooks?.onPrediction && typeof id === "string" && id) {
-        try {
-          hooks.onPrediction({ id, status: String(prediction.status ?? "") });
-        } catch {
-          /* hooks must never break generation */
-        }
-      }
-    };
     try {
-      const result = await replicate.run(model as any, options as any, progress);
-      // A cancelled prediction resolves with undefined output (SDK only throws on
-      // 'failed'). Surface it explicitly so the route can refund + mark cancelled.
-      if (lastStatus === "canceled" || lastStatus === "aborted") {
-        throw new ReplicateCancellationError();
-      }
-      return result;
+      return await runReplicateOnce(replicate, model, options, hooks);
     } catch (e: any) {
       if (e instanceof ReplicateCancellationError) throw e;
       const errMsg = e.message || String(e);
