@@ -245,33 +245,50 @@ export async function GET(req: NextRequest) {
         );
       }
 
+      // A TikTok post is a photo post exactly when photo_urls is populated —
+      // no separate post-type column (see openspec/changes/tiktok-photo-post).
+      // Computed up front (not just inside the tiktok branch below) because
+      // the video-existence-check + resolvePublishVideoUrl block right below
+      // is video-only and must be skipped for photo posts.
+      const isPhotoPost =
+        post.platform === "tiktok" && Array.isArray(post.photo_urls) && post.photo_urls.length > 0;
+
       // ── Re-verify the video still exists before spending a publish attempt ──
       // Catches the case where the file was deleted/swept sometime between
       // scheduling and now (see openspec/changes/video-existence-check).
-      let assetStoragePath: string | null = null;
-      if (post.asset_id && post.profile_id) {
-        const asset = await getAssetForProfile(post.profile_id, post.asset_id);
-        assetStoragePath = asset?.storage_path ?? null;
-      }
+      // Skipped entirely for a photo post: it has no video_url/video asset to
+      // check, and resolvePublishVideoUrl would otherwise unconditionally
+      // throw "No publishable video location for this post." for every photo
+      // post — this was the root cause of photo posts failing after 3
+      // retries while video posts succeeded (see bug investigation, cron
+      // ran this block before the photo/video branch existed).
+      let publishVideoUrl: string | null = null;
+      if (!isPhotoPost) {
+        let assetStoragePath: string | null = null;
+        if (post.asset_id && post.profile_id) {
+          const asset = await getAssetForProfile(post.profile_id, post.asset_id);
+          assetStoragePath = asset?.storage_path ?? null;
+        }
 
-      const storagePath = resolveStoragePath(assetStoragePath, post.video_url);
-      if (storagePath) {
-        const exists = await videoObjectExists(storagePath);
-        if (exists === false) {
+        const storagePath = resolveStoragePath(assetStoragePath, post.video_url);
+        if (storagePath) {
+          const exists = await videoObjectExists(storagePath);
+          if (exists === false) {
+            throw new Error(
+              "Video file no longer exists in storage — it was deleted or swept before publishing.",
+            );
+          }
+        } else if (await isVideoUrlConfirmedMissing(post.video_url)) {
           throw new Error(
             "Video file no longer exists in storage — it was deleted or swept before publishing.",
           );
         }
-      } else if (await isVideoUrlConfirmedMissing(post.video_url)) {
-        throw new Error(
-          "Video file no longer exists in storage — it was deleted or swept before publishing.",
-        );
-      }
 
-      const publishVideoUrl = await resolvePublishVideoUrl({
-        videoUrl: post.video_url,
-        assetStoragePath,
-      });
+        publishVideoUrl = await resolvePublishVideoUrl({
+          videoUrl: post.video_url,
+          assetStoragePath,
+        });
+      }
 
       if (post.platform === "tiktok") {
         // ── Refresh, then IMMEDIATELY persist, then publish ───────────────────
@@ -300,10 +317,6 @@ export async function GET(req: NextRequest) {
           throw new Error(`Failed to persist refreshed TikTok token: ${refreshUpsertErr.message}`);
         }
 
-        // A TikTok post is a photo post exactly when photo_urls is populated —
-        // no separate post-type column (see openspec/changes/tiktok-photo-post).
-        const isPhotoPost = Array.isArray(post.photo_urls) && post.photo_urls.length > 0;
-
         console.log(
           `[cron] Calling ${isPhotoPost ? "publishPhotoToTikTok" : "publishToTikTok"} for post ${post.id}`,
         );
@@ -322,7 +335,9 @@ export async function GET(req: NextRequest) {
             })
           : await publishToTikTok({
               accessToken: refreshed.accessToken,
-              videoUrl: publishVideoUrl,
+              // Non-null: this branch only runs when !isPhotoPost, which is
+              // exactly when publishVideoUrl was computed above.
+              videoUrl: publishVideoUrl!,
               title: post.title,
               privacyLevel: post.tiktok_privacy_level,
               brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
@@ -355,8 +370,10 @@ export async function GET(req: NextRequest) {
       console.log(`[cron] Calling uploadToYouTube for post ${post.id} with tags:`, tags);
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
+      // Non-null: YouTube posts are never photo posts (isPhotoPost is
+      // platform==="tiktok"-gated), so publishVideoUrl was always computed.
       const youtubeId = await uploadToYouTube({
-        videoUrl: publishVideoUrl,
+        videoUrl: publishVideoUrl!,
         title: post.title,
         description: post.description ?? "",
         tags,
