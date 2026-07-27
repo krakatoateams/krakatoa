@@ -81,6 +81,10 @@ function mapWhisperToPerSceneVideoTimeline(
   return out;
 }
 
+async function abortIfCancelled(ctx: ReelsPipelineContext): Promise<void> {
+  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+}
+
 export async function runVeoSinglePipeline(
   ctx: ReelsPipelineContext,
   params: VeoSinglePipelineParams
@@ -90,11 +94,13 @@ export async function runVeoSinglePipeline(
   const { w: targetW, h: targetH } = dimsForResolution(resolution);
 
   // ----- Step 1: style anchor + negative -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("style_anchor", "LLM style anchor + negative prompt");
   const { styleAnchor, negativePrompt } = await generateVeoStyle(ctx, { theme });
   await ctx.log.endStep({ styleAnchor, negativePrompt });
 
   // ----- Step 2: Veo prompt authoring -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("veo_prompt", "LLM Veo prompt authoring", { singlePromptScenes });
   const voiceLabel = humanizeVoiceId(voiceId);
   const voiceTone = `${voiceLabel} voice character; ${emotion} emotional delivery for pacing, emphasis, and phrasing.`;
@@ -155,7 +161,7 @@ ${promptInstruction}`,
 
   // ----- Step 3: Veo single-clip generation -----
   await ctx.log.beginStep("video_generation", "Veo single-clip generation");
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  await abortIfCancelled(ctx);
   const veoRes = await runWithRetry(
     ctx.replicate,
     ctx.refs.videoRef,
@@ -163,7 +169,7 @@ ${promptInstruction}`,
     10,
     ctx.recorder
   );
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  await abortIfCancelled(ctx);
   const veoVideoUrl = extractMediaUrl(veoRes);
   if (!veoVideoUrl.startsWith("http")) {
     throw new Error("Veo did not return a valid video URL.");
@@ -171,6 +177,7 @@ ${promptInstruction}`,
   await ctx.log.endStep({ veoVideoUrl });
 
   // ----- Step 4: extract audio (Veo provides native audio) -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("audio_extraction", "Rendi extract audio track from Veo clip");
   let audioMp3Url: string;
   try {
@@ -184,6 +191,7 @@ ${promptInstruction}`,
   await ctx.log.endStep({ audioMp3Url });
 
   // ----- Step 5: Whisper transcription -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("whisper_transcription", "Whisper word-level transcription");
   const wRes = await runWithRetry(
     ctx.replicate,
@@ -201,6 +209,7 @@ ${promptInstruction}`,
   // ----- Step 6: ASS subtitles + burn-in (audio is native to the Veo clip) -----
   const audioSpeedFactor = 1;
   const finalDuration = duration;
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("subtitle_burn", "ASS subtitles + Rendi burn-in");
   const assContent = buildAssContent(
     style,
@@ -215,10 +224,12 @@ ${promptInstruction}`,
     assContent,
     `captions_veo_${Date.now()}.ass`
   );
+  await abortIfCancelled(ctx);
   const rendiFinalUrl = await burnSubtitles(veoVideoUrl, srtUrl);
   await ctx.log.endStep({ rendiFinalUrl });
 
   // ----- Step 7: download + upload final MP4 -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
   const { storagePath, publicUrl } = await downloadAndStoreFinal(
     ctx.userId,
@@ -252,6 +263,7 @@ export async function runVeoPerScenePipeline(
   const MAX_WORDS_PER_SCENE = Math.max(6, Math.floor(DURATION * 1.7));
 
   // ----- Step 1: style anchor + negative -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("style_anchor", "LLM style anchor + negative prompt");
   const { styleAnchor, negativePrompt: _negativePrompt } = await generateVeoStyle(ctx, {
     theme,
@@ -259,6 +271,7 @@ export async function runVeoPerScenePipeline(
   await ctx.log.endStep({ styleAnchor, negativePrompt: _negativePrompt });
 
   // ----- Step 2: scene breakdown -----
+  await abortIfCancelled(ctx);
   const systemPrompt = `You are a video producer. Return a JSON array of exactly ${SCENE_COUNT} scene(s) for a faceless vertical video (9:16). Each scene is exactly ${DURATION} seconds.
 All scenes share one visual world.
 
@@ -295,7 +308,7 @@ Return ONLY raw JSON array, nothing else.`;
   await ctx.log.endStep({ scenes: scenes.length });
 
   // ----- Step 3: parallel Veo scene videos concurrent with the TTS pipeline -----
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  await abortIfCancelled(ctx);
   const videoPromises = scenes.map((scene) =>
     runWithRetry(
       ctx.replicate,
@@ -320,7 +333,7 @@ Return ONLY raw JSON array, nothing else.`;
       initialSpeed: 0.95,
     }),
   ]);
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  await abortIfCancelled(ctx);
   const fullAudioUrl = ttsPack.audioUrl;
   const whisperWords = ttsPack.words;
   const audioEndTotal = ttsPack.audioEndTotal;
@@ -364,6 +377,7 @@ Return ONLY raw JSON array, nothing else.`;
   const assContent = buildAssContent(style, targetW, targetH, videoWords, 1, finalDuration);
 
   // ----- Step 4: ASS subtitles + Rendi concat/merge/burn -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("rendi_render", "ASS subtitles + Rendi concat/merge/burn-in");
   const { srtFilename, srtUrl } = await uploadAssCaptions(
     ctx.userId,
@@ -377,8 +391,10 @@ Return ONLY raw JSON array, nothing else.`;
     }
     return url;
   });
+  await abortIfCancelled(ctx);
   const combinedVideoUrl = await concatScenes(sceneVideoUrls, perSceneDurStr, targetW, targetH);
   const fontUrl = getFontUrl(style.fontname);
+  await abortIfCancelled(ctx);
   const mergedVideoUrl = await mergeVideoAudioSubs({
     combinedVideoUrl,
     fullAudioUrl,
@@ -388,10 +404,12 @@ Return ONLY raw JSON array, nothing else.`;
     finalDuration,
     shortest: true,
   });
+  await abortIfCancelled(ctx);
   const rendiFinalUrl = await burnSubtitles(mergedVideoUrl, srtUrl);
   await ctx.log.endStep({ combinedVideoUrl, mergedVideoUrl, rendiFinalUrl });
 
   // ----- Step 5: download + upload final MP4 -----
+  await abortIfCancelled(ctx);
   await ctx.log.beginStep("storage_upload", "Download final MP4 + upload to Supabase");
   const { storagePath, publicUrl } = await downloadAndStoreFinal(
     ctx.userId,

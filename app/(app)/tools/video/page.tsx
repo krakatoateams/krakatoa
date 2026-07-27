@@ -160,7 +160,7 @@ async function pollMotionControlResult(idempotencyKey: string): Promise<{
     const data = await res.json();
     if (res.ok && data.videoUrl) return data;
     if (res.status === 202) continue;
-    if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+    if (data.code === "GENERATION_CANCELLED") {
       throw Object.assign(new Error("Generation cancelled."), { code: "GENERATION_CANCELLED" });
     }
     throw new Error(data.error || data.message || "Generation failed");
@@ -1145,7 +1145,7 @@ function ImageToVideoComposer({
   const [error, setError] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { videoCredits } = usePricing();
-  const { balance } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
 
   const startImage = useMediaRefs("image", 1);
   const endImage = useMediaRefs("image", 1);
@@ -1239,6 +1239,7 @@ function ImageToVideoComposer({
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
           setError(null);
+          refetchCredits();
           return;
         }
         if (response.status === 402) {
@@ -1647,7 +1648,7 @@ function MotionControlComposer({
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const { videoCredits } = usePricing();
-  const { balance } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
 
   const charImage = useMediaRefs("image", 1);
   const motionVideo = useMediaRefs("video", 1);
@@ -1759,6 +1760,7 @@ function MotionControlComposer({
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
           setError(null);
+          refetchCredits();
           return;
         }
         if (response.status === 402) {
@@ -1786,6 +1788,7 @@ function MotionControlComposer({
       if (err && typeof err === "object" && "code" in err && err.code === "GENERATION_CANCELLED") {
         attempt.settle(false);
         setError(null);
+        refetchCredits();
         return;
       }
       attempt.settle(false);
@@ -2162,7 +2165,7 @@ function ImportStoryboardModal({
   onImported: (item: StoryboardListItem) => void;
 }) {
   const { imageCredits } = usePricing();
-  const { balance } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -2172,7 +2175,7 @@ function ImportStoryboardModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   const cost = imageCredits("storyboard_import_vision_per_image", 1);
 
@@ -2223,6 +2226,11 @@ function ImportStoryboardModal({
       });
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          refetchCredits();
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
@@ -2386,10 +2394,27 @@ function ImportStoryboardModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
-          <p className="text-sm text-gray-500">
+        <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+          <p className="mr-auto hidden text-sm text-gray-500 sm:block">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
+          {busy && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
           <CreditActionButton
             type="button"
             onClick={analyze}
@@ -2425,7 +2450,7 @@ function StoryboardToVideoComposer({
     composerEnablement
   );
   const { videoCredits } = usePricing();
-  const { balance } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
 
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
@@ -2594,6 +2619,7 @@ function StoryboardToVideoComposer({
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
           setError(null);
+          refetchCredits();
           return;
         }
         if (response.status === 402) {
@@ -3266,7 +3292,7 @@ function ReelsCreatorComposer({
 }) {
   const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
-  const { balance } = useCreditBalance();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Engine + (Veo-only) mode.
@@ -3388,7 +3414,7 @@ function ReelsCreatorComposer({
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
           setError(null);
-          onGenerated();
+          refetchCredits();
           return;
         }
         if (response.status === 402) {

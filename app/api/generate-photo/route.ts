@@ -29,8 +29,9 @@ import {
 import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
+import { isCancellation } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import {
@@ -55,6 +56,10 @@ import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
+import {
+  assertNotCancelled,
+  makePredictionRecorder,
+} from "@/lib/generation-cancel";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -566,6 +571,17 @@ export async function POST(req: Request) {
     }));
     if (asset) photoAssetId = asset.id;
 
+    const recordPredictionTick = makePredictionRecorder({
+      generationRequestId,
+      profileId,
+      jobId,
+      kind: "product_photo",
+    });
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     // Provider client is created only after the spend has succeeded.
     const replicate = createReplicateClient();
 
@@ -626,9 +642,17 @@ export async function POST(req: Request) {
 
     await beginStep("image_generation", "Nano Banana product photo generation");
     console.log(`[Product Photo] Running ${photoModelRef} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
-    const output = await runWithRetry(replicate, photoModelRef, {
-      input: providerInput,
-    });
+    const output = await runWithRetry(
+      replicate,
+      photoModelRef,
+      { input: providerInput },
+      10,
+      { onPrediction: recordPredictionTick }
+    );
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     const generatedImageUrl = extractMediaUrl(output);
     if (!generatedImageUrl.startsWith("http")) {
@@ -637,6 +661,9 @@ export async function POST(req: Request) {
     await endStep({ generatedImageUrl });
 
     await beginStep("storage_upload", "Download generated image + save to Supabase");
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     const imageResponse = await fetch(generatedImageUrl);
     if (!imageResponse.ok) {
       throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
@@ -678,6 +705,10 @@ export async function POST(req: Request) {
     await endStep({ storagePath: saved.storagePath, publicUrl: saved.publicUrl });
 
     console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     // Platform: mark the asset ready, then finish the job. `costCredits` is a
     // display snapshot only — the ledger row created by spendCredits above is
@@ -737,15 +768,20 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    console.error("[Product Photo] Error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
-    // and any provider call, so no credits were charged and no provider ran.
+    const cancelled = isCancellation(error);
+    if (cancelled) console.log("[Product Photo] Cancelled by user.");
+    else console.error("[Product Photo] Error:", error);
     const pricingMissing = error instanceof PricingConfigError;
-    // Best-effort failure marking — must not throw or mask the original error.
-    const errJson = pricingMissing
-      ? { message, code: "PRICING_CONFIG_MISSING" }
-      : { message };
+    const message = cancelled
+      ? "Generation cancelled."
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    const errJson = cancelled
+      ? { message, code: "GENERATION_CANCELLED" }
+      : pricingMissing
+        ? { message, code: "PRICING_CONFIG_MISSING" }
+        : { message };
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
@@ -754,14 +790,13 @@ export async function POST(req: Request) {
       await safe("failAsset", () => markAssetFailed(profileId!, photoAssetId!, errJson));
     }
     if (jobId && profileId) {
-      await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      if (cancelled) {
+        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+      } else {
+        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+      }
     }
 
-    // Best-effort refund. Only fires when a spend actually succeeded (the
-    // InsufficientCreditsError path never sets creditsSpent=true, and a 500
-    // before the spend block also leaves it false). Wrapped in safe() so a
-    // refund failure cannot mask the original generation error — the spend
-    // ledger row stays in the DB and can be reconciled manually.
     if (creditsSpent && profileId && creditsAmount > 0) {
       await safe("refundCredits", () => refundCredits({
         profileId: profileId!,
@@ -770,8 +805,13 @@ export async function POST(req: Request) {
           ? `refund:product_photo:${jobId}`
           : `refund:product_photo:profile:${profileId}:${Date.now()}`,
         jobId: jobId ?? null,
-        description: "Best-effort refund after generation failure",
-        metadata: { reason: "generation_failed", originalError: errJson },
+        description: cancelled
+          ? "Refund after user cancellation"
+          : "Best-effort refund after generation failure",
+        metadata: {
+          reason: cancelled ? "generation_cancelled" : "generation_failed",
+          originalError: errJson,
+        },
       }));
     }
 
@@ -783,10 +823,13 @@ export async function POST(req: Request) {
       }));
     }
 
-    // The provider (Nano Banana / Gemini) returns a terse "Failed to generate
-    // image." when it produces no image for a request — most often a vague or
-    // placeholder prompt, or a content-policy refusal. Surface an actionable
-    // hint instead of the raw provider string (kept in logs above).
+    if (cancelled) {
+      return NextResponse.json(
+        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        { status: 409 }
+      );
+    }
+
     const isNoImageProviderError =
       !pricingMissing &&
       /failed to generate image|did not return a valid image|prediction failed/i.test(

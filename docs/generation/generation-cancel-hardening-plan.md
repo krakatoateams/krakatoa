@@ -1,6 +1,6 @@
 # Generation Cancel Hardening — Implementation Plan
 
-> **Status:** Planned (not started).  
+> **Status:** Phases 1–9 complete; pass-2 fixes applied. Phase 10 (replicate helper dedup) complete. Phase 11 docs ongoing.  
 > **Audience:** Agents implementing cancel safety across all metered generation routes.  
 > **Trigger:** Repo-wide cancel audit (ponytail-audit + code review) found gaps where cancel is ignored, routes lack cancel entirely, or refunds can be skipped.
 
@@ -60,12 +60,13 @@ useIdempotentSubmit             beginGenerationRequest (idempotency row)
 | Reels Creator | Partial | ✅ | ✅ | No cancel during Rendi / Whisper / storage; no pre-finalize check |
 | T2V / I2V | Partial | ✅ | ✅ | No cancel during download/upload |
 | Motion Control | ✅ | ✅ | ✅ (mostly) | Status route catch skips refund |
-| Storyboard→Video | ✅ | ✅ | ✅ | — |
-| Storyboard image | ❌ | ❌ | ❌ | Full gap |
-| Product Photo | ❌ | ❌ | ❌ | Full gap |
-| Storyboard import | ❌ | ❌ | ❌ | Full gap |
-| `isCancelRequested` | — | — | — | Returns `false` on DB error (cancel ignored) |
-| Vercel 300s kill | — | — | ❌ | Catch may not run; job stuck `running` |
+| Storyboard→Video | ✅ | ✅ | ✅ | Post-Replicate `assertNotCancelled` (pass 2) |
+| Storyboard image | ✅ | ✅ | ✅ | LLM retry loop cancel check (pass 2) |
+| Product Photo | ✅ | ✅ | ✅ | — |
+| Storyboard import | ✅ | ✅ | ✅ | LLM retry loop cancel check (pass 2) |
+| `isCancelRequested` | — | — | — | Fail-closed on DB error (fixed in Phase 1) |
+| Vercel 300s kill | — | — | ✅ | Cron reconcile (Phase 8) |
+| Motion Control poll | ✅ | ✅ | ✅ | 409 on terminal cancel row (pass 2) |
 
 ---
 
@@ -374,8 +375,8 @@ Phase 8 — Stuck job cron
 Phase 9 — Cancel endpoint polish
   □ §11 (minimal: already_cancelling)
 
-Phase 10 — Ponytail dedup (optional follow-up PR)
-  □ §13
+Phase 10 — Ponytail dedup
+  □ §13 — canonical replicate-server; utils/reels-helpers re-export
 
 Phase 11 — Docs
   □ Update CLAUDE.md cancel section + link this doc

@@ -1,4 +1,6 @@
 import type Replicate from "replicate";
+import { ReplicateCancellationError } from "@/lib/replicate-server";
+import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { supabaseServer } from "@/lib/supabase-server";
 
 /**
@@ -22,15 +24,6 @@ import { supabaseServer } from "@/lib/supabase-server";
 
 const REQUESTS_TABLE = "generation_requests";
 const PREDICTIONS_TABLE = "generation_predictions";
-
-function isMissingObject(message: string): boolean {
-  return (
-    message.includes("generation_predictions") &&
-    (message.includes("schema cache") ||
-      message.includes("does not exist") ||
-      message.includes("could not find"))
-  );
-}
 
 function missingHint(): Error {
   return new Error(
@@ -110,28 +103,56 @@ export async function requestCancel(
     .maybeSingle();
 
   if (error) {
-    if (isMissingObject(error.message)) throw missingHint();
+    if (
+      isMissingDbObject(error.message, REQUESTS_TABLE) ||
+      isMissingDbObject(error.message, PREDICTIONS_TABLE)
+    ) {
+      throw missingHint();
+    }
     throw new Error(error.message || "Failed to request cancellation.");
   }
   return !!data;
 }
 
-/** Read whether cancellation was requested for an attempt (best-effort; false on error). */
+const CANCEL_READ_RETRIES = 2;
+
+/** Read whether cancellation was requested. On persistent DB error, returns true (fail-closed). */
 export async function isCancelRequested(
   profileId: string,
   generationRequestId: string
 ): Promise<boolean> {
-  try {
-    const { data, error } = await supabaseServer
-      .from(REQUESTS_TABLE)
-      .select("cancel_requested")
-      .eq("id", generationRequestId)
-      .eq("profile_id", profileId)
-      .maybeSingle();
-    if (error) return false;
-    return !!(data as { cancel_requested?: boolean } | null)?.cancel_requested;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < CANCEL_READ_RETRIES; attempt++) {
+    try {
+      const { data, error } = await supabaseServer
+        .from(REQUESTS_TABLE)
+        .select("cancel_requested")
+        .eq("id", generationRequestId)
+        .eq("profile_id", profileId)
+        .maybeSingle();
+      if (!error) {
+        return !!(data as { cancel_requested?: boolean } | null)?.cancel_requested;
+      }
+      if (attempt < CANCEL_READ_RETRIES - 1) continue;
+      console.error(
+        "[generation-cancel] isCancelRequested DB error after retry:",
+        error.message
+      );
+    } catch (e) {
+      if (attempt < CANCEL_READ_RETRIES - 1) continue;
+      console.error("[generation-cancel] isCancelRequested threw after retry:", e);
+    }
+  }
+  // ponytail: fail-closed — safer to refund than charge when cancel state is unknown
+  return true;
+}
+
+/** Throws when the user requested cancellation for this attempt. */
+export async function assertNotCancelled(
+  profileId: string,
+  generationRequestId: string
+): Promise<void> {
+  if (await isCancelRequested(profileId, generationRequestId)) {
+    throw new ReplicateCancellationError();
   }
 }
 
@@ -147,7 +168,7 @@ export async function listPredictionIds(
     .eq("profile_id", profileId);
 
   if (error) {
-    if (isMissingObject(error.message)) throw missingHint();
+    if (isMissingDbObject(error.message, PREDICTIONS_TABLE)) throw missingHint();
     throw new Error(error.message || "Failed to list predictions.");
   }
   return ((data as { prediction_id: string }[] | null) ?? [])

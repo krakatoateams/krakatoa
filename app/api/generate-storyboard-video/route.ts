@@ -8,8 +8,8 @@ import {
   videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl, signStoragePathForUser } from "@/lib/storage-signed-url";
-import { extractMediaUrl, runReplicateWithRetry, isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
+import { extractMediaUrl, runReplicateWithRetry, isCancellation } from "@/lib/replicate-server";
+import { makePredictionRecorder, assertNotCancelled } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
@@ -484,8 +484,8 @@ export async function POST(req: Request) {
     await beginStep("video_generation", "Seedance video from storyboard reference");
     // If the user already hit Cancel between spend and provider call, abort now so
     // we never start (and pay for) a provider run we're about to throw away.
-    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
     console.log(
       `[Storyboard Video] Calling ${videoModel.modelLabel} (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`
@@ -521,8 +521,8 @@ export async function POST(req: Request) {
     // still in the provider's initial (pre-poll) window — before its id was
     // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
     // refunding and NOT delivering the result, rather than charging for an unwanted clip.
-    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     const videoRemoteUrl = extractMediaUrl(videoResult);
@@ -533,6 +533,9 @@ export async function POST(req: Request) {
     await endStep({ videoRemoteUrl });
 
     await beginStep("storage_upload", "Download Seedance MP4 + upload to Supabase");
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     console.log("[Storyboard Video] Downloading MP4...");
     const vidRes = await fetch(videoRemoteUrl);
     if (!vidRes.ok) {
@@ -542,8 +545,16 @@ export async function POST(req: Request) {
     }
     const videoBuffer = await vidRes.arrayBuffer();
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     const filename = `video_${Date.now()}.mp4`;
     const storagePath = videosStoryboardVideoPath(userId!, filename);
+
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -561,6 +572,10 @@ export async function POST(req: Request) {
     const { url: videoUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl: videoUrl });
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
+
     const { error: finalErr } = await supabase
       .from(STORYBOARDS_TABLE)
       .update({ video_url: storagePath, status: "done" })
@@ -577,6 +592,9 @@ export async function POST(req: Request) {
     // source storyboard image via asset_relations (storyboard_for).
     // costCredits on both markAssetReady and finishJob is a display snapshot —
     // credit_transactions is the billing source of truth.
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () => markAssetReady(profileId!, videoAssetId!, {
         storagePath,
@@ -674,6 +692,9 @@ export async function POST(req: Request) {
     }
 
     const successResponse = { videoUrl, storagePath, aspectRatio, language, historyItem };
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,

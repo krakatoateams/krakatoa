@@ -74,6 +74,7 @@ import {
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
+  CANCEL_BTN_CLASS,
   UploadTile,
   CharacterTile,
   useImageUpload,
@@ -88,6 +89,9 @@ function describeIdempotencyError(
   status: number,
   data: { code?: string; error?: string }
 ): string | null {
+  if (status === 409 && data?.code === "GENERATION_CANCELLED") {
+    return null;
+  }
   if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
     return "Generation already in progress, please wait.";
   }
@@ -149,7 +153,7 @@ function StoryboardComposer({
   // Photo studio's reference upload tile.
   const themeReference = useImageUpload();
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
 
   // Load the assets that can be @-mentioned: saved characters + storyboards.
   const loadMentionAssets = useCallback(async () => {
@@ -216,6 +220,11 @@ function StoryboardComposer({
       });
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          refetchCredits();
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
@@ -339,7 +348,7 @@ function StoryboardComposer({
                 disabled={loading}
               />
             </div>
-            <div className="hidden lg:flex">
+            <div className="hidden items-center gap-3 lg:flex">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -347,12 +356,29 @@ function StoryboardComposer({
                 loading={loading}
                 label="Generate"
               />
+              {loading && (
+                <button
+                  type="button"
+                  onClick={() => cancelSubmit()}
+                  disabled={cancelling}
+                  className={CANCEL_BTN_CLASS}
+                >
+                  {cancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <span>Cancel</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* Generate (mobile — full-width, below the form card) */}
-        <div className="mt-3 flex lg:hidden">
+        <div className="mt-3 flex items-center gap-3 lg:hidden">
           <CreditActionButton
             balance={balance}
             cost={cost}
@@ -361,6 +387,23 @@ function StoryboardComposer({
             label="Generate"
             className={`${GENERATE_BTN_CLASS} flex-1`}
           />
+          {loading && (
+            <button
+              type="button"
+              onClick={() => cancelSubmit()}
+              disabled={cancelling}
+              className={CANCEL_BTN_CLASS}
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
+            </button>
+          )}
         </div>
         <p className="mt-2 pl-1 text-xs text-gray-500">
           Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
@@ -483,7 +526,7 @@ function PhotoOmniPage() {
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling } = useIdempotentSubmit();
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
 
@@ -723,6 +766,11 @@ function PhotoOmniPage() {
 
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          refetchCredits();
+          return;
+        }
         if (response.status === 402) {
           throw new Error(
             `Insufficient credits. Required: ${data.requiredCredits ?? photoCost}, current: ${data.currentBalance ?? 0}.`
@@ -1056,6 +1104,23 @@ function PhotoOmniPage() {
                   loading={loading}
                   label="Generate"
                 />
+                {loading && (
+                  <button
+                    type="button"
+                    onClick={() => cancelSubmit()}
+                    disabled={cancelling}
+                    className={CANCEL_BTN_CLASS}
+                  >
+                    {cancelling ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Cancelling</span>
+                      </>
+                    ) : (
+                      <span>Cancel</span>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1084,7 +1149,7 @@ function PhotoOmniPage() {
           </div>
 
           {/* Generate (mobile — full-width, below the form card) */}
-          <div className="mt-3 flex lg:hidden">
+          <div className="mt-3 flex items-center gap-3 lg:hidden">
             <CreditActionButton
               balance={balance}
               cost={photoCost}
@@ -1093,6 +1158,23 @@ function PhotoOmniPage() {
               label="Generate"
               className={`${GENERATE_BTN_CLASS} flex-1`}
             />
+            {loading && (
+              <button
+                type="button"
+                onClick={() => cancelSubmit()}
+                disabled={cancelling}
+                className={CANCEL_BTN_CLASS}
+              >
+                {cancelling ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Cancelling</span>
+                  </>
+                ) : (
+                  <span>Cancel</span>
+                )}
+              </button>
+            )}
           </div>
 
           {!creationSupported ? (

@@ -70,6 +70,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: "already_failed" });
     }
 
+    if (existing.cancel_requested) {
+      return NextResponse.json({ status: "already_cancelling" });
+    }
+
     // Flag it cancelled (so any not-yet-created provider step aborts early), then
     // stop every Replicate prediction we've recorded for this attempt.
     await requestCancel(profileId, existing.id);

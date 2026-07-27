@@ -24,17 +24,18 @@ Yang sudah benar: T2V/I2V, Storyboard→Video, Motion Control (kecuali satu edge
 
 | Fase | Isi |
 |------|-----|
-| **1** | Perbaiki `lib/generation-cancel.ts` (fail-closed + helper `assertNotCancelled`) |
-| **2** | Checkpoint cancel di pipeline Seedance & Veo (sebelum LLM, Rendi, storage) |
-| **3** | Guard pre-finalize di `generate-reels` |
-| **4** | Guard download/upload di `generate-video` |
-| **5** | Cancel API + UI Photo Studio & Storyboard image (`photo-v2`) |
-| **6** | Cancel API + UI storyboard import (`video/page`) |
-| **7** | Fix refund di motion-control status catch |
-| **8** | Cron reconcile job stuck + refund backstop |
-| **9** | Polish cancel endpoint (`already_cancelling`) |
-| **10** | Ponytail: dedup replicate helpers (PR terpisah OK) |
-| **11** | Update CLAUDE.md + dokumen ini |
+| **1** | ✅ `assertNotCancelled`, fail-closed `isCancelRequested`, self-check | `lib/generation-cancel.ts` |
+| **2** | ✅ Checkpoint cancel di pipeline Seedance & Veo | `seedance.ts`, `veo.ts` |
+| **3** | ✅ Guard pre-finalize di `generate-reels` | `generate-reels/route.ts` |
+| **4** | ✅ Guard download/upload di `generate-video` | `generate-video/route.ts` |
+| **5** | ✅ Cancel API + UI Photo & Storyboard image | `photo-v2`, `generate-photo`, `generate-storyboard` |
+| **6** | ✅ Cancel API + UI storyboard import | `video/page` import modal, `storyboards/import` |
+| **7** | ✅ Fix refund di motion-control status catch | `generate-motion-control/status` |
+| **8** | ✅ Cron reconcile job stuck + refund | `generation-reconcile`, `/api/cron/generation-reconcile` |
+| **9** | ✅ Cancel endpoint `already_cancelling` | `generations/cancel` |
+| **Pass 2** | ✅ Storyboard-video post-Replicate guards; motion poll 409; LLM retry cancel; `refetchCredits` on cancel UI | lihat plan gap matrix |
+| **10** | ✅ Dedup `extractMediaUrl`, `runWithRetry`/`runReplicateWithRetry`, `isMissingDbObject` | `replicate-server`, `replicate-utils`, `reels-helpers`, `generation-db-errors` |
+| **11** | Update CLAUDE.md + dokumen ini | — |
 
 **Urutan merge:** Fase 1–4 (Video/Reels risiko tertinggi) → 5–6 (Photo) → 7–9 → 8 bisa paralel setelah fase 1.
 

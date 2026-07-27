@@ -80,7 +80,7 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 | Reels Creator / Veo per-scene (`api/generate-reels`, engine `veo` mode `perScene`) | `estimateVeoCredits({ durationSec: sceneCount × durationPerScene })` |
 | Storyboard image (`api/generate-storyboard`) | fixed 2 credits |
 | Storyboard video (`api/generate-storyboard-video`) | fixed 30 credits |
-| Photo Studio (`api/generate-photo`) | **not wired yet** — Photo Studio remains free during dummy phase by design |
+| Photo Studio (`api/generate-photo`) | `productPhotoPricingKey` via pricing resolver (tier + resolution) |
 
 ### Spend / refund contract (applies to every charged route)
 1. Validate input → strictly resolve profile (no free fallback; non-auth failure = 500).
@@ -93,10 +93,12 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 
 `credit_transactions` is the billing source of truth. `jobs.cost_credits` and `assets.cost_credits` are display snapshots only. `usage_events` is analytics-only and must never affect billing/response.
 
+### Generation cancel (in-flight v1)
+Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested` flag, `generation_predictions`, `assertNotCancelled` between steps). The generate route owns refund + `cancelJob`; cancel endpoint never refunds. Client: `useIdempotentSubmit().cancel()` + 409 `GENERATION_CANCELLED` → idle UI. Stuck runs: `GET /api/cron/generation-reconcile` (every 30 min). Full plan: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md).
+
 ### Known limitations (intentional)
 - No Xendit / payment gateway / subscription plans yet.
 - No credit-balance UI yet.
-- Photo Studio is not metered yet.
 - Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
 

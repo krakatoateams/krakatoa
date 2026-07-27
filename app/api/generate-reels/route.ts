@@ -29,7 +29,7 @@ import {
   markAssetFailed,
 } from "@/lib/assets-db";
 import { isCancellation } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
+import { makePredictionRecorder, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
 import {
   spendCredits,
   refundCredits,
@@ -441,6 +441,11 @@ export async function POST(req: Request) {
         sceneCount: reqv.numScenes!,
         style: reqv.style,
       });
+    }
+
+    // Defense-in-depth: honor cancel that landed during the final pipeline steps.
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     // ---- Finalize (asset -> history -> job -> usage -> idempotency) ----

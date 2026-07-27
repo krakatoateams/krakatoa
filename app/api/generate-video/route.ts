@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
-import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
+import { isCancellation } from "@/lib/replicate-server";
+import { makePredictionRecorder, assertNotCancelled } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { insertUserCreation } from "@/lib/creations-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
@@ -561,8 +561,8 @@ export async function POST(req: Request) {
       aspectRatio,
     });
     // Abort before paying for a provider run the user already asked to cancel.
-    if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
     console.log(
       `[${jobLabel}] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
@@ -579,8 +579,8 @@ export async function POST(req: Request) {
 
     // Post-run cancel safety net (see generate-storyboard-video): honor a cancel
     // that landed in the provider's pre-poll window with a refund + no delivery.
-    if (generationRequestId && profileId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     const generatedVideoUrl = extractMediaUrl(output);
@@ -591,6 +591,9 @@ export async function POST(req: Request) {
 
     // ---- Download the MP4 + persist to videos/ (so the sweep keeps it) ----
     await beginStep("storage_upload", "Download generated video + save to Supabase");
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     const videoResponse = await fetch(generatedVideoUrl);
     if (!videoResponse.ok) {
       throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
@@ -599,6 +602,9 @@ export async function POST(req: Request) {
     const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
     const storagePath = videosGeneratedVideoPath(userId!, videoMode, `video_${Date.now()}.mp4`);
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)
       .upload(storagePath, videoBuffer, { contentType: "video/mp4", upsert: false });
@@ -637,6 +643,9 @@ export async function POST(req: Request) {
       );
     }
 
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
+    }
     if (videoAssetId && profileId) {
       await safe("markAssetReady", () =>
         markAssetReady(profileId!, videoAssetId!, {
