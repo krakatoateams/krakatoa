@@ -168,7 +168,7 @@ Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/mod
    - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
-   - `CRON_SECRET` — Protects `app/api/cron` if used.
+   - `CRON_SECRET` — Bearer token untuk semua `GET /api/cron/*` (lihat [`docs/ops/cron-jobs.md`](docs/ops/cron-jobs.md)).
  - `DOKU_CLIENT_ID`, `DOKU_SECRET_KEY` — DOKU Checkout credentials (credit purchases).
  - `DOKU_ENV` — `sandbox` (default) or `production`; selects the DOKU API base URL.
  - `DOKU_API_BASE` — Optional explicit DOKU API base URL override (otherwise derived from `DOKU_ENV`).
