@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
-import { refreshAccessToken, publishToTikTok, publishPhotoToTikTok, resolveOrigin } from "@/lib/tiktok";
+import {
+  refreshAccessToken,
+  publishToTikTok,
+  publishPhotoToTikTok,
+  resolveOrigin,
+  waitForTikTokPublishOutcome,
+} from "@/lib/tiktok";
 import { resolveStoragePath, resolvePublishVideoUrl } from "@/lib/storage-signed-url";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
@@ -78,7 +84,18 @@ function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
  * GET /api/cron
  *
  * Finds posts whose scheduled_time has passed and status is still "scheduled",
- * claims a bounded batch, uploads each to YouTube, and marks it published/failed.
+ * claims a bounded batch, publishes each to its platform, and marks it
+ * published/failed.
+ *
+ * TikTok publish verification: Init succeeding only means TikTok *accepted*
+ * the request — the real upload/download + publish happens asynchronously
+ * afterward and can still fail there. After Init, this route polls TikTok's
+ * status/fetch endpoint (bounded wait) before marking "published"; a real
+ * FAILED status is stored as "failed" with TikTok's fail_reason, and a post
+ * still processing past the wait budget is left "scheduled" (with its
+ * publish_id already saved) to be re-checked — not re-published — next run.
+ * YouTube's upload is synchronous-complete, so no equivalent polling is
+ * needed there.
  *
  * Safety:
  *  - Bounded batch + maxDuration keep each run inside platform limits.
@@ -170,10 +187,15 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Idempotency: a post that already published must never publish again. ────
-    const alreadyPublishedId =
-      post.platform === "tiktok" ? claimed.tiktok_publish_id : claimed.youtube_video_id;
-    if (alreadyPublishedId) {
-      console.log(`[cron] Post ${post.id} already has a ${post.platform} publish ID — marking published, no re-upload`);
+    // YouTube's upload is synchronous-complete once youtube_video_id exists —
+    // safe to mark published immediately. TikTok's tiktok_publish_id can exist
+    // WITHOUT confirmed completion (Init succeeded on a prior tick, but our
+    // own status poll below hit its wait budget before a terminal status came
+    // back) — that case must re-check status rather than blindly trust it, so
+    // it's handled inside the TikTok branch below instead of short-circuited
+    // here.
+    if (post.platform !== "tiktok" && claimed.youtube_video_id) {
+      console.log(`[cron] Post ${post.id} already has a youtube publish ID — marking published, no re-upload`);
       await supabaseServer
         .from("posts")
         .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
@@ -290,41 +312,104 @@ export async function GET(req: NextRequest) {
           throw new Error(`Failed to persist refreshed TikTok token: ${refreshUpsertErr.message}`);
         }
 
-        console.log(
-          `[cron] Calling ${isPhotoPost ? "publishPhotoToTikTok" : "publishToTikTok"} for post ${post.id}`,
-        );
+        // ── Publish to TikTok, or resume checking a prior attempt ────────────────
+        // claimed.tiktok_publish_id is set when a previous tick's Init call
+        // succeeded but the status poll below hit its wait budget before a
+        // terminal status came back (see the idempotency comment above) —
+        // in that case, skip straight to re-polling instead of calling Init
+        // again, which would otherwise create a duplicate post on TikTok.
+        let publishId = claimed.tiktok_publish_id ?? null;
 
-        // ── Publish to TikTok (optimistic — no status polling, see Decision 1) ──
-        const publishId = isPhotoPost
-          ? await publishPhotoToTikTok({
-              accessToken: refreshed.accessToken,
-              photoUrls: post.photo_urls,
-              title: post.title,
-              description: post.description ?? "",
-              privacyLevel: post.tiktok_privacy_level,
-              brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
-              brandContentToggle: !!post.tiktok_brand_content_toggle,
-              origin: resolveOrigin(req),
+        if (!publishId) {
+          console.log(
+            `[cron] Calling ${isPhotoPost ? "publishPhotoToTikTok" : "publishToTikTok"} for post ${post.id}`,
+          );
+
+          publishId = isPhotoPost
+            ? await publishPhotoToTikTok({
+                accessToken: refreshed.accessToken,
+                photoUrls: post.photo_urls,
+                title: post.title,
+                description: post.description ?? "",
+                privacyLevel: post.tiktok_privacy_level,
+                brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+                brandContentToggle: !!post.tiktok_brand_content_toggle,
+                origin: resolveOrigin(req),
+              })
+            : await publishToTikTok({
+                accessToken: refreshed.accessToken,
+                // Non-null: this branch only runs when !isPhotoPost, which is
+                // exactly when publishVideoUrl was computed above.
+                videoUrl: publishVideoUrl!,
+                title: post.title,
+                privacyLevel: post.tiktok_privacy_level,
+                brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+                brandContentToggle: !!post.tiktok_brand_content_toggle,
+              });
+
+          console.log(`[cron] Init succeeded for post ${post.id} → TikTok publish ID: ${publishId}`);
+
+          // Persist the ID immediately — before we know the final outcome —
+          // so a retry (this tick's poll timing out, or a later tick) never
+          // re-calls Init and creates a duplicate TikTok post.
+          await supabaseServer.from("posts").update({ tiktok_publish_id: publishId }).eq("id", post.id);
+        } else {
+          console.log(
+            `[cron] Post ${post.id} already has TikTok publish ID ${publishId} from a prior attempt — re-checking status instead of re-publishing`,
+          );
+        }
+
+        // ── Verify TikTok actually completed the publish before trusting it ──
+        // Init only means TikTok accepted the request; the real upload/
+        // download + publish happens asynchronously and can still fail (see
+        // openspec/changes/tiktok-photo-post bug history — a post sat
+        // "published" in our DB while TikTok's real status was FAILED with
+        // file_format_check_failed).
+        const outcome = await waitForTikTokPublishOutcome(refreshed.accessToken, publishId);
+
+        if (outcome.outcome === "failed") {
+          await supabaseServer
+            .from("posts")
+            .update({
+              status: "failed",
+              last_error: `TikTok rejected this post: ${outcome.failReason}`.slice(0, 1000),
+              publish_started_at: null,
+              publish_attempts: (post.publish_attempts ?? 0) + 1,
             })
-          : await publishToTikTok({
-              accessToken: refreshed.accessToken,
-              // Non-null: this branch only runs when !isPhotoPost, which is
-              // exactly when publishVideoUrl was computed above.
-              videoUrl: publishVideoUrl!,
-              title: post.title,
-              privacyLevel: post.tiktok_privacy_level,
-              brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
-              brandContentToggle: !!post.tiktok_brand_content_toggle,
-            });
+            .eq("id", post.id);
+          console.error(`[cron] ✗ Post ${post.id} — TikTok reported FAILED (${outcome.failReason})`);
+          failed++;
+          continue;
+        }
 
-        console.log(`[cron] ✓ Post ${post.id} published → TikTok publish ID: ${publishId}`);
+        if (outcome.outcome === "pending") {
+          // Separate edge case (not a failure, not a success): TikTok hasn't
+          // finished processing within our poll budget. Don't block
+          // indefinitely — leave the post "scheduled" (tiktok_publish_id is
+          // already saved above, so the next tick re-checks status instead
+          // of re-calling Init) and release the claim so it can be picked up
+          // again.
+          console.warn(
+            `[cron] ⏳ Post ${post.id} still processing on TikTok (last status: ${outcome.lastStatus}) — will recheck next run`,
+          );
+          await supabaseServer
+            .from("posts")
+            .update({
+              last_error: `Still processing on TikTok (status: ${outcome.lastStatus}) — checking again automatically.`,
+              publish_started_at: null,
+            })
+            .eq("id", post.id);
+          skipped++;
+          continue;
+        }
 
-        // ── Mark published and store TikTok publish ID ──────────────────────────
+        // outcome.outcome === "complete"
+        console.log(`[cron] ✓ Post ${post.id} confirmed published on TikTok (publish ID: ${publishId})`);
+
         await supabaseServer
           .from("posts")
           .update({
             status: "published",
-            tiktok_publish_id: publishId,
             last_error: null,
             publish_started_at: null,
             publish_attempts: 0,

@@ -1,4 +1,7 @@
+import sharp from "sharp";
+import { supabaseServer } from "@/lib/supabase-server";
 import {
+  STORAGE_BUCKET,
   isStorageRelativePath,
   photoStoragePathToProxyRest,
   storagePathFromPublicUrl,
@@ -160,6 +163,88 @@ export async function getCreatorInfo(accessToken: string): Promise<TikTokCreator
     stitchDisabled: data.stitch_disabled ?? false,
     maxVideoPostDurationSec: data.max_video_post_duration_sec ?? 0,
   };
+}
+
+const TIKTOK_STATUS_FETCH_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
+
+interface RawStatusFetchResponse {
+  data?: {
+    status?: string;
+    fail_reason?: string;
+  };
+  error?: { code?: string; message?: string; log_id?: string };
+}
+
+interface TikTokPublishStatus {
+  status: string;
+  failReason: string;
+}
+
+async function fetchPublishStatus(accessToken: string, publishId: string): Promise<TikTokPublishStatus> {
+  const res = await fetch(TIKTOK_STATUS_FETCH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+    },
+    body: JSON.stringify({ publish_id: publishId }),
+  });
+
+  const json = (await res.json()) as RawStatusFetchResponse;
+  if (!res.ok || (json.error?.code && json.error.code !== "ok") || !json.data?.status) {
+    throw new Error(`TikTok status fetch failed: ${json.error?.message ?? res.statusText}`);
+  }
+
+  return { status: json.data.status, failReason: json.data.fail_reason ?? "" };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Bounded poll budget. This runs inside the cron route's single serverless
+// invocation (maxDuration = 60s total, shared with token refresh, Init, and
+// everything else in that request), so it must stay comfortably under that
+// — not approach it.
+const STATUS_POLL_INTERVAL_MS = 3000;
+const STATUS_POLL_MAX_WAIT_MS = 24000;
+
+export type TikTokPublishOutcome =
+  | { outcome: "complete" }
+  | { outcome: "failed"; failReason: string }
+  | { outcome: "pending"; lastStatus: string };
+
+/**
+ * Polls TikTok's publish status (POST /v2/post/publish/status/fetch/) until
+ * a terminal state or a bounded max wait elapses. Init succeeding only means
+ * TikTok *accepted* the request (post_status/fetch's own docs: PROCESSING_UPLOAD
+ * for FILE_UPLOAD / PROCESSING_DOWNLOAD for PULL_FROM_URL) — the actual
+ * upload/download + publish happens asynchronously afterward and can still
+ * fail (e.g. `file_format_check_failed` for a PNG photo — see
+ * openspec/changes/tiktok-photo-post bug history, where a post sat as
+ * "published" in our DB despite never appearing on the actual account).
+ *
+ * "pending" is a distinct, non-terminal outcome for when TikTok is still
+ * processing after the wait budget — not a failure and not a success.
+ * Callers must not block indefinitely waiting for it to resolve and must not
+ * treat it as either terminal outcome.
+ */
+export async function waitForTikTokPublishOutcome(
+  accessToken: string,
+  publishId: string,
+): Promise<TikTokPublishOutcome> {
+  const deadline = Date.now() + STATUS_POLL_MAX_WAIT_MS;
+  let lastStatus = "";
+  while (true) {
+    const { status, failReason } = await fetchPublishStatus(accessToken, publishId);
+    lastStatus = status;
+    if (status === "PUBLISH_COMPLETE") return { outcome: "complete" };
+    if (status === "FAILED") return { outcome: "failed", failReason: failReason || "Unknown failure reason." };
+    // Still going: PROCESSING_UPLOAD (video) / PROCESSING_DOWNLOAD (photo) /
+    // SEND_TO_USER_INBOX (draft-review flow, not used by this app's DIRECT_POST).
+    if (Date.now() >= deadline) return { outcome: "pending", lastStatus };
+    await sleep(STATUS_POLL_INTERVAL_MS);
+  }
 }
 
 export interface TikTokPublishParams {
@@ -367,26 +452,107 @@ async function initPhotoPost(params: {
 }
 
 /**
- * Rewrites a Supabase Storage public photo URL to this app's own
- * `/api/tiktok-photos/` proxy — required because TikTok's PULL_FROM_URL
- * validates the URL against a domain/prefix verified in the TikTok Developer
- * Portal, and `*.supabase.co` isn't ours to verify (see design.md, Decision 1).
- * Throws (rather than silently passing through the original URL) if the URL
- * isn't a recognized `photos/`-prefixed storage URL — sending TikTok a URL
- * that can never pass verification would just surface as a confusing
+ * Resolves any accepted photo reference (bare storage path, public URL, or
+ * signed URL) to a bucket-relative storage path. Throws if it isn't a
+ * recognized user photo storage location — sending TikTok a URL that can
+ * never pass its domain verification would just surface as a confusing
  * TikTok-side error instead of a clear one here.
  */
-function toProxyPhotoUrl(urlOrPath: string, origin: string): string {
+function resolvePhotoStoragePath(urlOrPath: string): string {
   const path = isStorageRelativePath(urlOrPath)
     ? urlOrPath
     : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
-  const rest = path ? photoStoragePathToProxyRest(path) : null;
-  if (!rest) {
+  if (!path) {
     throw new Error(
       `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${urlOrPath}`,
     );
   }
+  return path;
+}
+
+/**
+ * Rewrites a photo storage path to this app's own `/api/tiktok-photos/`
+ * proxy — required because TikTok's PULL_FROM_URL validates the URL against
+ * a domain/prefix verified in the TikTok Developer Portal, and `*.supabase.co`
+ * isn't ours to verify (see design.md, Decision 1).
+ */
+function toProxyPhotoUrl(storagePath: string, origin: string): string {
+  const rest = photoStoragePathToProxyRest(storagePath);
+  if (!rest) {
+    throw new Error(
+      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${storagePath}`,
+    );
+  }
   return `${origin}/api/tiktok-photos/${rest}`;
+}
+
+/**
+ * Sniffs an image's real format from its magic bytes — not the stored
+ * content-type or the file extension, either of which could be wrong or
+ * absent. Only the formats relevant to the TikTok format check are
+ * distinguished; anything else (or too short to tell) is "unknown".
+ */
+function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "webp" | "unknown" {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    return "png";
+  }
+  // RIFF....WEBP — bytes 0-3 "RIFF", bytes 8-11 "WEBP".
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "webp";
+  }
+  return "unknown";
+}
+
+/**
+ * Ensures a photo storage path points to a file TikTok's PULL_FROM_URL will
+ * actually accept. Per TikTok's Content Posting API media-transfer guide,
+ * photo posts only support JPEG and WebP — PNG (the default output of both
+ * Product Photo and Storyboard generation) is rejected at TikTok's async
+ * fetch step with `file_format_check_failed`, even though our own Init call
+ * and proxy succeed (confirmed by pulling the real publish status for a
+ * failed post — see openspec/changes/tiktok-photo-post bug history).
+ *
+ * Downloads the original, sniffs its *real* format from its magic bytes
+ * (not the stored content-type or extension — a mislabeled file shouldn't
+ * slip through), and if it isn't already JPEG or WebP, converts it to JPEG
+ * via sharp and uploads the result under a sibling path so the existing
+ * proxy route serves it with zero changes. Returns the storage path to
+ * actually proxy — the original path if no conversion was needed.
+ */
+async function ensureTikTokCompatiblePhoto(storagePath: string): Promise<string> {
+  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
+  if (error || !data) {
+    throw new Error(`Could not read photo from storage for TikTok format check: ${storagePath}`);
+  }
+
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  const format = sniffImageFormat(bytes);
+  if (format === "jpeg" || format === "webp") return storagePath;
+
+  const jpegBuffer = await sharp(Buffer.from(bytes)).jpeg({ quality: 90 }).toBuffer();
+  // Sibling path (not overwriting the original) so the source asset — still
+  // used elsewhere (Product Photo history, other posts) — is untouched.
+  const convertedPath = `${storagePath.replace(/\.[^./]+$/, "")}.tiktok.jpg`;
+
+  const { error: uploadError } = await supabaseServer.storage
+    .from(STORAGE_BUCKET)
+    .upload(convertedPath, jpegBuffer, { contentType: "image/jpeg", upsert: true });
+  if (uploadError) {
+    throw new Error(`Failed to upload converted JPEG for TikTok: ${uploadError.message}`);
+  }
+
+  return convertedPath;
 }
 
 export interface TikTokPhotoPublishParams {
@@ -407,8 +573,12 @@ export interface TikTokPhotoPublishParams {
  * (`PULL_FROM_URL` source) and returns the resulting publish_id. Completion
  * is optimistic, same as the video path — see design.md Decision 4.
  *
- * Unlike publishToTikTok, there is no upload step: PULL_FROM_URL means
- * TikTok fetches the (proxied) images itself once Init succeeds.
+ * Unlike publishToTikTok, there is no upload step for the original bytes:
+ * PULL_FROM_URL means TikTok fetches the (proxied) images itself once Init
+ * succeeds. Each photo is still individually format-checked and converted
+ * if needed (see ensureTikTokCompatiblePhoto) before that proxy URL is built
+ * — a carousel can mix a PNG (e.g. AI-generated) with a JPEG (e.g. raw
+ * upload), so this happens per-image, not once for the whole batch.
  */
 export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Promise<string> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
@@ -416,7 +586,13 @@ export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Pr
   // Sanity-check the account can actually post before spending an Init call.
   await getCreatorInfo(params.accessToken);
 
-  const proxiedUrls = params.photoUrls.map((url) => toProxyPhotoUrl(url, params.origin));
+  const proxiedUrls = await Promise.all(
+    params.photoUrls.map(async (urlOrPath) => {
+      const storagePath = resolvePhotoStoragePath(urlOrPath);
+      const compatiblePath = await ensureTikTokCompatiblePhoto(storagePath);
+      return toProxyPhotoUrl(compatiblePath, params.origin);
+    }),
+  );
 
   const { publishId } = await initPhotoPost({
     accessToken: params.accessToken,
