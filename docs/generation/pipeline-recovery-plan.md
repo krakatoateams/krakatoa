@@ -16,15 +16,16 @@ Canonical deliverables remain under `{userId}/videos/generated/…` and `{userId
 
 - `recoverable` — Replicate/scene work succeeded; Rendi or upload failed. Credits **held** (no refund).
 - Resume via `POST /api/generations/resume` with `{ jobId }`.
-- TTL default 24h; cron `generation-reconcile` expires stale recoverable jobs (refund + purge).
+- TTL default 24h; cron expires stale recoverable jobs (purge always; refund only if user had resume attempts and delivery still failed).
+- Abandon via `POST /api/generations/cancel { jobId }` — purge, no refund.
 
 ## Cleanup triggers
 
 | Event | Action |
 |-------|--------|
 | Success | `purgeResumableJobStorage` after final upload |
-| Terminal fail / cancel | Purge + refund |
-| TTL expired | Cron terminal + refund + purge |
+| Terminal fail / abandon | Purge; refund only on genuine delivery failure (see refund policy) |
+| TTL expired | Cron purge; refund only if `resumeAttempts >= 1` |
 
 ## Routes
 

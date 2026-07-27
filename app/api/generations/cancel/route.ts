@@ -29,7 +29,7 @@ export const maxDuration = 60;
  * Cancel an in-flight generation or abandon a recoverable job.
  *
  * Body: `{ idempotencyKey: string }` — cancel in-flight attempt (same as generate).
- * Body: `{ jobId: string }` — abandon recoverable job, purge storage, refund credits.
+ * Body: `{ jobId: string }` — abandon recoverable job, purge storage (no refund — provider cost committed).
  */
 export async function POST(req: Request) {
   let profileId: string;
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
           message: "Recovery abandoned by user.",
         },
       });
-      return NextResponse.json({ status: "abandoned", refunded: true });
+      return NextResponse.json({ status: "abandoned", refunded: false });
     }
 
     const idempotencyKey =
@@ -132,7 +132,7 @@ export async function POST(req: Request) {
               message: "Recovery abandoned by user.",
             },
           });
-          return NextResponse.json({ status: "abandoned", refunded: true });
+          return NextResponse.json({ status: "abandoned", refunded: false });
         }
       }
       return NextResponse.json({ status: "already_failed" });

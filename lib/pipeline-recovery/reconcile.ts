@@ -1,5 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { terminalGenerationFailure, userIdFromJob } from "./failure";
+import { closeRecoverableJobTerminal, userIdFromJob } from "./failure";
 import { parseRecoveryManifest } from "./manifest";
 import { purgeResumableJobStorage } from "./storage";
 import { finishGenerationRequestsForJob } from "@/lib/generation-idempotency";
@@ -61,26 +61,30 @@ export async function runResumableStorageReconcile(): Promise<ResumableReconcile
         result.errors.push(`job ${row.id}: missing userId for purge`);
         continue;
       }
+      const resumeAttempts = manifest.resumeAttempts ?? 0;
+      const refunded = resumeAttempts >= 1;
       try {
-        await terminalGenerationFailure({
+        await closeRecoverableJobTerminal({
           profileId: row.profile_id,
           userId,
           jobId: row.id,
           jobType: row.job_type,
           creditsAmount: row.cost_credits,
-          reason: {
-            code: "RECOVERY_TTL_EXPIRED",
-            message: "Recovery window expired. Credits refunded.",
-          },
-          refund: true,
-          purge: true,
+          reason: "ttl_expired",
+          resumeAttempts,
+          code: "RECOVERY_TTL_EXPIRED",
+          message: refunded
+            ? "Recovery window expired after retry attempts. Credits refunded."
+            : "Recovery window expired without a retry. Credits were not refunded.",
         });
         await finishGenerationRequestsForJob({
           profileId: row.profile_id,
           jobId: row.id,
           errorJson: {
             code: "RECOVERY_TTL_EXPIRED",
-            message: "Recovery window expired. Credits refunded.",
+            message: refunded
+              ? "Recovery window expired after retry attempts. Credits refunded."
+              : "Recovery window expired without a retry. Credits were not refunded.",
           },
         });
       } catch (e) {

@@ -2,6 +2,10 @@ import { failJob, cancelJob, getJob, type Job } from "@/lib/jobs-db";
 import { refundCredits } from "@/lib/credits-db";
 import { purgeResumableJobStorage } from "./storage";
 import { parseRecoveryManifest } from "./manifest";
+import {
+  shouldRefundRecoverableTerminal,
+  type RecoverableTerminalReason,
+} from "./refund-policy-pure";
 
 export async function terminalGenerationFailure(params: {
   profileId: string;
@@ -62,11 +66,42 @@ export async function abandonRecoverableJob(params: {
     jobId: params.jobId,
     jobType: params.jobType,
     creditsAmount: params.creditsAmount,
-    reason: params.reason ?? "Recovery abandoned.",
-    refund: true,
+    reason: {
+      code: "GENERATION_ABANDONED",
+      message: params.reason ?? "Recovery abandoned by user.",
+    },
+    refund: shouldRefundRecoverableTerminal({ reason: "user_abandon" }),
     purge: true,
+    cancelled: true,
   });
   return getJob(params.profileId, params.jobId);
+}
+
+/** Close a recoverable job after TTL or delivery failure — refund only when policy allows. */
+export async function closeRecoverableJobTerminal(params: {
+  profileId: string;
+  userId: string;
+  jobId: string;
+  jobType: string;
+  creditsAmount: number;
+  reason: RecoverableTerminalReason;
+  resumeAttempts?: number;
+  message: string;
+  code: string;
+}): Promise<void> {
+  await terminalGenerationFailure({
+    profileId: params.profileId,
+    userId: params.userId,
+    jobId: params.jobId,
+    jobType: params.jobType,
+    creditsAmount: params.creditsAmount,
+    reason: { code: params.code, message: params.message },
+    refund: shouldRefundRecoverableTerminal({
+      reason: params.reason,
+      resumeAttempts: params.resumeAttempts,
+    }),
+    purge: true,
+  });
 }
 
 export function userIdFromJob(job: Job, fallbackUserId?: string): string | null {

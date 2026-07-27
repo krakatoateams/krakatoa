@@ -20,7 +20,7 @@ import {
 } from "@/lib/pipeline-recovery/manifest";
 import { resumeReelsFromManifest } from "@/lib/pipeline-recovery/resume-reels";
 import { resumeVideoUploadFromManifest } from "@/lib/pipeline-recovery/resume-video-upload";
-import { terminalGenerationFailure } from "@/lib/pipeline-recovery/failure";
+import { closeRecoverableJobTerminal } from "@/lib/pipeline-recovery/failure";
 import { isRecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { insertUserCreation } from "@/lib/creations-db";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -111,15 +111,15 @@ export async function POST(req: Request) {
 
   const attempts = manifest.resumeAttempts ?? 0;
   if (attempts >= MAX_RESUME_ATTEMPTS) {
-    await terminalGenerationFailure({
+    await closeRecoverableJobTerminal({
       profileId,
       userId,
       jobId,
       jobType: job.job_type,
       creditsAmount: job.cost_credits,
-      reason: { code: "RESUME_EXHAUSTED", message: "Maximum resume attempts exceeded." },
-      refund: true,
-      purge: true,
+      reason: "resume_exhausted",
+      code: "RESUME_EXHAUSTED",
+      message: "Maximum resume attempts exceeded.",
     });
     await finishGenerationRequestsForJob({
       profileId,
@@ -424,15 +424,15 @@ export async function POST(req: Request) {
       );
     }
 
-    await terminalGenerationFailure({
+    await closeRecoverableJobTerminal({
       profileId,
       userId,
       jobId,
       jobType: job.job_type,
       creditsAmount: job.cost_credits,
-      reason: { message },
-      refund: true,
-      purge: true,
+      reason: "terminal_delivery_failure",
+      code: "DELIVERY_FAILED",
+      message,
     });
     await finishGenerationRequestsForJob({
       profileId,

@@ -25,7 +25,7 @@ Gagal total **setelah** commit (upload/Rendi/stitch): tetap **full refund**.
 | Photo / storyboard gambar | Setelah `image_generation` sukses |
 | Storyboard import | Setelah **vision LLM** selesai |
 
-Abandon recoverable (`cancel` + `jobId`) tetap refund — beda flow.
+Abandon recoverable (`cancel` + `jobId`) **tidak** refund — biaya provider sudah terpakai.
 
 ## Implementasi
 
