@@ -8,6 +8,7 @@ import {
   User,
   PersonStanding,
   Image as ImageIcon,
+  Images as ImagesIcon,
   Check,
   X,
   Maximize2,
@@ -21,6 +22,9 @@ import {
   Clapperboard,
   ArrowRight,
   Languages,
+  Sparkles,
+  Copy,
+  CalendarClock,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -58,6 +62,9 @@ import {
   DEFAULT_CHARACTER_STYLE,
   DEFAULT_CHARACTER_GENDER,
   DEFAULT_CHARACTER_AGE,
+  SOCIAL_POST_ASPECT_RATIOS,
+  DEFAULT_SOCIAL_POST_ASPECT_RATIO,
+  socialPostAspectLabel,
   getProductPhotoTier,
   tierSupportsMultiReference,
   ModelPoseId,
@@ -100,16 +107,24 @@ function describeIdempotencyError(
   return null;
 }
 
-// Creation types surfaced in the top-left chip. Only "product-tryon" is wired to a
-// backend today; the others are placeholders ("as of now") and disable Generate.
+// Creation types surfaced in the top-left chip. Every type is wired to a backend:
+// storyboard has its own composer + route, the rest map to a generate-photo `mode`.
+// An `available: false` entry renders a "Soon" hint and disables Generate.
 const CREATION_TYPES = [
   { id: "generate-any-image", label: "Generate any image", available: true },
   { id: "product-tryon", label: "Product try-on", available: true },
   { id: "character", label: "Character creation", available: true },
   { id: "storyboard", label: "Storyboard", available: true },
-  { id: "social-post", label: "Social media post", available: false },
+  { id: "social-post", label: "Social media post", available: true },
 ] as const;
 type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
+
+// Social media post batch: how many alternatives one submit may generate. Each
+// one is a separate provider call and is charged separately.
+const BATCH_COUNTS = [1, 2, 3, 4] as const;
+
+/** One image of the last generation, ready to be signed for preview. */
+type BatchResult = { path: string; seed: string | null };
 
 // First reference-capable model — the default we snap to when the user enters a
 // mode that needs a product reference (Product Try-on) with a text-only model selected.
@@ -328,9 +343,8 @@ function StoryboardComposer({
                 square
                 showChevron={false}
                 icon={<Languages className="h-3.5 w-3.5" />}
-                value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
+                value={storyboardLanguageLabel(language)}
                 activeId={language}
-                dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
                 options={STORYBOARD_LANGUAGES.map((l) => ({
                   id: l.id,
                   label: l.label,
@@ -433,7 +447,46 @@ function StoryboardComposer({
   );
 }
 
+/**
+ * One picker thumbnail of a batch. Signs its own URL so the strip can render an
+ * arbitrary number of images without hooks in a loop.
+ */
+function BatchThumb({
+  result,
+  selected,
+  index,
+  onSelect,
+}: {
+  result: BatchResult;
+  selected: boolean;
+  index: number;
+  onSelect: () => void;
+}) {
+  const url = useSignedMediaUrl(result.path, result.seed);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-label={`Show image ${index + 1}`}
+      aria-pressed={selected}
+      className={`relative cursor-pointer overflow-hidden rounded-lg border transition-opacity ${
+        selected
+          ? "border-purple-400/70 ring-1 ring-purple-400/50"
+          : "border-white/10 opacity-60 hover:opacity-100"
+      }`}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="block h-auto w-full" />
+      ) : (
+        <span className="block aspect-square w-full bg-white/5" />
+      )}
+    </button>
+  );
+}
+
 function PhotoOmniPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
   // so we open the storyboard sub-tool preselected.
@@ -470,14 +523,28 @@ function PhotoOmniPage() {
     string,
     { enabledTiers: string[]; defaultTier: string | null }
   > | null>(null);
+  // Social media post can ask for a batch of alternatives in one submit; every
+  // other mode always produces a single image.
+  const [batchCount, setBatchCount] = useState(1);
   const [loading, setLoading] = useState(false);
   const [resultPath, setResultPath] = useState<string | null>(null);
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
+  // Every image of the last batch. `resultPath` is whichever one is selected, so
+  // the preview, caption and scheduler hand-off all follow the selection.
+  const [resultBatch, setResultBatch] = useState<BatchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Social media post: the caption is written after the image, on the result card.
+  const [caption, setCaption] = useState("");
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [captionError, setCaptionError] = useState<string | null>(null);
+  const [captionCopied, setCaptionCopied] = useState(false);
+  // The idea that produced the current result — captions and the scheduler
+  // hand-off describe the generated image, not whatever is in the box right now.
+  const [resultPrompt, setResultPrompt] = useState("");
   // @-mentions: tag saved characters / storyboards in the prompt; their images are
   // sent as references and their names are woven into the prompt.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
@@ -501,15 +568,27 @@ function PhotoOmniPage() {
   const isImageMode = creationType === "generate-any-image";
   // "Character creation" = text-to-image turnaround sheet (one image, multiple angles).
   const isCharacterMode = creationType === "character";
+  // "Social media post" = text-to-image Instagram feed image + an optional caption.
+  const isSocialMode = creationType === "social-post";
+  // Only social posts expose the batch chip, so every other mode costs one image.
+  const requestedImageCount = isSocialMode ? batchCount : 1;
+  const totalCost = photoCost * requestedImageCount;
   const requiresProduct = creationSupported && creationType === "product-tryon";
   // Reference image upload is only meaningful for reference-capable models, and only
-  // in the no-product modes (Generate any image / Character creation).
-  const allowReferenceUpload = (isImageMode || isCharacterMode) && tier.supportsReference;
+  // in the no-product modes (Generate any image / Character creation / Social post).
+  const allowReferenceUpload =
+    (isImageMode || isCharacterMode || isSocialMode) && tier.supportsReference;
 
   // Which creation feature the current mode maps to (matches the admin config +
   // generate-photo `mode`). Unsupported types fall through to "product" but the
   // form is disabled for those, so it never matters.
-  const featureKey = isImageMode ? "image" : isCharacterMode ? "character" : "product";
+  const featureKey = isImageMode
+    ? "image"
+    : isCharacterMode
+      ? "character"
+      : isSocialMode
+        ? "social"
+        : "product";
 
   // Models usable in the current mode. When the admin enablement has loaded, use
   // its per-feature list (it already encodes capability + admin toggles). Before
@@ -525,17 +604,18 @@ function PhotoOmniPage() {
   const referenceImageCount =
     (requiresProduct ? 1 : 0) +
     (requiresProduct && (!!character.file || !!selectedCharacter) ? 1 : 0) +
-    ((isImageMode || isCharacterMode) && !!reference.file ? 1 : 0) +
+    (allowReferenceUpload && !!reference.file ? 1 : 0) +
     mentionCount;
   const needsReferenceModel =
     requiresProduct ||
-    ((isImageMode || isCharacterMode) && (mentionCount > 0 || !!reference.file));
+    ((isImageMode || isCharacterMode || isSocialMode) &&
+      (mentionCount > 0 || !!reference.file));
   const needsMultiReferenceModel = referenceImageCount > 1;
   const availableTiers = PRODUCT_PHOTO_TIERS.filter(
     (t) =>
       (enabledTierIds
         ? enabledTierIds.includes(t.id)
-        : isImageMode || isCharacterMode || t.supportsReference) &&
+        : isImageMode || isCharacterMode || isSocialMode || t.supportsReference) &&
       (!needsReferenceModel || t.supportsReference) &&
       (!needsMultiReferenceModel || tierSupportsMultiReference(t))
   );
@@ -545,7 +625,7 @@ function PhotoOmniPage() {
     creationSupported &&
     availableTiers.length > 0 &&
     (requiresProduct ? !!product.file : true) &&
-    (isImageMode ? prompt.trim().length > 0 : true) &&
+    (isImageMode || isSocialMode ? prompt.trim().length > 0 : true) &&
     // Character: need a description OR a usable reference image.
     (isCharacterMode
       ? prompt.trim().length > 0 || (allowReferenceUpload && !!reference.file)
@@ -583,6 +663,15 @@ function PhotoOmniPage() {
     setModelTier(next as ProductPhotoModelTier);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableTierKey, featureKey, modelTier]);
+
+  // Social posts only ship in the two ratios Instagram shows uncropped in the feed,
+  // so snap a wider ratio carried over from another mode.
+  useEffect(() => {
+    if (!isSocialMode) return;
+    setAspectRatio((current) =>
+      SOCIAL_POST_ASPECT_RATIOS.includes(current) ? current : DEFAULT_SOCIAL_POST_ASPECT_RATIO
+    );
+  }, [isSocialMode]);
 
   useEffect(() => {
     if (!lightboxUrl) return;
@@ -652,7 +741,13 @@ function PhotoOmniPage() {
     e.preventDefault();
     if (loading || !canGenerate) return;
 
-    const mode = isCharacterMode ? "character" : isImageMode ? "image" : "product";
+    const mode = isCharacterMode
+      ? "character"
+      : isImageMode
+        ? "image"
+        : isSocialMode
+          ? "social"
+          : "product";
     // Signature mirrors every input the request depends on, including file
     // identities (the server hash ignores image bytes), so any change rotates the
     // key. Stable key + synchronous lock stop a double-click / retry double-charge.
@@ -676,6 +771,7 @@ function PhotoOmniPage() {
       prompt.trim(),
       mentions.map((m) => m.id).join(","),
       tier.hasResolution ? resolution : "",
+      String(requestedImageCount),
     ].join("|");
     const attempt = beginSubmit(signature);
     if (!attempt) return;
@@ -683,6 +779,9 @@ function PhotoOmniPage() {
     setLoading(true);
     setError(null);
     setWarning(null);
+    setCaption("");
+    setCaptionError(null);
+    setCaptionCopied(false);
 
     try {
       const formData = new FormData();
@@ -706,6 +805,7 @@ function PhotoOmniPage() {
       formData.append("modelTier", modelTier);
       // Character creation has no aspect chip — it always uses a 2:3 portrait sheet.
       formData.append("aspectRatio", isCharacterMode ? "2:3" : aspectRatio);
+      if (requestedImageCount > 1) formData.append("imageCount", String(requestedImageCount));
       if (prompt.trim()) formData.append("prompt", prompt.trim());
       // @-mentioned assets (saved characters / storyboards) → reference images.
       if (mentions.length) {
@@ -725,7 +825,7 @@ function PhotoOmniPage() {
       if (!response.ok) {
         if (response.status === 402) {
           throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? photoCost}, current: ${data.currentBalance ?? 0}.`
+            `Insufficient credits. Required: ${data.requiredCredits ?? totalCost}, current: ${data.currentBalance ?? 0}.`
           );
         }
         const idemMsg = describeIdempotencyError(response.status, data);
@@ -734,9 +834,25 @@ function PhotoOmniPage() {
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.imageUrl ?? null);
+      // A batch comes back as `images`; single generations only have the legacy
+      // top-level fields. Either way the first image becomes the selected one.
+      const batch: BatchResult[] = Array.isArray(data.images)
+        ? (data.images as Array<{ imageUrl?: string | null; storagePath?: string | null }>)
+            .map((img) => ({ path: pickGenerateStoragePath(img), seed: img.imageUrl ?? null }))
+            .flatMap((r) => (r.path ? [{ path: r.path, seed: r.seed }] : []))
+        : [];
+      const primaryPath = batch[0]?.path ?? pickGenerateStoragePath(data);
+      setResultBatch(batch);
+      setResultPath(primaryPath);
+      setResultSeed(batch[0]?.seed ?? data.imageUrl ?? null);
+      setResultPrompt(prompt.trim());
       if (data.warning) setWarning(data.warning);
+      // Partial batch: the missing images were refunded server-side.
+      if (typeof data.failedImageCount === "number" && data.failedImageCount > 0) {
+        setWarning(
+          `${data.failedImageCount} of ${data.requestedImageCount} images couldn't be generated — you were only charged for the ${batch.length} that worked.`
+        );
+      }
       setHistoryRefreshKey((k) => k + 1);
       refetchCredits();
     } catch (err: unknown) {
@@ -746,6 +862,51 @@ function PhotoOmniPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Write (or re-roll) an Instagram caption for the post we just generated. Free —
+  // no credits are spent, so the user can keep rolling until one lands.
+  const handleGenerateCaption = async () => {
+    if (captionLoading) return;
+    setCaptionLoading(true);
+    setCaptionError(null);
+    setCaptionCopied(false);
+    try {
+      const response = await fetch("/api/generate-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "instagram", title: resultPrompt }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not write a caption");
+      setCaption(String(data.caption ?? "").trim());
+    } catch (err: unknown) {
+      setCaptionError(err instanceof Error ? err.message : "Could not write a caption");
+    } finally {
+      setCaptionLoading(false);
+    }
+  };
+
+  const handleCopyCaption = async () => {
+    if (!caption) return;
+    try {
+      await navigator.clipboard.writeText(caption);
+      setCaptionCopied(true);
+      window.setTimeout(() => setCaptionCopied(false), 2000);
+    } catch {
+      setCaptionError("Couldn't copy — select the caption and copy it manually.");
+    }
+  };
+
+  // Hand the post to the Scheduler: the storage path becomes the photo, the idea
+  // becomes the title, and the caption is pre-filled. No platform is preselected.
+  const handleSchedulePost = () => {
+    if (!resultPath) return;
+    const params = new URLSearchParams({ assetUrl: resultPath, mediaType: "image" });
+    const title = resultPrompt.slice(0, 100);
+    if (title) params.set("title", title);
+    if (caption.trim()) params.set("caption", caption.trim());
+    router.push(`/tools/scheduler?${params.toString()}`);
   };
 
   return (
@@ -903,7 +1064,9 @@ function PhotoOmniPage() {
                     ? "Describe your character — type @ to reference a saved character…"
                     : isImageMode
                       ? "Describe the image — type @ to reference a saved character or storyboard…"
-                      : "Describe the shot — type @ to reference a saved character or storyboard…"
+                      : isSocialMode
+                        ? "Describe your post — type @ to reference a saved character or storyboard…"
+                        : "Describe the shot — type @ to reference a saved character or storyboard…"
                 }
               />
               {/* Upload tiles stay inline beside the prompt on desktop */}
@@ -932,18 +1095,46 @@ function PhotoOmniPage() {
               <div className={STUDIO_CHIP_ROW_CLASS}>
                 {!isCharacterMode && (
                   <ChipDropdown
-                    sheetTitle="Select image ratio"
+                    sheetTitle={isSocialMode ? "Select post format" : "Select image ratio"}
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
                     value={aspectRatio}
                     activeId={aspectRatio}
-                    options={PHOTO_ASPECT_RATIOS.map((a) => ({
-                      id: a.id,
-                      label: a.label,
-                      hint: a.cinematic ? "Cinematic" : undefined,
-                    }))}
+                    // Social posts are limited to the two ratios Instagram shows
+                    // uncropped in the feed; other modes offer the full set.
+                    options={
+                      isSocialMode
+                        ? SOCIAL_POST_ASPECT_RATIOS.map((id) => ({
+                            id,
+                            label: socialPostAspectLabel(id),
+                            hint: id === DEFAULT_SOCIAL_POST_ASPECT_RATIO ? "Recommended" : undefined,
+                          }))
+                        : PHOTO_ASPECT_RATIOS.map((a) => ({
+                            id: a.id,
+                            label: a.label,
+                            hint: a.cinematic ? "Cinematic" : undefined,
+                          }))
+                    }
                     onSelect={(id) => setAspectRatio(id as PhotoAspectRatio)}
+                    disabled={loading}
+                  />
+                )}
+                {isSocialMode && (
+                  <ChipDropdown
+                    sheetTitle="Images per generation"
+                    square
+                    showChevron={false}
+                    icon={<ImagesIcon className="h-3.5 w-3.5" />}
+                    value={`${batchCount}`}
+                    activeId={String(batchCount)}
+                    dimValue={batchCount === 1}
+                    options={BATCH_COUNTS.map((n) => ({
+                      id: String(n),
+                      label: n === 1 ? "1 image" : `${n} images`,
+                      hint: `${photoCost * n}`,
+                    }))}
+                    onSelect={(id) => setBatchCount(Number(id))}
                     disabled={loading}
                   />
                 )}
@@ -1051,7 +1242,7 @@ function PhotoOmniPage() {
               <div className="hidden items-center gap-3 lg:flex">
                 <CreditActionButton
                   balance={balance}
-                  cost={photoCost}
+                  cost={totalCost}
                   ready={canGenerate}
                   loading={loading}
                   label="Generate"
@@ -1087,7 +1278,7 @@ function PhotoOmniPage() {
           <div className="mt-3 flex lg:hidden">
             <CreditActionButton
               balance={balance}
-              cost={photoCost}
+              cost={totalCost}
               ready={canGenerate}
               loading={loading}
               label="Generate"
@@ -1122,25 +1313,55 @@ function PhotoOmniPage() {
             <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
             {isCharacterMode
               ? `Creating your character turnaround with ${tier.label} — it will appear below when ready.`
-              : `Creating your shot with ${tier.label} — it will appear below when ready.`}
+              : isSocialMode
+                ? requestedImageCount > 1
+                  ? `Creating ${requestedImageCount} post options with ${tier.label} — they will appear below when ready.`
+                  : `Creating your post with ${tier.label} — it will appear below when ready.`
+                : `Creating your shot with ${tier.label} — it will appear below when ready.`}
           </div>
         )}
 
         {resultUrl && !loading && (
-          <div className="mt-6 flex flex-col gap-4 rounded-[16px] border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={() => setLightboxUrl(resultUrl)}
-              className="group relative h-40 w-32 shrink-0 overflow-hidden rounded-2xl border border-white/10"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={resultUrl}
-                alt="Latest generation"
-                className="h-full w-full object-cover transition-transform group-hover:scale-105"
-              />
-            </button>
-            <div className="min-w-0">
+          <div
+            className={`mt-6 flex flex-col gap-4 rounded-[16px] border border-white/10 bg-white/5 p-4 sm:flex-row ${
+              isSocialMode ? "" : "sm:items-center"
+            }`}
+          >
+            <div className="flex w-32 shrink-0 flex-col gap-2">
+              {/* No fixed height: the image's own ratio sets the box, so square,
+                  portrait and landscape results all show uncropped. */}
+              <button
+                type="button"
+                onClick={() => setLightboxUrl(resultUrl)}
+                className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={resultUrl}
+                  alt="Latest generation"
+                  className="block h-auto w-full transition-transform group-hover:scale-105"
+                />
+              </button>
+              {/* Batch alternatives — picking one swaps the preview, and with it
+                  the caption target and the scheduler hand-off. */}
+              {resultBatch.length > 1 && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {resultBatch.map((item, index) => (
+                    <BatchThumb
+                      key={item.path}
+                      result={item}
+                      index={index}
+                      selected={item.path === resultPath}
+                      onSelect={() => {
+                        setResultPath(item.path);
+                        setResultSeed(item.seed);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
               <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
                 <Check className="h-3 w-3" />
                 Saved to your library
@@ -1150,11 +1371,84 @@ function PhotoOmniPage() {
                   ? `Character${characterName.trim() ? ` · ${characterName.trim()}` : ""} · ${tier.label}`
                   : isImageMode
                     ? `Generated image · ${tier.label}`
-                    : `${selectedPose?.label} · ${selectedStyle?.label} · ${tier.label}`}
+                    : isSocialMode
+                      ? `Social media post · ${socialPostAspectLabel(aspectRatio)}${
+                          resultBatch.length > 1 ? ` · ${resultBatch.length} options` : ""
+                        } · ${tier.label}`
+                      : `${selectedPose?.label} · ${selectedStyle?.label} · ${tier.label}`}
               </p>
-              <p className="mt-1 text-xs text-gray-500">
-                Click the thumbnail to view full size, or generate another below.
-              </p>
+              {isSocialMode ? (
+                <>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {resultBatch.length > 1
+                      ? "Pick the image you like, write a caption, then send the post to your scheduler."
+                      : "Write a caption, then send the post to your scheduler."}
+                  </p>
+
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <textarea
+                      value={caption}
+                      onChange={(e) => setCaption(e.target.value)}
+                      rows={4}
+                      maxLength={2200}
+                      placeholder="Your caption — write it yourself, or let AI draft one."
+                      className="w-full resize-none bg-transparent text-sm text-white placeholder:text-gray-500 focus:outline-none"
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2">
+                      <button
+                        type="button"
+                        onClick={handleGenerateCaption}
+                        disabled={captionLoading}
+                        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-gray-200 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {captionLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5 text-purple-300" />
+                        )}
+                        {captionLoading
+                          ? "Writing…"
+                          : caption
+                            ? "Rewrite caption"
+                            : "Generate caption"}
+                      </button>
+                      {caption && (
+                        <button
+                          type="button"
+                          onClick={handleCopyCaption}
+                          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-gray-200 transition-colors hover:bg-white/10"
+                        >
+                          {captionCopied ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-300" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                          {captionCopied ? "Copied" : "Copy"}
+                        </button>
+                      )}
+                      <span className="ml-auto text-[11px] text-gray-500">Free</span>
+                    </div>
+                  </div>
+
+                  {captionError && (
+                    <p className="mt-2 text-xs text-red-300">{captionError}</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSchedulePost}
+                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-[#f45906] px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  >
+                    <CalendarClock className="h-4 w-4" />
+                    <span>Schedule this post</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </>
+              ) : (
+                <p className="mt-1 text-xs text-gray-500">
+                  Click the thumbnail to view full size, or generate another below.
+                </p>
+              )}
             </div>
           </div>
         )}

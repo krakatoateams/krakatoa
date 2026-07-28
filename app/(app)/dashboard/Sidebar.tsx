@@ -163,38 +163,10 @@ export default function Sidebar({
 
   const mobileNavItems = sectionsToRender.flatMap((section) => section.items);
 
-  // Light feedback while the mobile nav is scrolled: a haptic vibration
-  // (Android/Chrome only — iOS Safari lacks the Vibration API) plus a synthesized
-  // "tick" sound so it still feels tactile on devices without vibration.
-  // Throttled so it reads as a subtle texture rather than a constant buzz.
+  // Light haptic feedback while the mobile nav is scrolled (Android/Chrome only —
+  // iOS Safari lacks the Vibration API). Throttled so it reads as a subtle
+  // texture rather than a constant buzz.
   const lastHapticRef = useRef(0);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  const playTick = () => {
-    try {
-      const AC =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (!AC) return;
-      if (!audioCtxRef.current) audioCtxRef.current = new AC();
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") void ctx.resume();
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = 180;
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.04, now + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.05);
-    } catch {
-      /* audio unavailable — ignore */
-    }
-  };
 
   const handleHapticScroll = () => {
     const now = Date.now();
@@ -203,7 +175,6 @@ export default function Sidebar({
     if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
       navigator.vibrate(3);
     }
-    playTick();
   };
 
   // Dashboard uses the Kelolako logo instead of a lucide icon. Pick the logo
@@ -327,7 +298,7 @@ export default function Sidebar({
         >
           <div
             onScroll={handleHapticScroll}
-            className="flex items-center gap-2.5 overflow-x-auto px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex items-center gap-2.5 overflow-x-auto rounded-full border border-white/10 bg-gray-950/60 px-2 py-2 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {mobileNavItems.map((item) => {
               const active = isActive(item.href);

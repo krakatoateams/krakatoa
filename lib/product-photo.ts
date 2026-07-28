@@ -104,6 +104,7 @@ export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
  */
 export type PhotoAspectRatio =
   | "1:1"
+  | "4:5"
   | "3:4"
   | "2:3"
   | "9:16"
@@ -114,6 +115,7 @@ export type PhotoAspectRatio =
 
 export const PHOTO_ASPECT_RATIOS: { id: PhotoAspectRatio; label: string; cinematic?: boolean }[] = [
   { id: "1:1", label: "1:1" },
+  { id: "4:5", label: "4:5" },
   { id: "3:4", label: "3:4" },
   { id: "2:3", label: "2:3" },
   { id: "9:16", label: "9:16" },
@@ -240,6 +242,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     providerFamily: "seedream",
     supportsReference: true,
     referenceParam: "image_input",
+    supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"],
   },
   {
     id: "flux_kontext",
@@ -313,6 +316,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     resolutions: [],
     providerFamily: "seedream",
     supportsReference: false,
+    supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"],
   },
   {
     id: "flux_schnell",
@@ -490,6 +494,9 @@ export function buildProductPhotoPrompt(
 /** Metadata flag marking a creation as a Character creation (omni-form). */
 export const CHARACTER_CREATION_KIND = "character";
 
+/** Metadata flag marking a creation as a Social media post (omni-form). */
+export const SOCIAL_POST_CREATION_KIND = "social_post";
+
 // --- Character creation options (omni-form "Character creation" mode) ---------
 
 export type CharacterStyleId =
@@ -586,10 +593,51 @@ export function buildCharacterSheetPrompt(params: {
     .join(" ");
 }
 
+/**
+ * Instagram feed presets for the omni-form "Social media post" mode. Square is the
+ * safe default for grids; 4:5 is the tallest ratio Instagram shows uncropped in the
+ * feed, so it takes the most screen space.
+ */
+export const SOCIAL_POST_ASPECT_RATIOS: PhotoAspectRatio[] = ["4:5", "1:1"];
+export const DEFAULT_SOCIAL_POST_ASPECT_RATIO: PhotoAspectRatio = "4:5";
+
+export function socialPostAspectLabel(id: PhotoAspectRatio): string {
+  return id === "1:1" ? "Square 1:1" : id === "4:5" ? "Portrait 4:5" : id;
+}
+
+/**
+ * Build a social-post prompt for the omni-form "Social media post" mode. The user's
+ * idea carries the subject; we layer in feed-native composition (one clear subject,
+ * breathing room at the edges so Instagram's own UI never covers anything important)
+ * and keep generated lettering out of the frame — the caption is written separately.
+ */
+export function buildSocialPostPrompt(params: {
+  userPrompt: string;
+  aspectRatio: PhotoAspectRatio;
+}): string {
+  const idea = params.userPrompt.trim();
+  const framing =
+    params.aspectRatio === "1:1"
+      ? "Square 1:1 framing for an Instagram feed grid."
+      : "Vertical 4:5 framing for an Instagram feed post.";
+
+  return [
+    `Scroll-stopping social media post image: ${idea}.`,
+    framing,
+    "One clear hero subject, bold and instantly readable at thumbnail size.",
+    "Clean uncluttered composition with generous margins at the top and bottom so overlaid interface elements never cover the subject.",
+    "Vibrant contemporary color grading, crisp lighting, high detail.",
+    "No text, no lettering, no logos, no watermark.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 // Fallback chains for ratios a given model may not support — pick the closest
 // supported orientation rather than silently snapping everything to square.
 const ASPECT_FALLBACK: Record<PhotoAspectRatio, PhotoAspectRatio[]> = {
   "1:1": ["1:1"],
+  "4:5": ["4:5", "3:4", "2:3", "9:16"],
   "3:4": ["3:4", "9:16"],
   "2:3": ["2:3", "3:4", "9:16"],
   "9:16": ["9:16", "3:4"],
@@ -717,18 +765,19 @@ export function userStoragePrefix(userId: string): string {
 }
 
 /** Photo studio output modes under `photos/{userId}/generated/{mode}/`. */
-export type PhotoStudioMode = "product" | "t2i" | "character" | "storyboard";
+export type PhotoStudioMode = "product" | "t2i" | "character" | "storyboard" | "social";
 
 export const PHOTO_STUDIO_MODES: PhotoStudioMode[] = [
   "product",
   "t2i",
   "character",
   "storyboard",
+  "social",
 ];
 
 /** Map generate-photo `mode` → storage folder (image → t2i, parallel to video t2v). */
 export function photoStorageModeFromGenerate(
-  mode: "product" | "image" | "character",
+  mode: "product" | "image" | "character" | "social",
 ): PhotoStudioMode {
   if (mode === "image") return "t2i";
   return mode;

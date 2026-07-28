@@ -156,9 +156,88 @@ function downloadFilename(item: CreationHistoryItem, mimeType?: string): string 
   return `${base}-${item.id.slice(0, 8)}.${ext}`;
 }
 
+/** Duration in seconds recorded at generation time, for tools that store one. */
+function metadataDurationSec(item: CreationHistoryItem): number | undefined {
+  const raw = item.metadata?.duration;
+  const value = typeof raw === "string" ? Number(raw) : raw;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const rounded = Math.max(0, Math.round(totalSeconds));
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+// First-frame snapshots for video cards. Mobile browsers cap how many videos can
+// decode at once, so a live <video> in a long grid sometimes paints nothing — a
+// cached poster keeps the tile filled. Keyed by storage path (not the media URL)
+// so a rotated signed-URL token still hits the same entry.
+const POSTER_CACHE_KEY = "krakatoa:library:videoPosters";
+const POSTER_CACHE_LIMIT = 150;
+
+let posterCache: Map<string, string> | null = null;
+
+function posterStore(): Map<string, string> {
+  if (posterCache) return posterCache;
+  const store = new Map<string, string>();
+  posterCache = store;
+  if (typeof window === "undefined") return store;
+  try {
+    const raw = window.localStorage.getItem(POSTER_CACHE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (parsed && typeof parsed === "object") {
+      Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+        if (typeof value === "string") store.set(key, value);
+      });
+    }
+  } catch {
+    /* unreadable cache — start empty */
+  }
+  return store;
+}
+
+function cachePoster(key: string, dataUrl: string) {
+  const store = posterStore();
+  store.set(key, dataUrl);
+  // Map keeps insertion order, so the first key is always the oldest snapshot.
+  while (store.size > POSTER_CACHE_LIMIT) {
+    const oldest = store.keys().next().value;
+    if (oldest === undefined) break;
+    store.delete(oldest);
+  }
+  if (typeof window === "undefined") return;
+  const plain: Record<string, string> = {};
+  store.forEach((value, entryKey) => {
+    plain[entryKey] = value;
+  });
+  try {
+    window.localStorage.setItem(POSTER_CACHE_KEY, JSON.stringify(plain));
+  } catch {
+    /* quota exceeded — the in-memory cache still serves this session */
+  }
+}
+
 /** Muted hover preview for library video cards (first frame at rest). */
-function HoverPlayVideo({ src, className }: { src: string; className?: string }) {
+function HoverPlayVideo({
+  src,
+  className,
+  cacheKey,
+  fallbackDurationSec,
+}: {
+  src: string;
+  className?: string;
+  cacheKey: string;
+  fallbackDurationSec?: number;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [poster, setPoster] = useState<string | undefined>(() =>
+    posterStore().get(cacheKey)
+  );
+  const [durationSec, setDurationSec] = useState<number | undefined>(
+    fallbackDurationSec
+  );
 
   const play = () => {
     const el = ref.current;
@@ -174,21 +253,56 @@ function HoverPlayVideo({ src, className }: { src: string; className?: string })
     el.currentTime = 0;
   };
 
+  const handleLoadedData = () => {
+    const el = ref.current;
+    if (!el) return;
+    if (Number.isFinite(el.duration) && el.duration > 0) setDurationSec(el.duration);
+    if (poster) return;
+    try {
+      const width = 320;
+      const height =
+        el.videoWidth > 0 && el.videoHeight > 0
+          ? Math.round((el.videoHeight / el.videoWidth) * width)
+          : width;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(el, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+      cachePoster(cacheKey, dataUrl);
+      setPoster(dataUrl);
+    } catch {
+      /* frame not capturable (tainted canvas / decode not ready) — live frame stands */
+    }
+  };
+
   return (
     <div
-      className="h-full w-full"
+      className="relative h-full w-full"
       onMouseEnter={play}
       onMouseLeave={pause}
     >
       <video
         ref={ref}
-        src={src}
+        // The #t=0.001 fragment makes mobile Safari paint a real frame instead of
+        // leaving the tile blank when it only preloads metadata.
+        src={`${src}#t=0.001`}
+        poster={poster}
         className={className}
         muted
         playsInline
         loop
         preload="metadata"
+        crossOrigin="anonymous"
+        onLoadedData={handleLoadedData}
       />
+      {durationSec !== undefined && (
+        <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/80 backdrop-blur-sm">
+          {formatDuration(durationSec)}
+        </span>
+      )}
     </div>
   );
 }
@@ -746,14 +860,12 @@ export default function CreationsHistory({
             }`;
 
             const media = (
-              <div
-                className={`relative w-full bg-black/40 ${
-                  item.mediaType === "video" ? "aspect-video" : "aspect-[4/5]"
-                }`}
-              >
+              <div className="relative w-full aspect-square bg-black/40">
                 {item.mediaType === "video" ? (
                   <HoverPlayVideo
                     src={item.mediaUrl}
+                    cacheKey={item.storagePath || item.id}
+                    fallbackDurationSec={metadataDurationSec(item)}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -766,9 +878,9 @@ export default function CreationsHistory({
                   />
                 )}
                 {isCharacterItem(item) && (
-                  <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
-                    <User className="h-3 w-3" />
-                    Character
+                  <span className="absolute left-2 top-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
+                    <User className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{characterDisplayName(item)}</span>
                   </span>
                 )}
                 {multiSelect && isSelected && (
@@ -781,21 +893,15 @@ export default function CreationsHistory({
 
             const footer = (
               <div className="p-3 bg-white/[0.04]">
-                {showMeta ? (
+                {showMeta && (
                   <>
                     <p className="text-xs font-medium text-white truncate">
                       {item.title || item.toolLabel}
                     </p>
                     <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{item.toolLabel}</p>
                   </>
-                ) : (
-                  isCharacterItem(item) && (
-                    <p className="text-xs font-medium text-white truncate">
-                      {characterDisplayName(item)}
-                    </p>
-                  )
                 )}
-                <p className="text-xs text-white mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   {new Date(item.createdAt).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",

@@ -69,7 +69,6 @@ export default function PhotoLibraryPicker({
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
   libraryTool = "product_photo",
-  libraryKind,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -85,8 +84,6 @@ export default function PhotoLibraryPicker({
   libraryEmptyLabel?: string;
   /** Creations `tool` to list from (default "product_photo"). */
   libraryTool?: string;
-  /** When set, only keep items whose `metadata.creationKind` matches (e.g. "character"). */
-  libraryKind?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<LibraryImage[]>([]);
@@ -97,9 +94,7 @@ export default function PhotoLibraryPicker({
     startedRef.current = true;
     setLoadState("loading");
     fetch(
-      `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image&limit=100${
-        libraryKind ? `&kind=${encodeURIComponent(libraryKind)}` : ""
-      }`
+      `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image&limit=100`
     )
       .then((r) => r.json())
       .then(
@@ -108,12 +103,14 @@ export default function PhotoLibraryPicker({
             id: string;
             mediaUrl?: string;
             title?: string;
-            metadata?: { creationKind?: string } | null;
+            metadata?: Record<string, unknown>;
           }[];
         }) => {
           const list: LibraryImage[] = (d.items ?? [])
             .filter((it) => !!it.mediaUrl)
-            .filter((it) => !libraryKind || it.metadata?.creationKind === libraryKind)
+            // Character turnaround sheets are multi-pose grids, not usable as a
+            // single source photo, so they never belong in this picker.
+            .filter((it) => it.metadata?.creationKind !== "character")
             .map((it) => ({
               id: it.id,
               url: it.mediaUrl as string,
@@ -124,7 +121,7 @@ export default function PhotoLibraryPicker({
         }
       )
       .catch(() => setLoadState("error"));
-  }, [libraryTool, libraryKind]);
+  }, [libraryTool]);
 
   useEffect(() => {
     if (source !== "library" || startedRef.current) return;
@@ -136,7 +133,7 @@ export default function PhotoLibraryPicker({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
+        <span className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
           {hint ? (
@@ -148,7 +145,7 @@ export default function PhotoLibraryPicker({
             </Tooltip>
           ) : null}
         </span>
-        <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
+        <div className="flex items-center gap-0.5 rounded-full p-0.5">
           {(
             [
               { id: "upload", label: "Upload" },

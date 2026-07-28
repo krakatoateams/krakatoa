@@ -19,6 +19,8 @@ import {
   isValidPhotoAspectRatio,
   DEFAULT_PHOTO_ASPECT_RATIO,
   CHARACTER_CREATION_KIND,
+  SOCIAL_POST_CREATION_KIND,
+  buildSocialPostPrompt,
   isValidCharacterStyle,
   isValidCharacterGender,
   isValidCharacterAge,
@@ -66,6 +68,9 @@ const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const PROMPT_MAX_CHARS = 1500;
 // Max @-mentioned assets (saved characters / storyboards) used as references.
 const MAX_MENTIONS = 8;
+// Social media post can generate a batch of alternatives in one request. Every
+// image is a separate provider call and is charged separately.
+const MAX_BATCH_IMAGES = 4;
 
 function isValidPose(id: string): id is ModelPoseId {
   return MODEL_POSES.some((p) => p.id === id);
@@ -94,6 +99,10 @@ export async function POST(req: Request) {
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let photoAssetId: string | null = null;
+  // Batch generations create one asset row per image; `photoAssetId` stays the
+  // first one so single-image bookkeeping is unchanged.
+  const photoAssetIds: string[] = [];
+  let photoAssetsFinalized = false;
   // Credit-spend trackers — used by the catch block to issue a best-effort
   // refund when generation fails after a successful spend. `creditsSpent` is
   // the gate; without it the catch block must NOT refund (no spend = no debt).
@@ -213,11 +222,22 @@ export async function POST(req: Request) {
     //   - "image"     : text-to-image; prompt required, used verbatim; no product.
     //   - "character" : text-to-image turnaround sheet (one image, multiple angles);
     //                  prompt or reference required; optional character name.
+    //   - "social"    : text-to-image Instagram feed post; prompt required, wrapped
+    //                  in social-composition scaffolding; 1:1 or 4:5.
     const modeRaw = String(formData.get("mode") || "product").trim();
-    const mode: "product" | "image" | "character" =
-      modeRaw === "image" || modeRaw === "character" ? modeRaw : "product";
+    const mode: "product" | "image" | "character" | "social" =
+      modeRaw === "image" || modeRaw === "character" || modeRaw === "social"
+        ? modeRaw
+        : "product";
     const requiresProductImage = mode === "product";
     const isCharacterMode = mode === "character";
+    const isSocialMode = mode === "social";
+    // Batch size — only Social media post offers alternatives; every other mode
+    // produces exactly one image. Clamped so a forged client value can't fan out.
+    const imageCountRaw = Number.parseInt(String(formData.get("imageCount") || "1"), 10);
+    const imageCount = isSocialMode
+      ? Math.min(Math.max(Number.isFinite(imageCountRaw) ? imageCountRaw : 1, 1), MAX_BATCH_IMAGES)
+      : 1;
     // Optional character name (Character creation). Trimmed + capped.
     const characterName = String(formData.get("characterName") || "").trim().slice(0, 80);
     // Character creation descriptors (validated; fall back to defaults). Style =
@@ -432,6 +452,7 @@ export async function POST(req: Request) {
       characterGender,
       characterAge,
       aspectRatio,
+      imageCount,
       // Distinguish requests that add an optional character/reference image so a
       // retry with a different attachment set isn't treated as a replay.
       extraRefCount: extraReferenceFiles.length + directReferenceUrls.length,
@@ -476,7 +497,7 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId, modelTier, resolution, pricingKey, mode },
+      input: { poseId, styleId, modelTier, resolution, pricingKey, mode, imageCount },
     }));
     if (job) {
       jobId = job.id;
@@ -496,7 +517,10 @@ export async function POST(req: Request) {
     // request. A full HTTP retry by the client produces a NEW jobId and a NEW
     // spend key — that double-charge risk is an accepted limitation of this
     // dummy phase (future fix: client/request-level idempotency key).
-    const requiredCredits = await getProductPhotoCredits({ modelTier, resolution });
+    // Batches are charged per image: N provider calls, N credit units, one ledger
+    // row. Images that fail are refunded below rather than silently absorbed.
+    const perImageCredits = await getProductPhotoCredits({ modelTier, resolution });
+    const requiredCredits = perImageCredits * imageCount;
     try {
       await spendCredits({
         profileId: profileId!,
@@ -515,6 +539,8 @@ export async function POST(req: Request) {
           resolution,
           pricingKey,
           providerModel: photoModel.model,
+          imageCount,
+          perImageCredits,
         },
       });
       creditsSpent = true;
@@ -552,19 +578,25 @@ export async function POST(req: Request) {
       throw e;
     }
 
-    // ---- Processing asset (created AFTER spend succeeds) ----
-    const asset = await safe("createAsset", () => createProcessingAsset({
-      profileId: profileId!,
-      jobId: jobId ?? undefined,
-      tool: "photo",
-      assetType: "image",
-      role: "product_photo",
-      bucket: PRODUCT_PHOTO_BUCKET,
-      provider: photoModel.provider,
-      model: photoModel.model,
-      metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },
-    }));
-    if (asset) photoAssetId = asset.id;
+    // ---- Processing assets (created AFTER spend succeeds) ----
+    // A batch gets one asset row per image so every generated file keeps its own
+    // record; single generations behave exactly as before.
+    const assetMetadata = { poseId, styleId, modelTier, resolution, pricingKey, providerResolution };
+    for (let index = 0; index < imageCount; index += 1) {
+      const asset = await safe("createAsset", () => createProcessingAsset({
+        profileId: profileId!,
+        jobId: jobId ?? undefined,
+        tool: "photo",
+        assetType: "image",
+        role: "product_photo",
+        bucket: PRODUCT_PHOTO_BUCKET,
+        provider: photoModel.provider,
+        model: photoModel.model,
+        metadata: imageCount > 1 ? { ...assetMetadata, batchIndex: index, imageCount } : assetMetadata,
+      }));
+      if (asset) photoAssetIds.push(asset.id);
+    }
+    photoAssetId = photoAssetIds[0] ?? null;
 
     // Provider client is created only after the spend has succeeded.
     const replicate = createReplicateClient();
@@ -592,7 +624,8 @@ export async function POST(req: Request) {
     referenceUrls.push(...directReferenceUrls);
 
     // Product mode wraps the prompt in product-photography scaffolding; character
-    // mode builds a multi-angle turnaround sheet; image mode uses the prompt verbatim.
+    // mode builds a multi-angle turnaround sheet; social mode adds feed-native
+    // composition; image mode uses the prompt verbatim.
     const basePrompt =
       mode === "product"
         ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
@@ -603,7 +636,9 @@ export async function POST(req: Request) {
               genderId: characterGender,
               ageId: characterAge,
             })
-          : userPrompt;
+          : isSocialMode
+            ? buildSocialPostPrompt({ userPrompt, aspectRatio })
+            : userPrompt;
 
     // @-mention guidance: tell the model that the trailing reference images depict the
     // named subjects from the prompt, so it actually uses them as visual references.
@@ -624,75 +659,150 @@ export async function POST(req: Request) {
       providerResolution,
     });
 
-    await beginStep("image_generation", "Nano Banana product photo generation");
-    console.log(`[Product Photo] Running ${photoModelRef} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
-    const output = await runWithRetry(replicate, photoModelRef, {
-      input: providerInput,
-    });
-
-    const generatedImageUrl = extractMediaUrl(output);
-    if (!generatedImageUrl.startsWith("http")) {
-      throw new Error("Nano Banana did not return a valid image URL");
-    }
-    await endStep({ generatedImageUrl });
-
-    await beginStep("storage_upload", "Download generated image + save to Supabase");
-    const imageResponse = await fetch(generatedImageUrl);
-    if (!imageResponse.ok) {
-      throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
-    }
-    const fetchedContentType = imageResponse.headers.get("content-type");
-    const mimeType = fetchedContentType && fetchedContentType.startsWith("image/")
-      ? fetchedContentType
-      : "image/png";
-
-    const imageBuffer = await imageResponse.arrayBuffer();
-    const filename = buildGeneratedFilename(poseId, styleId);
-
-    const saved = await saveGeneratedProductPhoto({
-      userId,
-      photoMode: photoStorageModeFromGenerate(mode),
-      filename,
-      imageBuffer,
-      poseId,
-      styleId,
-      contentType: "image/png",
-      prompt,
-      // Non-product items aren't pose/style shots, so give the library a meaningful
-      // title instead of the misleading "Standing · Minimalist Studio". Product
-      // shots with both pose + style on "auto" would otherwise read "Auto · Auto",
-      // so fall back to the prompt (or a generic label) in that case too.
-      title: isCharacterMode
-        ? characterName || "Character"
-        : mode === "image"
-          ? userPrompt.slice(0, 60) || "Generated image"
+    // Non-product items aren't pose/style shots, so give the library a meaningful
+    // title instead of the misleading "Standing · Minimalist Studio". Product
+    // shots with both pose + style on "auto" would otherwise read "Auto · Auto",
+    // so fall back to the prompt (or a generic label) in that case too.
+    const savedTitle = isCharacterMode
+      ? characterName || "Character"
+      : mode === "image"
+        ? userPrompt.slice(0, 60) || "Generated image"
+        : isSocialMode
+          ? userPrompt.slice(0, 60) || "Social media post"
           : poseId === "auto" && styleId === "auto"
             ? userPrompt.slice(0, 60) || "Product photo"
+            : undefined;
+
+    // One provider call + download + Supabase save per batch image. Distinct
+    // timestamps keep filenames (and the unique storage_path index) from
+    // colliding when two calls land in the same millisecond.
+    const batchTimestamp = Date.now();
+    const generateOne = async (index: number) => {
+      const output = await runWithRetry(replicate, photoModelRef, {
+        input: providerInput,
+      });
+
+      const generatedImageUrl = extractMediaUrl(output);
+      if (!generatedImageUrl.startsWith("http")) {
+        throw new Error("Nano Banana did not return a valid image URL");
+      }
+
+      const imageResponse = await fetch(generatedImageUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
+      }
+      const fetchedContentType = imageResponse.headers.get("content-type");
+      const mimeType = fetchedContentType && fetchedContentType.startsWith("image/")
+        ? fetchedContentType
+        : "image/png";
+
+      const imageBuffer = await imageResponse.arrayBuffer();
+      const filename = buildGeneratedFilename(poseId, styleId, batchTimestamp + index);
+
+      const saved = await saveGeneratedProductPhoto({
+        userId,
+        photoMode: photoStorageModeFromGenerate(mode),
+        filename,
+        imageBuffer,
+        poseId,
+        styleId,
+        contentType: "image/png",
+        prompt,
+        title: savedTitle,
+        // Tag character creations so the library can group/badge them.
+        creationKind: isCharacterMode
+          ? CHARACTER_CREATION_KIND
+          : isSocialMode
+            ? SOCIAL_POST_CREATION_KIND
             : undefined,
-      // Tag character creations so the library can group/badge them.
-      creationKind: isCharacterMode ? CHARACTER_CREATION_KIND : undefined,
-      characterName: isCharacterMode && characterName ? characterName : undefined,
-      modelTier,
-      modelLabel: tier.modelLabel,
-    });
-    await endStep({ storagePath: saved.storagePath, publicUrl: saved.publicUrl });
+        characterName: isCharacterMode && characterName ? characterName : undefined,
+        modelTier,
+        modelLabel: tier.modelLabel,
+      });
+      console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
+      return { saved, mimeType };
+    };
 
-    console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
-
-    // Platform: mark the asset ready, then finish the job. `costCredits` is a
-    // display snapshot only — the ledger row created by spendCredits above is
-    // the billing source of truth.
-    if (photoAssetId && profileId) {
-      await safe("markAssetReady", () => markAssetReady(profileId!, photoAssetId!, {
-        storagePath: saved.storagePath,
-        mimeType,
-        costCredits: creditsAmount,
-        metadata: { poseId, styleId, modelTier, resolution, pricingKey, providerResolution },
-      }));
+    await beginStep(
+      "image_generation",
+      imageCount > 1
+        ? `Generate ${imageCount} images + save to Supabase`
+        : "Nano Banana product photo generation",
+      imageCount > 1 ? { imageCount } : undefined
+    );
+    console.log(`[Product Photo] Running ${photoModelRef} ×${imageCount} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
+    // Settled, not all-or-nothing: one bad image in a batch must not discard the
+    // ones that worked. Failed images are refunded below.
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: imageCount }, (_, index) => generateOne(index))
+    );
+    const successes = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
+    const failureCount = outcomes.length - successes.length;
+    if (successes.length === 0) {
+      // Every image failed: rethrow so the outer catch refunds the whole spend.
+      const firstRejection = outcomes.find((o) => o.status === "rejected");
+      throw firstRejection && firstRejection.status === "rejected"
+        ? firstRejection.reason
+        : new Error("Image generation failed");
     }
+    await endStep({
+      generated: successes.length,
+      failed: failureCount,
+      storagePaths: successes.map((s) => s.saved.storagePath),
+    });
+
+    // Refund the images that never materialized, so the wallet only pays for
+    // what the user actually got. `creditsAmount` follows so the display
+    // snapshots below (and any later catch-block refund) stay honest.
+    if (failureCount > 0) {
+      const failedCredits = perImageCredits * failureCount;
+      console.warn(`[Product Photo] ${failureCount}/${imageCount} batch image(s) failed — refunding ${failedCredits} credits`);
+      await safe("refundFailedBatchImages", () => refundCredits({
+        profileId: profileId!,
+        amount: failedCredits,
+        idempotencyKey: jobId
+          ? `refund:product_photo:${jobId}:partial`
+          : `refund:product_photo:profile:${profileId}:${batchTimestamp}:partial`,
+        jobId: jobId ?? null,
+        description: "Refund for failed batch images",
+        metadata: { reason: "batch_image_failed", failureCount, imageCount, perImageCredits },
+      }));
+      creditsAmount = perImageCredits * successes.length;
+    }
+
+    // Platform: mark each asset ready (or failed), then finish the job.
+    // `costCredits` is a display snapshot only — the ledger rows written by
+    // spendCredits/refundCredits above are the billing source of truth.
+    if (profileId) {
+      for (let index = 0; index < photoAssetIds.length; index += 1) {
+        const assetId = photoAssetIds[index];
+        const outcome = outcomes[index];
+        if (outcome && outcome.status === "fulfilled") {
+          await safe("markAssetReady", () => markAssetReady(profileId!, assetId, {
+            storagePath: outcome.value.saved.storagePath,
+            mimeType: outcome.value.mimeType,
+            costCredits: perImageCredits,
+            metadata: assetMetadata,
+          }));
+        } else {
+          const reason = outcome && outcome.status === "rejected" ? outcome.reason : null;
+          await safe("markAssetFailed", () => markAssetFailed(profileId!, assetId, {
+            message: reason instanceof Error ? reason.message : String(reason ?? "Image generation failed"),
+          }));
+        }
+      }
+      photoAssetsFinalized = true;
+    }
+    const primary = successes[0].saved;
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
-        output: { imageUrl: saved.publicUrl, storagePath: saved.storagePath, assetId: photoAssetId },
+        output: {
+          imageUrl: primary.publicUrl,
+          storagePath: primary.storagePath,
+          assetId: photoAssetId,
+          imageCount: successes.length,
+          storagePaths: successes.map((s) => s.saved.storagePath),
+        },
         costCredits: creditsAmount,
       }));
     }
@@ -707,7 +817,7 @@ export async function POST(req: Request) {
       provider: photoModel.provider,
       model: photoModel.model,
       unitType: "image_count",
-      units: 1,
+      units: successes.length,
       creditsCharged: creditsAmount,
       metadata: {
         jobType: "product_photo",
@@ -718,13 +828,24 @@ export async function POST(req: Request) {
         pricingKey,
         providerModel: photoModel.model,
         providerResolution,
+        requestedImageCount: imageCount,
+        failedImageCount: failureCount,
       },
     }));
 
     const successResponse = {
-      imageUrl: saved.publicUrl,
-      storagePath: saved.storagePath,
-      historyItem: saved.historyItem,
+      // Primary image keeps the legacy single-image shape; `images` carries the
+      // full batch for clients that render alternatives.
+      imageUrl: primary.publicUrl,
+      storagePath: primary.storagePath,
+      historyItem: primary.historyItem,
+      images: successes.map((s) => ({
+        imageUrl: s.saved.publicUrl,
+        storagePath: s.saved.storagePath,
+        historyItem: s.saved.historyItem,
+      })),
+      requestedImageCount: imageCount,
+      failedImageCount: failureCount,
       savedToCloud: true,
     };
     if (generationRequestId) {
@@ -750,8 +871,12 @@ export async function POST(req: Request) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
     }
-    if (photoAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, photoAssetId!, errJson));
+    // Skipped once the success path has already resolved each asset, so a late
+    // failure can't flip a ready image back to failed.
+    if (profileId && !photoAssetsFinalized) {
+      for (const assetId of photoAssetIds) {
+        await safe("failAsset", () => markAssetFailed(profileId!, assetId, errJson));
+      }
     }
     if (jobId && profileId) {
       await safe("failJob", () => failJob(profileId!, jobId!, errJson));

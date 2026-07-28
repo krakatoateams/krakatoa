@@ -20,11 +20,11 @@ import {
  *   3. Defaults/seed     — this file (defaultFeatureModelRows()).
  *
  * The feature key values intentionally match the generate-photo `mode` field
- * ("image" | "product" | "character") so the route can map a request to a feature
- * with no extra translation.
+ * ("image" | "product" | "character" | "social") so the route can map a request to
+ * a feature with no extra translation.
  */
 
-export type PhotoFeatureKey = "image" | "product" | "character";
+export type PhotoFeatureKey = "image" | "product" | "character" | "social";
 
 export type CreationFeature = {
   key: PhotoFeatureKey;
@@ -57,7 +57,17 @@ export const PHOTO_FEATURES: CreationFeature[] = [
     description: "Turnaround character sheets from a prompt and/or reference.",
     requiresReference: false,
   },
+  {
+    key: "social",
+    toolKey: "photo",
+    label: "Social media post",
+    description: "Instagram-ready feed images (1:1 / 4:5) with an optional caption.",
+    requiresReference: false,
+  },
 ];
+
+/** Every feature key in catalog order — use instead of hardcoding the list. */
+export const PHOTO_FEATURE_KEYS: PhotoFeatureKey[] = PHOTO_FEATURES.map((f) => f.key);
 
 const PHOTO_FEATURE_BY_KEY = Object.fromEntries(
   PHOTO_FEATURES.map((f) => [f.key, f])

@@ -214,7 +214,8 @@ const ASPECT_RATIO_LABELS: Record<VideoAspectRatio, string> = {
   adaptive: "Adaptive",
 };
 
-// Motion Control "Your character" — upload or pick any saved Photo Studio image.
+// Motion Control "Your character" — upload or pick a saved Photo Studio image
+// (character turnaround sheets are excluded; they're grids, not a source photo).
 function CharacterPicker({
   group,
   source,
@@ -241,8 +242,6 @@ function CharacterPicker({
       selected={selected}
       onSelect={onSelect}
       disabled={disabled}
-      libraryKind="character"
-      libraryEmptyLabel="No saved characters yet."
       hint={MOTION_CONTROL_CHARACTER_HINT}
     />
   );
@@ -1486,15 +1485,6 @@ function ImageToVideoComposer({
             </div>
           </div>
 
-          {!frameReady ? (
-            <p className="mt-3 pl-1 text-sm text-amber-300/80">
-              {model.requiresFirstFrame
-                ? imageSource === "library"
-                  ? "Pick a start image from your library."
-                  : "Upload a start image to animate."
-                : "Add a start image or end image (at least one)."}
-            </p>
-          ) : null}
         </div>
 
         {/* Model — attached under the form card on mobile only */}
@@ -2017,11 +2007,7 @@ function MotionControlComposer({
             </div>
           </div>
 
-          {!imageReady || !videoReady ? (
-            <p className="mt-3 pl-1 text-sm text-amber-300/80">
-              Upload a character photo and a motion video—both are required to generate.
-            </p>
-          ) : !durationError ? (
+          {imageReady && videoReady && !durationError ? (
             <p className="mt-3 pl-1 text-sm text-gray-500">
               Motion clip length: {MOTION_CONTROL_REF_DURATION_LABEL}.
             </p>
@@ -2350,11 +2336,8 @@ function ImportStoryboardModal({
               square
               showChevron={false}
               icon={<Languages className="h-3.5 w-3.5" />}
-              // Show the parameter name as a placeholder while unset (at default);
-              // dim it too. Once changed, show the chosen value at full emphasis.
-              value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
+              value={storyboardLanguageLabel(language)}
               activeId={language}
-              dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
               tooltip="Spoken language for the video's dialogue."
               options={STORYBOARD_LANGUAGES.map((l) => ({ id: l.id, label: l.label }))}
               onSelect={(id) => setLanguage(id as StoryboardLanguageId)}
@@ -2816,10 +2799,9 @@ function StoryboardToVideoComposer({
                 square
                 showChevron={false}
                 icon={<Languages className="h-3.5 w-3.5" />}
-              value={language === DEFAULT_STORYBOARD_LANGUAGE ? "Language" : storyboardLanguageLabel(language)}
-              activeId={language}
-              dimValue={language === DEFAULT_STORYBOARD_LANGUAGE}
-              tooltip="Spoken language for the video's dialogue. Defaults to the storyboard's language — change it to re-voice this storyboard in another language."
+                value={storyboardLanguageLabel(language)}
+                activeId={language}
+                tooltip="Spoken language for the video's dialogue. Defaults to the storyboard's language — change it to re-voice this storyboard in another language."
                 options={STORYBOARD_LANGUAGES.map((l) => ({
                   id: l.id,
                   label: l.label,
@@ -3608,9 +3590,8 @@ function ReelsCreatorComposer({
                 square
                 showChevron={false}
                 icon={<Mic className="h-3.5 w-3.5" />}
-                value={voiceId === DEFAULT_VOICE_ID ? "Voice" : humanizeReelsVoice(voiceId)}
+                value={humanizeReelsVoice(voiceId)}
                 activeId={voiceId}
-                dimValue={voiceId === DEFAULT_VOICE_ID}
                 tooltip="The narrator's MiniMax voice."
                 options={REELS_ENGLISH_VOICES.map((v) => ({
                   id: v,
@@ -3624,9 +3605,10 @@ function ReelsCreatorComposer({
                 square
                 showChevron={false}
                 icon={<Smile className="h-3.5 w-3.5" />}
-                value={emotion === "auto" ? "Mood" : humanizeReelsEmotion(emotion)}
+                // The menu spells "auto" out as "Auto (let AI decide)"; the chip
+                // keeps the short form so it stays the width of its neighbours.
+                value={emotion === "auto" ? "Auto" : humanizeReelsEmotion(emotion)}
                 activeId={emotion}
-                dimValue={emotion === "auto"}
                 tooltip={
                   engine === "veo"
                     ? 'Spoken delivery mood. "Auto" maps to neutral for Veo.'
