@@ -129,7 +129,7 @@ export async function reconcileProductPhotosFromStorage(
 
   // Legacy flat `generated/*.png` (pre mode subfolders).
   await collectFromPrefix(generatedRoot);
-  // Mode subfolders: product, t2i, character, storyboard.
+  // Mode subfolders: product, t2i, character, storyboard, social.
   for (const mode of PHOTO_STUDIO_MODES) {
     await collectFromPrefix(`${generatedRoot}/${mode}`);
   }

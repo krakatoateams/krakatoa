@@ -129,6 +129,31 @@ function buildCalendarDays(year: number, month: number) {
   return days;
 }
 
+// Sunday→Saturday of the anchor's week. Used for the mobile view, where 42 cells
+// across 7 columns leave no room to read a post chip.
+function buildWeekDays(anchor: Date) {
+  const start = new Date(anchor);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    return { date, isCurrentMonth: true };
+  });
+}
+
+function weekRangeLabel(days: { date: Date }[]): string {
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const firstMonth = MONTH_NAMES[first.getMonth()].slice(0, 3);
+  const lastMonth = MONTH_NAMES[last.getMonth()].slice(0, 3);
+  const end =
+    first.getMonth() === last.getMonth()
+      ? `${last.getDate()}`
+      : `${lastMonth} ${last.getDate()}`;
+  return `${firstMonth} ${first.getDate()} – ${end}, ${last.getFullYear()}`;
+}
+
 function toLocalDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -581,6 +606,8 @@ interface DayCellProps {
   onDragOver: (dateKey: string) => void;
   onDragLeave: () => void;
   onDrop: (dateKey: string) => void;
+  /** Week-list row (mobile): shorter, and labelled with its weekday. */
+  compact?: boolean;
 }
 
 function DayCell({
@@ -595,6 +622,7 @@ function DayCell({
   onDragOver,
   onDragLeave,
   onDrop,
+  compact = false,
 }: DayCellProps) {
   const dateKey = toLocalDateKey(date);
   const isOver = dragOverKey === dateKey && draggingId !== null;
@@ -608,7 +636,9 @@ function DayCell({
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver(dateKey); }}
       onDragLeave={onDragLeave}
       onDrop={(e) => { e.preventDefault(); onDrop(dateKey); }}
-      className={`group relative flex min-h-[120px] flex-col gap-1 rounded-lg border p-2 transition-all duration-150 ${
+      className={`group relative flex flex-col gap-1 rounded-lg border p-2 transition-all duration-150 ${
+        compact ? "min-h-[68px]" : "min-h-[120px]"
+      } ${
         !isCurrentMonth ? "border-gray-800/50 bg-gray-900/30" :
         isOver ? "border-violet-500/60 bg-violet-500/10 ring-1 ring-violet-500/40" :
         isToday ? "border-violet-500/30 bg-violet-500/5" :
@@ -616,14 +646,25 @@ function DayCell({
       }`}
     >
       <div className="flex items-center justify-between">
-        <span
-          className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-            isToday ? "bg-violet-500 text-white" :
-            isCurrentMonth ? "text-gray-300" :
-            "text-gray-700"
-          }`}
-        >
-          {date.getDate()}
+        <span className="flex items-center gap-2">
+          {compact && (
+            <span
+              className={`text-[11px] font-semibold uppercase tracking-wider ${
+                isToday ? "text-violet-300" : "text-gray-500"
+              }`}
+            >
+              {DAY_NAMES[date.getDay()]}
+            </span>
+          )}
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+              isToday ? "bg-violet-500 text-white" :
+              isCurrentMonth ? "text-gray-300" :
+              "text-gray-700"
+            }`}
+          >
+            {date.getDate()}
+          </span>
         </span>
         {isOver && (
           <span className="rounded text-[10px] font-medium text-violet-400">Drop here</span>
@@ -667,8 +708,21 @@ function DayCell({
 
 export default function SchedulerCalendarPage() {
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  // One anchor drives both views: the month it falls in (desktop grid) and the
+  // week it falls in (mobile list), so switching between them stays in place.
+  const [anchor, setAnchor] = useState<Date>(now);
+  const year = anchor.getFullYear();
+  const month = anchor.getMonth();
+
+  // Phones get a week view — 42 cells across 7 columns leaves a chip unreadable.
+  const [isWeekView, setIsWeekView] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsWeekView(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -699,15 +753,15 @@ export default function SchedulerCalendarPage() {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
-  const prevMonth = () => {
-    if (month === 0) { setYear((y) => y - 1); setMonth(11); }
-    else setMonth((m) => m - 1);
-  };
-  const nextMonth = () => {
-    if (month === 11) { setYear((y) => y + 1); setMonth(0); }
-    else setMonth((m) => m + 1);
-  };
-  const goToToday = () => { setYear(now.getFullYear()); setMonth(now.getMonth()); };
+  // Steps a week at a time in the mobile view, a month at a time on desktop.
+  const shiftPeriod = (dir: -1 | 1) =>
+    setAnchor((a) => {
+      if (!isWeekView) return new Date(a.getFullYear(), a.getMonth() + dir, 1);
+      const next = new Date(a);
+      next.setDate(next.getDate() + dir * 7);
+      return next;
+    });
+  const goToToday = () => setAnchor(new Date());
 
   const handleDrop = useCallback(async (targetDateKey: string) => {
     const postId = draggingId;
@@ -755,7 +809,12 @@ export default function SchedulerCalendarPage() {
     setSelectedPost((cur) => (cur && cur.id === updated.id ? { ...cur, ...updated } : cur));
   }, []);
 
-  const calendarDays = buildCalendarDays(year, month);
+  const calendarDays = isWeekView
+    ? buildWeekDays(anchor)
+    : buildCalendarDays(year, month);
+  const periodLabel = isWeekView
+    ? weekRangeLabel(calendarDays)
+    : `${MONTH_NAMES[month]} ${year}`;
   const todayKey = toLocalDateKey(now);
 
   const postsByDay = posts.reduce<Record<string, Post[]>>((acc, post) => {
@@ -808,45 +867,46 @@ export default function SchedulerCalendarPage() {
           </div>
         </div>
 
-        {/* Stats strip */}
-        <div className="mb-4 flex flex-wrap gap-3">
-          {(["scheduled", "published", "failed"] as const).map((status) => {
-            const cfg = STATUS_CFG[status];
-            return (
-              <div key={status} className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${cfg.badge}`}>
-                <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
-                <span className="text-xs font-medium capitalize">{cfg.label}</span>
-                <span className={`text-sm font-bold ${cfg.stat}`}>{statCounts[status]}</span>
-              </div>
-            );
-          })}
-          <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2">
-            <span className="text-xs text-gray-500">Total this month</span>
-            <span className="text-sm font-bold text-white">{monthPosts.length}</span>
+        {/* Stats + period navigation — one row, nav trailing on the right */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {(["scheduled", "published", "failed"] as const).map((status) => {
+              const cfg = STATUS_CFG[status];
+              return (
+                <div key={status} className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${cfg.badge}`}>
+                  <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
+                  <span className="text-xs font-medium capitalize">{cfg.label}</span>
+                  <span className={`text-sm font-bold ${cfg.stat}`}>{statCounts[status]}</span>
+                </div>
+              );
+            })}
+            <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2">
+              <span className="text-xs text-gray-500">Total this month</span>
+              <span className="text-sm font-bold text-white">{monthPosts.length}</span>
+            </div>
           </div>
-        </div>
 
-        {/* Month navigation */}
-        <div className="mb-4 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={prevMonth}
-            aria-label="Previous month"
-            className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <h2 className="min-w-[160px] text-center text-lg font-semibold text-white">
-            {MONTH_NAMES[month]} {year}
-          </h2>
-          <button
-            type="button"
-            onClick={nextMonth}
-            aria-label="Next month"
-            className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => shiftPeriod(-1)}
+              aria-label={isWeekView ? "Previous week" : "Previous month"}
+              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <h2 className="min-w-[150px] text-center text-lg font-semibold text-white">
+              {periodLabel}
+            </h2>
+            <button
+              type="button"
+              onClick={() => shiftPeriod(1)}
+              aria-label={isWeekView ? "Next week" : "Next month"}
+              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {fetchError && (
@@ -858,22 +918,30 @@ export default function SchedulerCalendarPage() {
 
         {/* Calendar grid */}
         <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-2">
-          <div className="mb-1 grid grid-cols-7 gap-1">
-            {DAY_NAMES.map((day) => (
-              <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-600">
-                {day}
-              </div>
-            ))}
-          </div>
+          {/* The week view labels each row with its own weekday instead. */}
+          {!isWeekView && (
+            <div className="mb-1 grid grid-cols-7 gap-1">
+              {DAY_NAMES.map((day) => (
+                <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-600">
+                  {day}
+                </div>
+              ))}
+            </div>
+          )}
 
           {loading ? (
-            <div className="grid grid-cols-7 gap-1">
-              {Array.from({ length: 42 }).map((_, i) => (
-                <div key={i} className="min-h-[120px] animate-pulse rounded-lg border border-gray-800 bg-gray-900" />
+            <div className={isWeekView ? "flex flex-col gap-1" : "grid grid-cols-7 gap-1"}>
+              {Array.from({ length: isWeekView ? 7 : 42 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`animate-pulse rounded-lg border border-gray-800 bg-gray-900 ${
+                    isWeekView ? "min-h-[68px]" : "min-h-[120px]"
+                  }`}
+                />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-7 gap-1">
+            <div className={isWeekView ? "flex flex-col gap-1" : "grid grid-cols-7 gap-1"}>
               {calendarDays.map(({ date, isCurrentMonth }) => {
                 const key = toLocalDateKey(date);
                 return (
@@ -890,6 +958,7 @@ export default function SchedulerCalendarPage() {
                     onDragOver={setDragOverKey}
                     onDragLeave={() => setDragOverKey(null)}
                     onDrop={handleDrop}
+                    compact={isWeekView}
                   />
                 );
               })}

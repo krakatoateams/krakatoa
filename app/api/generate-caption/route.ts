@@ -165,6 +165,48 @@ function buildGeneralPrompt(videos: { title?: string; tags?: string }[]): string
   return lines.join("\n");
 }
 
+/**
+ * Instagram caption for a Photo Studio social post. There is no video and no
+ * transcript — the creator's post idea (sent as `title`) plus optional tags carry
+ * the context. Kept short so it stays comfortable inside the scheduler hand-off URL.
+ */
+function buildInstagramPrompt(opts: {
+  title?: string;
+  tags?: string;
+  description?: string;
+}): string {
+  const lines: string[] = [
+    "You are an Instagram content expert. Generate an engaging caption for a single Instagram feed post.",
+    "",
+    "Context about the post:",
+  ];
+
+  if (opts.title) lines.push(`What the image shows: "${opts.title}"`);
+  if (opts.tags) lines.push(`Tags/topics: ${opts.tags}`);
+  if (opts.description) lines.push(`Creator's notes: "${opts.description}"`);
+
+  lines.push(
+    "",
+    "Write a caption with this exact structure:",
+    "1. A strong hook (first line, max 10 words, must stop the scroll)",
+    "2. Body (1-2 sentences, conversational, ending with a light call to action)",
+    "3. 5-10 relevant hashtags",
+    "4. 2-3 relevant emojis",
+    "",
+    "Rules:",
+    "- Always write the caption in English, even if the context is in another language",
+    "- Do NOT add a #Shorts hashtag — this is an Instagram post, not a YouTube Short",
+    "- Never use placeholder text like [Your Name] or [Topic]",
+    "- Be specific based on the actual context provided",
+    "- Keep total length under 500 characters",
+    "- Sound natural and human, not robotic",
+    "",
+    "Return only the caption, nothing else.",
+  );
+
+  return lines.join("\n");
+}
+
 function isSupabaseSignedUrl(url: string): boolean {
   return url.includes("/object/sign/");
 }
@@ -214,8 +256,14 @@ function buildPolishPrompt(existingCaption: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json();
+    // Which surface is asking. Default "youtube" keeps the scheduler untouched;
+    // "instagram" is the Photo Studio social post, which lives under the photo tool.
+    const platform: "youtube" | "instagram" =
+      body.platform === "instagram" ? "instagram" : "youtube";
+
     try {
-      await assertToolEnabled("schedule");
+      await assertToolEnabled(platform === "instagram" ? "photo" : "schedule");
     } catch (e) {
       if (e instanceof ToolDisabledError) {
         return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
@@ -223,7 +271,6 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    const body = await req.json();
     const mode: string = (body.mode ?? "generate").toString();
     const description: string = (body.description ?? "").toString().trim();
     const title: string = (body.title ?? "").toString().trim();
@@ -303,6 +350,38 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json({ caption: polished, mode: "polish" });
+    }
+
+    // ----- Instagram: caption a Photo Studio social post, no transcription -----
+    if (platform === "instagram") {
+      if (!title && !tags && !description) {
+        return NextResponse.json(
+          { error: "Describe the post first, then generate a caption." },
+          { status: 400 },
+        );
+      }
+
+      const igOutput = await runWithRetry(replicate, llmModel, {
+        input: {
+          prompt: buildInstagramPrompt({
+            title: title || undefined,
+            tags: tags || undefined,
+            description: description || undefined,
+          }),
+          max_tokens: 400,
+          temperature: 0.8,
+        },
+      });
+
+      const igCaption = joinReplicateOutput(igOutput);
+      if (!igCaption) {
+        return NextResponse.json(
+          { error: "Model returned an empty response. Please try again." },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json({ caption: igCaption, platform: "instagram" });
     }
 
     // ----- Generate mode: build a caption from video/context -----

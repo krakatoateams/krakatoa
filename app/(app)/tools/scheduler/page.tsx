@@ -131,6 +131,15 @@ interface VideoItem {
   photoUrls: string[];
 }
 
+/**
+ * Anything that can become a schedulable card: a library pick (full creation), a
+ * bare URL/storage path (always a video), or the minimal shape a deep-link
+ * hand-off can supply.
+ */
+type SchedulableSource =
+  | string
+  | (Pick<CreationHistoryItem, "mediaType" | "mediaUrl"> & { storagePath?: string | null });
+
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/avi", "video/x-msvideo"];
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -2480,15 +2489,20 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
 
 // ─── Deep-link intake ─────────────────────────────────────────────────────────
 
-// Reads a `?assetUrl=&title=` hand-off (e.g. from ReelsGen's "Schedule to
-// YouTube") and applies it exactly once. Isolated in its own component so the
-// `useSearchParams()` call can sit under a <Suspense> boundary as App Router
-// requires. The useRef guard makes it StrictMode-safe (effects double-invoke in
-// dev) and immune to re-renders.
+// Reads a `?assetUrl=&title=&mediaType=&caption=` hand-off and applies it exactly
+// once. Sources: ReelsGen's "Schedule to YouTube" (a video, no mediaType) and Photo
+// Studio's "Schedule this post" (`mediaType=image` plus a caption). Isolated in its
+// own component so the `useSearchParams()` call can sit under a <Suspense> boundary
+// as App Router requires. The useRef guard makes it StrictMode-safe (effects
+// double-invoke in dev) and immune to re-renders.
 function DeepLinkIntake({
   onAsset,
 }: {
-  onAsset: (assetUrl: string, title: string | null) => void;
+  onAsset: (
+    assetUrl: string,
+    title: string | null,
+    opts: { isPhoto: boolean; caption: string | null },
+  ) => void;
 }) {
   const searchParams = useSearchParams();
   const consumed = useRef(false);
@@ -2498,7 +2512,10 @@ function DeepLinkIntake({
     const assetUrl = searchParams.get("assetUrl");
     if (!assetUrl) return;
     consumed.current = true;
-    onAsset(assetUrl, searchParams.get("title"));
+    onAsset(assetUrl, searchParams.get("title"), {
+      isPhoto: searchParams.get("mediaType") === "image",
+      caption: searchParams.get("caption"),
+    });
   }, [searchParams, onAsset]);
 
   return null;
@@ -2749,9 +2766,10 @@ export default function SchedulerDashboardPage() {
   // — no /api/upload. Fills the first empty draft in place (keeps single mode
   // single); otherwise appends a new card (auto-spaced like uploads) up to
   // MAX_VIDEOS. mediaType drives the same contentType auto-detection as a raw
-  // drop (openspec/changes/tiktok-photo-post Decision 6).
+  // drop (openspec/changes/tiktok-photo-post Decision 6). A bare string is always
+  // a video — photo hand-offs pass an object so `mediaType` can say so.
   const handleAssetSelected = useCallback(
-    (source: CreationHistoryItem | string) => {
+    (source: SchedulableSource) => {
       const isPhoto = typeof source !== "string" && source.mediaType === "image";
       const mediaUrl = typeof source === "string" ? source : source.mediaUrl;
       const storagePath =
@@ -2809,20 +2827,43 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
-  // Deep-link hand-off (e.g. ReelsGen → "Schedule to YouTube"). Reuses the
-  // asset intake above, then pre-fills the title on the card that now holds the
-  // asset (matched by videoUrl — the prior setItems updates are already queued,
-  // so this functional update sees the just-added/filled item). Finally strips
-  // the query params so a refresh doesn't re-trigger and the URL stays clean.
-  // Always a video — this hand-off originates from Reels Creator.
+  // Deep-link hand-off: Reels Creator → "Schedule to YouTube" (a video) and Photo
+  // Studio → "Schedule this post" (a photo, with a caption). Reuses the asset intake
+  // above, then pre-fills title/caption on the card that now holds the asset (the
+  // prior setItems updates are already queued, so this functional update sees the
+  // just-added/filled item). Photo cards land with no platform ticked so the user
+  // picks the destination; the intake would otherwise default them to TikTok.
+  // Finally strips the query params so a refresh doesn't re-trigger and the URL
+  // stays clean.
   const handleDeepLinkAsset = useCallback(
-    (assetUrl: string, title: string | null) => {
-      handleAssetSelected(assetUrl);
-      if (title && title.trim()) {
+    (
+      assetUrl: string,
+      title: string | null,
+      opts: { isPhoto: boolean; caption: string | null },
+    ) => {
+      // Same path resolution the string (video) branch of the intake performs, so
+      // the ref we match on below is the one the card actually stores.
+      const photoPath = isStorageRelativePath(assetUrl)
+        ? assetUrl
+        : storagePathFromStorageUrl(assetUrl);
+      handleAssetSelected(
+        opts.isPhoto
+          ? { mediaType: "image", mediaUrl: assetUrl, storagePath: photoPath }
+          : assetUrl,
+      );
+      const patch: Partial<VideoItem> = {};
+      if (title && title.trim()) patch.title = title.trim();
+      if (opts.caption && opts.caption.trim()) patch.caption = opts.caption.trim();
+      if (opts.isPhoto) patch.platforms = [];
+      if (Object.keys(patch).length > 0) {
         setItems((prev) => {
-          const idx = prev.findIndex((i) => i.videoUrl === assetUrl || i.storagePath === assetUrl);
+          const idx = prev.findIndex((i) =>
+            opts.isPhoto
+              ? i.photoUrls.includes(photoPath ?? assetUrl)
+              : i.videoUrl === assetUrl || i.storagePath === assetUrl,
+          );
           if (idx === -1) return prev;
-          return prev.map((i, k) => (k === idx ? { ...i, title: title.trim() } : i));
+          return prev.map((i, k) => (k === idx ? { ...i, ...patch } : i));
         });
       }
       router.replace("/tools/scheduler");

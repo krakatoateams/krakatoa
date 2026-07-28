@@ -1,12 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { User, Clapperboard, ImageIcon } from "lucide-react";
 import {
   activeMentionQuery,
   escapeRegExp,
   type MentionAsset,
 } from "@/lib/mention-assets";
+
+/** Height of the top/bottom scroll fade on the prompt text. */
+const EDGE_FADE_PX = 18;
 
 function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.ReactNode {
   if (!mentions.length) return text;
@@ -57,6 +60,7 @@ export default function MentionTextarea({
   assets,
   placeholder,
   rows = 2,
+  maxLines = 5,
   disabled,
   className = "min-h-[48px]",
   maxLength,
@@ -68,6 +72,8 @@ export default function MentionTextarea({
   assets: MentionAsset[];
   placeholder?: string;
   rows?: number;
+  /** Tallest the box may auto-grow before it starts scrolling. */
+  maxLines?: number;
   disabled?: boolean;
   className?: string;
   maxLength?: number;
@@ -76,6 +82,48 @@ export default function MentionTextarea({
   const bdRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
+  // Which edges have text hidden past them — drives the scroll fade.
+  const [fade, setFade] = useState({ top: false, bottom: false });
+
+  const syncFade = useCallback(() => {
+    const el = taRef.current;
+    if (!el) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    const top = el.scrollTop > 1;
+    const bottom = scrollable > 1 && el.scrollTop < scrollable - 1;
+    setFade((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
+  }, []);
+
+  // Grow with the text: `rows` stays the floor, `maxLines` the ceiling, and past
+  // that the textarea scrolls (the backdrop follows via onScroll).
+  const autosize = useCallback(() => {
+    const el = taRef.current;
+    if (!el) return;
+    const cs = window.getComputedStyle(el);
+    const line = Number.parseFloat(cs.lineHeight) || 24;
+    const frame =
+      Number.parseFloat(cs.paddingTop) +
+      Number.parseFloat(cs.paddingBottom) +
+      Number.parseFloat(cs.borderTopWidth) +
+      Number.parseFloat(cs.borderBottomWidth);
+    const minHeight = line * rows + frame;
+    const maxHeight = line * Math.max(maxLines, rows) + frame;
+    // Measure unconstrained first — once a height is set, scrollHeight can no
+    // longer report how tall the content actually wants to be.
+    el.style.height = "auto";
+    const content = el.scrollHeight;
+    el.style.height = `${Math.min(Math.max(content, minHeight), maxHeight)}px`;
+    el.style.overflowY = content > maxHeight ? "auto" : "hidden";
+    syncFade();
+  }, [rows, maxLines, syncFade]);
+
+  // Re-measure on every value change (typing, mention inserts, programmatic
+  // resets) and whenever the width changes, since wrapping shifts line count.
+  useEffect(autosize, [autosize, value]);
+  useEffect(() => {
+    window.addEventListener("resize", autosize);
+    return () => window.removeEventListener("resize", autosize);
+  }, [autosize]);
 
   const matches =
     query === null
@@ -131,11 +179,22 @@ export default function MentionTextarea({
     }
   };
 
+  // Softens the cut where text runs past the box, on whichever edge is hiding
+  // it. Only the text layer is masked, so the caret never fades out.
+  const fadeMask =
+    fade.top || fade.bottom
+      ? `linear-gradient(to bottom, ${[
+          fade.top ? `transparent 0px, #000 ${EDGE_FADE_PX}px` : "#000 0px",
+          fade.bottom ? `#000 calc(100% - ${EDGE_FADE_PX}px), transparent 100%` : "#000 100%",
+        ].join(", ")})`
+      : undefined;
+
   return (
     <div className={`relative flex-1 ${className}`}>
       <div
         ref={bdRef}
         aria-hidden
+        style={{ maskImage: fadeMask, WebkitMaskImage: fadeMask }}
         className="pointer-events-none absolute inset-0 min-h-[48px] w-full overflow-hidden whitespace-pre-wrap break-words text-base text-white"
       >
         {renderMentionBackdrop(value, mentions)}
@@ -147,6 +206,7 @@ export default function MentionTextarea({
         onKeyDown={handleKeyDown}
         onScroll={(e) => {
           if (bdRef.current) bdRef.current.scrollTop = e.currentTarget.scrollTop;
+          syncFade();
         }}
         onBlur={() => setTimeout(() => setQuery(null), 120)}
         placeholder={placeholder}

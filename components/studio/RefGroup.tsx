@@ -224,7 +224,7 @@ export function RefGroup({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 sm:text-sm">
+        <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
           <span className="text-purple-300">{icon}</span>
           {label}
           {hint ? (

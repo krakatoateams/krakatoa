@@ -4,6 +4,7 @@ import {
   defaultTierForFeature,
   eligibleTiersForFeature,
   isPhotoFeatureKey,
+  PHOTO_FEATURE_KEYS,
   type PhotoFeatureKey,
 } from "@/lib/creation-features";
 import {
@@ -227,7 +228,7 @@ let videoCache: VideoEnablementCache = { map: null, expiresAt: 0 };
 /** Pure code-default enablement (every eligible tier enabled; code default tier). */
 function codeDefaults(): Record<PhotoFeatureKey, FeatureEnablement> {
   const out = {} as Record<PhotoFeatureKey, FeatureEnablement>;
-  for (const featureKey of ["image", "product", "character"] as PhotoFeatureKey[]) {
+  for (const featureKey of PHOTO_FEATURE_KEYS) {
     out[featureKey] = {
       enabledTiers: eligibleTiersForFeature(featureKey),
       defaultTier: defaultTierForFeature(featureKey),
@@ -257,7 +258,7 @@ export async function getPhotoFeatureEnablement(): Promise<
     for (const r of rows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
 
     const out = {} as Record<PhotoFeatureKey, FeatureEnablement>;
-    for (const featureKey of ["image", "product", "character"] as PhotoFeatureKey[]) {
+    for (const featureKey of PHOTO_FEATURE_KEYS) {
       const eligible = eligibleTiersForFeature(featureKey);
       const enabledTiers = eligible.filter((tier) => {
         if (!catalogEnabled.has(tier)) return false;
