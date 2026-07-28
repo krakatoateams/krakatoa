@@ -75,12 +75,12 @@ const content: LegalContent = {
       {
         heading: "7. Kredit dan Pembayaran",
         blocks: [
-          { type: "p", text: "Sebagian fitur Layanan menggunakan sistem kredit virtual (\"Kredit\") yang dapat dibeli menggunakan uang sungguhan melalui penyedia gerbang pembayaran pihak ketiga (DOKU). Dengan melakukan pembelian, Anda menyetujui:" },
+          { type: "p", text: "Sebagian fitur Layanan menggunakan sistem kredit virtual (\"Kredit\") yang dapat dibeli menggunakan uang sungguhan melalui penyedia gerbang pembayaran pihak ketiga (saat ini DOKU, dan dapat bertambah dengan penyedia lain di masa mendatang). Dengan melakukan pembelian, Anda menyetujui:" },
           { type: "ul", items: [
             "Harga Kredit dapat berubah sewaktu-waktu dengan pemberitahuan yang wajar;",
             "Kredit yang telah dibeli bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali diwajibkan oleh hukum yang berlaku atau sebagaimana diatur dalam ketentuan ini. Kredit hasil pembelian tidak memiliki masa berlaku (tidak pernah kedaluwarsa). Kredit bonus (seperti bonus pendaftaran atau bonus pembelian) memiliki masa berlaku terbatas sebagaimana tercantum pada halaman akun Anda, dan akan hangus secara otomatis setelah masa berlaku tersebut berakhir tanpa kompensasi apapun. Kredit dengan masa berlaku yang lebih dekat akan digunakan terlebih dahulu sebelum Kredit yang tidak memiliki masa berlaku.",
             "Jika proses pembuatan konten AI gagal karena kesalahan sistem kami, Kredit yang terpakai untuk proses tersebut akan dikembalikan secara otomatis ke akun Anda.",
-            "Kelolako tidak menyimpan detail kartu pembayaran Anda — seluruh pemrosesan pembayaran ditangani oleh DOKU sesuai kebijakan privasi mereka sendiri.",
+            "Kelolako tidak menyimpan detail kartu pembayaran Anda — seluruh pemrosesan pembayaran ditangani oleh penyedia gerbang pembayaran kami (saat ini DOKU) sesuai kebijakan privasi masing-masing.",
           ]},
         ],
       },
@@ -200,12 +200,12 @@ const content: LegalContent = {
       {
         heading: "7. Credits and Payment",
         blocks: [
-          { type: "p", text: "Certain Service features use a virtual credit system (\"Credits\") that can be purchased with real money through a third-party payment gateway provider (DOKU). By making a purchase, you agree that:" },
+          { type: "p", text: "Certain Service features use a virtual credit system (\"Credits\") that can be purchased with real money through third-party payment gateway provider(s) (currently DOKU, with additional providers possibly added in the future). By making a purchase, you agree that:" },
           { type: "ul", items: [
             "Credit pricing may change from time to time with reasonable notice;",
             "Purchased Credits are final and non-refundable, except where required by applicable law or as otherwise stated in these Terms. Purchased Credits do not expire. Bonus Credits (such as welcome bonuses or purchase bonuses) have a limited validity period as shown on your account page, and will automatically forfeit upon expiration with no compensation. Credits with an earlier expiration date will be used before Credits that do not expire.",
             "If an AI content generation process fails due to an error on our part, the Credit consumed for that process will be automatically refunded to your account.",
-            "Kelolako does not store your payment card details — all payment processing is handled by DOKU under its own privacy policy.",
+            "Kelolako does not store your payment card details — all payment processing is handled by our payment gateway provider(s) (currently DOKU) under their respective privacy policies.",
           ]},
         ],
       },

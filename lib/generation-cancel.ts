@@ -1,4 +1,10 @@
 import type Replicate from "replicate";
+import {
+  ReplicateCancellationError,
+  type ReplicateRunHooks,
+} from "@/lib/replicate-server";
+import { isMissingDbObject } from "@/lib/generation-db-errors";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { supabaseServer } from "@/lib/supabase-server";
 
 /**
@@ -22,15 +28,6 @@ import { supabaseServer } from "@/lib/supabase-server";
 
 const REQUESTS_TABLE = "generation_requests";
 const PREDICTIONS_TABLE = "generation_predictions";
-
-function isMissingObject(message: string): boolean {
-  return (
-    message.includes("generation_predictions") &&
-    (message.includes("schema cache") ||
-      message.includes("does not exist") ||
-      message.includes("could not find"))
-  );
-}
 
 function missingHint(): Error {
   return new Error(
@@ -96,7 +93,27 @@ export function makePredictionRecorder(params: {
   };
 }
 
-/** Flip cancel_requested true for an attempt (ownership-checked). Returns true when a row matched. */
+/**
+ * Hooks for `runReplicateWithRetry`: record prediction ids + poll cancel_requested
+ * on every provider wait tick so UI cancel stops Replicate without waiting for
+ * the full generation to finish.
+ */
+export function makeReplicateCancelHooks(params: {
+  generationRequestId: string | null;
+  profileId: string | null;
+  jobId?: string | null;
+  kind?: string;
+}): ReplicateRunHooks | undefined {
+  const { generationRequestId, profileId } = params;
+  if (!generationRequestId || !profileId) return undefined;
+  const onPrediction = makePredictionRecorder(params);
+  return {
+    onPrediction,
+    abortCheck: () => assertNotCancelled(profileId, generationRequestId),
+  };
+}
+
+/** Flip cancel_requested true when cancel is still allowed (ownership-checked). */
 export async function requestCancel(
   profileId: string,
   generationRequestId: string
@@ -106,32 +123,64 @@ export async function requestCancel(
     .update({ cancel_requested: true })
     .eq("id", generationRequestId)
     .eq("profile_id", profileId)
+    .eq("cancel_allowed", true)
     .select("id")
     .maybeSingle();
 
   if (error) {
-    if (isMissingObject(error.message)) throw missingHint();
+    if (
+      isMissingDbObject(error.message, REQUESTS_TABLE) ||
+      isMissingDbObject(error.message, PREDICTIONS_TABLE)
+    ) {
+      throw missingHint();
+    }
     throw new Error(error.message || "Failed to request cancellation.");
   }
   return !!data;
 }
 
-/** Read whether cancellation was requested for an attempt (best-effort; false on error). */
+const CANCEL_READ_RETRIES = 2;
+
+/** Read whether cancellation was requested. On persistent DB error, returns true (fail-closed). */
 export async function isCancelRequested(
   profileId: string,
   generationRequestId: string
 ): Promise<boolean> {
-  try {
-    const { data, error } = await supabaseServer
-      .from(REQUESTS_TABLE)
-      .select("cancel_requested")
-      .eq("id", generationRequestId)
-      .eq("profile_id", profileId)
-      .maybeSingle();
-    if (error) return false;
-    return !!(data as { cancel_requested?: boolean } | null)?.cancel_requested;
-  } catch {
+  if (await isProviderCommitLocked(profileId, generationRequestId)) {
     return false;
+  }
+  for (let attempt = 0; attempt < CANCEL_READ_RETRIES; attempt++) {
+    try {
+      const { data, error } = await supabaseServer
+        .from(REQUESTS_TABLE)
+        .select("cancel_requested")
+        .eq("id", generationRequestId)
+        .eq("profile_id", profileId)
+        .maybeSingle();
+      if (!error) {
+        return !!(data as { cancel_requested?: boolean } | null)?.cancel_requested;
+      }
+      if (attempt < CANCEL_READ_RETRIES - 1) continue;
+      console.error(
+        "[generation-cancel] isCancelRequested DB error after retry:",
+        error.message
+      );
+    } catch (e) {
+      if (attempt < CANCEL_READ_RETRIES - 1) continue;
+      console.error("[generation-cancel] isCancelRequested threw after retry:", e);
+    }
+  }
+  // ponytail: fail-closed — safer to refund than charge when cancel state is unknown
+  return true;
+}
+
+/** Throws when the user requested cancellation for this attempt. */
+export async function assertNotCancelled(
+  profileId: string,
+  generationRequestId: string
+): Promise<void> {
+  if (await isCancelRequested(profileId, generationRequestId)) {
+    throw new ReplicateCancellationError();
   }
 }
 
@@ -147,7 +196,7 @@ export async function listPredictionIds(
     .eq("profile_id", profileId);
 
   if (error) {
-    if (isMissingObject(error.message)) throw missingHint();
+    if (isMissingDbObject(error.message, PREDICTIONS_TABLE)) throw missingHint();
     throw new Error(error.message || "Failed to list predictions.");
   }
   return ((data as { prediction_id: string }[] | null) ?? [])

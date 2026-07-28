@@ -11,6 +11,12 @@ import {
 import { listPredictionIds } from "@/lib/generation-cancel";
 import { isCancelRequested } from "@/lib/generation-cancel";
 import {
+  markProviderCommitted,
+  readGenerationCancelAllowed,
+  isProviderCommitLocked,
+  isRefundableUserCancellation,
+} from "@/lib/generation-commit";
+import {
   buildMotionControlFinalizeContext,
   type MotionControlJobInput,
 } from "@/lib/motion-control-context";
@@ -18,6 +24,7 @@ import {
   finalizeMotionControlSuccess,
   failMotionControlAttempt,
   endMotionControlStep,
+  type MotionControlFinalizeContext,
 } from "@/lib/motion-control-finalize";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { Job } from "@/lib/jobs-db";
@@ -26,8 +33,14 @@ export const dynamic = "force-dynamic";
 
 const PROCESSING = { status: "processing" as const };
 
+async function processingPayload(profileId: string, generationRequestId: string) {
+  const cancelAllowed = await readGenerationCancelAllowed(profileId, generationRequestId);
+  return { ...PROCESSING, cancelAllowed };
+}
+
 export async function GET(req: Request) {
   let currentStepId: string | null = null;
+  let motionCtx: MotionControlFinalizeContext | null = null;
 
   try {
     const profile = await requireCurrentProfile();
@@ -51,13 +64,34 @@ export async function GET(req: Request) {
       return NextResponse.json(generationRequest.response_json);
     }
     if (generationRequest.status === "failed") {
-      const err = generationRequest.error_json ?? { message: "Generation failed." };
+      const err = (generationRequest.error_json ?? { message: "Generation failed." }) as {
+        message?: string;
+        code?: string;
+      };
+      if (err.code === "GENERATION_CANCELLED") {
+        const failedJobId =
+          generationRequest.job_id ?? (await lookupJobId(profileId, generationRequest.id));
+        const failedJob = failedJobId ? await loadJob(profileId, failedJobId) : null;
+        const failedInput = (failedJob?.input ?? {}) as MotionControlJobInput;
+        const failedCredits =
+          failedInput.creditsAmount ?? failedJob?.cost_credits ?? 0;
+        return NextResponse.json(
+          {
+            error: err.message ?? "Generation cancelled.",
+            code: "GENERATION_CANCELLED",
+            refunded: failedCredits > 0,
+          },
+          { status: 409 },
+        );
+      }
       return NextResponse.json(err, { status: 500 });
     }
 
     const predictionIds = await listPredictionIds(profileId, generationRequest.id);
     if (predictionIds.length === 0) {
-      return NextResponse.json(PROCESSING, { status: 202 });
+      return NextResponse.json(await processingPayload(profileId, generationRequest.id), {
+        status: 202,
+      });
     }
 
     const jobId = generationRequest.job_id ?? (await lookupJobId(profileId, generationRequest.id));
@@ -77,36 +111,60 @@ export async function GET(req: Request) {
       jobInput,
     });
 
+    motionCtx = ctx;
+
     const replicate = createReplicateClient();
     const predictionId = predictionIds[predictionIds.length - 1]!;
     const prediction = await replicate.predictions.get(predictionId);
+    const predictionSucceeded = prediction.status === "succeeded";
 
-    if (await isCancelRequested(profileId, generationRequest.id)) {
+    if (
+      !predictionSucceeded &&
+      (await isCancelRequested(profileId, generationRequest.id)) &&
+      !(await isProviderCommitLocked(profileId, generationRequest.id))
+    ) {
       if (prediction.status === "starting" || prediction.status === "processing") {
         try {
           await replicate.predictions.cancel(predictionId);
         } catch {
           /* best-effort */
         }
-        return NextResponse.json(PROCESSING, { status: 202 });
+        return NextResponse.json(await processingPayload(profileId, generationRequest.id), {
+          status: 202,
+        });
       }
       const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
       await failMotionControlAttempt(ctx, errJson, { cancelled: true });
       return NextResponse.json(
-        { error: "Generation cancelled.", code: "GENERATION_CANCELLED", refunded: true },
+        {
+          error: "Generation cancelled.",
+          code: "GENERATION_CANCELLED",
+          refunded: creditsAmount > 0,
+        },
         { status: 409 },
       );
     }
 
     if (prediction.status === "starting" || prediction.status === "processing") {
-      return NextResponse.json(PROCESSING, { status: 202 });
+      return NextResponse.json(await processingPayload(profileId, generationRequest.id), {
+        status: 202,
+      });
     }
 
     if (prediction.status === "canceled" || prediction.status === "aborted") {
       const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
-      await failMotionControlAttempt(ctx, errJson, { cancelled: true });
+      const lockedNow = await isProviderCommitLocked(profileId, generationRequest.id);
+      const refundable = !lockedNow;
+      await failMotionControlAttempt(ctx, errJson, {
+        cancelled: true,
+        refund: refundable,
+      });
       return NextResponse.json(
-        { error: "Generation cancelled.", code: "GENERATION_CANCELLED", refunded: true },
+        {
+          error: "Generation cancelled.",
+          code: "GENERATION_CANCELLED",
+          refunded: refundable && creditsAmount > 0,
+        },
         { status: 409 },
       );
     }
@@ -124,7 +182,9 @@ export async function GET(req: Request) {
     }
 
     if (prediction.status !== "succeeded") {
-      return NextResponse.json(PROCESSING, { status: 202 });
+      return NextResponse.json(await processingPayload(profileId, generationRequest.id), {
+        status: 202,
+      });
     }
 
     const generatedVideoUrl = extractMediaUrl(prediction.output);
@@ -147,6 +207,12 @@ export async function GET(req: Request) {
     await endMotionControlStep(profileId, currentStepId, { generatedVideoUrl });
     currentStepId = null;
 
+    await markProviderCommitted({
+      generationRequestId: generationRequest.id,
+      profileId,
+      reason: "motion_control_generation",
+    });
+
     const successResponse = await finalizeMotionControlSuccess(ctx, generatedVideoUrl);
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
@@ -154,13 +220,36 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
     if (isCancellation(error)) {
+      const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
+      const refundable =
+        motionCtx?.generationRequestId
+          ? await isRefundableUserCancellation(
+              motionCtx.profileId,
+              motionCtx.generationRequestId,
+              error,
+            )
+          : true;
+      if (motionCtx) {
+        await failMotionControlAttempt(motionCtx, errJson, {
+          cancelled: true,
+          refund: refundable,
+        });
+      }
       return NextResponse.json(
-        { error: "Generation cancelled.", code: "GENERATION_CANCELLED" },
+        {
+          error: "Generation cancelled.",
+          code: "GENERATION_CANCELLED",
+          refunded: refundable && motionCtx ? motionCtx.creditsAmount > 0 : false,
+        },
         { status: 409 },
       );
     }
     const message = error instanceof Error ? error.message : String(error);
     console.error("[motion-control status] Error:", error);
+    if (motionCtx) {
+      const errJson = { message };
+      await failMotionControlAttempt(motionCtx, errJson, { refund: true });
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

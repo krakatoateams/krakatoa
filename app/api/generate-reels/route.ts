@@ -21,7 +21,7 @@
 import { NextResponse } from "next/server";
 import { insertUserCreation } from "@/lib/creations-db";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
+import { createJob, startJob, finishJob, failJob, cancelJob, markJobRecoverable } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import {
   createProcessingAsset,
@@ -29,7 +29,11 @@ import {
   markAssetFailed,
 } from "@/lib/assets-db";
 import { isCancellation } from "@/lib/replicate-server";
-import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
+import { makeReplicateCancelHooks, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
+import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
+import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
+import { isRecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import {
   spendCredits,
   refundCredits,
@@ -48,6 +52,8 @@ import {
   beginGenerationRequest,
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
+  finishGenerationRequestRecoverable,
+  buildRecoverableGenerationJson,
 } from "@/lib/generation-idempotency";
 import { validateReelsRequest, REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
@@ -80,6 +86,7 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let jobType: "reels_seedance" | "veo_single" | "veo_perscene" | null = null;
+  let pipelineRecovery: ReturnType<typeof createPipelineRecoveryHandle> | undefined;
 
   // Best-effort wrapper for platform writes: observability must NEVER crash the
   // generation pipeline or mask the real generation error.
@@ -250,6 +257,16 @@ export async function POST(req: Request) {
     if (begin.action === "replay") {
       return NextResponse.json(begin.response);
     }
+    if (begin.action === "recoverable") {
+      return NextResponse.json(
+        buildRecoverableGenerationJson({
+          jobId: begin.jobId,
+          message:
+            typeof begin.errorJson.message === "string" ? begin.errorJson.message : undefined,
+        }),
+        { status: 503 },
+      );
+    }
     generationRequestId = begin.id;
 
     // ---- Platform job (best-effort observability) ----
@@ -258,6 +275,7 @@ export async function POST(req: Request) {
       reqv.engine === "seedance"
         ? {
             engine: "seedance",
+            userId: userId!,
             theme: reqv.theme.slice(0, 500),
             numScenes: reqv.numScenes,
             durationPerScene: reqv.durationPerScene,
@@ -268,6 +286,7 @@ export async function POST(req: Request) {
           }
         : {
             engine: "veo",
+            userId: userId!,
             theme: reqv.theme.slice(0, 500),
             mode: reqv.mode,
             duration: reqv.duration,
@@ -388,6 +407,17 @@ export async function POST(req: Request) {
     );
     if (asset) finalAssetId = asset.id;
 
+    const recovery =
+      jobId && profileId && userId
+        ? createPipelineRecoveryHandle({
+            profileId: profileId!,
+            userId: userId!,
+            jobId: jobId!,
+            existingJob: job,
+          })
+        : undefined;
+    pipelineRecovery = recovery;
+
     // ---- Build the pipeline context + dispatch ----
     const ctx: ReelsPipelineContext = {
       replicate,
@@ -400,14 +430,23 @@ export async function POST(req: Request) {
         generationRequestId && profileId
           ? isCancelRequested(profileId, generationRequestId)
           : false,
-      recorder: {
-        onPrediction: makePredictionRecorder({
+      recorder:
+        makeReplicateCancelHooks({
           generationRequestId,
           profileId,
           jobId,
           kind: reqv.jobType,
-        }),
-      },
+        }) ?? {},
+      onProviderCommitted:
+        generationRequestId && profileId
+          ? () =>
+              markProviderCommitted({
+                generationRequestId: generationRequestId!,
+                profileId: profileId!,
+                reason: "reels_first_scene_or_veo_clip",
+              })
+          : undefined,
+      recovery,
     };
 
     let result: ReelsPipelineResult;
@@ -441,6 +480,11 @@ export async function POST(req: Request) {
         sceneCount: reqv.numScenes!,
         style: reqv.style,
       });
+    }
+
+    // Defense-in-depth: honor cancel that landed during the final pipeline steps.
+    if (generationRequestId && profileId) {
+      await assertNotCancelled(profileId, generationRequestId);
     }
 
     // ---- Finalize (asset -> history -> job -> usage -> idempotency) ----
@@ -534,6 +578,10 @@ export async function POST(req: Request) {
       );
     }
 
+    if (jobId && userId) {
+      await safe("purgeResumable", () => purgeResumableJobStorage(userId!, jobId!));
+    }
+
     // Usage event — analytics only, NEVER affects billing/response.
     await safe("recordUsage", () =>
       recordUsageEvent({
@@ -585,9 +633,13 @@ export async function POST(req: Request) {
     }
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
-    // User cancellation is a normal outcome: job -> 'cancelled' + refund (below).
-    const cancelled = isCancellation(error);
+    const recoverable = isRecoverablePipelineError(error);
+    const cancelled =
+      profileId && generationRequestId
+        ? await isRefundableUserCancellation(profileId, generationRequestId, error)
+        : isCancellation(error);
     if (cancelled) console.log("[reels] Cancelled by user.");
+    else if (recoverable) console.warn("[reels] Recoverable pipeline error:", error);
     else console.error("[reels] pipeline error:", error);
 
     // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
@@ -595,34 +647,59 @@ export async function POST(req: Request) {
     const pricingMissing = error instanceof PricingConfigError;
     const message = cancelled
       ? "Generation cancelled."
-      : error instanceof Error
-        ? error.message
-        : String(error);
+      : recoverable
+        ? error instanceof Error
+          ? error.message
+          : String(error)
+        : error instanceof Error
+          ? error.message
+          : String(error);
     const errJson = cancelled
       ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
+      : recoverable
+        ? { message, code: "PIPELINE_RECOVERABLE" }
+        : pricingMissing
+          ? { message, code: "PRICING_CONFIG_MISSING" }
+          : { message };
 
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
       currentStepId = null;
     }
-    if (finalAssetId && profileId) {
+    if (finalAssetId && profileId && !recoverable) {
       await safe("failAsset", () => markAssetFailed(profileId!, finalAssetId!, errJson));
     }
     if (jobId && profileId) {
       if (cancelled) {
         await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
+        if (userId) {
+          await safe("purgeResumableCancel", () => purgeResumableJobStorage(userId!, jobId!));
+        }
+      } else if (recoverable) {
+        const manifest = pipelineRecovery?.getManifest();
+        await safe("markRecoverable", () =>
+          markJobRecoverable(profileId!, jobId!, {
+            recovery: (manifest ?? {}) as unknown as Record<string, unknown>,
+            outputExtra: finalAssetId ? { assetId: finalAssetId } : undefined,
+            error: errJson,
+          })
+        );
       } else {
         await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+        if (userId) {
+          await safe("purgeResumableFail", () => purgeResumableJobStorage(userId!, jobId!));
+        }
       }
     }
 
-    // Best-effort refund. Fires whenever a spend actually succeeded — covering
-    // both failures AND user cancellations. InsufficientCreditsError returns 402
-    // directly and never reaches this catch (creditsSpent stays false).
-    if (creditsSpent && profileId && creditsAmount > 0 && jobType) {
+    // Best-effort refund. Skip when recoverable (credits held for resume).
+    if (
+      creditsSpent &&
+      profileId &&
+      creditsAmount > 0 &&
+      jobType &&
+      !recoverable
+    ) {
       await safe("refundCredits", () =>
         refundCredits({
           profileId: profileId!,
@@ -643,19 +720,41 @@ export async function POST(req: Request) {
     }
 
     if (generationRequestId) {
-      await safe("idemFailure", () =>
-        finishGenerationRequestFailure({
-          id: generationRequestId!,
-          jobId: jobId ?? null,
-          errorJson: errJson,
-        })
-      );
+      if (recoverable && jobId) {
+        await safe("idemRecoverable", () =>
+          finishGenerationRequestRecoverable({
+            id: generationRequestId!,
+            jobId: jobId!,
+            errorJson: errJson,
+          })
+        );
+      } else {
+        await safe("idemFailure", () =>
+          finishGenerationRequestFailure({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            errorJson: errJson,
+          })
+        );
+      }
     }
 
     if (cancelled) {
       return NextResponse.json(
         { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
         { status: 409 }
+      );
+    }
+    if (recoverable) {
+      return NextResponse.json(
+        {
+          recoverable: true,
+          jobId,
+          error: message,
+          code: "PIPELINE_RECOVERABLE",
+          refunded: false,
+        },
+        { status: 503 }
       );
     }
     return NextResponse.json(

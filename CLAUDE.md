@@ -80,7 +80,7 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 | Reels Creator / Veo per-scene (`api/generate-reels`, engine `veo` mode `perScene`) | `estimateVeoCredits({ durationSec: sceneCount × durationPerScene })` |
 | Storyboard image (`api/generate-storyboard`) | fixed 2 credits |
 | Storyboard video (`api/generate-storyboard-video`) | fixed 30 credits |
-| Photo Studio (`api/generate-photo`) | **not wired yet** — Photo Studio remains free during dummy phase by design |
+| Photo Studio (`api/generate-photo`) | `productPhotoPricingKey` via pricing resolver (tier + resolution) |
 
 ### Spend / refund contract (applies to every charged route)
 1. Validate input → strictly resolve profile (no free fallback; non-auth failure = 500).
@@ -93,10 +93,12 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 
 `credit_transactions` is the billing source of truth. `jobs.cost_credits` and `assets.cost_credits` are display snapshots only. `usage_events` is analytics-only and must never affect billing/response.
 
+### Generation cancel (in-flight v1)
+Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested`, `generation_predictions`, `cancel_allowed`, `assertNotCancelled`). The generate route owns refund + `cancelJob`; cancel endpoint never refunds in-flight attempts. After provider output is committed (`markProviderCommitted` in `lib/generation-commit.ts` flips `cancel_allowed=false`), cancel API returns 409 `CANCEL_NOT_ALLOWED` and post-commit user cancel does not refund. Recoverable jobs (`pipeline-recovery/`, status `recoverable`): credits held for **Try again**; refund only on genuine delivery failure (`lib/pipeline-recovery/refund-policy-pure.ts` — resume exhausted, terminal resume error, TTL after at least one resume attempt). Abandon recoverable (`cancel` + `jobId`) does not refund. Commit points: first Reels scene / Veo clip, video/image generation success, storyboard import vision LLM. Client: `useIdempotentSubmit().cancel()` + `useGenerationStatusPoll` + `GenerationCancelButton` (shows “Finalizing…” when locked). Stuck runs: `GET /api/cron/generation-reconcile`. Plans: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md), [`docs/generation/no-refund-after-replicate-plan.md`](docs/generation/no-refund-after-replicate-plan.md).
+
 ### Known limitations (intentional)
 - No Xendit / payment gateway / subscription plans yet.
 - No credit-balance UI yet.
-- Photo Studio is not metered yet.
 - Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
 
@@ -132,9 +134,9 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Burn-in:** Final pass burns subtitles from the **hosted `.ass` URL** via `-vf "subtitles={{in_srt}}"` (not only the MKV subtitle stream), outputting `final_video.mp4`.
 
 ### 5. Supabase Storage (Reels Creator)
-- **Canonical paths:** User media is scoped under `{userId}/` first. Video studio: `{userId}/videos/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `{userId}/videos/generated/storyboard/`. Photo studio: `{userId}/photos/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `{userId}/photos/uploads/reference/`. Transient video refs: `{userId}/videos/temp/`. Legacy `photos|videos/{userId}/…` paths remain readable until `npm run storage:migrate-user-first -- --execute`.
+- **Canonical paths:** User media is scoped under `{userId}/` first. Video studio: `{userId}/videos/generated/video/{mode}/` (`reelscreator`, `t2v`, `i2v`, `motion-control`). Storyboard i2v: `{userId}/videos/generated/storyboard/`. Photo studio: `{userId}/photos/generated/{mode}/` (`product`, `t2i`, `character`, `storyboard`). Photo reference uploads: `{userId}/photos/uploads/reference/`. Transient video refs: `{userId}/videos/temp/`. **Pipeline recovery staging:** `{userId}/resumable/{jobId}/` (outside `photos/` and `videos/`; auto-purged on success/terminal/TTL). Legacy `photos|videos/{userId}/…` paths remain readable until `npm run storage:migrate-user-first -- --execute`.
 - **Final deliverable (Reels Creator):** `{userId}/videos/generated/video/reelscreator/video_<timestamp>.mp4` (Seedance and Veo share this folder).
-- **Transient captions:** `.ass` under **`{userId}/videos/temp/`** for Rendi; deleted after a successful run.
+- **Recovery captions/scenes:** Reels recovery uploads `.ass` and scene MP4s under `{userId}/resumable/{jobId}/` (not `videos/temp/`). Legacy runs still use `{userId}/videos/temp/` for captions only.
 - **Product Photo** uses **`{userId}/photos/`** in the same bucket — never under `videos/`.
 - **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
 - **Private access (live):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs and `useSignedMediaUrl` sign on read. Bucket `krakatoa` is **private** (migration `049_storage_bucket_private.sql`). Legacy `/api/upload` returns 410 — use `POST /api/upload/sign`.
@@ -166,7 +168,7 @@ Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/mod
    - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
-   - `CRON_SECRET` — Protects `app/api/cron` if used.
+   - `CRON_SECRET` — Bearer token untuk semua `GET /api/cron/*` (lihat [`docs/ops/cron-jobs.md`](docs/ops/cron-jobs.md)).
  - `DOKU_CLIENT_ID`, `DOKU_SECRET_KEY` — DOKU Checkout credentials (credit purchases).
  - `DOKU_ENV` — `sandbox` (default) or `production`; selects the DOKU API base URL.
  - `DOKU_API_BASE` — Optional explicit DOKU API base URL override (otherwise derived from `DOKU_ENV`).
