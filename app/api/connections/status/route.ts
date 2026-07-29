@@ -19,5 +19,6 @@ export async function GET() {
   return NextResponse.json({
     youtube: connected.has("youtube"),
     tiktok: connected.has("tiktok"),
+    instagram: connected.has("instagram"),
   });
 }
