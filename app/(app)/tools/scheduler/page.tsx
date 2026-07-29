@@ -675,7 +675,24 @@ function UploadCard({
 
     return (
       <Card>
-        <CardHeader title="Select Photos" icon={<ImageIcon className="h-4 w-4" />} />
+        <div className="flex items-center justify-between gap-2.5 border-b border-gray-800 px-5 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="text-violet-400"><ImageIcon className="h-4 w-4" /></span>
+            <h2 className="text-sm font-semibold text-white">Select Photos</h2>
+          </div>
+          {/* Escape hatch: picking a photo (e.g. from "My Assets") permanently
+              switches this card to photo mode with no other way back to the
+              plain video/blank dropzone once photoUrls has no raw `file`
+              (whose own remove button happens to call onRemove already). */}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Cancel photo post"
+            className="text-gray-500 transition-colors hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
         <div className="p-5">
           {/* Feedback for a raw photo drop that triggered this mode — the
               upload itself happens in the parent's handleFilesAdded; this
@@ -2132,6 +2149,43 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const today = new Date().toISOString().split("T")[0];
   const ai = useCaptionAI();
+  // Choice-first "add more photos" flow (mirrors UploadCard's single-mode
+  // photo picker) — collapsed to one button, only reveals the upload-vs-library
+  // choice, then the relevant UI, once asked for.
+  const [addPhotoMode, setAddPhotoMode] = useState<"closed" | "choice" | "library">("closed");
+  const [addPhotoStatus, setAddPhotoStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const [addPhotoError, setAddPhotoError] = useState<string | null>(null);
+  const newPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddPhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files ? Array.from(e.target.files) : [];
+    if (newPhotoInputRef.current) newPhotoInputRef.current.value = "";
+    if (selected.length === 0) return;
+
+    const room = Math.max(0, 35 - item.photoUrls.length);
+    const accepted = selected.filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type)).slice(0, room);
+    if (accepted.length === 0) return;
+
+    setAddPhotoStatus("uploading");
+    setAddPhotoError(null);
+    const uploaded: string[] = [];
+    let firstError: string | null = null;
+    for (const f of accepted) {
+      try {
+        const { storagePath } = await signAndUploadFile(f, "image");
+        uploaded.push(storagePath);
+      } catch (err) {
+        firstError = err instanceof Error ? err.message : "Upload failed.";
+      }
+    }
+    if (uploaded.length > 0) onUpdate({ photoUrls: [...item.photoUrls, ...uploaded] });
+    if (firstError) {
+      setAddPhotoStatus("error");
+      setAddPhotoError(firstError);
+    } else {
+      setAddPhotoStatus("idle");
+    }
+  };
 
   useEffect(() => {
     if (item.file) {
@@ -2377,7 +2431,9 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           {/* Per-card "add more photos" picker (openspec/changes/tiktok-photo-post
               Decision 7) — only for a photo-typed card; grows past the one
               raw-dropped/picked photo toward TikTok's 35-photo cap without
-              affecting sibling cards in the same batch. */}
+              affecting sibling cards in the same batch. Choice-first (upload
+              vs. library) to match the single-mode UploadCard flow instead of
+              jumping straight to the library grid. */}
           {item.contentType === "photo" && (
             <div>
               <p className="mb-1.5 text-xs text-gray-500">
@@ -2386,29 +2442,110 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               {item.photoUrls.length === 0 && !item.file && (
                 <p className="mb-1.5 text-xs text-amber-400">Add at least one photo to schedule this post.</p>
               )}
-              {/* No `tools` allowlist — see the matching comment on
-                  UploadCard's photo picker above; mediaType="image" alone
-                  is what scopes this to photos, covering every image tool
-                  (including "storyboard", missed by the old allowlist). */}
-              <CreationsHistory
-                title="Your photos"
-                description="Pick photos to include in this TikTok post."
-                mediaType="image"
-                limit={24}
-                multiSelect
-                selectedUrls={item.photoUrls}
-                onSelect={(a) => {
-                  const ref = creationPhotoRef(a);
-                  const next = item.photoUrls.includes(ref)
-                    ? item.photoUrls.filter((u) => u !== ref)
-                    : item.photoUrls.length >= 35
-                      ? item.photoUrls
-                      : [...item.photoUrls, ref];
-                  onUpdate({ photoUrls: next });
-                }}
-                hideHeader
-                gridClassName="grid-cols-4 sm:grid-cols-6"
-                className="!mt-0 !border-t-0 !pt-0"
+
+              {addPhotoMode === "closed" && (
+                <button
+                  type="button"
+                  onClick={() => setAddPhotoMode(item.photoUrls.length >= 35 ? "closed" : "choice")}
+                  disabled={item.photoUrls.length >= 35}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-700 px-3 py-2.5 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add photos
+                </button>
+              )}
+
+              {addPhotoMode === "choice" && (
+                <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3.5">
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-white">Add photos to this post</p>
+                    <button
+                      type="button"
+                      onClick={() => setAddPhotoMode("closed")}
+                      aria-label="Cancel"
+                      className="text-gray-500 transition-colors hover:text-white"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddPhotoMode("closed");
+                        newPhotoInputRef.current?.click();
+                      }}
+                      className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Upload new
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAddPhotoMode("library")}
+                      className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      Choose from your library
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {addPhotoMode === "library" && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-white">Pick photos to include in this TikTok post</p>
+                    <button
+                      type="button"
+                      onClick={() => setAddPhotoMode("closed")}
+                      className="text-xs font-medium text-violet-400 transition-colors hover:text-violet-300"
+                    >
+                      Done
+                    </button>
+                  </div>
+                  {/* No `tools` allowlist — see the matching comment on
+                      UploadCard's photo picker above; mediaType="image" alone
+                      is what scopes this to photos, covering every image tool
+                      (including "storyboard", missed by the old allowlist). */}
+                  <CreationsHistory
+                    hideHeader
+                    mediaType="image"
+                    limit={24}
+                    multiSelect
+                    selectedUrls={item.photoUrls}
+                    onSelect={(a) => {
+                      const ref = creationPhotoRef(a);
+                      const next = item.photoUrls.includes(ref)
+                        ? item.photoUrls.filter((u) => u !== ref)
+                        : item.photoUrls.length >= 35
+                          ? item.photoUrls
+                          : [...item.photoUrls, ref];
+                      onUpdate({ photoUrls: next });
+                    }}
+                    gridClassName="grid grid-cols-4 gap-2 sm:grid-cols-6"
+                    className="!mt-0 !border-t-0 !pt-0"
+                  />
+                </div>
+              )}
+
+              {addPhotoStatus === "uploading" && (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-violet-300">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Uploading…
+                </p>
+              )}
+              {addPhotoStatus === "error" && (
+                <p className="mt-2 text-xs text-red-400">{addPhotoError ?? "Upload failed."}</p>
+              )}
+              <input
+                ref={newPhotoInputRef}
+                type="file"
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                onChange={handleAddPhotoFiles}
+                className="hidden"
+                aria-label="Upload new photo"
               />
             </div>
           )}
@@ -3231,7 +3368,7 @@ export default function SchedulerDashboardPage() {
             >
               <Info className="mt-px h-4 w-4 shrink-0 text-sky-400" />
               <p className="text-xs text-sky-300">
-                Videos are spread across days for optimal reach (max 2/day at 12:00 &amp; 18:00).
+                Posts are spread across days for optimal reach (max 2/day at 12:00 &amp; 18:00).
                 Adjust per card if needed.
               </p>
             </div>
