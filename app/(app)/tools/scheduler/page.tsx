@@ -851,6 +851,7 @@ function UploadCard({
                 multiSelect
                 selectedUrls={photoUrls}
                 onSelect={(item) => togglePhoto(creationPhotoRef(item))}
+                showCreateCta
                 className="!mt-0 !border-t-0 !pt-0"
               />
             </div>
@@ -987,6 +988,7 @@ function UploadCard({
             limit={24}
             selectedUrl={videoUrl ?? undefined}
             onSelect={(item) => onAssetSelected(item)}
+            showCreateCta
             className="!mt-0 !border-t-0 !pt-0"
           />
         )}
@@ -2523,6 +2525,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                           : [...item.photoUrls, ref];
                       onUpdate({ photoUrls: next });
                     }}
+                    showCreateCta
                     gridClassName="grid grid-cols-4 gap-2 sm:grid-cols-6"
                     className="!mt-0 !border-t-0 !pt-0"
                   />

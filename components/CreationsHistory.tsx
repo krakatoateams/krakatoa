@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   ChevronLeft,
   ChevronRight,
@@ -55,6 +56,12 @@ type Props = {
   hideHeader?: boolean;
   /** Override the asset grid layout classes (defaults to 5 columns on lg). */
   gridClassName?: string;
+  /** Show a "go create one" CTA (linking to the relevant generation tool) in
+   * the empty state, instead of just "No generations yet." — for pickers
+   * where the only next step is leaving to go generate something (e.g. the
+   * Scheduler's asset pickers), as opposed to a tool's own history section
+   * where the generation form is already right there on the same page. */
+  showCreateCta?: boolean;
 };
 
 /** Windowed page numbers with ellipses, e.g. [1, "…", 4, 5, 6, "…", 12]. */
@@ -326,6 +333,7 @@ export default function CreationsHistory({
   showRefresh = true,
   hideHeader = false,
   gridClassName,
+  showCreateCta = false,
 }: Props) {
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
@@ -832,7 +840,33 @@ export default function CreationsHistory({
               ) : (
                 <ImageIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
               )}
-              <p className="text-gray-400">No generations yet.</p>
+              <p className="text-gray-400">
+                {showCreateCta
+                  ? "You don't have any assets yet — head over to create some."
+                  : "No generations yet."}
+              </p>
+              {showCreateCta && (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                  {effectiveMediaType !== "image" && (
+                    <Link
+                      href="/tools/video"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+                    >
+                      <Video className="h-3.5 w-3.5" />
+                      Reels Generation
+                    </Link>
+                  )}
+                  {effectiveMediaType !== "video" && (
+                    <Link
+                      href="/tools/photo"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Product Photo
+                    </Link>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
