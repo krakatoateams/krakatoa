@@ -52,7 +52,6 @@ export default function SignupPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [signupError, setSignupError] = useState<SignupError | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -159,41 +158,10 @@ export default function SignupPage() {
           </p>
         </div>
 
-        {/* Consent — gates both Google and email/password signup below */}
-        <div className="flex items-start gap-2">
-          <input
-            type="checkbox"
-            id="agree-terms"
-            checked={agreedToTerms}
-            onChange={(e) => setAgreedToTerms(e.target.checked)}
-            required
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-700 bg-gray-800 text-[#F26522] focus:outline-none focus:ring-2 focus:ring-[#F26522]"
-          />
-          <label htmlFor="agree-terms" className="text-xs text-gray-400">
-            I agree to the{" "}
-            <Link
-              href="/terms"
-              target="_blank"
-              className="text-[#F26522] hover:text-[#e05a1a]"
-            >
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link
-              href="/privacy"
-              target="_blank"
-              className="text-[#F26522] hover:text-[#e05a1a]"
-            >
-              Privacy Policy
-            </Link>
-          </label>
-        </div>
-
         {/* Google */}
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          disabled={!agreedToTerms}
           className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50"
         >
           <GoogleIcon />
@@ -291,11 +259,23 @@ export default function SignupPage() {
 
           <button
             type="submit"
-            disabled={loading || !agreedToTerms}
+            disabled={loading}
             className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
             {loading ? "Creating account…" : "Create account"}
           </button>
+
+          <p className="text-center text-xs text-gray-500">
+            By creating an account, you agree to our{" "}
+            <Link href="/terms" target="_blank" className="text-gray-400 underline hover:text-gray-300">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" target="_blank" className="text-gray-400 underline hover:text-gray-300">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
       </div>
     </AuthLayout>
