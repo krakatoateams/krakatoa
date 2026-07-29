@@ -21,12 +21,26 @@ export interface InstagramShortLivedTokenResponse {
   permissions: string[];
 }
 
-interface RawInstagramCodeTokenPayload {
-  data?: Array<{ access_token?: string; user_id?: string; permissions?: string }>;
+interface RawInstagramCodeTokenEntry {
+  access_token?: string;
+  user_id?: string;
+  permissions?: string;
+}
+
+// Meta's documented sample for this endpoint wraps the entry in a `data`
+// array ({ data: [{ access_token, user_id, permissions }] }) — but the
+// observed live response for this app's app/flow config was the same fields
+// flat at the top level instead. Accepting both shapes means a docs/reality
+// mismatch (either direction) can never again silently masquerade as a
+// failed exchange — see the "token exchange failed: OK" incident this fixes,
+// where a 200 response was misread as a failure because only the wrapped
+// shape was recognized.
+type RawInstagramCodeTokenPayload = RawInstagramCodeTokenEntry & {
+  data?: Array<RawInstagramCodeTokenEntry>;
   error_type?: string;
   error_message?: string;
   error_description?: string;
-}
+};
 
 /**
  * Exchanges the OAuth `code` for a short-lived (~1 hour) Instagram User
@@ -51,11 +65,12 @@ export async function exchangeCodeForToken(
   });
 
   const json = (await res.json()) as RawInstagramCodeTokenPayload;
-  const entry = json.data?.[0];
+  // Prefer the array-wrapped shape if present, fall back to the flat shape.
+  const entry: RawInstagramCodeTokenEntry = json.data?.[0] ?? json;
 
   if (!res.ok || !entry?.access_token || !entry?.user_id) {
     throw new Error(
-      `Instagram code-for-token exchange failed: ${json.error_message ?? json.error_description ?? res.statusText}`,
+      `Instagram code-for-token exchange failed: HTTP ${res.status} ${JSON.stringify(json)}`,
     );
   }
 
@@ -110,7 +125,7 @@ export async function exchangeForLongLivedToken(
 
   if (!res.ok || !json.access_token || !json.expires_in) {
     throw new Error(
-      `Instagram long-lived token exchange failed: ${json.error_message ?? res.statusText}`,
+      `Instagram long-lived token exchange failed: HTTP ${res.status} ${JSON.stringify(json)}`,
     );
   }
 
