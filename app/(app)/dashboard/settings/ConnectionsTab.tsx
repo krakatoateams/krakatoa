@@ -5,37 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, Music2, Check, X } from "lucide-react";
 
-function StaticConnectionRow({
-  icon,
-  name,
-  description,
-  status,
-}: {
-  icon: React.ReactNode;
-  name: string;
-  description: string;
-  status: "soon";
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-800 text-gray-300">
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-white">{name}</p>
-          <p className="truncate text-xs text-gray-500">{description}</p>
-        </div>
-      </div>
-      {status === "soon" && (
-        <span className="shrink-0 rounded-full border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-500">
-          Coming soon
-        </span>
-      )}
-    </div>
-  );
-}
-
 export default function ConnectionsTab() {
   const { status: authStatus } = useCurrentUser();
   const searchParams = useSearchParams();
@@ -48,6 +17,10 @@ export default function ConnectionsTab() {
   const [disconnectingTiktok, setDisconnectingTiktok] = useState(false);
   const [confirmDisconnectTiktok, setConfirmDisconnectTiktok] = useState(false);
 
+  const [instagramConnected, setInstagramConnected] = useState<boolean | null>(null);
+  const [disconnectingInstagram, setDisconnectingInstagram] = useState(false);
+  const [confirmDisconnectInstagram, setConfirmDisconnectInstagram] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
 
   // Surface redirect-back errors from the OAuth callback.
@@ -57,6 +30,12 @@ export default function ConnectionsTab() {
       setError("Couldn't connect YouTube. Please try again.");
     } else if (urlError === "tiktok_connect_failed") {
       setError("Couldn't connect TikTok. Please try again.");
+    } else if (urlError === "instagram_connect_failed") {
+      setError("Couldn't connect Instagram. Please try again.");
+    } else if (urlError === "instagram_not_business_account") {
+      setError(
+        "This Instagram account isn't set up for publishing yet — convert it to a Business or Creator account in Instagram's settings, then try connecting again.",
+      );
     } else if (urlError === "invalid_state") {
       setError("Connection attempt expired or was tampered with. Please try again.");
     }
@@ -67,17 +46,20 @@ export default function ConnectionsTab() {
     if (authStatus === "unauthenticated") {
       setYoutubeConnected(false);
       setTiktokConnected(false);
+      setInstagramConnected(false);
       return;
     }
     fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false }))
-      .then((data: { youtube?: boolean; tiktok?: boolean }) => {
+      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false, instagram: false }))
+      .then((data: { youtube?: boolean; tiktok?: boolean; instagram?: boolean }) => {
         setYoutubeConnected(Boolean(data.youtube));
         setTiktokConnected(Boolean(data.tiktok));
+        setInstagramConnected(Boolean(data.instagram));
       })
       .catch(() => {
         setYoutubeConnected(false);
         setTiktokConnected(false);
+        setInstagramConnected(false);
       });
   }, [authStatus]);
 
@@ -112,6 +94,23 @@ export default function ConnectionsTab() {
       setError("Couldn't disconnect TikTok. Please try again.");
     } finally {
       setDisconnectingTiktok(false);
+    }
+  }
+
+  async function handleDisconnectInstagram() {
+    setDisconnectingInstagram(true);
+    setConfirmDisconnectInstagram(false);
+    try {
+      const res = await fetch("/api/connections/instagram", { method: "DELETE" });
+      if (res.ok) {
+        setInstagramConnected(false);
+      } else {
+        setError("Couldn't disconnect Instagram. Please try again.");
+      }
+    } catch {
+      setError("Couldn't disconnect Instagram. Please try again.");
+    } finally {
+      setDisconnectingInstagram(false);
     }
   }
 
@@ -208,12 +207,74 @@ export default function ConnectionsTab() {
           </div>
         )}
 
-        <StaticConnectionRow
-          icon={<Camera className="h-5 w-5" />}
-          name="Instagram"
-          description="Auto-publish Reels to Instagram"
-          status="soon"
-        />
+        {/* Instagram row — interactive */}
+        {instagramConnected === null ? (
+          <div className="px-5 py-4">
+            <div className="h-10 animate-pulse rounded-lg bg-gray-800" />
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-800">
+                <Camera className="h-5 w-5 text-pink-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">Instagram</p>
+                <p className="truncate text-xs text-gray-500">
+                  {instagramConnected
+                    ? "Instagram publishing enabled"
+                    : "Instagram publishing not yet connected"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              {instagramConnected ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-400">
+                    <Check className="h-3.5 w-3.5" />
+                    Connected
+                  </span>
+                  {confirmDisconnectInstagram ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleDisconnectInstagram}
+                        disabled={disconnectingInstagram}
+                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        {disconnectingInstagram ? "Disconnecting…" : "Confirm"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnectInstagram(false)}
+                        disabled={disconnectingInstagram}
+                        className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:text-white disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDisconnectInstagram(true)}
+                      className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </>
+              ) : (
+                <a
+                  href="/api/connections/instagram/start"
+                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+                >
+                  Connect
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* TikTok row — interactive */}
         {tiktokConnected === null ? (
@@ -284,10 +345,6 @@ export default function ConnectionsTab() {
           </div>
         )}
       </div>
-
-      <p className="text-xs text-gray-600">
-        Independent per-platform connections are coming soon.
-      </p>
     </div>
   );
 }
