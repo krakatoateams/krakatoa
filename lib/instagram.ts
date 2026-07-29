@@ -24,7 +24,25 @@ export interface InstagramShortLivedTokenResponse {
 interface RawInstagramCodeTokenEntry {
   access_token?: string;
   user_id?: string;
-  permissions?: string;
+  // Meta's docs sample shows this as a comma-separated string, but the
+  // observed live response is already a string array — normalized below via
+  // normalizePermissions() rather than assumed to be one or the other.
+  permissions?: string | string[];
+}
+
+/** Accepts either shape observed for `permissions` (comma-separated string,
+ * per Meta's docs sample, or a string array, per this app's actual live
+ * response) and normalizes to a trimmed, non-empty string array either way —
+ * see the ".split is not a function" incident this fixes, where the code
+ * assumed the string shape and blew up on the real array shape. */
+function normalizePermissions(raw: string | string[] | undefined): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((p) => String(p).trim()).filter(Boolean);
+  }
+  if (typeof raw === "string") {
+    return raw.split(",").map((p) => p.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 // Meta's documented sample for this endpoint wraps the entry in a `data`
@@ -77,7 +95,7 @@ export async function exchangeCodeForToken(
   return {
     accessToken: entry.access_token,
     userId: entry.user_id,
-    permissions: (entry.permissions ?? "").split(",").map((p) => p.trim()).filter(Boolean),
+    permissions: normalizePermissions(entry.permissions),
   };
 }
 
