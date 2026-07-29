@@ -33,7 +33,7 @@ TikTok and YouTube already proved the pattern to mirror: independent per-platfor
 
 - **Backend:** 3 new route files (`start`, `callback`, `route.ts` DELETE) + 1 new lib helper (`lib/instagram.ts`) + 1 modified route (`status`) + 1 modified route (`cron`) + 1 new periodic-refresh route (shape TBD, see Open Questions).
 - **Frontend:** `ConnectionsTab.tsx` + `app/(app)/tools/scheduler/page.tsx` (platform type, label, checkbox gating).
-- **DB:** one new additive migration (`posts.instagram_container_id`, `posts.instagram_media_id`) — `platform_tokens` needs no migration, same as TikTok (`onConflict: "user_id,platform"` already generic).
+- **DB:** `056_platform_tokens_nullable_refresh_token.sql` (Phase 1 — drops `platform_tokens.refresh_token`'s `NOT NULL` constraint; discovered necessary in practice, not assumed up front — see `design.md` Context) plus one future additive migration for Phase 2 (`posts.instagram_container_id`, `posts.instagram_media_id`).
 - **Env:** 2 new secrets to provision outside code (`.env.local` + Vercel).
 - **Out of scope (deferred):**
   - Carousel posts (multiple images in one Instagram post) — this change treats Instagram photo posts as single-image only, matching the task's "photo + video/reel" framing (not "photo carousel").

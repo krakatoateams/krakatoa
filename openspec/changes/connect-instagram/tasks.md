@@ -4,6 +4,10 @@ Phased per the confirmed decisions in `design.md`. **Phase 1 is this change's ac
 
 ## Phase 1 — OAuth connect/disconnect only
 
+### 0. DB migration (discovered necessary during Phase 1, not assumed up front)
+- [x] 0.1 `056_platform_tokens_nullable_refresh_token.sql` — drops `platform_tokens.refresh_token`'s `NOT NULL` constraint (Instagram writes a genuine `null`; YouTube's `?? null` had never actually exercised that path)
+- [ ] 0.2 (User action) Run the migration's SQL in the Supabase SQL Editor (same manual process used for `054_posts_failed_at.sql`) — `npm run db:setup` applies it automatically for any environment where that's run instead
+
 ### 1. Shared origin resolution (design.md Decision 13)
 - [x] 1.1 Extract `resolveOrigin` from `lib/tiktok.ts` into new `lib/http.ts`
 - [x] 1.2 `lib/tiktok.ts` re-exports `resolveOrigin` from `lib/http.ts` (zero changes needed at existing call sites in `app/api/connections/tiktok/{start,callback}` and `app/api/cron/route.ts`)
