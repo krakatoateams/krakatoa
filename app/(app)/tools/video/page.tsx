@@ -4079,9 +4079,7 @@ function ReelsCreatorComposer({
                 Download
               </a>
               <a
-                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}${
-                  theme.trim() ? `&title=${encodeURIComponent(theme.trim())}` : ""
-                }`}
+                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}`}
                 className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
               >
                 <CalendarClock className="h-4 w-4" />
