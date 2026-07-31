@@ -33,11 +33,25 @@ TikTok and YouTube already proved the pattern to mirror: independent per-platfor
 
 - **Backend:** 3 new route files (`start`, `callback`, `route.ts` DELETE) + 1 new lib helper (`lib/instagram.ts`) + 1 modified route (`status`) + 1 modified route (`cron`) + 1 new periodic-refresh route (shape TBD, see Open Questions).
 - **Frontend:** `ConnectionsTab.tsx` + `app/(app)/tools/scheduler/page.tsx` (platform type, label, checkbox gating).
-- **DB:** `056_platform_tokens_nullable_refresh_token.sql` (Phase 1 — drops `platform_tokens.refresh_token`'s `NOT NULL` constraint; discovered necessary in practice, not assumed up front — see `design.md` Context) plus one future additive migration for Phase 2 (`posts.instagram_container_id`, `posts.instagram_media_id`).
+- **DB:** `056_platform_tokens_nullable_refresh_token.sql` (Phase 1), `057_posts_tiktok_share_url.sql` (unrelated TikTok work, same migration sequence), `058_platform_tokens_platform_user_id.sql` (Phase 2 — fixes a Phase 1 gap, see below), `059_posts_instagram_fields.sql` (Phase 2 — `instagram_container_id`, `instagram_media_id`, `instagram_first_attempted_at`).
 - **Env:** 2 new secrets to provision outside code (`.env.local` + Vercel).
 - **Out of scope (deferred):**
   - Carousel posts (multiple images in one Instagram post) — this change treats Instagram photo posts as single-image only, matching the task's "photo + video/reel" framing (not "photo carousel").
   - Instagram Stories.
   - Messaging / comment management — `instagram_business_manage_messages` and `instagram_business_manage_comments` are deliberately **not** requested scopes; this integration is publish-only, same scope boundary as TikTok/YouTube.
   - Content-publishing-limit dashboarding beyond basic error classification (see `design.md` Decision 8).
-- **Open questions requiring confirmation before implementation begins:** see `design.md` § Open Questions — env var naming, the token-refresh job's cadence/shape, the give-up threshold for a stuck/still-processing container, and a couple of scheduler-UX calls around single-image-only photo posts.
+  - Phase 3 (proactive token refresh cron) and Phase 4 (scheduler UI) — not started.
+- **Open questions requiring confirmation:** see `design.md` § Open Questions — the token-refresh job's cadence/shape (Phase 3) and scheduler-UX calls around single-image-only photo posts (Phase 4). Env var naming, the 10-minute give-up threshold, and the Business/Creator detection mechanism were confirmed and implemented in Phase 2.
+
+## Phase 2 status (2026-07-31)
+
+**Implemented:** `lib/instagram.ts`'s publish functions (`createMediaContainer`, `getContainerStatus`, `publishContainer`, `ensureInstagramCompatibleImage`, `isInstagramPermanentFailure`), the full cron branch in `app/api/cron/route.ts`, and 2 new migrations. See `design.md` § Phase 2 for re-verified API details and several things Phase 1 didn't anticipate — most importantly, **`platform_tokens.platform_user_id` was never persisted in Phase 1**, meaning the publish endpoints could not have been called at all until this phase's fix (`058_...sql` + a one-line fix to the Phase 1 callback route).
+
+**Also fixed (2026-07-31):** `POST /api/posts` previously hard-rejected any `photo_urls` post targeting a platform other than `"tiktok"` — an Instagram photo post couldn't be created via the API at all, even for manual testing. Now accepts `photo_urls` for `platform === "instagram"` too, with its own validation rejecting more than 1 photo (Instagram has no carousel support — matches the cron's `photo_urls[0]`-only handling, but rejects up front rather than silently dropping extras), and `insertRow.photo_urls` is now actually persisted for Instagram posts (it was previously only assigned inside the TikTok-only branch, so it would have been silently dropped even once the platform check allowed it through).
+
+**Not implemented, flagged for your review before relying on this:**
+- Instagram requires JPEG-only images (stricter than TikTok, which also accepts WebP) — handled via a new `ensureInstagramCompatibleImage`, but **unverified against a real Instagram publish**.
+- This app's Rendi FFmpeg video pipeline doesn't set `-movflags +faststart`, which Instagram's Reels container spec explicitly requires ("moov atom at the front of the file") — not fixed here (it's the generation pipeline, not this integration), but flagged as a plausible cause of real publish failures specific to Instagram video/reel posts.
+- The signed-URL-reuse assumption (`design.md` Decision 7) remains unverified — no new evidence either way was found this phase.
+
+Nothing above was tested live — Supabase access is still restricted. See `tasks.md` for the exact verification steps once it's back.
