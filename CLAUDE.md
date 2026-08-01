@@ -153,6 +153,18 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 
 Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/model-catalog-configs.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
 
+## Admin Monitoring (`/admin/monitoring`)
+
+**Status: code complete, NOT yet verified against a live DB** (Supabase project was restricted — `exceed_egress_quota`). Migration `057` is written but **not applied**; the panel works without it (indexes are read-perf only).
+
+Read-only cross-user generation monitor: who is generating what, which pipeline step they're on, and three derived anomalies — `stuck`, `cancel_not_honored`, `refund_missing`. Adds **no tables/columns**; it joins `jobs`, `job_steps`, `credit_transactions`, `generation_requests`, `generation_predictions` and `jobs.output.recovery`.
+
+Key code: `lib/admin-monitoring-flags.ts` (pure classifier + self-check), `lib/admin-monitoring-db.ts` (batched queries — 5 round trips, never N+1), `app/api/admin/monitoring/`, `app/(app)/admin/monitoring/page.tsx`.
+
+**Refund rule delegates to `shouldRefundRecoverableTerminal()`** in `lib/pipeline-recovery/refund-policy-pure.ts` — never restate refund policy in the monitoring module; add new terminal error codes to `RECOVERABLE_TERMINAL_CODES` or they surface as false positives.
+
+Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-monitoring` (needs a live DB). Full doc incl. the pending-verification checklist: [`docs/admin/admin-monitoring.md`](docs/admin/admin-monitoring.md).
+
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
 2. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.

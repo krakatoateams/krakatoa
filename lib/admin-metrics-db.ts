@@ -17,7 +17,7 @@ const ROW_CAP = 5000;
 // Supabase's untyped client infers embedded one-to-many relations as arrays even
 // when the FK is many-to-one (a single row at runtime). These helpers read the
 // joined profile defensively whether it comes back as an object or an array.
-type ProfileEmbed =
+export type ProfileEmbed =
   | { email?: string | null; display_name?: string | null }
   | { email?: string | null; display_name?: string | null }[]
   | null
@@ -30,7 +30,7 @@ function embeddedProfile(
   return Array.isArray(p) ? (p[0] ?? null) : p;
 }
 
-function embeddedEmail(p: ProfileEmbed): string | null {
+export function embeddedEmail(p: ProfileEmbed): string | null {
   return embeddedProfile(p)?.email ?? null;
 }
 
