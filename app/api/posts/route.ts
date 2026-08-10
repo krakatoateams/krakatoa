@@ -91,9 +91,9 @@ export async function POST(req: NextRequest) {
       tiktok_brand_content_toggle?: boolean;
     };
 
-    // photo_urls (a TikTok photo-post carousel) is an alternative to video_url,
-    // never both — see openspec/changes/tiktok-photo-post. TikTok-only: YouTube
-    // has no photo-post concept.
+    // photo_urls (a TikTok photo-post carousel, or an Instagram single-image
+    // post — see openspec/changes/connect-instagram) is an alternative to
+    // video_url, never both. YouTube has no photo-post concept at all.
     const hasPhotoUrls = Array.isArray(photo_urls) && photo_urls.length > 0;
     if (photo_urls !== undefined) {
       if (
@@ -111,9 +111,21 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
-      if (hasPhotoUrls && platform !== "tiktok") {
+      if (hasPhotoUrls && platform !== "tiktok" && platform !== "instagram") {
         return NextResponse.json(
-          { error: "photo_urls is only supported for platform \"tiktok\"." },
+          { error: "photo_urls is only supported for platform \"tiktok\" or \"instagram\"." },
+          { status: 400 },
+        );
+      }
+      // Instagram's Content Publishing API has no carousel support in this
+      // integration (single image only — see connect-instagram/design.md
+      // Non-Goals); reject a multi-photo Instagram post outright rather than
+      // silently publishing only the first photo, which the cron already
+      // does defensively but which would otherwise be a confusing surprise
+      // discovered only after scheduling.
+      if (platform === "instagram" && photo_urls.length > 1) {
+        return NextResponse.json(
+          { error: "Instagram photo posts support exactly one photo (no carousel)." },
           { status: 400 },
         );
       }
@@ -230,9 +242,9 @@ export async function POST(req: NextRequest) {
         ? video_url.trim()
         : null;
 
-    if (platform === "tiktok" && hasPhotoUrls && (!!resolvedPath || !!legacyHttpUrl)) {
+    if ((platform === "tiktok" || platform === "instagram") && hasPhotoUrls && (!!resolvedPath || !!legacyHttpUrl)) {
       return NextResponse.json(
-        { error: "TikTok posts can't mix photos and video — please choose one or the other." },
+        { error: "A post can't mix photos and video — please choose one or the other." },
         { status: 400 },
       );
     }
@@ -241,7 +253,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "storage_path (or video_url), photo_urls (TikTok photo post), title, scheduled_time and platform are required.",
+            "storage_path (or video_url), photo_urls (TikTok or Instagram photo post), title, scheduled_time and platform are required.",
         },
         { status: 400 },
       );
@@ -296,6 +308,11 @@ export async function POST(req: NextRequest) {
       insertRow.tiktok_brand_organic_toggle = Boolean(tiktok_brand_organic_toggle);
       insertRow.tiktok_brand_content_toggle = Boolean(tiktok_brand_content_toggle);
       if (hasPhotoUrls) insertRow.photo_urls = photo_urls;
+    }
+    // Instagram has no privacy-level/disclosure-toggle equivalent — just the
+    // shared photo_urls column (validated above as exactly one entry).
+    if (platform === "instagram" && hasPhotoUrls) {
+      insertRow.photo_urls = photo_urls;
     }
 
     const { data, error } = await supabaseServer

@@ -29,6 +29,7 @@ interface Post {
   video_url: string | null;
   youtube_video_id?: string | null;
   tiktok_publish_id?: string | null;
+  tiktok_share_url?: string | null;
   title: string;
   description: string;
   tags: string;
@@ -537,6 +538,21 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 >
                   <YoutubeIcon className="h-4 w-4" />
                   View on YouTube
+                </a>
+              )}
+              {/* Only present for a confirmed-public (non-SELF_ONLY) TikTok
+                  post — see openspec/changes/tiktok-view-on-tiktok. A
+                  SELF_ONLY post has no public post ID to link to at all, so
+                  there's intentionally no button in that case. */}
+              {post.status === "published" && post.tiktok_share_url && (
+                <a
+                  href={post.tiktok_share_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-900"
+                >
+                  <Music2 className="h-4 w-4" />
+                  View on TikTok
                 </a>
               )}
               {post.video_url && (

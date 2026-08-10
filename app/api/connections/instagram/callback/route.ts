@@ -71,6 +71,14 @@ export async function GET(request: NextRequest) {
           // access_token refreshes itself (see design.md Decision 2).
           refresh_token: null,
           expires_at: expiresAt,
+          // Instagram's Content Publishing API scopes /media and
+          // /media_publish under this ID in the URL itself (unlike
+          // TikTok/YouTube, whose access token alone is sufficient) — a
+          // Phase 1 gap discovered during Phase 2 investigation: this value
+          // was already available here but was previously discarded after
+          // the eligibility check, meaning publish could never have actually
+          // worked without this fix.
+          platform_user_id: shortLived.userId,
         },
         { onConflict: "user_id,platform" },
       );
