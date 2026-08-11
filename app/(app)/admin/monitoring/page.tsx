@@ -123,20 +123,44 @@ const FLAG_HINT: Record<JobFlag, string> = {
 };
 
 const POLL_MS = 5000;
+const PAGE_SIZE = 25;
 
+// Rolls up into d/w/mo so a month-old job reads "4w 1d", not "710h 31m". Step
+// durations stay in s/m/h — routes are capped at 300s, so they never reach a day.
 function fmtDur(msTotal: number): string {
   if (!Number.isFinite(msTotal) || msTotal < 0) return "—";
+  const pair = (a: number, ua: string, b: number, ub: string) =>
+    b > 0 ? `${a}${ua} ${b}${ub}` : `${a}${ua}`;
   const s = Math.floor(msTotal / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
+  if (m < 60) return pair(m, "m", s % 60, "s");
   const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  if (h < 24) return pair(h, "h", m % 60, "m");
+  const d = Math.floor(h / 24);
+  if (d < 7) return pair(d, "d", h % 24, "h");
+  if (d < 30) return pair(Math.floor(d / 7), "w", d % 7, "d");
+  return pair(Math.floor(d / 30), "mo", d % 30, "d");
 }
 
 function since(iso: string | null | undefined): string {
   if (!iso) return "—";
   return fmtDur(Date.now() - Date.parse(iso));
+}
+
+/** Wall-clock stamp in the admin's own timezone. Year only when it isn't this one. */
+function fmtWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+  });
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -218,6 +242,95 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+const str = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() ? v.trim() : null;
+
+/**
+ * Prompt surface. Reads only what the pipeline already persists — nothing is
+ * reconstructed here. Coverage is uneven by design and the UI says so out loud:
+ * motion-control writes `input.prompt`, Reels/Veo/storyboard write `input.theme`
+ * (the seed the LLM expands), and the Reels style anchor lands in the
+ * `style_anchor` step output. Photo and text/image-to-video assemble their prompt
+ * at call time and never store it, so those read "not recorded" rather than blank.
+ */
+function PromptSection({
+  input,
+  steps,
+}: {
+  input: Record<string, unknown> | null;
+  steps: Step[];
+}) {
+  const i = input ?? {};
+  const prompt = str(i.prompt);
+  const theme = str(i.theme);
+  const stepOut = (key: string) => steps.find((s) => s.step_key === key)?.output ?? null;
+  const style = stepOut("style_anchor");
+  const styleAnchor = str(style?.styleAnchor);
+  const negativePrompt = str(style?.negativePrompt);
+  const scenes = stepOut("scene_breakdown")?.scenes ?? null;
+  // Routes that assemble a prompt (photo wraps pose/style scaffolding around the
+  // user's text) record the final string on the generating step, not the job.
+  const assembled = steps
+    .map((s) => str(s.input?.prompt))
+    .find((p) => p && p !== prompt);
+
+  const empty =
+    !prompt && !theme && !styleAnchor && !negativePrompt && !scenes && !assembled;
+
+  return (
+    <Section title="Prompt">
+      {empty ? (
+        <p className="text-sm text-gray-500">
+          Not recorded — this route builds its prompt at call time and never persists it.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {prompt || theme ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                {prompt ? "User prompt" : "Theme — the seed the LLM expands"}
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-gray-300">{prompt ?? theme}</p>
+            </div>
+          ) : null}
+          {assembled ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                Assembled prompt — what the model actually received
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-gray-300">{assembled}</p>
+            </div>
+          ) : null}
+          {styleAnchor ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                Style anchor — appended verbatim to every scene prompt
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-gray-300">{styleAnchor}</p>
+            </div>
+          ) : null}
+          {negativePrompt ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                Negative prompt
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-gray-300">{negativePrompt}</p>
+            </div>
+          ) : null}
+          {scenes ? (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
+                Scene breakdown
+              </div>
+              <Json value={scenes} />
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 /** Step timeline + every side-table record for one job. */
 function JobDetail({ jobId }: { jobId: string }) {
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -249,6 +362,10 @@ function JobDetail({ jobId }: { jobId: string }) {
 
   return (
     <div className="grid gap-6 border-t border-gray-800 bg-black/20 p-4 lg:grid-cols-2">
+      <div className="lg:col-span-2">
+        <PromptSection input={job.input} steps={steps} />
+      </div>
+
       <Section title={`Step timeline (${steps.length})`}>
         {steps.length === 0 ? (
           <p className="text-sm text-gray-500">
@@ -411,6 +528,7 @@ export default function AdminMonitoringPage() {
   const [flag, setFlag] = useState<JobFlag | null>(null);
   const [status, setStatus] = useState<string>("");
   const [windowHours, setWindowHours] = useState(24);
+  const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
 
@@ -443,6 +561,16 @@ export default function AdminMonitoringPage() {
     const id = setInterval(load, POLL_MS);
     return () => clearInterval(id);
   }, [live, load]);
+
+  // Paging is client-side: the API already returns the whole capped window in one
+  // payload, so slicing here costs no extra round trip and survives the 5s poll.
+  useEffect(() => {
+    setPage(0);
+  }, [flag, status, windowHours]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = safePage * PAGE_SIZE;
+  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
 
   const anomalyRows = rows.filter((r) => r.flags.length > 0);
   const totalAnomalies = counts
@@ -480,6 +608,7 @@ export default function AdminMonitoringPage() {
           <option value={24}>Last 24h</option>
           <option value={72}>Last 3d</option>
           <option value={168}>Last 7d</option>
+          <option value={720}>Last 30d</option>
         </select>
         <select
           value={status}
@@ -612,11 +741,12 @@ export default function AdminMonitoringPage() {
                       <th className={TH}>Current step</th>
                       <th className={TH}>Credits</th>
                       <th className={TH}>Flags</th>
+                      <th className={TH}>Started</th>
                       <th className={TH}>Age</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {rows.map((r) => {
+                    {pageRows.map((r) => {
                       const open = expanded === r.id;
                       const step = r.currentStep;
                       const stepEnd = step?.finished_at ?? new Date().toISOString();
@@ -685,13 +815,19 @@ export default function AdminMonitoringPage() {
                               ) : null}
                             </div>
                           </td>
+                          <td
+                            className="whitespace-nowrap px-3 py-2 text-xs tabular-nums text-gray-400"
+                            title={new Date(r.created_at).toLocaleString()}
+                          >
+                            {fmtWhen(r.created_at)}
+                          </td>
                           <td className="px-3 py-2 text-xs tabular-nums text-gray-500">
                             {since(r.created_at)}
                           </td>
                         </tr>,
                         open ? (
                           <tr key={`${r.id}-detail`}>
-                            <td colSpan={9} className="p-0">
+                            <td colSpan={10} className="p-0">
                               <JobDetail jobId={r.id} />
                             </td>
                           </tr>
@@ -702,6 +838,34 @@ export default function AdminMonitoringPage() {
                 </table>
               </div>
             )}
+            {rows.length > PAGE_SIZE ? (
+              <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
+                <span className="tabular-nums">
+                  {pageStart + 1}–{pageStart + pageRows.length} of {rows.length}
+                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={safePage === 0}
+                    onClick={() => setPage(safePage - 1)}
+                    className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-gray-300 hover:border-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <span className="tabular-nums">
+                    {safePage + 1} / {pageCount}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safePage >= pageCount - 1}
+                    onClick={() => setPage(safePage + 1)}
+                    className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-gray-300 hover:border-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           {failedSteps.length > 0 ? (

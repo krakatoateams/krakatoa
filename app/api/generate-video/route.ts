@@ -467,7 +467,7 @@ export async function POST(req: Request) {
         jobType: jobKind,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
-        input: { userId: userId!, modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
+        input: { userId: userId!, modelId, duration, resolution, aspectRatio, generateAudio, pricingKey, prompt },
       })
     );
     if (job) {

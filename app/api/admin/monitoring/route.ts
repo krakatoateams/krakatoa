@@ -12,20 +12,20 @@ export async function GET(req: Request) {
   return withAdmin(async () => {
     const { searchParams } = new URL(req.url);
     const flagRaw = searchParams.get("flag");
-    const windowRaw = Number(searchParams.get("window"));
-    const limitRaw = Number(searchParams.get("limit"));
+    // A missing param yields Number(null) === 0, which is finite — so `|| undefined`
+    // rather than isFinite, otherwise an absent `limit` becomes .limit(0) (no rows).
+    const windowHours = Number(searchParams.get("window")) || undefined;
+    const limit = Number(searchParams.get("limit")) || undefined;
 
     const [monitoring, failedSteps] = await Promise.all([
       getAdminMonitoring({
-        windowHours: Number.isFinite(windowRaw) ? windowRaw : undefined,
+        windowHours,
         tool: searchParams.get("tool") ?? undefined,
         status: searchParams.get("status") ?? undefined,
         flag: FLAGS.find((f) => f === flagRaw),
-        limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+        limit,
       }),
-      getAdminFailedStepAggregates({
-        windowHours: Number.isFinite(windowRaw) ? windowRaw : undefined,
-      }),
+      getAdminFailedStepAggregates({ windowHours }),
     ]);
 
     return NextResponse.json({ ...monitoring, failedSteps });
