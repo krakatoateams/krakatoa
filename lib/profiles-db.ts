@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { supabaseServer } from "@/lib/supabase-server";
 
@@ -12,6 +13,8 @@ export type Profile = {
   email: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  /** ISO 3166-1 alpha-2, from the edge geo header. Null before first capture. */
+  country: string | null;
   onboarding_completed: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -28,6 +31,50 @@ function missingTableError(): Error {
   return new Error(
     "Database table profiles is missing. Run: npm run db:setup — or apply supabase/migrations/003_platform_foundation_nextauth_single_user.sql in the Supabase SQL Editor.",
   );
+}
+
+/**
+ * Country for the current request, from Vercel's edge geo header.
+ *
+ * Returns null off-Vercel (local dev) and when called outside a request scope
+ * (cron, scripts) — headers() throws there, and a missing country must never
+ * break profile resolution.
+ */
+function requestCountry(): string | null {
+  try {
+    const raw = headers().get("x-vercel-ip-country");
+    const code = raw?.trim().toUpperCase();
+    // Vercel sends "XX" when it cannot geolocate the address.
+    if (!code || code === "XX" || code.length !== 2) return null;
+    return code;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-time country backfill for profiles created before capture existed (or
+ * created off-Vercel). Guarded on null, so this is a single UPDATE per user for
+ * their lifetime rather than a write on every authenticated request.
+ *
+ * Best-effort: a failure here returns the profile untouched.
+ */
+async function backfillCountry(profile: Profile): Promise<Profile> {
+  if (profile.country) return profile;
+
+  const country = requestCountry();
+  if (!country) return profile;
+
+  const { data, error } = await supabaseServer
+    .from(PROFILES_TABLE)
+    .update({ country })
+    .eq("id", profile.id)
+    .is("country", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error || !data) return profile;
+  return data as Profile;
 }
 
 /** Resolve the authenticated Supabase user (id + email), or null. */
@@ -73,7 +120,7 @@ async function findAndPatchProfile(sessionUser: {
 }): Promise<Profile | null> {
   // a. Fast path — user already migrated or freshly created.
   const existing = await fetchProfileByUserId(sessionUser.id);
-  if (existing) return existing;
+  if (existing) return backfillCountry(existing);
 
   // b. Lazy patch — existing user's first login via Supabase Auth. Their
   //    profile was created with the old NextAuth users.id; match by email.
@@ -103,11 +150,12 @@ async function findAndPatchProfile(sessionUser: {
       .update({ user_id: sessionUser.id })
       .eq("user_id", match.user_id);
 
-    return patched as Profile;
+    return backfillCountry(patched as Profile);
   }
 
   // Race: another concurrent request already patched → fetch by new id.
-  return fetchProfileByUserId(sessionUser.id);
+  const raced = await fetchProfileByUserId(sessionUser.id);
+  return raced ? backfillCountry(raced) : null;
 }
 
 /**
@@ -137,14 +185,17 @@ async function getOrCreateProfileFromSupabaseAuth(): Promise<Profile> {
     // Handle the race where a concurrent request created the row first.
     if (error && /duplicate key|unique/i.test(error.message)) {
       const raced = await fetchProfileByUserId(sessionUser.id);
-      if (raced) return raced;
+      if (raced) return backfillCountry(raced);
     }
     const msg = error?.message || "Failed to create profile.";
     if (tableMissingMessage(msg)) throw missingTableError();
     throw new Error(msg);
   }
 
-  return data as Profile;
+  // Country is set by a follow-up UPDATE rather than being part of the insert:
+  // backfillCountry is best-effort, so a geo problem (or an environment where
+  // migration 060 has not landed yet) can never block profile creation.
+  return backfillCountry(data as Profile);
 }
 
 /**

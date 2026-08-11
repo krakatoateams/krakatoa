@@ -1,7 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  X,
+} from "lucide-react";
 
 export type AdminToastType = "loading" | "success" | "error";
 
@@ -122,6 +129,162 @@ export function AdminTableSkeleton({ rows = 6 }: { rows?: number }) {
             <Bone className="ml-auto h-8 w-20" />
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** Uppercase label that opens each block on the admin Overview. */
+export function SectionHeading({ children }: { children: ReactNode }) {
+  return (
+    <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
+      {children}
+    </h2>
+  );
+}
+
+/** Single metric tile. */
+export function StatCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-bold text-white">{value}</p>
+      {sub ? <p className="mt-0.5 text-xs text-gray-500">{sub}</p> : null}
+    </div>
+  );
+}
+
+export type AdminColumn<T> = {
+  key: string;
+  header: string;
+  /** Right-align numeric columns. */
+  align?: "left" | "right";
+  render: (row: T) => ReactNode;
+};
+
+/**
+ * Read-only admin table. Wraps the markup that was previously hand-copied
+ * across every admin page so the seven Analytics tables stay consistent.
+ */
+export function AdminTable<T>({
+  columns,
+  rows,
+  rowKey,
+  empty = "No data yet.",
+}: {
+  columns: AdminColumn<T>[];
+  rows: T[];
+  rowKey: (row: T, index: number) => string;
+  empty?: string;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl border border-gray-800 bg-gray-900/30 px-4 py-6 text-sm text-gray-500">
+        {empty}
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-gray-800">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-gray-900/60 text-[11px] uppercase tracking-wider text-gray-500">
+          <tr>
+            {columns.map((col) => (
+              <th
+                key={col.key}
+                className={`whitespace-nowrap px-4 py-2.5 font-semibold ${
+                  col.align === "right" ? "text-right" : "text-left"
+                }`}
+              >
+                {col.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {rows.map((row, i) => (
+            <tr key={rowKey(row, i)} className="text-gray-300">
+              {columns.map((col) => (
+                <td
+                  key={col.key}
+                  className={`whitespace-nowrap px-4 py-2.5 ${
+                    col.align === "right"
+                      ? "text-right tabular-nums"
+                      : "text-left"
+                  }`}
+                >
+                  {col.render(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** "X-Y of N" plus prev/next. Hidden entirely when everything fits on one page. */
+export function AdminPagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  busy = false,
+}: {
+  /** 1-based. */
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  busy?: boolean;
+}) {
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  if (total <= pageSize) return null;
+
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
+  const btn =
+    "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-800 text-gray-400 transition-colors hover:border-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
+
+  return (
+    <div className="mt-2 flex items-center justify-between px-1">
+      <p className="text-xs text-gray-500">
+        {first}-{last} of {total}
+      </p>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onPageChange(page - 1)}
+          disabled={busy || page <= 1}
+          aria-label="Previous page"
+          className={btn}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="px-1 text-xs tabular-nums text-gray-500">
+          {page} / {lastPage}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(page + 1)}
+          disabled={busy || page >= lastPage}
+          aria-label="Next page"
+          className={btn}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );
