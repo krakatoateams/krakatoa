@@ -1,43 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-type TrendingTemplate = {
-  id: string;
-  videoUrl: string;
-  thumbnailUrl: string | null;
-};
+import { TRENDING_TEMPLATES, type TrendingTemplate } from "@/lib/trending-templates";
 
 /**
  * Dashboard "Trending templates" carousel. Shows a horizontal, scroll-snapping
  * row of short motion videos. Each card previews on hover and reveals a "Use
  * template" button that deep-links into Motion Control with the clip preloaded
- * as the driving video. Renders nothing until (and unless) templates load, so
- * it never leaves an empty placeholder.
+ * as the driving video.
  */
 export default function TrendingTemplates() {
   const router = useRouter();
-  const [templates, setTemplates] = useState<TrendingTemplate[] | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/templates/trending")
-      .then((res) => (res.ok ? res.json() : { templates: [] }))
-      .then((data) => {
-        if (active) setTemplates(data.templates ?? []);
-      })
-      .catch(() => {
-        if (active) setTemplates([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (!templates || templates.length === 0) return null;
+  if (TRENDING_TEMPLATES.length === 0) return null;
 
   const scrollBy = (dir: 1 | -1) => {
     const el = scrollerRef.current;
@@ -81,7 +59,7 @@ export default function TrendingTemplates() {
         ref={scrollerRef}
         className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {templates.map((template) => (
+        {TRENDING_TEMPLATES.map((template) => (
           <TemplateCard
             key={template.id}
             template={template}
@@ -104,7 +82,6 @@ function TemplateCard({
     <div className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-gray-800 bg-gray-900 sm:w-44">
       <video
         src={template.videoUrl}
-        poster={template.thumbnailUrl ?? undefined}
         autoPlay
         muted
         loop
