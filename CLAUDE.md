@@ -26,6 +26,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`
 - **Migrate to user-first paths** (`photos|videos/{userId}` → `{userId}/photos|videos`): `npm run storage:migrate-user-first` (dry-run, scans DB + storage) / `npm run storage:migrate-user-first -- --execute` / optional `--prune-stale-db` `--delete-global-temp`
 - **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
+- **Verify signed-URL caching** (egress guard): `npm run probe:signed-url-cache`
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -45,7 +46,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - `lib/`: Shared utilities (`supabase.ts`, `supabase-server.ts`, `storage-buckets.ts`, `auth.ts`, `youtube.ts`, etc.).
   - **Reels Creator pipeline**: `reels-models.ts` (engine/schema registry + `validateReelsRequest`), `reels-pipeline/` (shared `llm`, `tts-whisper`, `ass`, `rendi-stitch`, `storage`, `seedance`, `veo`, `types`).
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
-- `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `006_dummy_credits.sql`).
+- `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `060_signed_url_cache.sql`).
 - `public/`: Static assets (images, fonts, icons).
   - **PWA**: `public/icons/` (16–512px + maskable + apple-touch), `public/sw.js` (minimal install SW), source logo `Logo White transparent.svg`. Next.js serves `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png`, and `app/manifest.ts` → `/manifest.webmanifest`. Regenerate with `npm run icons:generate`.
 
@@ -140,6 +141,20 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 - **Product Photo** uses **`{userId}/photos/`** in the same bucket — never under `videos/`.
 - **Hygiene:** `lib/storage-orphan-audit.ts` audits both roots (includes `assets` refs). `npm run storage:list-orphans` lists deletable orphans; `GET /api/cron/storage-sweep` deletes `videos/` only (daily cron).
 - **Private access (live):** `lib/storage-signed-url.ts` + `GET /api/storage/sign` mint ownership-checked signed URLs. Generation routes store `storage_path` in DB; list APIs and `useSignedMediaUrl` sign on read. Bucket `krakatoa` is **private** (migration `049_storage_bucket_private.sql`). Legacy `/api/upload` returns 410 — use `POST /api/upload/sign`.
+
+## Supabase egress (free plan — 5 GB uncached + 5 GB cached per month)
+
+**Status: fixed and verified Aug 11, 2026.** The project was throttled last month for blowing the quota. Root cause was *not* volume (202 MB stored, 7 jobs in 14 days) — it was **signed URLs whose token changed on every call**. A new URL is a new cache entry, so the browser had no ETag to revalidate and re-downloaded the whole file on every page view. Supabase does answer a conditional GET with **304 / 0 bytes**, so stable URLs make repeat views free.
+
+Rules for new code:
+
+1. **Never sign the same object twice with a fresh token for UI reads.** `createSignedStorageUrl` caches `ui`-TTL URLs in the `signed_url_cache` table (migration `060`) so the URL is identical across requests and instances. Only the `ui` TTL is cached, matched **exactly** — `ttl` arrives from a query param, so a range would let any caller mint unbounded cache rows. `pipeline` and `publish` stay short and uncached on purpose.
+2. `SIGN_TTL.ui` is **30 days**. Any client-side `setTimeout` derived from it must be clamped — past ~24.8 days the delay overflows int32 and fires immediately (see `MAX_REFRESH_MS` in `lib/use-signed-media-url.ts`).
+3. **Never render user media with `unoptimized` on `next/image`.** A 2.42 MB source PNG becomes 20 KB of WebP at grid size. `next.config.mjs` allows `/object/sign/**` with `minimumCacheTTL` 30 days.
+4. Upload with `MEDIA_CACHE_CONTROL` from `lib/storage-buckets.ts`, never a literal `"3600"`. Exception: upserted recovery staging paths.
+5. `storage.objects.metadata->>'cacheControl'` is **not** what Supabase serves — the header comes from S3 object metadata. Editing that jsonb does nothing.
+
+Check: `npm run probe:signed-url-cache`. Full write-up incl. measurements and what was ruled out: [`docs/ops/supabase-egress.md`](docs/ops/supabase-egress.md).
 
 ## Admin Config v2 (unified control panel)
 

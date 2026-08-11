@@ -8,6 +8,7 @@ import { uploadToResumable } from "@/lib/pipeline-recovery/storage";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
+  MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   videosGeneratedVideoPath,
   type VideoStudioMode,
@@ -42,7 +43,7 @@ export async function uploadAssCaptions(
     .from(STORAGE_BUCKET)
     .upload(srtFilename, assContent, {
       contentType: "text/plain",
-      cacheControl: "3600",
+      cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,
     });
   if (error) {
@@ -70,7 +71,7 @@ export async function downloadAndStoreFinal(
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
       contentType: "video/mp4",
-      cacheControl: "3600",
+      cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,
     });
   if (error) {

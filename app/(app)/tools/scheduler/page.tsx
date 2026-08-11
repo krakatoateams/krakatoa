@@ -6,7 +6,11 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
-import { isStorageRelativePath, storagePathFromStorageUrl } from "@/lib/storage-buckets";
+import {
+  MEDIA_CACHE_CONTROL,
+  isStorageRelativePath,
+  storagePathFromStorageUrl,
+} from "@/lib/storage-buckets";
 import type { CreationHistoryItem } from "@/lib/creations";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
@@ -233,7 +237,10 @@ async function signAndUploadFile(
 
   const { error: uploadError } = await getSupabaseBrowser()
     .storage.from(bucket)
-    .uploadToSignedUrl(path, token, file, { contentType: file.type });
+    .uploadToSignedUrl(path, token, file, {
+      contentType: file.type,
+      cacheControl: MEDIA_CACHE_CONTROL,
+    });
 
   if (uploadError) throw new Error(uploadError.message || "Upload failed.");
   const resolvedPath = storagePath ?? path;

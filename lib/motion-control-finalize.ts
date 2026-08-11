@@ -5,7 +5,11 @@ import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { refundCredits } from "@/lib/credits-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosGeneratedVideoPath } from "@/lib/storage-buckets";
+import {
+  MEDIA_CACHE_CONTROL,
+  STORAGE_BUCKET,
+  videosGeneratedVideoPath,
+} from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   finishGenerationRequestFailure,
@@ -94,7 +98,11 @@ export async function finalizeMotionControlSuccess(
 
   const { error: uploadError } = await supabaseServer.storage
     .from(STORAGE_BUCKET)
-    .upload(storagePath, videoBuffer, { contentType: "video/mp4", upsert: false });
+    .upload(storagePath, videoBuffer, {
+      contentType: "video/mp4",
+      cacheControl: MEDIA_CACHE_CONTROL,
+      upsert: false,
+    });
   if (uploadError) {
     throw new Error(`Failed to save video to storage: ${uploadError.message}`);
   }

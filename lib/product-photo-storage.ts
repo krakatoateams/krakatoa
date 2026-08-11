@@ -1,7 +1,11 @@
 import { getSupabase } from "@/lib/supabase";
 import { supabaseServer } from "@/lib/supabase-server";
 import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
-import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import {
+  MEDIA_CACHE_CONTROL,
+  STORAGE_BUCKET,
+  USER_CREATIONS_TABLE,
+} from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   PRODUCT_PHOTO_BUCKET,  ModelPoseId,
@@ -40,7 +44,7 @@ export async function uploadProductReferenceImage(
 
   const { error } = await storage().upload(storagePath, buffer, {
     contentType: file.type || `image/${safeExt === "jpg" ? "jpeg" : safeExt}`,
-    cacheControl: "3600",
+    cacheControl: MEDIA_CACHE_CONTROL,
     upsert: false,
   });
 
@@ -71,7 +75,7 @@ export async function saveGeneratedProductPhoto(params: {
 
   const { error } = await storage().upload(storagePath, params.imageBuffer, {
     contentType: params.contentType ?? "image/png",
-    cacheControl: "3600",
+    cacheControl: MEDIA_CACHE_CONTROL,
     upsert: false,
   });
 

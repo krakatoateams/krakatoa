@@ -27,7 +27,12 @@ import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosGeneratedVideoPath, isVideosTempRefPath } from "@/lib/storage-buckets";
+import {
+  MEDIA_CACHE_CONTROL,
+  STORAGE_BUCKET,
+  videosGeneratedVideoPath,
+  isVideosTempRefPath,
+} from "@/lib/storage-buckets";
 import { resolveRefForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
   getVideoModel,
@@ -655,7 +660,11 @@ export async function POST(req: Request) {
     }
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)
-      .upload(storagePath, videoBuffer, { contentType: "video/mp4", upsert: false });
+      .upload(storagePath, videoBuffer, {
+        contentType: "video/mp4",
+        cacheControl: MEDIA_CACHE_CONTROL,
+        upsert: false,
+      });
     if (uploadError) {
       throw new RecoverablePipelineError(
         `Failed to save video to storage: ${uploadError.message}`,

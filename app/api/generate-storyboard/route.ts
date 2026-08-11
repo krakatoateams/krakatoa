@@ -4,6 +4,7 @@ import { insertUserCreation } from "@/lib/creations-db";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { getSupabase } from "@/lib/supabase";
 import {
+  MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
 } from "@/lib/storage-buckets";
@@ -710,7 +711,7 @@ export async function POST(req: Request) {
       .from(STORAGE_BUCKET)
       .upload(storagePath, imageBuffer, {
         contentType: "image/png",
-        cacheControl: "3600",
+        cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false,
       });
 

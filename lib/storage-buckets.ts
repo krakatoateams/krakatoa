@@ -20,6 +20,16 @@
 export const STORAGE_BUCKET =
   process.env.SUPABASE_STORAGE_BUCKET ?? "krakatoa";
 
+/**
+ * `cacheControl` for every upload. supabase-js sends this as `max-age=<value>`.
+ *
+ * Generated filenames carry a timestamp and are never overwritten, so a year with
+ * `immutable` is safe. This is load-bearing for cost, not a micro-optimisation: the
+ * Supabase free plan allows 5 GB egress per month, and a short max-age means every
+ * page view re-downloads bytes the browser already has.
+ */
+export const MEDIA_CACHE_CONTROL = "31536000, immutable";
+
 /** Top-level folder for ReelsGen (.ass, .mp4) — legacy layout only */
 export const VIDEOS_FOLDER = "videos";
 

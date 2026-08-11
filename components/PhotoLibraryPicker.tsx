@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { Plus, Loader2, AlertCircle, Check, Info } from "lucide-react";
 import { Tooltip } from "@/components/studio/Tooltip";
 
@@ -238,11 +239,12 @@ export default function PhotoLibraryPicker({
                     : "border-white/10 hover:border-white/30"
                 }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src={img.url}
                   alt={img.title}
-                  className="absolute inset-0 h-full w-full object-cover"
+                  fill
+                  sizes="120px"
+                  className="object-cover"
                 />
                 {active && (
                   <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-white">
