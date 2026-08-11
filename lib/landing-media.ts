@@ -19,11 +19,16 @@ export const LANDING_VIDEO_BASE = (
   process.env.NEXT_PUBLIC_LANDING_VIDEO_BASE || DEFAULT_VIDEO_BASE
 ).replace(/\/+$/, "");
 
+/**
+ * The `-optimized` re-encodes, not the original uploads sitting beside them in
+ * the same bucket: 6.5 MB for the set against 22 MB. This is the hero, so page
+ * weight beats fidelity.
+ */
 export const LANDING_VIDEO_FILES = [
-  "Badminton (GPT).mp4",
-  "Car Racing 1 (Seedence).mp4",
-  "Car Racing 2 (seedence).mp4",
-  "Dinosaur (Kling).mp4",
+  "Badminton (GPT)-optimized.mp4",
+  "Car Racing 1 (Seedence)-optimized.mp4",
+  "Car Racing 2 (seedence)-optimized.mp4",
+  "Dinosaur (Kling)-optimized.mp4",
 ];
 
 export const LANDING_VIDEO_SRCS = LANDING_VIDEO_FILES.map(
@@ -41,9 +46,9 @@ export const LANDING_VIDEO_SRCS = LANDING_VIDEO_FILES.map(
  * it still plays in the full rotation on `/` and the auth screens.
  */
 export const LANDING_SHOWREEL: { model: string; src: string }[] = [
-  { model: "Nano Banana 2", file: "Badminton (GPT).mp4" },
-  { model: "Kling 3", file: "Dinosaur (Kling).mp4" },
-  { model: "Seedance 2", file: "Car Racing 1 (Seedence).mp4" },
+  { model: "Nano Banana 2", file: "Badminton (GPT)-optimized.mp4" },
+  { model: "Kling 3", file: "Dinosaur (Kling)-optimized.mp4" },
+  { model: "Seedance 2", file: "Car Racing 1 (Seedence)-optimized.mp4" },
 ].map(({ model, file }) => ({
   model,
   src: `${LANDING_VIDEO_BASE}/${encodeURIComponent(file)}`,
