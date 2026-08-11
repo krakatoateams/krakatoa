@@ -153,6 +153,20 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 
 Key code: `lib/admin-config-tree.ts`, `lib/video-composer-features.ts`, `lib/model-catalog-configs.ts`, `lib/admin-pipeline-config.ts`, `app/(app)/admin/config-v2/page.tsx`.
 
+## Admin Monitoring (`/admin/monitoring`)
+
+**Status: verified against the live DB and in the UI (Aug 11, 2026).** Migration `057` (read-perf indexes) is applied, `npm run admin:probe-monitoring` passes, and the panel renders real data. Only the cancel/failure scenarios that need a real generation are still outstanding. The first UI pass caught a route bug — an absent `limit` query param parsed as `0` and became `.limit(0)`, so the panel was always empty despite the probe passing; probe covers the query layer, not query-string parsing.
+
+Read-only cross-user generation monitor: who is generating what, which pipeline step they're on, and three derived anomalies — `stuck`, `cancel_not_honored`, `refund_missing`. Adds **no tables/columns**; it joins `jobs`, `job_steps`, `credit_transactions`, `generation_requests`, `generation_predictions` and `jobs.output.recovery`.
+
+Key code: `lib/admin-monitoring-flags.ts` (pure classifier + self-check), `lib/admin-monitoring-db.ts` (batched queries — 5 round trips, never N+1), `app/api/admin/monitoring/`, `app/(app)/admin/monitoring/page.tsx`.
+
+**Prompt capture (Aug 11, 2026):** `generate-video` and `generate-photo` now persist the user's prompt to `jobs.input.prompt`, and photo records the assembled prompt on the `image_generation` step (it is built after `createJob`). New generation routes should follow the same convention — user prompt on the job, assembled prompt on the step that calls the model — and the monitoring detail picks it up with no UI change. System instructions stay unstored: the template is a constant in `lib/reels-pipeline/llm.ts` and its only per-run parts (`styleAnchor`, `maxWordsPerScene`) are already on the steps.
+
+**Refund rule delegates to `shouldRefundRecoverableTerminal()`** in `lib/pipeline-recovery/refund-policy-pure.ts` — never restate refund policy in the monitoring module; add new terminal error codes to `RECOVERABLE_TERMINAL_CODES` or they surface as false positives.
+
+Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-monitoring` (needs a live DB). Historical baseline over 30 days is all zeros. The one `refund_missing` it originally surfaced was a genuine pre-fix bug (not a false positive) and was settled on Aug 11, 2026 by replaying the canonical `refund:{jobType}:{jobId}` key through the ledger RPC — corrections must be `type='refund'` with `job_id` set, since an `adjustment` fixes the balance without clearing the flag. Full doc incl. the remaining E2E checklist: [`docs/admin/admin-monitoring.md`](docs/admin/admin-monitoring.md).
+
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
 2. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.

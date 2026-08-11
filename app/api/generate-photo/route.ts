@@ -503,7 +503,18 @@ export async function POST(req: Request) {
       jobType: "product_photo",
       provider: photoModel.provider,
       model: photoModel.model,
-      input: { poseId, styleId, modelTier, resolution, pricingKey, mode, imageCount },
+      // `prompt` is what the user typed; the assembled prompt actually sent to the
+      // model is recorded on the image_generation step, since it is built later.
+      input: {
+        poseId,
+        styleId,
+        modelTier,
+        resolution,
+        pricingKey,
+        mode,
+        imageCount,
+        ...(userPrompt ? { prompt: userPrompt } : {}),
+      },
     }));
     if (job) {
       jobId = job.id;
@@ -767,7 +778,7 @@ export async function POST(req: Request) {
       imageCount > 1
         ? `Generate ${imageCount} images + save to Supabase`
         : "Nano Banana product photo generation",
-      imageCount > 1 ? { imageCount } : undefined
+      { prompt, ...(imageCount > 1 ? { imageCount } : {}) }
     );
     console.log(`[Product Photo] Running ${photoModelRef} ×${imageCount} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
     // Settled, not all-or-nothing: one bad image in a batch must not discard the

@@ -16,6 +16,8 @@
     "test:idempotency": "npx tsx lib/generation-idempotency-self-check.ts",
     "test:generation-commit": "npx tsx lib/generation-commit-self-check.ts",
     "test:recoverable-refund": "npx tsx lib/pipeline-recovery/refund-policy-pure.ts",
+    "test:monitoring-flags": "npx tsx lib/admin-monitoring-flags.ts",
+    "admin:probe-monitoring": "npx tsx scripts/probe-monitoring.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {
