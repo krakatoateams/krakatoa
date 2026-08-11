@@ -200,8 +200,12 @@ export default function Sidebar({
       <aside
         className="hidden h-screen w-60 shrink-0 flex-col border-r border-gray-800 bg-gray-950 md:sticky md:top-0 md:flex"
       >
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-5">
+      {/* Logo — doubles as the way back out to the landing page */}
+      <Link
+        href="/"
+        aria-label="Kelolako home"
+        className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-5 transition-opacity hover:opacity-80"
+      >
         <Image
           src="/Logo White transparent.svg"
           alt="Kelolako"
@@ -212,7 +216,7 @@ export default function Sidebar({
         <span className="text-base font-black uppercase tracking-[-0.5px] text-white">
           KELOLAKO
         </span>
-      </div>
+      </Link>
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-3 py-5">

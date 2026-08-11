@@ -13,8 +13,25 @@ type BaseProps = {
   icon?: LucideIcon;
   /** Hover transform for the icon circle. Defaults to a -45deg rotate. */
   iconHoverClassName?: string;
-  /** dark = white circle on gray-900 button; orange = white circle with orange arrow */
-  iconVariant?: "dark" | "orange";
+  /**
+   * dark = white circle on gray-900 button; orange = white circle with orange
+   * arrow; invert = dark circle with white arrow, for light-on-dark pills.
+   */
+  iconVariant?: IconVariant;
+};
+
+type IconVariant = "dark" | "orange" | "invert";
+
+const ICON_CIRCLE_CLASS: Record<IconVariant, string> = {
+  dark: "bg-white",
+  orange: "bg-white",
+  invert: "bg-[#111111]",
+};
+
+const ICON_ARROW_CLASS: Record<IconVariant, string> = {
+  dark: "text-gray-900",
+  orange: "text-[#F26522]",
+  invert: "text-white",
 };
 
 type ButtonProps = BaseProps &
@@ -43,16 +60,16 @@ function IconCircle({
 }: {
   iconWrapperClassName?: string;
   iconClassName?: string;
-  iconVariant?: "dark" | "orange";
+  iconVariant?: IconVariant;
   icon?: LucideIcon;
   iconHoverClassName?: string;
 }) {
   return (
     <span
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-white ${iconWrapperClassName ?? "w-6 h-6"}`}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full ${ICON_CIRCLE_CLASS[iconVariant]} ${iconWrapperClassName ?? "w-6 h-6"}`}
     >
       <Icon
-        className={`transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${iconHoverClassName} ${iconVariant === "dark" ? "text-gray-900" : "text-[#F26522]"} ${iconClassName ?? "w-3.5 h-3.5"}`}
+        className={`transition-transform duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${iconHoverClassName} ${ICON_ARROW_CLASS[iconVariant]} ${iconClassName ?? "w-3.5 h-3.5"}`}
       />
     </span>
   );

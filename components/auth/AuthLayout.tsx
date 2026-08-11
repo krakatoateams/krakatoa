@@ -3,19 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-// Same background clips as the homepage hero (components/landing/HeroSectionVideo.tsx),
-// served from our own Supabase Storage (the *.r2.dev dev domain was flaky).
-const VIDEO_BASE =
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/Internal%20Assets/Videos";
-const VIDEO_FILES = [
-  "Badminton (GPT)-optimized.mp4",
-  "Car Racing 1 (Seedence)-optimized.mp4",
-  "Car Racing 2 (seedence)-optimized.mp4",
-  "Dinosaur (Kling)-optimized.mp4",
-];
-const VIDEOS = VIDEO_FILES.map(
-  (name) => `${VIDEO_BASE}/${encodeURIComponent(name)}`
-);
+// Same background clips as the homepage hero.
+import { LANDING_VIDEO_SRCS as VIDEOS } from "@/lib/landing-media";
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
   const [currentIdx, setCurrentIdx] = useState(0);
