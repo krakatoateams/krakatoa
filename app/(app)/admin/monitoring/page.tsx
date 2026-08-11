@@ -40,6 +40,7 @@ type Row = {
   tool: string;
   job_type: string;
   status: string;
+  featureLabel: string | null;
   provider: string | null;
   model: string | null;
   created_at: string;
@@ -697,8 +698,8 @@ export default function AdminMonitoringPage() {
                     className="flex flex-wrap items-center gap-2 rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3 text-sm"
                   >
                     <span className="text-gray-200">{r.email ?? "—"}</span>
-                    <span className="text-gray-500">
-                      {r.tool} / {r.job_type}
+                    <span className="text-gray-500" title={r.job_type}>
+                      {r.tool} / {r.featureLabel ?? r.job_type}
                     </span>
                     <StatusPill status={r.status} />
                     {r.flags.map((f) => (
@@ -765,9 +766,11 @@ export default function AdminMonitoringPage() {
                             )}
                           </td>
                           <td className="px-3 py-2">{r.email ?? "—"}</td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2" title={r.job_type}>
                             <div>{r.tool}</div>
-                            <div className="text-xs text-gray-500">{r.job_type}</div>
+                            <div className="text-xs text-gray-500">
+                              {r.featureLabel ?? r.job_type}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-xs text-gray-400">{r.model ?? "—"}</td>
                           <td className="px-3 py-2">

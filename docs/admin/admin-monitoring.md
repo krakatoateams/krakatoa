@@ -88,6 +88,18 @@ Panel menampilkan prompt **hanya dari yang benar-benar ditulis pipeline** — ti
 
 ---
 
+## Kolom "Tool / mode"
+
+Baris list menampilkan `tool` di baris atas dan **mode yang dipakai user** di baris bawah. Untuk hampir semua tool, mode itu sudah ada di `jobs.job_type` (`reels_seedance`, `veo_single`, `video_text2video`, `storyboard_image`, …).
+
+**Photo adalah pengecualian:** keempat fitur omni-form (`Generate any image`, `Product try-on`, `Character generation`, `Social media post`) semuanya menulis `job_type = "product_photo"` dan hanya berbeda di `jobs.input.mode`. Sebelum 11 Agu 2026 panel menampilkan `job_type` mentah, jadi orang yang memakai Social media post **tidak bisa dibedakan** dari yang memotret produk — kelihatannya seperti tool-nya tidak terpakai padahal jobs-nya tercatat lengkap.
+
+`featureLabelOf()` di [`lib/admin-monitoring-db.ts`](../../lib/admin-monitoring-db.ts) menerjemahkan `input.mode` lewat label katalog di [`lib/creation-features.ts`](../../lib/creation-features.ts) (`social` → "Social media post"). Mode yang tidak dikenal ditampilkan apa adanya, `job_type` mentah tetap bisa dilihat lewat tooltip kolomnya.
+
+> Kalau nanti ada tool lain yang menaruh beberapa fitur user di satu `job_type`, tambahkan cabangnya di `featureLabelOf()` — jangan bikin map label baru di komponen UI.
+
+---
+
 ## Batas yang disengaja
 
 | Batasan | Alasan | Kapan diperbaiki |

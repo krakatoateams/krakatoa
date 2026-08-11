@@ -2,6 +2,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { embeddedEmail, type ProfileEmbed } from "@/lib/admin-metrics-db";
 import { parseRecoveryManifest } from "@/lib/pipeline-recovery/manifest";
 import { classifyJobFlags, type JobFlag } from "@/lib/admin-monitoring-flags";
+import { getPhotoFeature, isPhotoFeatureKey } from "@/lib/creation-features";
 
 /**
  * Read-only cross-user generation monitoring for the admin panel.
@@ -39,6 +40,8 @@ export type MonitoringRow = {
   tool: string;
   job_type: string;
   status: string;
+  /** User-facing sub-feature when job_type alone can't name it (see featureLabelOf). */
+  featureLabel: string | null;
   provider: string | null;
   model: string | null;
   cost_credits: number;
@@ -109,6 +112,23 @@ function ms(iso: string | null | undefined): number {
 function errorCodeOf(error: Record<string, unknown> | null): string | null {
   const code = error?.code;
   return typeof code === "string" ? code : null;
+}
+
+/**
+ * Photo is the one tool whose job_type hides which feature ran: Product try-on,
+ * Generate any image, Character and Social media post all write
+ * `job_type = "product_photo"` and only differ by `input.mode`. Without this an
+ * admin cannot tell a Social media post from a product shot in the list, so
+ * "nobody used Social media post" and "four people did" look identical.
+ * Every other tool already encodes its mode in job_type.
+ */
+function featureLabelOf(job: {
+  tool: string;
+  input: Record<string, unknown> | null;
+}): string | null {
+  const mode = job.input?.mode;
+  if (job.tool !== "photo" || typeof mode !== "string") return null;
+  return isPhotoFeatureKey(mode) ? getPhotoFeature(mode).label : mode;
 }
 
 /** Batched side-table reads keyed by job_id. Empty ids short-circuits the round trip. */
@@ -249,6 +269,7 @@ export async function getAdminMonitoring(options?: {
       tool: j.tool,
       job_type: j.job_type,
       status: j.status,
+      featureLabel: featureLabelOf(j),
       provider: j.provider,
       model: j.model,
       cost_credits: j.cost_credits,

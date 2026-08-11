@@ -66,7 +66,8 @@ async function main() {
   for (const r of rows.slice(0, 10)) {
     const step = r.currentStep ? `${r.currentStep.step_key}(${r.currentStep.status})` : "-";
     console.log(
-      `  ${r.status.padEnd(11)} ${r.tool}/${r.job_type} model=${r.model ?? "-"}\n` +
+      `  ${r.status.padEnd(11)} ${r.tool}/${r.job_type}` +
+        `${r.featureLabel ? ` [${r.featureLabel}]` : ""} model=${r.model ?? "-"}\n` +
         `    step=${step} steps=${r.stepCount} spent=${r.spentCredits} refunded=${r.refundedCredits} ` +
         `cancelReq=${r.cancelRequested} cancelAllowed=${r.cancelAllowed} preds=${r.predictionCount} ` +
         `code=${r.errorCode ?? "-"} flags=[${r.flags.join(",")}]`
