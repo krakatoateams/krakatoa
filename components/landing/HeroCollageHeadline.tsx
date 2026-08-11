@@ -1,3 +1,5 @@
+import { HERO_HEADLINE, type HeadlineToken } from "@/lib/landing-content";
+
 const headlineSize = "clamp(2.25rem, 8.5vw, 5.875rem)";
 const emojiBoxClass =
   "font-emoji inline-flex align-middle items-center justify-center shrink-0 h-[clamp(2.5rem,9vw,6rem)] text-[clamp(1.5rem,5.5vw,3.5rem)] leading-none";
@@ -43,6 +45,18 @@ function HeroScallopBadge({ emoji }: { emoji: string }) {
 
 const lineClass = "flex flex-wrap items-center justify-center gap-x-1 gap-y-2";
 
+const ORNAMENTS = {
+  pill: HeroEmojiPill,
+  badge: HeroScallopBadge,
+  circle: HeroEmojiCircle,
+} as const;
+
+function HeadlineTokenView({ token }: { token: HeadlineToken }) {
+  if (token.kind === "text") return <span>{token.value}</span>;
+  const Ornament = ORNAMENTS[token.variant];
+  return <Ornament emoji={token.emoji} />;
+}
+
 export function HeroCollageHeadline({
   tone = "dark",
 }: { tone?: "dark" | "light" } = {}) {
@@ -53,21 +67,16 @@ export function HeroCollageHeadline({
       }`}
       style={{ fontSize: headlineSize }}
     >
-      <span className={lineClass}>
-        Everything
-        <HeroEmojiPill emoji="🎬" />
-        You
-      </span>
-      <span className={`${lineClass} mt-5 sm:mt-6`}>
-        Need
-        <HeroScallopBadge emoji="🏷️" />
-        To Grow Your
-      </span>
-      <span className={`${lineClass} mt-5 sm:mt-6`}>
-        Content
-        <HeroEmojiCircle emoji="📈" />
-        Reach
-      </span>
+      {HERO_HEADLINE.map((line, lineIndex) => (
+        <span
+          key={lineIndex}
+          className={lineIndex === 0 ? lineClass : `${lineClass} mt-5 sm:mt-6`}
+        >
+          {line.map((token, tokenIndex) => (
+            <HeadlineTokenView key={tokenIndex} token={token} />
+          ))}
+        </span>
+      ))}
     </h1>
   );
 }

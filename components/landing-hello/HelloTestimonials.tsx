@@ -4,18 +4,11 @@ import {
   TESTIMONIALS,
   TESTIMONIALS_HEADING,
   type Testimonial,
-  type TestimonialPlatform,
 } from "@/lib/landing-content";
+import { eyebrow } from "./theme";
 
 const ROW_ONE = TESTIMONIALS;
 const ROW_TWO = [...TESTIMONIALS].reverse();
-
-const PLATFORM_STYLE: Record<TestimonialPlatform, string> = {
-  Instagram: "bg-[#E1306C]/10 text-[#C13584]",
-  TikTok: "bg-gray-900/[0.06] text-gray-900",
-  YouTube: "bg-[#FF0000]/10 text-[#CC0000]",
-  X: "bg-gray-900/[0.06] text-gray-900",
-};
 
 function getInitials(name: string) {
   return name
@@ -28,23 +21,20 @@ function getInitials(name: string) {
 
 function TestimonialCard({ t }: { t: Testimonial }) {
   return (
-    <article className="flex w-[300px] shrink-0 flex-col gap-5 rounded-3xl bg-white p-6 ring-1 ring-black/[0.06] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.08)] sm:w-[340px] sm:p-7 lg:w-[360px]">
-      <p className="text-[15px] leading-relaxed text-gray-900">
+    <article className="flex w-[300px] shrink-0 flex-col gap-5 rounded-xl bg-[#171717] p-6 sm:w-[340px] sm:p-7 lg:w-[360px]">
+      <p className="text-[15px] leading-relaxed text-[#dddddd]">
         &ldquo;{t.quote}&rdquo;
       </p>
       <div className="mt-auto flex items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[12px] font-semibold text-white">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#0a0a0a] text-[12px] font-medium text-[#cccccc]">
           {getInitials(t.name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-gray-900">
-            {t.name}
-          </p>
-          <p className="truncate text-[12px] text-gray-500">{t.handle}</p>
+          <p className="truncate text-sm font-medium text-white">{t.name}</p>
+          <p className="truncate text-[12px] text-[#8a8a8a]">{t.handle}</p>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${PLATFORM_STYLE[t.platform]}`}
-        >
+        {/* Platform badges go monochrome — arqe's system has no chroma at all. */}
+        <span className="shrink-0 rounded-full border border-[#2a2a2a] px-2.5 py-1 text-[11px] font-medium text-[#8a8a8a]">
           {t.platform}
         </span>
       </div>
@@ -75,16 +65,17 @@ function MarqueeRow({
   );
 }
 
-export function TestimonialsSection() {
+export function HelloTestimonials() {
   return (
     <section
       id="testimonials"
-      className="relative overflow-hidden bg-[#111827] pt-16 pb-16 sm:pt-20 sm:pb-20 lg:pt-28 lg:pb-28"
+      className="relative overflow-hidden bg-[#0a0a0a] pt-16 pb-16 sm:pt-20 sm:pb-20 lg:pt-28 lg:pb-28"
     >
       <div className="mx-auto max-w-[1440px]">
         <div className="mb-10 px-5 sm:mb-12 sm:px-8 lg:mb-14 lg:px-12">
+          <span className={eyebrow}>Testimonials</span>
           <h2
-            className="max-w-3xl font-medium leading-[1.08] tracking-[-0.02em] text-white"
+            className="mt-5 max-w-3xl font-medium leading-[1.08] tracking-[-0.02em] text-white"
             style={{ fontSize: "clamp(1.75rem, 5vw, 3rem)" }}
           >
             {TESTIMONIALS_HEADING}
@@ -100,11 +91,11 @@ export function TestimonialsSection() {
 
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-[#111827] to-transparent sm:w-24"
+          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-[#0a0a0a] to-transparent sm:w-24"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[#111827] to-transparent sm:w-24"
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[#0a0a0a] to-transparent sm:w-24"
         />
       </div>
     </section>

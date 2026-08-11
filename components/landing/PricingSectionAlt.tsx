@@ -10,22 +10,25 @@ import { Check, Flame, X } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
 import { useCurrentUser } from "@/lib/auth-context";
 import {
-  DEFAULT_CREDIT_PACKS,
   formatIdr,
   packBonusValueIdr,
   packTotalCredits,
   type CreditPack,
 } from "@/lib/credit-packs";
-
-// Where the "Purchase" CTA sends visitors. Signed-in users go straight to the
-// add-credit page; everyone else is funneled through login first.
-const CREDIT_CTA_HREF_AUTHED = "/dashboard/settings?tab=credits";
-const CREDIT_CTA_HREF_GUEST = "/login";
-
-// Rough spend rates used only to estimate what a pack buys (matches the copy in
-// the aside: ~10 credits per AI reel · 2 per product photo).
-const CREDITS_PER_IMAGE = 2;
-const CREDITS_PER_VIDEO = 10;
+import { useCreditPacks } from "@/lib/use-credit-packs";
+import {
+  CREDITS_PER_IMAGE,
+  CREDITS_PER_VIDEO,
+  CREDIT_CTA_HREF_AUTHED,
+  CREDIT_CTA_HREF_GUEST,
+  CREDIT_POLICY,
+  PLANS,
+  PRICING_ASIDE,
+  PRICING_HEADING,
+  PRICING_SUBHEADING,
+  SHOW_PLANS,
+  type Plan,
+} from "@/lib/landing-content";
 
 // useLayoutEffect on the server logs a warning; this component is "use client"
 // but Next still SSR's the initial render, so fall back to useEffect on the
@@ -34,69 +37,6 @@ const useIsoLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 type Mode = "plans" | "credits";
-
-type Plan = {
-  id: "free" | "pro" | "studio";
-  name: string;
-  price: string;
-  cadence: string;
-  tagline: string;
-  features: string[];
-  ctaHref: string;
-  ctaLabel: string;
-  featured?: boolean;
-};
-
-const PLANS: Plan[] = [
-  {
-    id: "free",
-    name: "Free",
-    price: "$0",
-    cadence: "/mo",
-    tagline: "Try the suite. Ship your first reel.",
-    features: [
-      "5 AI reels per month",
-      "Standard templates",
-      "Standard generation queue",
-      "Kelolako watermark",
-    ],
-    ctaHref: "#growth",
-    ctaLabel: "Start free",
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "$29",
-    cadence: "/mo",
-    featured: true,
-    tagline: "Everything solo creators need to grow.",
-    features: [
-      "50 AI reels per month",
-      "All tools incl. Product Photo + Scheduler",
-      "No watermark",
-      "Priority generation",
-      "Caption studio + ASS subtitles",
-    ],
-    ctaHref: "#growth",
-    ctaLabel: "Get Pro",
-  },
-  {
-    id: "studio",
-    name: "Studio",
-    price: "$99",
-    cadence: "/mo",
-    tagline: "For teams and growing brands.",
-    features: [
-      "Unlimited AI reels",
-      "Team seats + roles",
-      "API access",
-      "Advanced analytics",
-      "Priority support",
-    ],
-    ctaHref: "#growth",
-    ctaLabel: "Talk to us",
-  },
-];
 
 function CardShell({
   featured,
@@ -377,38 +317,12 @@ function ModeToggle({
   );
 }
 
-// Subscription plans are hidden for now — only credit packs are offered.
-// Flip this to re-enable the Plans/Credits toggle and the plan tier cards.
-const SHOW_PLANS = false;
-
 export function PricingSectionAlt() {
   const [mode, setMode] = useState<Mode>(SHOW_PLANS ? "plans" : "credits");
   const [policyOpen, setPolicyOpen] = useState(false);
-  // Admin-managed tiers, seeded with the static defaults then refreshed from the
-  // public packs API (falls back to defaults if the fetch fails).
-  const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_CREDIT_PACKS);
+  const packs = useCreditPacks();
   const { status } = useCurrentUser();
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadPacks = () => {
-      fetch("/api/credits/packs", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: { packs?: CreditPack[] } | null) => {
-          if (!cancelled && d?.packs?.length) setPacks(d.packs);
-        })
-        .catch(() => {});
-    };
-    loadPacks();
-    // Refresh tiers when the tab regains focus so admin price edits appear
-    // without a hard reload.
-    const onFocus = () => loadPacks();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-    };
-  }, []);
   const creditHref =
     status === "authenticated"
       ? CREDIT_CTA_HREF_AUTHED
@@ -430,10 +344,10 @@ export function PricingSectionAlt() {
             className="max-w-3xl font-medium leading-[1.08] tracking-[-0.02em] text-gray-900"
             style={{ fontSize: "clamp(1.75rem, 5vw, 3rem)" }}
           >
-            Pricing that scales with your content.
+            {PRICING_HEADING}
           </h2>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-gray-600 sm:text-base">
-            Buy credits and pay only for what you create. No subscription.
+            {PRICING_SUBHEADING}
           </p>
         </div>
 
@@ -460,20 +374,14 @@ export function PricingSectionAlt() {
                   className="font-medium leading-[1.12] tracking-[-0.02em] text-gray-900"
                   style={{ fontSize: "clamp(1.5rem, 3vw, 2rem)" }}
                 >
-                  Pay only for what you create.
+                  {PRICING_ASIDE.heading}
                 </h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-gray-600">
-                  Buy credits in bulk and spend them across every Kelolako
-                  tool. No subscription. No surprise charges.
+                  {PRICING_ASIDE.body}
                 </p>
 
                 <ul className="mt-6 flex flex-col gap-3">
-                  {[
-                    "Mix & match across reels, photos, and captions",
-                    "Better value on larger packs",
-                    "No monthly commitment",
-                    "2-year validity from redemption",
-                  ].map((f) => (
+                  {PRICING_ASIDE.bullets.map((f) => (
                     <li
                       key={f}
                       className="flex items-start gap-3 text-[14px] leading-relaxed text-gray-700"
@@ -490,17 +398,16 @@ export function PricingSectionAlt() {
                 </ul>
 
                 <p className="mt-6 text-[12px] text-gray-500">
-                  ~10 credits per AI reel · 2 per product photo · 1 per caption
+                  {PRICING_ASIDE.rateNote}
                 </p>
                 <p className="mt-auto pt-6 text-[12px] leading-relaxed text-gray-400">
-                  Credits cannot be exchanged for memberships, nor refunded,
-                  transferred, or withdrawn.{" "}
+                  {PRICING_ASIDE.disclaimer}{" "}
                   <button
                     type="button"
                     onClick={() => setPolicyOpen(true)}
                     className="font-medium text-emerald-600 underline-offset-2 hover:text-emerald-700 hover:underline"
                   >
-                    Credits Policy
+                    {PRICING_ASIDE.policyLinkLabel}
                   </button>
                 </p>
               </aside>
@@ -561,7 +468,7 @@ function CreditPolicyModal({
             id="credits-policy-title"
             className="text-lg font-semibold tracking-[-0.01em] text-gray-900"
           >
-            Credits Policy
+            {CREDIT_POLICY.title}
           </h3>
           <button
             type="button"
@@ -574,13 +481,7 @@ function CreditPolicyModal({
         </div>
 
         <ul className="flex flex-col gap-3 p-6 text-[14px] leading-relaxed text-gray-600">
-          {[
-            "Credits are non-refundable, non-transferable, and cannot be withdrawn or exchanged for cash.",
-            "Credits cannot be exchanged for memberships or subscription plans.",
-            "Credits are valid for 2 years from the date of redemption.",
-            "Spent credits are consumed at generation time and are not returned for outputs you choose not to use.",
-            "Kelolako may adjust credit pricing for future purchases; credits already purchased keep their granted value.",
-          ].map((item) => (
+          {CREDIT_POLICY.items.map((item) => (
             <li key={item} className="flex items-start gap-3">
               <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
                 <Check className="h-3 w-3 text-emerald-600" strokeWidth={2.5} />
@@ -596,7 +497,7 @@ function CreditPolicyModal({
             onClick={onClose}
             className="rounded-full bg-gray-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800"
           >
-            Got it
+            {CREDIT_POLICY.dismissLabel}
           </button>
         </div>
       </div>
