@@ -1,53 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
 import { Gift, type LucideIcon } from "lucide-react";
 import { TextRollButton } from "./TextRollButton";
-
-const ABOUT_PHOTOS = [
-  "https://images.unsplash.com/photo-1614858978391-a3feca014006?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1767571900953-a6efae9c0ac1?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1761898565688-b5dec21c908a?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1675573206424-36f844f7627a?w=1200&auto=format&fit=crop&q=80",
-];
-
-function FadePhotoCarousel({
-  images,
-  intervalMs = 4000,
-}: {
-  images: string[];
-  intervalMs?: number;
-}) {
-  const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    if (images.length <= 1) return;
-    const id = setInterval(
-      () => setActive((prev) => (prev + 1) % images.length),
-      intervalMs
-    );
-    return () => clearInterval(id);
-  }, [images.length, intervalMs]);
-
-  return (
-    <>
-      {images.map((src, i) => (
-        <Image
-          key={src}
-          src={src}
-          alt="AI-generated content creation"
-          fill
-          priority={i === 0}
-          className={`object-cover object-[center_30%] transition-opacity duration-1000 ease-in-out ${
-            i === active ? "opacity-100" : "opacity-0"
-          }`}
-          sizes="(min-width: 1024px) 50vw, 100vw"
-        />
-      ))}
-    </>
-  );
-}
+import { FadePhotoCarousel } from "./FadePhotoCarousel";
+import { ABOUT, ABOUT_PHOTOS } from "@/lib/landing-content";
 
 function StatCard({
   value,
@@ -108,26 +65,28 @@ export function AboutSectionAlt() {
               className="font-medium leading-[1.06] tracking-[-0.02em]"
               style={{ fontSize: "clamp(1.75rem, 4.2vw, 3rem)" }}
             >
-              AI video and images,
-              <br className="hidden sm:block" />
-              <span className="sm:hidden"> </span>
-              from prompt to
-              <br className="hidden sm:block" />
-              <span className="sm:hidden"> </span>
-              post in minutes.
+              {ABOUT.headingLines.map((line, i) => (
+                <span key={line}>
+                  {i > 0 ? (
+                    <>
+                      <br className="hidden sm:block" />
+                      <span className="sm:hidden"> </span>
+                    </>
+                  ) : null}
+                  {line}
+                </span>
+              ))}
             </h2>
             <p className="mt-6 max-w-md text-base leading-relaxed text-white/70 sm:mt-7">
-              Generate faceless reels, cinematic clips, and studio-grade product
-              photos with one AI suite — scripted, generated, captioned, and
-              ready to publish.
+              {ABOUT.body}
             </p>
             <div className="mt-auto pt-8 lg:pt-10">
               <TextRollButton
-                href="#features"
+                href={ABOUT.cta.href}
                 className="inline-flex items-center gap-2 bg-[#F26522] hover:bg-[#e05a1a] text-white text-sm font-medium rounded-full pl-5 pr-2 py-2 transition-colors"
                 iconVariant="orange"
               >
-                Explore our tools
+                {ABOUT.cta.label}
               </TextRollButton>
             </div>
           </div>
@@ -143,8 +102,7 @@ export function AboutSectionAlt() {
               className="max-w-2xl font-medium leading-[1.25]"
               style={{ fontSize: "clamp(1.25rem, 2.2vw, 1.625rem)" }}
             >
-              We don&apos;t just generate content — we help brands realize
-              their voice at scale.
+              {ABOUT.manifesto}
             </p>
             <div className="mt-6 flex items-center gap-3 text-sm text-white/85">
               <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-black ring-1 ring-white/30">
@@ -156,14 +114,14 @@ export function AboutSectionAlt() {
                   className="h-full w-full object-contain p-1.5"
                 />
               </span>
-              <span>Kelolako team · est. 2026</span>
+              <span>{ABOUT.byline}</span>
             </div>
           </div>
 
           <StatCard
             icon={Gift}
-            value="Free to start"
-            label="Register now — no commitment, no card required"
+            value={ABOUT.stat.value}
+            label={ABOUT.stat.label}
             tone="dark"
             className="sm:col-span-2 lg:col-span-1"
           />

@@ -4,9 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { storagePathFromStorageUrl } from "@/lib/storage-buckets";
 
-/** Re-sign 5 min before expiry (ui TTL = 1h). */
+/** Re-sign 5 min before expiry. */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const MIN_REFRESH_MS = 60_000;
+/**
+ * setTimeout stores its delay in a signed 32-bit int, so anything past ~24.8 days
+ * overflows and fires immediately — which would turn the long UI TTL into a re-sign
+ * loop. Cap the wait; a page open longer than this re-signs once, harmlessly.
+ */
+const MAX_REFRESH_MS = 12 * 60 * 60 * 1000;
 
 /** Extract `storagePath` from generate-* JSON (top-level or historyItem). */
 export function pickGenerateStoragePath(data: {
@@ -25,7 +31,7 @@ export function pickGenerateStoragePath(data: {
 
 /**
  * Resolve a fetchable media URL from a canonical storage path.
- * Re-signs before expiry so previews/downloads stay valid past 1h.
+ * Re-signs before expiry so previews/downloads stay valid.
  * `seedUrl` — optional signed URL from the generate response for instant first paint.
  */
 export function useSignedMediaUrl(
@@ -59,7 +65,8 @@ export function useSignedMediaUrl(
         setSignedUrl(signed.url);
         clearTimer();
         const ms = new Date(signed.expiresAt).getTime() - Date.now() - REFRESH_BUFFER_MS;
-        timerRef.current = setTimeout(() => void load(), Math.max(ms, MIN_REFRESH_MS));
+        const delay = Math.min(Math.max(ms, MIN_REFRESH_MS), MAX_REFRESH_MS);
+        timerRef.current = setTimeout(() => void load(), delay);
       } catch {
         if (!cancelled) setSignedUrl(null);
       }

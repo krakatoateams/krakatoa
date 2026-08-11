@@ -164,6 +164,13 @@ interface RawStatusFetchResponse {
   data?: {
     status?: string;
     fail_reason?: string;
+    // TikTok's docs type this as `list<int64>` — real post IDs are ~19-digit
+    // snowflake-style numbers that exceed Number.MAX_SAFE_INTEGER, so if
+    // TikTok ever serializes it as a bare (unquoted) JSON number rather than
+    // a string, JSON.parse would silently round it to the wrong value. See
+    // extractFirstPublicPostId, which reads the raw response text instead of
+    // trusting this parsed field for the actual ID.
+    publicaly_available_post_id?: Array<string | number>;
   };
   error?: { code?: string; message?: string; log_id?: string };
 }
@@ -171,6 +178,26 @@ interface RawStatusFetchResponse {
 interface TikTokPublishStatus {
   status: string;
   failReason: string;
+  /** Only present once `status = PUBLISH_COMPLETE` AND the post's
+   * privacy_level is public (not SELF_ONLY) — TikTok's own docs: "returned
+   * only if the post is published for public viewership." First entry of
+   * TikTok's `publicaly_available_post_id` array, as an exact-digit string
+   * (see extractFirstPublicPostId for why this isn't just `json.data...[0]`). */
+  publicPostId: string | null;
+}
+
+/**
+ * Extracts the first `publicaly_available_post_id` entry directly from the
+ * raw response text via regex, rather than trusting the value JSON.parse
+ * already produced — a real int64 in that array can exceed
+ * Number.MAX_SAFE_INTEGER, and if TikTok ever sends it unquoted, JSON.parse
+ * would have already silently rounded it before we could stringify it back.
+ * Reading the exact digit run from the source text sidesteps that entirely,
+ * matching whichever form (quoted or bare) TikTok actually sent.
+ */
+function extractFirstPublicPostId(rawText: string): string | null {
+  const match = rawText.match(/"publicaly_available_post_id"\s*:\s*\[\s*"?(\d+)"?/);
+  return match ? match[1] : null;
 }
 
 async function fetchPublishStatus(accessToken: string, publishId: string): Promise<TikTokPublishStatus> {
@@ -183,12 +210,19 @@ async function fetchPublishStatus(accessToken: string, publishId: string): Promi
     body: JSON.stringify({ publish_id: publishId }),
   });
 
-  const json = (await res.json()) as RawStatusFetchResponse;
+  const rawText = await res.text();
+  const json = JSON.parse(rawText) as RawStatusFetchResponse;
   if (!res.ok || (json.error?.code && json.error.code !== "ok") || !json.data?.status) {
     throw new Error(`TikTok status fetch failed: ${json.error?.message ?? res.statusText}`);
   }
 
-  return { status: json.data.status, failReason: json.data.fail_reason ?? "" };
+  return {
+    status: json.data.status,
+    failReason: json.data.fail_reason ?? "",
+    publicPostId: json.data.publicaly_available_post_id?.length
+      ? extractFirstPublicPostId(rawText)
+      : null,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -203,9 +237,21 @@ const STATUS_POLL_INTERVAL_MS = 3000;
 const STATUS_POLL_MAX_WAIT_MS = 24000;
 
 export type TikTokPublishOutcome =
-  | { outcome: "complete" }
+  | { outcome: "complete"; publicPostId: string | null }
   | { outcome: "failed"; failReason: string }
   | { outcome: "pending"; lastStatus: string };
+
+/**
+ * Builds a real, clickable TikTok permalink from a public-post ID + the
+ * connected creator's username. Only meaningful once `publicPostId` is
+ * non-null (i.e. the post's privacy_level was public, not SELF_ONLY) — a
+ * SELF_ONLY post never gets a `publicaly_available_post_id` from TikTok at
+ * all, so there is nothing to link to (see design notes in
+ * openspec/changes/tiktok-view-on-tiktok for the SELF_ONLY-era history).
+ */
+export function buildTikTokShareUrl(username: string, publicPostId: string): string {
+  return `https://www.tiktok.com/@${username}/video/${publicPostId}`;
+}
 
 /**
  * Polls TikTok's publish status (POST /v2/post/publish/status/fetch/) until
@@ -229,9 +275,9 @@ export async function waitForTikTokPublishOutcome(
   const deadline = Date.now() + STATUS_POLL_MAX_WAIT_MS;
   let lastStatus = "";
   while (true) {
-    const { status, failReason } = await fetchPublishStatus(accessToken, publishId);
+    const { status, failReason, publicPostId } = await fetchPublishStatus(accessToken, publishId);
     lastStatus = status;
-    if (status === "PUBLISH_COMPLETE") return { outcome: "complete" };
+    if (status === "PUBLISH_COMPLETE") return { outcome: "complete", publicPostId };
     if (status === "FAILED") return { outcome: "failed", failReason: failReason || "Unknown failure reason." };
     // Still going: PROCESSING_UPLOAD (video) / PROCESSING_DOWNLOAD (photo) /
     // SEND_TO_USER_INBOX (draft-review flow, not used by this app's DIRECT_POST).

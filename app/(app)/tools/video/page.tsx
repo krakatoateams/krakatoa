@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   Plus,
@@ -2837,12 +2838,15 @@ function StoryboardToVideoComposer({
                         : "border-white/10 hover:border-white/30"
                     }`}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={s.storyboardUrl}
-                      alt={s.theme}
-                      className="aspect-[3/2] w-full object-cover"
-                    />
+                    <div className="relative aspect-[3/2] w-full">
+                      <Image
+                        src={s.storyboardUrl}
+                        alt={s.theme}
+                        fill
+                        sizes="(min-width: 640px) 220px, 45vw"
+                        className="object-cover"
+                      />
+                    </div>
                     <span className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-300">
                       {s.aspectRatio && (
                         <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-xs font-semibold text-gray-200">

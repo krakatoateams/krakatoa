@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2,
@@ -1573,11 +1574,12 @@ function PhotoOmniPage() {
                         }`}
                       >
                         <div className="relative aspect-square w-full bg-black/40">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <Image
                             src={item.mediaUrl}
                             alt={name}
-                            className="absolute inset-0 h-full w-full object-cover"
+                            fill
+                            sizes="160px"
+                            className="object-cover"
                           />
                         </div>
                         <p className="truncate px-2 py-1.5 text-[11px] font-medium text-white">

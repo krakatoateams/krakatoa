@@ -2,36 +2,37 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HeroLayout } from "./HeroSection";
-
-// Served from R2 behind our own cdn.kelolako.com. Not the *.r2.dev public dev
-// domain, which is rate-limited/best-effort and intermittently returned blank
-// clips; and not Supabase Storage, whose egress we pay for.
-const VIDEO_BASE = "https://cdn.kelolako.com";
-
-const VIDEO_FILES = [
-  "Badminton (GPT)-optimized.mp4",
-  "Car Racing 1 (Seedence)-optimized.mp4",
-  "Car Racing 2 (seedence)-optimized.mp4",
-  "Dinosaur (Kling)-optimized.mp4",
-];
-
-const VIDEO_SRCS = VIDEO_FILES.map(
-  (name) => `${VIDEO_BASE}/${encodeURIComponent(name)}`
-);
+import { LANDING_VIDEO_SRCS as VIDEO_SRCS } from "@/lib/landing-media";
 
 /**
  * Plays a playlist of background clips one after another with a soft
  * crossfade. Only the current and next clip are preloaded so the hero
  * doesn't pull every video at once.
  */
-function VideoBackdrop({ srcs }: { srcs: string[] }) {
-  const [active, setActive] = useState(0);
+export function VideoBackdrop({
+  srcs,
+  overlayClassName = "bg-black/40",
+  activeIndex,
+  onActiveIndexChange,
+}: {
+  srcs: string[];
+  /** Darkening layer above the clips, below the hero content. */
+  overlayClassName?: string;
+  /** Pass to drive the playlist from outside; omit to self-advance. */
+  activeIndex?: number;
+  onActiveIndexChange?: (index: number) => void;
+}) {
+  const [internalActive, setInternalActive] = useState(0);
+  const controlled = activeIndex != null;
+  const active = controlled ? activeIndex : internalActive;
   const refs = useRef<(HTMLVideoElement | null)[]>([]);
   const nextIndex = (active + 1) % srcs.length;
 
   const advance = useCallback(() => {
-    setActive((prev) => (prev + 1) % srcs.length);
-  }, [srcs.length]);
+    const next = (active + 1) % srcs.length;
+    if (controlled) onActiveIndexChange?.(next);
+    else setInternalActive(next);
+  }, [active, srcs.length, controlled, onActiveIndexChange]);
 
   useEffect(() => {
     const el = refs.current[active];
@@ -62,7 +63,7 @@ function VideoBackdrop({ srcs }: { srcs: string[] }) {
         />
       ))}
       {/* Darkening overlay for contrast — sits above the clips, below content */}
-      <div className="absolute inset-0 bg-black/40" aria-hidden />
+      <div className={`absolute inset-0 ${overlayClassName}`} aria-hidden />
     </div>
   );
 }

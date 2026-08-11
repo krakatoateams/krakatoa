@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  MAX_SIGN_TTL,
   SIGN_TTL,
   type SignTtlKind,
   type SignedStorageUrl,
@@ -14,7 +15,7 @@ type BatchItem = { assetId?: string; path?: string };
 
 function parseTtl(raw: unknown): SignTtlKind | number {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-    return Math.min(Math.floor(raw), SIGN_TTL.pipeline);
+    return Math.min(Math.floor(raw), MAX_SIGN_TTL);
   }
   if (typeof raw === "string" && raw in SIGN_TTL) return raw as SignTtlKind;
   return "ui";

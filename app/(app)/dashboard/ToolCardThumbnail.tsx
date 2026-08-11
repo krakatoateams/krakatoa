@@ -60,7 +60,7 @@ export default function ToolCardThumbnail({
               alt={item.title}
               fill
               className="object-cover"
-              unoptimized
+              sizes="160px"
             />
           )}
         </div>

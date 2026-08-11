@@ -6,6 +6,7 @@ import { Menu, X, ArrowRight } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { LondonClock } from "./LondonClock";
 import { TextRollButton } from "./TextRollButton";
+import { NAV_LINKS } from "@/lib/landing-content";
 
 /** First letter for the avatar circle, from name/email (falls back to "U"). */
 function initialFrom(name: string | null, email: string | null): string {
@@ -13,11 +14,7 @@ function initialFrom(name: string | null, email: string | null): string {
   return source.charAt(0).toUpperCase();
 }
 
-const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "Pricing", href: "#pricing" },
-  { label: "Testimonials", href: "#testimonials" },
-];
+const navLinks = NAV_LINKS;
 
 /** Parse a CSS color string ("rgb(...)" / "rgba(...)") into [r,g,b,a]. */
 function parseRgba(color: string): [number, number, number, number] | null {

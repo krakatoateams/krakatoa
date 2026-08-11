@@ -1,69 +1,16 @@
 "use client";
 
-type Platform = "Instagram" | "TikTok" | "YouTube" | "X";
-
-type Testimonial = {
-  quote: string;
-  name: string;
-  handle: string;
-  platform: Platform;
-};
-
-const TESTIMONIALS: Testimonial[] = [
-  {
-    quote: "Kelolako cut my reel turnaround from 4 hours to 4 minutes.",
-    name: "Maya Chen",
-    handle: "@mayamakes",
-    platform: "Instagram",
-  },
-  {
-    quote: "Captions actually land on the beat. First tool that gets it.",
-    name: "Diego Alvarez",
-    handle: "@diegoshoots",
-    platform: "TikTok",
-  },
-  {
-    quote: "My product photos look like a $5k studio session.",
-    name: "Priya Shah",
-    handle: "@priyastudio",
-    platform: "Instagram",
-  },
-  {
-    quote: "Scheduling and reels in one place finally clicked for my team.",
-    name: "Tomo Sato",
-    handle: "@tomocreates",
-    platform: "YouTube",
-  },
-  {
-    quote: "The narration sounds human. My audience can't tell.",
-    name: "Lena Rios",
-    handle: "@lenaonair",
-    platform: "TikTok",
-  },
-  {
-    quote: "I post 5x more content with the same headcount.",
-    name: "Jordan Pike",
-    handle: "@jordanpike",
-    platform: "Instagram",
-  },
-  {
-    quote: "Honestly the only AI tool I pay for.",
-    name: "Aisha Bello",
-    handle: "@aishabuilds",
-    platform: "X",
-  },
-  {
-    quote: "Setup was 3 clicks. First post live in 10 minutes.",
-    name: "Marco Russo",
-    handle: "@marcofilms",
-    platform: "YouTube",
-  },
-];
+import {
+  TESTIMONIALS,
+  TESTIMONIALS_HEADING,
+  type Testimonial,
+  type TestimonialPlatform,
+} from "@/lib/landing-content";
 
 const ROW_ONE = TESTIMONIALS;
 const ROW_TWO = [...TESTIMONIALS].reverse();
 
-const PLATFORM_STYLE: Record<Platform, string> = {
+const PLATFORM_STYLE: Record<TestimonialPlatform, string> = {
   Instagram: "bg-[#E1306C]/10 text-[#C13584]",
   TikTok: "bg-gray-900/[0.06] text-gray-900",
   YouTube: "bg-[#FF0000]/10 text-[#CC0000]",
@@ -140,7 +87,7 @@ export function TestimonialsSection() {
             className="max-w-3xl font-medium leading-[1.08] tracking-[-0.02em] text-white"
             style={{ fontSize: "clamp(1.75rem, 5vw, 3rem)" }}
           >
-            Creators ship more with Kelolako.
+            {TESTIMONIALS_HEADING}
           </h2>
         </div>
       </div>

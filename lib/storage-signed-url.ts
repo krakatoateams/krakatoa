@@ -14,12 +14,60 @@ import { getAssetForProfile } from "@/lib/assets-db";
 import { getSessionUserId } from "@/lib/resolve-user";
 
 export const SIGN_TTL = {
-  ui: 3600,
+  /**
+   * 30 days. Long on purpose: a signed URL's token is part of the URL, so re-signing
+   * mints a URL the browser has never seen and must download in full. Keeping the URL
+   * stable is what lets the browser (and the Supabase CDN) serve media from cache
+   * instead of re-fetching it — the difference between ~0 and full file size per view.
+   */
+  ui: 2592000,
   pipeline: 21600,
   publish: 900,
 } as const;
 
 export type SignTtlKind = keyof typeof SIGN_TTL;
+
+/** Longest TTL any caller may request, for validating untrusted `ttl` input. */
+export const MAX_SIGN_TTL = Math.max(...Object.values(SIGN_TTL));
+
+/** Re-sign once a cached URL has under a day left, so no client gets one mid-expiry. */
+const REUSE_MIN_REMAINING_MS = 24 * 60 * 60 * 1000;
+
+const SIGNED_URL_CACHE_TABLE = "signed_url_cache";
+
+async function readCachedSignedUrl(
+  storagePath: string,
+  expiresIn: number,
+): Promise<SignedStorageUrl | null> {
+  const { data, error } = await supabaseServer
+    .from(SIGNED_URL_CACHE_TABLE)
+    .select("url, expires_at")
+    .eq("storage_path", storagePath)
+    .eq("ttl_sec", expiresIn)
+    .maybeSingle();
+
+  if (error || !data?.url || !data.expires_at) return null;
+  const expiresAt = new Date(data.expires_at);
+  if (expiresAt.getTime() - Date.now() < REUSE_MIN_REMAINING_MS) return null;
+  return { url: data.url, expiresAt: expiresAt.toISOString(), storagePath };
+}
+
+async function writeCachedSignedUrl(signed: SignedStorageUrl, expiresIn: number): Promise<void> {
+  // Best-effort: a cache write failure must never fail the request it was meant to
+  // speed up. The caller already holds a valid URL at this point.
+  const { error } = await supabaseServer.from(SIGNED_URL_CACHE_TABLE).upsert(
+    {
+      storage_path: signed.storagePath,
+      ttl_sec: expiresIn,
+      url: signed.url,
+      expires_at: signed.expiresAt,
+    },
+    { onConflict: "storage_path,ttl_sec" },
+  );
+  if (error) {
+    console.warn("[storage-signed-url] cache write failed:", error.message);
+  }
+}
 
 export type SignedStorageUrl = {
   url: string;
@@ -105,17 +153,31 @@ export async function createSignedStorageUrl(
     throw new Error("Invalid storage path.");
   }
   const expiresIn = ttlSec(ttl);
+  // Exact match, not a threshold: `ttl` reaches here straight from a query param, so
+  // a range would let a caller mint unbounded distinct (storage_path, ttl_sec) rows.
+  // Pipeline and publish URLs go to Rendi, Replicate and social platforms, which never
+  // re-request the same URL, so caching those would buy nothing anyway.
+  const cacheable = expiresIn === SIGN_TTL.ui;
+
+  if (cacheable) {
+    const cached = await readCachedSignedUrl(storagePath, expiresIn);
+    if (cached) return cached;
+  }
+
   const { data, error } = await supabaseServer.storage
     .from(STORAGE_BUCKET)
     .createSignedUrl(storagePath, expiresIn);
   if (error || !data?.signedUrl) {
     throw new Error(error?.message ?? "Failed to create signed URL.");
   }
-  return {
+  const signed: SignedStorageUrl = {
     url: data.signedUrl,
     expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     storagePath,
   };
+
+  if (cacheable) await writeCachedSignedUrl(signed, expiresIn);
+  return signed;
 }
 
 export async function signStoragePathForUser(

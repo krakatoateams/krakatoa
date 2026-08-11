@@ -1,5 +1,8 @@
+// Spline serves published scenes from S3/CloudFront with no Cache-Control, so
+// browsers cache them heuristically for days — a republished scene keeps showing
+// the old version inside the iframe. Bump this token after every republish.
 export const GOOGLY_EYES_SPLINE_URL =
-  "https://my.spline.design/googlyeyes-9vLBf5posajnNeZ0kedg2uVm-OIN/";
+  "https://my.spline.design/googlyeyes-9vLBf5posajnNeZ0kedg2uVm-OIN/?v=20260807";
 
 type SplineCoverEmbedProps = {
   src?: string;

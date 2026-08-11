@@ -25,6 +25,7 @@ import { isRecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { insertUserCreation } from "@/lib/creations-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
+  MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
   videosGeneratedVideoPath,
@@ -226,6 +227,7 @@ export async function POST(req: Request) {
               .from(STORAGE_BUCKET)
               .upload(storagePath, Buffer.from(buffer), {
                 contentType: "video/mp4",
+                cacheControl: MEDIA_CACHE_CONTROL,
                 upsert: false,
               });
             if (uploadError) {
@@ -242,6 +244,7 @@ export async function POST(req: Request) {
             .from(STORAGE_BUCKET)
             .upload(storagePath, Buffer.from(buffer), {
               contentType: "video/mp4",
+              cacheControl: MEDIA_CACHE_CONTROL,
               upsert: false,
             });
           if (uploadError) {

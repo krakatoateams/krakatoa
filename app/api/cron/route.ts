@@ -7,8 +7,17 @@ import {
   publishPhotoToTikTok,
   resolveOrigin,
   waitForTikTokPublishOutcome,
+  getCreatorInfo,
+  buildTikTokShareUrl,
 } from "@/lib/tiktok";
-import { resolveStoragePath, resolvePublishVideoUrl } from "@/lib/storage-signed-url";
+import {
+  ensureInstagramCompatibleImage,
+  createMediaContainer,
+  getContainerStatus,
+  publishContainer,
+  isInstagramPermanentFailure,
+} from "@/lib/instagram";
+import { resolveStoragePath, resolvePublishVideoUrl, signStoragePathForPublish } from "@/lib/storage-signed-url";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
@@ -30,6 +39,14 @@ const CLAIM_STALE_MS = 10 * 60 * 1000;
 
 // Transient failures are retried up to this many attempts before giving up.
 const MAX_PUBLISH_ATTEMPTS = 3;
+
+// Instagram's IN_PROGRESS container status isn't a failure and doesn't
+// increment publish_attempts, so it can't use MAX_PUBLISH_ATTEMPTS (an
+// attempt-count) to decide when to give up — this is a wall-clock budget
+// instead, measured from posts.instagram_first_attempted_at (see
+// openspec/changes/connect-instagram/design.md Decision 6, confirmed by the
+// user at 10 minutes).
+const INSTAGRAM_GIVE_UP_MS = 10 * 60 * 1000;
 
 /**
  * Classify an upload failure. Permanent failures will not self-heal on retry and
@@ -94,8 +111,27 @@ function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
  * FAILED status is stored as "failed" with TikTok's fail_reason, and a post
  * still processing past the wait budget is left "scheduled" (with its
  * publish_id already saved) to be re-checked — not re-published — next run.
+ * On a confirmed PUBLISH_COMPLETE for a public (non-SELF_ONLY) post, TikTok
+ * also returns a public post ID; this route builds a real share URL from it
+ * (see openspec/changes/tiktok-view-on-tiktok) and stores it as
+ * `posts.tiktok_share_url` for the Calendar's "View on TikTok" button — best
+ * effort, never blocks the already-confirmed publish if it fails.
  * YouTube's upload is synchronous-complete, so no equivalent polling is
  * needed there.
+ *
+ * Instagram publish verification (openspec/changes/connect-instagram, Phase
+ * 2): a container (POST /{ig-user-id}/media) publishes nothing on its own —
+ * Instagram's own API refuses media_publish until the container reports
+ * status_code = FINISHED, so (unlike TikTok) this is a structural
+ * precondition, not just an added safety check. This route does exactly ONE
+ * status check per cron tick (never an in-request polling loop — Meta's
+ * recommended cadence, once/minute for up to 5 minutes, cannot fit this
+ * route's maxDuration budget even once) — a container still IN_PROGRESS
+ * leaves the post "scheduled" with instagram_container_id intact for the
+ * next tick to re-check. A post stuck IN_PROGRESS for more than 10 minutes
+ * wall-clock (posts.instagram_first_attempted_at) is given up on — a
+ * separate budget from MAX_PUBLISH_ATTEMPTS, since "still processing" isn't
+ * a failure and doesn't increment publish_attempts.
  *
  * Safety:
  *  - Bounded batch + maxDuration keep each run inside platform limits.
@@ -171,7 +207,7 @@ export async function GET(req: NextRequest) {
       .eq("id", post.id)
       .eq("status", "scheduled")
       .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
-      .select("id, youtube_video_id, tiktok_publish_id")
+      .select("id, youtube_video_id, tiktok_publish_id, instagram_container_id, instagram_media_id, instagram_first_attempted_at")
       .maybeSingle();
 
     if (claimErr) {
@@ -210,7 +246,7 @@ export async function GET(req: NextRequest) {
       // ── Get user's platform token ──────────────────────────────────────────
       const { data: token, error: tokenErr } = await supabaseServer
         .from("platform_tokens")
-        .select("access_token, refresh_token")
+        .select("access_token, refresh_token, platform_user_id")
         .eq("user_id", post.user_id)
         .eq("platform", post.platform)
         .single();
@@ -234,19 +270,28 @@ export async function GET(req: NextRequest) {
         refresh_token_preview: token.refresh_token?.slice(0, 20) + "...",
       });
 
-      if (!token.refresh_token) {
+      // Instagram has no refresh_token concept at all (its long-lived
+      // access_token refreshes itself via a separate proactive cron — see
+      // openspec/changes/connect-instagram/design.md Decision 2b) — its
+      // platform_tokens row always has refresh_token = null by design, so
+      // this check must not apply to it.
+      if (post.platform !== "instagram" && !token.refresh_token) {
         throw new Error(
           `No refresh token stored. The user must reconnect ${post.platform} to obtain a refresh token.`,
         );
       }
 
-      // A TikTok post is a photo post exactly when photo_urls is populated —
-      // no separate post-type column (see openspec/changes/tiktok-photo-post).
-      // Computed up front (not just inside the tiktok branch below) because
-      // the video-existence-check + resolvePublishVideoUrl block right below
-      // is video-only and must be skipped for photo posts.
+      // A TikTok or Instagram post is a photo post exactly when photo_urls is
+      // populated — no separate post-type column (see openspec/changes/
+      // tiktok-photo-post). Computed up front (not just inside each platform
+      // branch below) because the video-existence-check + resolvePublishVideoUrl
+      // block right below is video-only and must be skipped for photo posts.
+      // Instagram photo posts are single-image only (no carousel support —
+      // see connect-instagram/design.md Non-Goals), so only photo_urls[0] is
+      // ever used for Instagram even if more are present.
       const isPhotoPost =
-        post.platform === "tiktok" && Array.isArray(post.photo_urls) && post.photo_urls.length > 0;
+        (post.platform === "tiktok" || post.platform === "instagram") &&
+        Array.isArray(post.photo_urls) && post.photo_urls.length > 0;
 
       // ── Re-verify the video still exists before spending a publish attempt ──
       // Catches the case where the file was deleted/swept sometime between
@@ -406,10 +451,188 @@ export async function GET(req: NextRequest) {
         // outcome.outcome === "complete"
         console.log(`[cron] ✓ Post ${post.id} confirmed published on TikTok (publish ID: ${publishId})`);
 
+        // A share URL only exists for a public (non-SELF_ONLY) post — TikTok
+        // only returns publicaly_available_post_id for public viewership.
+        // Best-effort: a failure fetching the username must never turn an
+        // already-confirmed publish into a failed post.
+        let shareUrl: string | null = null;
+        if (outcome.publicPostId) {
+          try {
+            const creator = await getCreatorInfo(refreshed.accessToken);
+            shareUrl = buildTikTokShareUrl(creator.creatorUsername, outcome.publicPostId);
+          } catch (err) {
+            console.warn(`[cron] Post ${post.id} — failed to build TikTok share URL (non-blocking):`, err);
+          }
+        }
+
         await supabaseServer
           .from("posts")
           .update({
             status: "published",
+            last_error: null,
+            publish_started_at: null,
+            publish_attempts: 0,
+            tiktok_share_url: shareUrl,
+          })
+          .eq("id", post.id);
+
+        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+        await cleanupPostPhotos(post.id, post.photo_urls);
+        published++;
+        continue;
+      }
+
+      if (post.platform === "instagram") {
+        // ── Idempotency: already fully published ──────────────────────────
+        if (claimed.instagram_media_id) {
+          console.log(`[cron] Post ${post.id} already has an Instagram media ID — marking published, no re-publish`);
+          await supabaseServer
+            .from("posts")
+            .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
+            .eq("id", post.id);
+          await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+          await cleanupPostPhotos(post.id, post.photo_urls);
+          published++;
+          continue;
+        }
+
+        // Set at connect time (app/api/connections/instagram/callback) —
+        // required to scope /media and /media_publish under the right
+        // account. Absence here means the user connected before this field
+        // was persisted (a Phase 1 gap fixed alongside this Phase 2 work) —
+        // surfaced as a clear reconnect-needed error rather than a confusing
+        // API failure.
+        if (!token.platform_user_id) {
+          throw new Error(
+            "No Instagram account ID stored for this connection. The user must reconnect Instagram to re-authorize.",
+          );
+        }
+        const igUserId = token.platform_user_id;
+
+        let containerId: string | null = claimed.instagram_container_id ?? null;
+        const firstAttemptedAt = claimed.instagram_first_attempted_at ?? null;
+
+        // ── 10-minute wall-clock give-up (design.md Decision 6) ────────────
+        // Independent of MAX_PUBLISH_ATTEMPTS, which counts thrown errors —
+        // "still IN_PROGRESS" is neither a failure nor something that
+        // increments publish_attempts.
+        if (containerId && firstAttemptedAt && Date.now() - new Date(firstAttemptedAt).getTime() > INSTAGRAM_GIVE_UP_MS) {
+          await supabaseServer
+            .from("posts")
+            .update({
+              status: "failed",
+              last_error: "Instagram hasn't finished processing this post after 10 minutes — giving up. It may still complete on Instagram's side independently of this app; check the account directly if needed.",
+              publish_started_at: null,
+              publish_attempts: (post.publish_attempts ?? 0) + 1,
+              instagram_container_id: null,
+              instagram_first_attempted_at: null,
+            })
+            .eq("id", post.id);
+          console.error(`[cron] ✗ Post ${post.id} — Instagram container stuck IN_PROGRESS past the 10-minute give-up threshold`);
+          failed++;
+          continue;
+        }
+
+        if (!containerId) {
+          // ── Create the container (or resume checking a prior attempt) ───
+          const mediaType: "IMAGE" | "REELS" = isPhotoPost ? "IMAGE" : "REELS";
+          let mediaUrl: string;
+
+          if (isPhotoPost) {
+            // Single-image only (design.md Non-Goals) — always the first
+            // photo, same simplification TikTok's own cover-photo handling
+            // uses elsewhere in this codebase.
+            const rawPhoto = post.photo_urls[0];
+            const photoStoragePath = resolveStoragePath(null, rawPhoto);
+            if (!photoStoragePath) {
+              throw new Error("Instagram photo post has no resolvable storage path.");
+            }
+            const compatiblePath = await ensureInstagramCompatibleImage(photoStoragePath);
+            mediaUrl = await signStoragePathForPublish(compatiblePath);
+          } else {
+            // Non-null: isPhotoPost is false here, exactly when
+            // publishVideoUrl was computed by the shared block above.
+            mediaUrl = publishVideoUrl!;
+          }
+
+          console.log(`[cron] Creating Instagram ${mediaType} container for post ${post.id}`);
+          const created = await createMediaContainer({
+            igUserId,
+            accessToken: token.access_token,
+            mediaType,
+            mediaUrl,
+            caption: post.description ?? "",
+          });
+          containerId = created.containerId;
+
+          // Persist immediately — before polling — so a mid-poll timeout or
+          // crash resumes on the next tick instead of creating a duplicate
+          // container. instagram_first_attempted_at is set once and never
+          // overwritten on later resumes (mirrors the give-up check reading
+          // it as a fixed starting point).
+          await supabaseServer
+            .from("posts")
+            .update({
+              instagram_container_id: containerId,
+              instagram_first_attempted_at: firstAttemptedAt ?? new Date().toISOString(),
+            })
+            .eq("id", post.id);
+        } else {
+          console.log(
+            `[cron] Post ${post.id} already has Instagram container ${containerId} from a prior attempt — re-checking status instead of recreating`,
+          );
+        }
+
+        // ── One status check this tick — never an in-request polling loop ──
+        const statusCode = await getContainerStatus(token.access_token, containerId);
+        console.log(`[cron] Instagram container ${containerId} status: ${statusCode}`);
+
+        if (statusCode === "ERROR" || statusCode === "EXPIRED") {
+          await supabaseServer
+            .from("posts")
+            .update({
+              status: "failed",
+              last_error: `Instagram reported ${statusCode} while processing this post.`,
+              publish_started_at: null,
+              publish_attempts: (post.publish_attempts ?? 0) + 1,
+              // Neither status can ever recover — a retry must create a
+              // fresh container, not re-poll a dead one.
+              instagram_container_id: null,
+              instagram_first_attempted_at: null,
+            })
+            .eq("id", post.id);
+          console.error(`[cron] ✗ Post ${post.id} — Instagram container ${statusCode}`);
+          failed++;
+          continue;
+        }
+
+        if (statusCode !== "FINISHED") {
+          // IN_PROGRESS (or an unrecognized/PUBLISHED-without-our-own-
+          // media_publish edge case — see design.md Risks) — not terminal,
+          // don't block. Release the claim; instagram_container_id +
+          // instagram_first_attempted_at stay so the next tick re-checks
+          // status instead of recreating the container.
+          console.warn(`[cron] ⏳ Post ${post.id} still processing on Instagram (status: ${statusCode}) — will recheck next run`);
+          await supabaseServer
+            .from("posts")
+            .update({
+              last_error: `Still processing on Instagram (status: ${statusCode}) — checking again automatically.`,
+              publish_started_at: null,
+            })
+            .eq("id", post.id);
+          skipped++;
+          continue;
+        }
+
+        // statusCode === "FINISHED"
+        const { mediaId } = await publishContainer(igUserId, token.access_token, containerId);
+        console.log(`[cron] ✓ Post ${post.id} published → Instagram media ID: ${mediaId}`);
+
+        await supabaseServer
+          .from("posts")
+          .update({
+            status: "published",
+            instagram_media_id: mediaId,
             last_error: null,
             publish_started_at: null,
             publish_attempts: 0,
@@ -472,7 +695,11 @@ export async function GET(req: NextRequest) {
       // ── Decide retry vs give up ─────────────────────────────────────────────
       const attempts = (post.publish_attempts ?? 0) + 1;
       const permanent =
-        post.platform === "tiktok" ? isTikTokPermanentFailure(err, message) : isPermanentFailure(err, message);
+        post.platform === "tiktok"
+          ? isTikTokPermanentFailure(err, message)
+          : post.platform === "instagram"
+            ? isInstagramPermanentFailure(err, message)
+            : isPermanentFailure(err, message);
       const giveUp = permanent || attempts >= MAX_PUBLISH_ATTEMPTS;
 
       // Releasing the lock (publish_started_at = null) on a retry lets the next

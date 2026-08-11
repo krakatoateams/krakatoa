@@ -60,6 +60,8 @@ export async function copyUrlToResumable(
     .from(STORAGE_BUCKET)
     .upload(storagePath, buffer, {
       contentType,
+      // Not MEDIA_CACHE_CONTROL: resumable paths are upserted on retry, and only
+      // Rendi/Replicate ever fetch them, so there is no browser cache to win.
       cacheControl: "3600",
       upsert: true,
     });

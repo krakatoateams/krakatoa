@@ -1,47 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-type FeatureItem = {
-  id: string;
-  label: string;
-  description: string;
-  video: string;
-  badge?: string;
-};
-
-const FEATURES: FeatureItem[] = [
-  {
-    id: "video",
-    label: "Video generation",
-    description: "Scroll-stopping videos with narration, scenes, and captions.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_170732_8a9ccda6-5cff-4628-b164-059c500a2b41.mp4",
-  },
-  {
-    id: "image",
-    label: "Image generation",
-    description: "Studio-grade images and product shots from a single prompt.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260418_063509_7d167302-4fd4-480b-8260-18ab572333d4.mp4",
-  },
-  {
-    id: "virtual-creator",
-    label: "Virtual Creator",
-    description: "Bring a lifelike AI persona to life to front your content.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_074625_a81f018a-956b-43fb-9aee-4d1508e30e6a.mp4",
-    badge: "New",
-  },
-  {
-    id: "scheduler",
-    label: "Smart Scheduling",
-    description: "Plan posts when your audience is most active.",
-    video:
-      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260510_060007_60275ce7-030c-4668-a160-8f364ec537d3.mp4",
-  },
-];
+import {
+  FEATURES,
+  FEATURES_HEADING,
+  type FeatureItem,
+} from "@/lib/landing-content";
+import { usePinnedScrollIndex } from "@/lib/use-pinned-scroll";
 
 function FeatureMenuItem({
   feature,
@@ -98,11 +64,11 @@ function FeatureMenuItem({
 }
 
 export function FeaturesSectionAlt() {
-  const [activeId, setActiveId] = useState(FEATURES[0].id);
-  const activeFeature =
-    FEATURES.find((f) => f.id === activeId) ?? FEATURES[0];
+  const { outerRef, activeIndex, scrollToIndex: scrollToFeature } =
+    usePinnedScrollIndex(FEATURES.length);
+  const activeFeature = FEATURES[activeIndex];
+  const activeId = activeFeature.id;
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const outerRef = useRef<HTMLElement | null>(null);
 
   // Drive the new clip whenever the active feature changes.
   // Some browsers won't pick up a new <video src> without an explicit load() call.
@@ -117,53 +83,6 @@ export function FeaturesSectionAlt() {
       });
     }
   }, [activeId]);
-
-  // Scroll-driven activeId. Map scroll progress through the outer wrapper to a
-  // feature index so the pinned inner walks 0 -> N-1 as the user scrolls.
-  useEffect(() => {
-    let rafId = 0;
-    const onScroll = () => {
-      if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        const el = outerRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const denom = rect.height - window.innerHeight;
-        if (denom <= 0) return;
-        const progress = Math.min(Math.max(-rect.top / denom, 0), 1);
-        const idx = Math.min(
-          Math.floor(progress * FEATURES.length),
-          FEATURES.length - 1
-        );
-        const nextId = FEATURES[idx].id;
-        setActiveId((prev) => (prev === nextId ? prev : nextId));
-      });
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  const scrollToFeature = (index: number) => {
-    const el = outerRef.current;
-    if (!el) return;
-    const denom = el.offsetHeight - window.innerHeight;
-    // Aim for the middle of each step so the index "lands" cleanly on that feature.
-    const targetProgress = (index + 0.5) / FEATURES.length;
-    const top = el.offsetTop + targetProgress * denom;
-    const reduce =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    window.scrollTo({ top, behavior: reduce ? "auto" : "smooth" });
-  };
-
-  const activeIndex = FEATURES.findIndex((f) => f.id === activeFeature.id);
 
   return (
     <section
@@ -206,7 +125,7 @@ export function FeaturesSectionAlt() {
               textShadow: "0 2px 18px rgba(0,0,0,0.35)",
             }}
           >
-            Built for every stage of your content workflow
+            {FEATURES_HEADING}
           </h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,360px)_1fr]">

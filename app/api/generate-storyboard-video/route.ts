@@ -3,6 +3,7 @@ import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
 import { getSupabase } from "@/lib/supabase";
 import {
+  MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   STORYBOARDS_TABLE,
   videosStoryboardVideoPath,
@@ -604,7 +605,7 @@ export async function POST(req: Request) {
       .from(STORAGE_BUCKET)
       .upload(storagePath, videoBuffer, {
         contentType: "video/mp4",
-        cacheControl: "3600",
+        cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false,
       });
 

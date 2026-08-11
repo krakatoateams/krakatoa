@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  MAX_SIGN_TTL,
   SIGN_TTL,
   type SignTtlKind,
   requireSessionUserId,
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 function parseTtl(raw: string | null): SignTtlKind | number {
   if (!raw) return "ui";
   const n = Number(raw);
-  if (Number.isFinite(n) && n > 0 && n <= SIGN_TTL.pipeline) return Math.floor(n);
+  if (Number.isFinite(n) && n > 0 && n <= MAX_SIGN_TTL) return Math.floor(n);
   if (raw in SIGN_TTL) return raw as SignTtlKind;
   return "ui";
 }

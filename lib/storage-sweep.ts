@@ -122,6 +122,24 @@ export async function runStorageSweep(opts?: {
     }
   }
 
+  if (!dryRun) {
+    // A cached signed URL outlives the object it points at, so drop rows for what this
+    // sweep just deleted as well as anything already expired. Best-effort on both: a
+    // surviving row only ever hands out a URL that 404s.
+    for (let i = 0; i < paths.length; i += 100) {
+      const { error } = await supabaseServer
+        .from("signed_url_cache")
+        .delete()
+        .in("storage_path", paths.slice(i, i + 100));
+      if (error) console.warn("[storage-sweep] signed_url_cache purge failed:", error.message);
+    }
+    const { error } = await supabaseServer
+      .from("signed_url_cache")
+      .delete()
+      .lt("expires_at", new Date().toISOString());
+    if (error) console.warn("[storage-sweep] signed_url_cache cleanup failed:", error.message);
+  }
+
   return {
     ...plan,
     dryRun,

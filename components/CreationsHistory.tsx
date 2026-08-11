@@ -908,7 +908,7 @@ export default function CreationsHistory({
                     alt={item.title}
                     fill
                     className="object-cover"
-                    unoptimized
+                    sizes="(min-width: 1024px) 20vw, (min-width: 768px) 25vw, (min-width: 640px) 33vw, 50vw"
                   />
                 )}
                 {isCharacterItem(item) && (
@@ -1198,7 +1198,7 @@ export default function CreationsHistory({
                     alt={previewItem.title || previewItem.toolLabel}
                     width={1080}
                     height={1350}
-                    unoptimized
+                    sizes="(min-width: 768px) 720px, 100vw"
                     className="max-h-[70vh] w-auto object-contain"
                   />
                 )}
