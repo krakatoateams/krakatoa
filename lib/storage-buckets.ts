@@ -52,6 +52,9 @@ const LEGACY_MEDIA_PREFIX = new RegExp(`^(?:${PHOTOS_FOLDER}|${VIDEOS_FOLDER})/`
 const USER_FIRST_MEDIA_PREFIX = new RegExp(
   `^([a-zA-Z0-9-]+)/(?:${PHOTOS_FOLDER}|${VIDEOS_FOLDER})/`,
 );
+// Recovery staging is a sibling of photos/ and videos/, so it needs its own anchor
+// here: the pipeline signs these artifacts for Rendi and Replicate to fetch.
+const USER_FIRST_RESUMABLE_PREFIX = new RegExp(`^([a-zA-Z0-9-]+)/${RESUMABLE_SEGMENT}/`);
 
 export function safeUserIdSegment(userId: string): string {
   const safe = userId.replace(/[^a-zA-Z0-9-]/g, "");
@@ -75,16 +78,19 @@ export function storagePathMediaKind(path: string): UserMediaFolder | null {
   return null;
 }
 
-/** Legacy `photos|videos/{userId}/…` or user-first `{userId}/photos|videos/…`. */
+/**
+ * Legacy `photos|videos/{userId}/…`, user-first `{userId}/photos|videos/…`, or
+ * recovery staging `{userId}/resumable/{jobId}/…`.
+ */
 export function isStorageRelativePath(value: string): boolean {
   if (!value || value.includes("..")) return false;
   if (LEGACY_MEDIA_PREFIX.test(value)) return true;
-  return USER_FIRST_MEDIA_PREFIX.test(value);
+  return USER_FIRST_MEDIA_PREFIX.test(value) || USER_FIRST_RESUMABLE_PREFIX.test(value);
 }
 
 /** Extract owner userId from a storage path (new layout first, then legacy). */
 export function storagePathOwnerUserId(path: string): string | null {
-  const userFirst = path.match(USER_FIRST_MEDIA_PREFIX);
+  const userFirst = path.match(USER_FIRST_MEDIA_PREFIX) ?? path.match(USER_FIRST_RESUMABLE_PREFIX);
   if (userFirst?.[1]) return userFirst[1];
   const legacy = path.match(new RegExp(`^(?:${PHOTOS_FOLDER}|${VIDEOS_FOLDER})/([a-zA-Z0-9-]+)/`));
   return legacy?.[1] ?? null;
@@ -309,5 +315,14 @@ if (process.env.NODE_ENV !== "production") {
   const legacy = `photos/${uid}/generated/product/z.png`;
   if (!isStorageRelativePath(legacy) || storagePathOwnerUserId(legacy) !== uid) {
     throw new Error("storage-buckets self-check failed: legacy layout");
+  }
+  // Recovery staging must round-trip too: the pipeline signs these paths, and a
+  // helper that builds a path the signer rejects fails the whole reels render.
+  const resumable = userResumablePath(uid, "job-1", "captions.ass");
+  if (!isStorageRelativePath(resumable) || storagePathOwnerUserId(resumable) !== uid) {
+    throw new Error("storage-buckets self-check failed: resumable layout");
+  }
+  if (isStorageRelativePath(`${uid}/secrets/x.txt`)) {
+    throw new Error("storage-buckets self-check failed: unknown root accepted");
   }
 }
