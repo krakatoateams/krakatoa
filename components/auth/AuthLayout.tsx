@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-// Same background clips as the homepage hero (components/landing/HeroSectionVideo.tsx),
-// served from our own Supabase Storage (the *.r2.dev dev domain was flaky).
-const VIDEO_BASE =
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/Internal%20Assets/Videos";
+// Same background clips and CDN as the homepage hero — keep this list in sync
+// with components/landing/HeroSectionVideo.tsx.
+const VIDEO_BASE = "https://cdn.kelolako.com";
 const VIDEO_FILES = [
   "Badminton (GPT)-optimized.mp4",
   "Car Racing 1 (Seedence)-optimized.mp4",

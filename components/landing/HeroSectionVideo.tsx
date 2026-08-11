@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HeroLayout } from "./HeroSection";
 
-// Served from our own Supabase Storage (public "Internal Assets" bucket). The
-// previous Cloudflare R2 public dev domain (*.r2.dev) is rate-limited/best-effort
-// and intermittently returned blank clips for some users.
-const VIDEO_BASE =
-  "https://ybfmllqcvvexldsteuaw.supabase.co/storage/v1/object/public/Internal%20Assets/Videos";
+// Served from R2 behind our own cdn.kelolako.com. Not the *.r2.dev public dev
+// domain, which is rate-limited/best-effort and intermittently returned blank
+// clips; and not Supabase Storage, whose egress we pay for.
+const VIDEO_BASE = "https://cdn.kelolako.com";
 
 const VIDEO_FILES = [
   "Badminton (GPT)-optimized.mp4",
