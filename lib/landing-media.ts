@@ -1,16 +1,19 @@
 /**
  * Background clips shared by the landing hero and the auth screens.
  *
- * Served from Cloudflare R2. Supabase Storage is currently returning 402 under
- * `exceed_egress_quota`, and R2 has no egress cost, so the clips live there.
+ * Served from Cloudflare R2 over the bucket's custom domain. Supabase Storage
+ * returned 402 `exceed_egress_quota`, and R2 has no egress cost, so the clips
+ * live there.
  *
- * Caveat: `*.r2.dev` is Cloudflare's managed dev domain — rate-limited and
- * uncached, which is what caused intermittently blank clips the last time these
- * were served from it. The durable fix is a custom domain on the bucket
- * (e.g. cdn.kelolako.com), which lifts the rate limit and puts the CDN in
- * front. Point NEXT_PUBLIC_LANDING_VIDEO_BASE at it once DNS is on Cloudflare.
+ * The custom domain replaced the `pub-*.r2.dev` managed dev URL, which is
+ * rate-limited and bypasses the CDN — that was the cause of intermittently
+ * blank clips. The dev URL is now disabled on the bucket, so this must stay a
+ * host that is actually enabled or every hero video 401s.
+ *
+ * NEXT_PUBLIC_LANDING_VIDEO_BASE overrides it, but note it is inlined at build
+ * time: setting it in Vercel does nothing until the next deploy.
  */
-const DEFAULT_VIDEO_BASE = "https://pub-30197c9faf284e5e852ce7d61364972c.r2.dev";
+const DEFAULT_VIDEO_BASE = "https://cdn.kelolako.com";
 
 export const LANDING_VIDEO_BASE = (
   process.env.NEXT_PUBLIC_LANDING_VIDEO_BASE || DEFAULT_VIDEO_BASE
