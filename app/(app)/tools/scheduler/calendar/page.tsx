@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useCurrentUser } from "@/lib/auth-context";
 import {
   ChevronLeft,
   ChevronRight,
@@ -19,6 +18,7 @@ import {
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import PageContainer from "../../../dashboard/PageContainer";
+import { ConnectionStatusBadge, YoutubeIcon } from "@/components/ConnectionStatusBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -181,16 +181,6 @@ function toDateTimeLocalValue(isoString: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// ─── YoutubeIcon ─────────────────────────────────────────────────────────────
-
-function YoutubeIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-    </svg>
-  );
-}
-
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
 function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }) {
@@ -214,40 +204,6 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
       <button type="button" onClick={onDismiss} aria-label="Dismiss" className="cursor-pointer opacity-60 hover:opacity-100">
         <X className="h-3.5 w-3.5" />
       </button>
-    </div>
-  );
-}
-
-// ─── YouTube status badge ─────────────────────────────────────────────────────
-
-function YouTubeStatusBadge() {
-  const { status } = useCurrentUser();
-  const [youtubeConnected, setYoutubeConnected] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (status === "loading") return;
-    if (status === "unauthenticated") { setYoutubeConnected(false); return; }
-    fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { youtube: false }))
-      .then((data: { youtube?: boolean }) => setYoutubeConnected(Boolean(data.youtube)))
-      .catch(() => setYoutubeConnected(false));
-  }, [status]);
-
-  if (status === "loading" || youtubeConnected === null) {
-    return <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />;
-  }
-  if (youtubeConnected) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
-        <YoutubeIcon className="h-3.5 w-3.5 text-green-400" />
-        <span className="text-xs font-medium text-green-400">YouTube Connected</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5">
-      <YoutubeIcon className="h-3.5 w-3.5 text-gray-500" />
-      <span className="text-xs font-medium text-gray-500">YouTube not connected</span>
     </div>
   );
 }
@@ -863,7 +819,9 @@ export default function SchedulerCalendarPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <YouTubeStatusBadge />
+            <ConnectionStatusBadge platform="youtube" />
+            <ConnectionStatusBadge platform="tiktok" />
+            <ConnectionStatusBadge platform="instagram" />
             <button
               type="button"
               onClick={goToToday}

@@ -16,6 +16,7 @@ import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
+import { ConnectionStatusBadge } from "@/components/ConnectionStatusBadge";
 import {
   Upload,
   Zap,
@@ -3228,7 +3229,14 @@ export default function SchedulerDashboardPage() {
       <PageContainer>
         <PageHeader
           title="Create & Schedule"
-          actions={<ConnectionStatusPrompt platforms={item0.platforms} />}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <ConnectionStatusBadge platform="youtube" />
+              <ConnectionStatusBadge platform="tiktok" />
+              <ConnectionStatusBadge platform="instagram" />
+              <ConnectionStatusPrompt platforms={item0.platforms} />
+            </div>
+          }
         />
 
         {single ? (
