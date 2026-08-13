@@ -778,15 +778,6 @@ export default function CreationsHistory({
         </p>
       )}
 
-      {activeTiles.length > 0 && (
-        <div className={pagedItems.length > 0 || loading ? "mb-4" : ""}>
-          <ActiveGenerationTiles
-            items={activeTiles}
-            gridClassName={gridClassName ?? DEFAULT_GRID_CLASS}
-          />
-        </div>
-      )}
-
       {loading ? (
         // `loading` is only true on a cache miss (a cached chip serves instantly
         // and revalidates silently), so these placeholders mark a real fresh load
@@ -798,8 +789,7 @@ export default function CreationsHistory({
           lines={showMeta ? 3 : 1}
           label="Loading generations"
         />
-      ) : pagedItems.length === 0 ? (
-        activeTiles.length === 0 ? (
+      ) : pagedItems.length === 0 && activeTiles.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
           {enableTabs && activeTab === "favorite" ? (
             <>
@@ -853,10 +843,10 @@ export default function CreationsHistory({
             </>
           )}
         </div>
-      ) : null
       ) : (
         <>
         <div className={gridClassName ?? DEFAULT_GRID_CLASS}>
+          <ActiveGenerationTiles items={activeTiles} />
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);

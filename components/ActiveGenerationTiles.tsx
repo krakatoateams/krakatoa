@@ -35,19 +35,16 @@ async function postAction(
   }
 }
 
+/** In-progress tiles meant to sit in the same grid as finished history cards. */
 export function ActiveGenerationTiles({
   items,
-  gridClassName,
-  tileClassName = "rounded-2xl border border-white/10",
+  tileClassName = "rounded-2xl border border-violet-400/30",
 }: {
   items: ActiveGeneration[];
-  gridClassName: string;
   tileClassName?: string;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  if (items.length === 0) return null;
 
   const cancelJob = async (item: ActiveGeneration) => {
     if (!item.idempotencyKey) return;
@@ -84,8 +81,10 @@ export function ActiveGenerationTiles({
     emitChanged();
   };
 
+  if (items.length === 0) return null;
+
   return (
-    <div className={gridClassName}>
+    <>
       {items.map((item) => {
         const live = isLiveStatus(item.status);
         const busy = busyId === item.jobId;
@@ -150,6 +149,6 @@ export function ActiveGenerationTiles({
           </div>
         );
       })}
-    </div>
+    </>
   );
 }
