@@ -26,7 +26,13 @@ import {
   isTrashedItem,
 } from "@/lib/creations";
 import { CreationPreviewModal } from "@/components/CreationPreviewModal";
+import { ActiveGenerationTiles } from "@/components/ActiveGenerationTiles";
 import { TileSkeleton } from "@/components/ui/TileSkeleton";
+import { useActiveGenerations } from "@/app/(app)/active-generations-context";
+import {
+  filterActiveGenerations,
+  isLiveStatus,
+} from "@/lib/active-generations-pure";
 
 type Props = {
   title?: string;
@@ -348,6 +354,7 @@ export default function CreationsHistory({
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const { items: activeJobs } = useActiveGenerations();
 
   const downloadItem = useCallback(async (item: CreationHistoryItem) => {
     setDownloadingId(item.id);
@@ -666,6 +673,31 @@ export default function CreationsHistory({
   // Items are already filtered + paged by the server.
   const pagedItems = items;
 
+  const showActiveTiles =
+    richUI && !isFavoriteTab && !isTrashTab && activeTab !== "character";
+  const activeTiles = showActiveTiles
+    ? filterActiveGenerations(activeJobs, {
+        tools: isStoryboardTab ? ["storyboard"] : tools,
+        mediaType: effectiveMediaType,
+      })
+    : [];
+  const liveActiveKey = activeTiles
+    .filter((j) => isLiveStatus(j.status))
+    .map((j) => j.jobId)
+    .join(",");
+  const prevLiveActiveRef = useRef(liveActiveKey);
+  useEffect(() => {
+    const prev = prevLiveActiveRef.current;
+    prevLiveActiveRef.current = liveActiveKey;
+    if (!prev) return;
+    const prevIds = new Set(prev.split(",").filter(Boolean));
+    const nextIds = new Set(liveActiveKey.split(",").filter(Boolean));
+    const finished = [...prevIds].some((id) => !nextIds.has(id));
+    if (!finished) return;
+    historyCache.clear();
+    void load();
+  }, [liveActiveKey, load]);
+
   const TABS: { id: LibraryTab; label: string; icon: LucideIcon }[] = [
     { id: "all", label: "All", icon: LayoutGrid },
     { id: "video", label: "Videos", icon: Video },
@@ -746,6 +778,15 @@ export default function CreationsHistory({
         </p>
       )}
 
+      {activeTiles.length > 0 && (
+        <div className={pagedItems.length > 0 || loading ? "mb-4" : ""}>
+          <ActiveGenerationTiles
+            items={activeTiles}
+            gridClassName={gridClassName ?? DEFAULT_GRID_CLASS}
+          />
+        </div>
+      )}
+
       {loading ? (
         // `loading` is only true on a cache miss (a cached chip serves instantly
         // and revalidates silently), so these placeholders mark a real fresh load
@@ -758,6 +799,7 @@ export default function CreationsHistory({
           label="Loading generations"
         />
       ) : pagedItems.length === 0 ? (
+        activeTiles.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
           {enableTabs && activeTab === "favorite" ? (
             <>
@@ -811,6 +853,7 @@ export default function CreationsHistory({
             </>
           )}
         </div>
+      ) : null
       ) : (
         <>
         <div className={gridClassName ?? DEFAULT_GRID_CLASS}>

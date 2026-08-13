@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
+
+function emitGenerationChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(GENERATION_CHANGED_EVENT));
+}
 
 /**
  * Client-side double-submit / double-charge protection for generation forms.
@@ -65,6 +71,7 @@ export function useIdempotentSubmit() {
     const key = keyRef.current;
     setActiveKey(key);
     setCancelling(false);
+    emitGenerationChanged();
     let settled = false;
     const settle = (succeeded: boolean) => {
       if (settled) return;
@@ -72,6 +79,7 @@ export function useIdempotentSubmit() {
       inFlightRef.current = false;
       setActiveKey(null);
       setCancelling(false);
+      emitGenerationChanged();
       if (succeeded) {
         keyRef.current = null;
         signatureRef.current = null;

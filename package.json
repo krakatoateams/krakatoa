@@ -19,6 +19,7 @@
     "test:monitoring-flags": "npx tsx lib/admin-monitoring-flags.ts",
     "test:animate-handoff": "npx tsx lib/animate-handoff.ts",
     "test:aspect-ratio": "npx tsx lib/aspect-ratio-match.ts",
+    "test:active-generations": "npx tsx lib/active-generations-pure.ts",
     "admin:probe-monitoring": "npx tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "npx tsx scripts/probe-signed-url-cache.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""

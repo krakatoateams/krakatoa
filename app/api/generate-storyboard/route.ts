@@ -37,6 +37,7 @@ import {
   isValidIdempotencyKey,
   computeRequestHash,
   beginGenerationRequest,
+  attachGenerationRequestJob,
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
@@ -458,6 +459,11 @@ export async function POST(req: Request) {
     if (job) {
       jobId = job.id;
       await safe("startJob", () => startJob(profileId!, jobId!));
+      if (generationRequestId) {
+        await safe("attachJob", () =>
+          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
+        );
+      }
     }
 
     // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----

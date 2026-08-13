@@ -58,6 +58,7 @@ import {
   isValidIdempotencyKey,
   computeRequestHash,
   beginGenerationRequest,
+  attachGenerationRequestJob,
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
   finishGenerationRequestRecoverable,
@@ -484,6 +485,11 @@ export async function POST(req: Request) {
     if (job) {
       jobId = job.id;
       await safe("startJob", () => startJob(profileId!, jobId!));
+      if (generationRequestId) {
+        await safe("attachJob", () =>
+          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
+        );
+      }
       pipelineRecovery =
         userId
           ? createPipelineRecoveryHandle({

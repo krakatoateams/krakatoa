@@ -1,6 +1,8 @@
 import Sidebar from "./dashboard/Sidebar";
 import { CreditBalanceProvider } from "./credit-balance-context";
 import { PricingProvider } from "./pricing-context";
+import { ActiveGenerationsProvider } from "./active-generations-context";
+import { ActiveGenerationBanner } from "@/components/ActiveGenerationBanner";
 import { getCurrentProfile } from "@/lib/profiles-db";
 import {
   listToolConfigs,
@@ -22,12 +24,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <CreditBalanceProvider>
       <PricingProvider>
-        <div className="flex min-h-screen bg-gray-950 text-white">
-          <Sidebar initialToolVisibility={initialToolVisibility} />
-          <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:pb-0">
-            {children}
-          </main>
-        </div>
+        <ActiveGenerationsProvider>
+          <div className="flex min-h-screen bg-gray-950 text-white">
+            <Sidebar initialToolVisibility={initialToolVisibility} />
+            <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:pb-0">
+              <ActiveGenerationBanner />
+              {children}
+            </main>
+          </div>
+        </ActiveGenerationsProvider>
       </PricingProvider>
     </CreditBalanceProvider>
   );
