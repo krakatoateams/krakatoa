@@ -41,6 +41,7 @@ import PhotoLibraryPicker, {
   type PhotoLibrarySource,
 } from "@/components/PhotoLibraryPicker";
 import type { CreationHistoryItem } from "@/lib/creations";
+import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
@@ -305,6 +306,9 @@ function VideoOmniPage() {
             ? "reels-creator"
             : "text2video";
   const initialStoryboardId = searchParams.get("storyboardId") || null;
+  // Photo → video "Animate" CTA: ?type=image2video&startImageCreationId=<creation id>
+  // preselects that library photo as the start frame (see lib/animate-handoff.ts).
+  const initialStartImageCreationId = searchParams.get("startImageCreationId") || null;
   // Dashboard "Trending templates" deep-link: ?type=motion_control&templateVideo=<public url>
   // preloads the clip as the Motion Control driving video.
   const initialTemplateVideo = searchParams.get("templateVideo") || null;
@@ -1047,6 +1051,7 @@ function VideoOmniPage() {
 
         {creationType === "image2video" && (
           <ImageToVideoComposer
+            initialStartImageCreationId={initialStartImageCreationId}
             mentionAssets={mentionAssets}
             creationTypes={availableCreationTypes}
             composerEnablement={composerEnablement}
@@ -1137,12 +1142,15 @@ const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 
 // Image to Video — models that require a reference image (Kling v1.5 family).
 function ImageToVideoComposer({
+  initialStartImageCreationId,
   mentionAssets,
   creationTypes,
   composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
+  /** Library photo to preselect as the start frame (Photo → video "Animate"). */
+  initialStartImageCreationId: string | null;
   mentionAssets: MentionAsset[];
   creationTypes: VideoCreationTypeOption[];
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
@@ -1171,13 +1179,17 @@ function ImageToVideoComposer({
 
   const [prompt, setPrompt] = useState("");
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
-  const [imageSource, setImageSource] = useState<PhotoLibrarySource>("upload");
+  const [imageSource, setImageSource] = useState<PhotoLibrarySource>(
+    initialStartImageCreationId ? "library" : "upload"
+  );
   const [libraryImage, setLibraryImage] = useState<LibraryImage | null>(null);
   const [endImageSource, setEndImageSource] = useState<PhotoLibrarySource>("upload");
   const [endLibraryImage, setEndLibraryImage] = useState<LibraryImage | null>(null);
   const [duration, setDuration] = useState<number>(model.defaultDuration);
   const [resolution, setResolution] = useState(model.defaultResolution);
   const [aspectRatio, setAspectRatio] = useState(model.defaultAspectRatio);
+  // Once the user picks a ratio by hand, stop matching it to the source photo.
+  const ratioTouchedRef = useRef(false);
 
   useEffect(() => {
     const m = getVideoModel(modelId);
@@ -1222,6 +1234,35 @@ function ImageToVideoComposer({
     if (getVideoModel(modelId).references.referenceImages === 0) refImages.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId]);
+
+  const startImageUrl =
+    imageSource === "library" ? (libraryImage?.url ?? null) : (startImage.done[0]?.url ?? null);
+
+  // Match the frame to the source photo: animating a square photo in the default
+  // 9:16 frame would letterbox it. Measured in the browser because the photo's
+  // shape isn't stored on the creation, so this also works for older photos.
+  // An explicit ratio pick always wins — see ratioTouchedRef.
+  useEffect(() => {
+    if (!startImageUrl || ratioTouchedRef.current) return;
+    let active = true;
+    const probe = new window.Image();
+    probe.onload = () => {
+      if (!active) return;
+      const next = nearestAspectRatio(probe.naturalWidth, probe.naturalHeight, model.aspectRatios);
+      if (next) setAspectRatio(next);
+    };
+    // Read the shape off a 64 px thumbnail from the Next optimizer instead of the
+    // original: resizing preserves the ratio, and downloading a multi-megabyte PNG
+    // just to learn its dimensions is exactly the Supabase egress the optimizer
+    // exists to avoid (see the egress notes in CLAUDE.md). 64 is one of Next's
+    // default imageSizes, so the optimizer accepts the width. If it ever refuses,
+    // onload never fires and the ratio simply stays on the model default.
+    probe.src = `/_next/image?url=${encodeURIComponent(startImageUrl)}&w=64&q=25`;
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startImageUrl]);
 
   const pricingKey = model.pricingKey({ resolution });
   const cost = videoCredits(pricingKey, duration);
@@ -1422,6 +1463,7 @@ function ImageToVideoComposer({
               }}
               selected={libraryImage}
               onSelect={setLibraryImage}
+              preselectId={initialStartImageCreationId}
               disabled={loading}
               hint={
                 model.requiresFirstFrame
@@ -1551,7 +1593,10 @@ function ImageToVideoComposer({
                   id: a,
                   label: ASPECT_RATIO_LABELS[a],
                 }))}
-                onSelect={(id) => setAspectRatio(id as typeof aspectRatio)}
+                onSelect={(id) => {
+                  ratioTouchedRef.current = true;
+                  setAspectRatio(id as typeof aspectRatio);
+                }}
                 disabled={loading}
               />
               )}

@@ -11,10 +11,16 @@ import {
 } from "@/lib/pipeline-recovery/video-upload-recovery";
 import { RecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { insertUserCreation } from "@/lib/creations-db";
+import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
-import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import {
+  createProcessingAsset,
+  markAssetReady,
+  markAssetFailed,
+  findAssetByStoragePath,
+} from "@/lib/assets-db";
+import { createAssetRelation } from "@/lib/asset-relations-db";
 import {
   spendCredits,
   refundCredits,
@@ -717,6 +723,28 @@ export async function POST(req: Request) {
         })
       );
     }
+    // Lineage for the Photo → video hand-off: link the library photo that seeded
+    // this clip to the clip itself, so the source is recoverable from either end.
+    // ponytail: start frame only — end frames and @-mentions are additional
+    // inputs, not the source. Widen the same block if that ever matters.
+    if (startImageCreationId && videoAssetId && profileId && userId) {
+      await safe("linkSourceImage", async () => {
+        const creation = await getUserCreationForUser(userId!, startImageCreationId);
+        if (!creation?.storagePath) return;
+        const imageAsset = await findAssetByStoragePath(profileId!, creation.storagePath);
+        // Only an image can be the source of a clip. Guards the relation graph
+        // against a client sending a video creation id as the start frame.
+        if (imageAsset?.asset_type !== "image") return;
+        await createAssetRelation({
+          profileId: profileId!,
+          parentAssetId: imageAsset.id,
+          childAssetId: videoAssetId!,
+          relationType: "source_for",
+          metadata: { creationId: startImageCreationId },
+        });
+      });
+    }
+
     if (jobId && profileId) {
       await safe("finishJob", () =>
         finishJob(profileId!, jobId!, {

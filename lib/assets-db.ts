@@ -251,6 +251,33 @@ export async function getAssetForProfile(
 }
 
 /**
+ * Narrow, read-only lookup of the asset that owns a storage path. Used to turn a
+ * library pick (a `user_creations` row, keyed by storage_path) into the platform
+ * asset it corresponds to, so a generated video can be linked back to its source
+ * image via asset_relations. Mirrors the (profile_id, storage_path) join already
+ * used by enrichCreationsFromAssets. Returns null for pre-Phase 4 creations that
+ * never got an `assets` row.
+ */
+export async function findAssetByStoragePath(
+  profileId: string,
+  storagePath: string
+): Promise<Asset | null> {
+  const { data, error } = await supabaseServer
+    .from(ASSETS_TABLE)
+    .select("*")
+    .eq("profile_id", profileId)
+    .eq("storage_path", storagePath)
+    .eq("status", "ready")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  handleError(error, "Failed to find asset by storage path.");
+  return (data as Asset | null) ?? null;
+}
+
+/**
  * Narrow, read-only lookup of the storyboard image asset that backs a given
  * legacy `storyboards.id`. Used only to link a generated storyboard video back
  * to its source image via asset_relations. Intentionally NOT a generic

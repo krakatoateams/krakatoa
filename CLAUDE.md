@@ -59,7 +59,7 @@ Krakatoa's product identity, observability, and billing primitives live in seven
 - **jobs** — every generation job (queued / running / succeeded / failed / cancelled), with `cost_credits` as a display snapshot.
 - **job_steps** — queryable pipeline-step diary attached to a job.
 - **assets** — long-term source of truth for generated files (image, video, audio, subtitle, ...). Carries `cost_credits` as a display snapshot.
-- **asset_relations** — flexible parent/child links (`derived_from`, `thumbnail_of`, `caption_for`, `audio_for`, `storyboard_for`, `source_for`, `variant_of`, `contains`).
+- **asset_relations** — flexible parent/child links (`derived_from`, `thumbnail_of`, `caption_for`, `audio_for`, `storyboard_for`, `source_for`, `variant_of`, `contains`). Only two are written today: `storyboard_for` (storyboard sheet → its video) and `source_for` (library photo → the clip it seeded, see Cross-tool hand-offs). Parent is always the source asset, child the derived one.
 - **posts** — evolved with `profile_id`, `project_id`, `asset_id` platform columns; existing scheduler columns intact.
 - **credit_wallets** — fast-read balance cache per profile.
 - **credit_transactions** — append-mostly ledger (`purchase`/`spend`/`refund`/`bonus`/`adjustment`/`expiry`); idempotent via `idempotency_key`. **Billing source of truth.**
@@ -102,6 +102,33 @@ Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/gener
 - No credit-balance UI yet.
 - Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
+
+## Cross-tool hand-offs
+
+Tools hand work to each other with **URL query params** — there is no shared client store. Existing links:
+
+| From | To | Link |
+|---|---|---|
+| Photo storyboard result | Storyboard to video | `/tools/video?type=storyboard&storyboardId=…` |
+| Photo result + library preview | Image to video | `/tools/video?type=image2video&startImageCreationId=…` |
+| Photo social post result | Scheduler | `/tools/scheduler?assetUrl=…&mediaType=image&title=…&caption=…` |
+| Video empty state | Photo storyboard | `/tools/photo-v2?type=storyboard` |
+| Dashboard trending template | Motion control | `/tools/video?type=motion_control&templateVideo=…` |
+
+`?type=` preselects a composer in `app/(app)/tools/video/page.tsx`; every param is read **once on mount** (see `initialType`), so switching modes in the UI never rewrites the URL.
+
+**Animate (photo → video).** [`lib/animate-handoff.ts`](lib/animate-handoff.ts) owns both halves of that contract — build the link with `animateVideoHref()` and gate the CTA with `canAnimateCreation()`; never inline the URL or re-derive the exclusions (videos, character turnaround sheets, storyboard sheets, trashed items). The CTA lives on the Photo result card and in the `CreationsHistory` preview modal, so it appears in Photo Studio history, `/dashboard/assets` and the dashboard — and stays hidden on Scheduler pickers, which render without `richUI`. Check: `npm run test:animate-handoff`.
+
+The CTA and its landing picker are coupled: the picker lists `tool="product_photo"` only, so an animatable creation from any other tool would deep-link into a picker that can never preselect it. `animateHandoffSelfCheck()` pins that invariant — **adding an image-media tool to `CREATION_TOOLS` fails `npm run test:animate-handoff`** until the tool either joins that picker or is excluded from `canAnimateCreation`.
+
+The id travelling in the URL is a **`user_creations.id`**, not an `assets.id`; `POST /api/generate-video` resolves it owner-scoped via `resolveMentionCreations` and, on success, links photo → clip in `asset_relations` (`source_for`) by matching `storage_path` through `findAssetByStoragePath`. Pre-Phase 4 photos with no `assets` row simply get no relation.
+
+**Frame matching.** Whenever an Image to Video start frame is set — deep-linked, picked from the library, or uploaded — the composer snaps the ratio chip to the closest shape the selected model offers via `nearestAspectRatio()` in [`lib/aspect-ratio-match.ts`](lib/aspect-ratio-match.ts), so a square photo isn't letterboxed into the 9:16 default. Two constraints to preserve:
+
+- The photo's shape is **not** stored on `user_creations` or `assets`, so it is measured in the browser. Measure the **`/_next/image` 64 px thumbnail**, never the signed URL directly — resizing preserves the ratio, and pulling a multi-megabyte original just to read `naturalWidth` is precisely the Supabase egress the optimizer exists to avoid (~839 B vs. megabytes). `64` must stay within Next's default `imageSizes` or the optimizer rejects the width and the ratio silently stays on the model default.
+- `ratioTouchedRef` makes an explicit chip pick final; auto-matching must never overwrite a ratio the user chose by hand.
+
+Distance is compared in log space (relative error) because a raw difference of ratios is asymmetric and drags ambiguous shapes toward the portrait end of the list. Check: `npm run test:aspect-ratio`.
 
 ## Reels Creator AI Pipeline Architecture
 The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contract (profile, tool gate, idempotency, spend/refund, jobs/assets, history) and dispatches by engine/mode into `lib/reels-pipeline/` (`runSeedancePipeline`, `runVeoSinglePipeline`, `runVeoPerScenePipeline`). The Seedance pipeline below orchestrates LLM scripting, one continuous voiceover, transcription, parallel scene video generation, ASS subtitles, Rendi stitching, and Supabase upload of the final MP4. The Veo pipelines reuse the same shared modules — Veo `single` uses the model's native audio (extract → Whisper → burn-in); Veo `perScene` runs Seedance-style continuous TTS mapped onto the concatenated timeline.

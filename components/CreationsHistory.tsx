@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Download,
   History,
   ImageIcon,
@@ -21,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { CreationHistoryItem, CreationTool } from "@/lib/creations";
+import { animateVideoHref, canAnimateCreation } from "@/lib/animate-handoff";
 import { getCreationModelLabel } from "@/lib/creation-model-label";
 
 type Props = {
@@ -1303,6 +1305,18 @@ export default function CreationsHistory({
                     />
                     {favorites.has(previewItem.id) ? "Favorited" : "Favorite"}
                   </button>
+                )}
+                {/* Hand-off to the Video studio. A link (not a router push) so the
+                    photo can be animated in a new tab. Hidden on picker surfaces
+                    (no richUI) where leaving the page would drop the selection. */}
+                {richUI && canAnimateCreation(previewItem) && (
+                  <Link
+                    href={animateVideoHref(previewItem.id)}
+                    className="flex h-8 items-center gap-1.5 rounded-full border border-purple-400/30 bg-purple-500/15 px-3 text-xs font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+                  >
+                    <Clapperboard className="h-3.5 w-3.5" />
+                    Animate
+                  </Link>
                 )}
                 <button
                   type="button"
