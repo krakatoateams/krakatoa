@@ -90,6 +90,7 @@ import {
 } from "@/components/studio";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { animateVideoHref } from "@/lib/animate-handoff";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
@@ -129,8 +130,11 @@ type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
 // one is a separate provider call and is charged separately.
 const BATCH_COUNTS = [1, 2, 3, 4] as const;
 
-/** One image of the last generation, ready to be signed for preview. */
-type BatchResult = { path: string; seed: string | null };
+/**
+ * One image of the last generation, ready to be signed for preview. `id` is the
+ * `user_creations` id, which the Animate hand-off passes to the Video studio.
+ */
+type BatchResult = { path: string; seed: string | null; id: string | null };
 
 // First reference-capable model — the default we snap to when the user enters a
 // mode that needs a product reference (Product Try-on) with a text-only model selected.
@@ -557,6 +561,8 @@ function PhotoOmniPage() {
   // Every image of the last batch. `resultPath` is whichever one is selected, so
   // the preview, caption and scheduler hand-off all follow the selection.
   const [resultBatch, setResultBatch] = useState<BatchResult[]>([]);
+  // Creation id of the selected image, or null when the result can't be animated.
+  const resultCreationId = resultBatch.find((b) => b.path === resultPath)?.id ?? null;
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -867,12 +873,33 @@ function PhotoOmniPage() {
       // A batch comes back as `images`; single generations only have the legacy
       // top-level fields. Either way the first image becomes the selected one.
       const batch: BatchResult[] = Array.isArray(data.images)
-        ? (data.images as Array<{ imageUrl?: string | null; storagePath?: string | null }>)
-            .map((img) => ({ path: pickGenerateStoragePath(img), seed: img.imageUrl ?? null }))
-            .flatMap((r) => (r.path ? [{ path: r.path, seed: r.seed }] : []))
+        ? (
+            data.images as Array<{
+              imageUrl?: string | null;
+              storagePath?: string | null;
+              historyItem?: { id?: string; storagePath?: string } | null;
+            }>
+          )
+            .map((img) => ({
+              path: pickGenerateStoragePath(img),
+              seed: img.imageUrl ?? null,
+              id: img.historyItem?.id ?? null,
+            }))
+            .flatMap((r) => (r.path ? [{ path: r.path, seed: r.seed, id: r.id }] : []))
         : [];
       const primaryPath = batch[0]?.path ?? pickGenerateStoragePath(data);
-      setResultBatch(batch);
+      // Legacy single-image response shape (no `images`): keep the one result in
+      // the batch anyway so the Animate hand-off can still find its creation id.
+      if (!batch.length && primaryPath) {
+        batch.push({
+          path: primaryPath,
+          seed: data.imageUrl ?? null,
+          id: data.historyItem?.id ?? null,
+        });
+      }
+      // Dropping the ids on a character turnaround hides the Animate CTA for it:
+      // it is a multi-pose grid, not a single source frame (see canAnimateCreation).
+      setResultBatch(isCharacterMode ? batch.map((b) => ({ ...b, id: null })) : batch);
       setResultPath(primaryPath);
       setResultSeed(batch[0]?.seed ?? data.imageUrl ?? null);
       setResultPrompt(prompt.trim());
@@ -937,6 +964,13 @@ function PhotoOmniPage() {
     if (title) params.set("title", title);
     if (caption.trim()) params.set("caption", caption.trim());
     router.push(`/tools/scheduler?${params.toString()}`);
+  };
+
+  // Hand the photo to the Video studio: Image to video opens with this image
+  // already selected from the library, so the user only writes the motion prompt.
+  const handleAnimate = () => {
+    if (!resultCreationId) return;
+    router.push(animateVideoHref(resultCreationId));
   };
 
   return (
@@ -1490,6 +1524,18 @@ function PhotoOmniPage() {
                 <p className="mt-1 text-xs text-gray-500">
                   Click the thumbnail to view full size, or generate another below.
                 </p>
+              )}
+
+              {resultCreationId && (
+                <button
+                  type="button"
+                  onClick={handleAnimate}
+                  className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+                >
+                  <Clapperboard className="h-4 w-4" />
+                  <span>Animate this photo</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               )}
             </div>
           </div>

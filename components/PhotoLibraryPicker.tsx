@@ -23,6 +23,29 @@ export type PhotoUploadGroup = {
   uploading: boolean;
 };
 
+type HistoryResponse = {
+  items?: {
+    id: string;
+    mediaUrl?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  }[];
+};
+
+/** Creations-history payload → picker items, dropping anything unusable here. */
+function toLibraryImages(data: HistoryResponse): LibraryImage[] {
+  return (data.items ?? [])
+    .filter((it) => !!it.mediaUrl)
+    // Character turnaround sheets are multi-pose grids, not usable as a single
+    // source photo, so they never belong in this picker.
+    .filter((it) => it.metadata?.creationKind !== "character")
+    .map((it) => ({
+      id: it.id,
+      url: it.mediaUrl as string,
+      title: it.title || "Image",
+    }));
+}
+
 function RefTile({
   item,
   onRemove,
@@ -70,6 +93,7 @@ export default function PhotoLibraryPicker({
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
   libraryTool = "product_photo",
+  preselectId,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -85,49 +109,58 @@ export default function PhotoLibraryPicker({
   libraryEmptyLabel?: string;
   /** Creations `tool` to list from (default "product_photo"). */
   libraryTool?: string;
+  /**
+   * Creation id to select once the library has loaded — used by the Photo → video
+   * "Animate" deep link. Fetched by id and pinned to the top of the grid, so it
+   * works for photos older than the newest page. Ignored when the id isn't an
+   * image the user owns.
+   */
+  preselectId?: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<LibraryImage[]>([]);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const startedRef = useRef(false);
+  const preselectedRef = useRef(false);
 
   const loadLibrary = useCallback(() => {
     startedRef.current = true;
     setLoadState("loading");
-    fetch(
-      `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image&limit=100`
-    )
-      .then((r) => r.json())
-      .then(
-        (d: {
-          items?: {
-            id: string;
-            mediaUrl?: string;
-            title?: string;
-            metadata?: Record<string, unknown>;
-          }[];
-        }) => {
-          const list: LibraryImage[] = (d.items ?? [])
-            .filter((it) => !!it.mediaUrl)
-            // Character turnaround sheets are multi-pose grids, not usable as a
-            // single source photo, so they never belong in this picker.
-            .filter((it) => it.metadata?.creationKind !== "character")
-            .map((it) => ({
-              id: it.id,
-              url: it.mediaUrl as string,
-              title: it.title || "Image",
-            }));
-          setItems(list);
-          setLoadState("loaded");
-        }
-      )
+    const base = `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image`;
+    // The newest 100, plus the deep-linked photo itself when there is one: it can
+    // be older than that window, and a CTA landing on an unselected picker is a
+    // dead end. `mediaType=image` also stops a video id from being pinned here.
+    Promise.all([
+      fetch(`${base}&limit=100`).then((r) => r.json()),
+      preselectId
+        ? fetch(`${base}&limit=1&ids=${encodeURIComponent(preselectId)}`)
+            .then((r) => r.json())
+            // Settled separately: a deep link that fails to resolve costs the user
+            // its preselection, not the whole picker.
+            .catch(() => ({}) as HistoryResponse)
+        : Promise.resolve({} as HistoryResponse),
+    ])
+      .then(([page, pinned]: HistoryResponse[]) => {
+        const list = toLibraryImages(page);
+        const [target] = toLibraryImages(pinned);
+        setItems(target && !list.some((i) => i.id === target.id) ? [target, ...list] : list);
+        setLoadState("loaded");
+      })
       .catch(() => setLoadState("error"));
-  }, [libraryTool]);
+  }, [libraryTool, preselectId]);
 
   useEffect(() => {
     if (source !== "library" || startedRef.current) return;
     loadLibrary();
   }, [source, loadLibrary]);
+
+  useEffect(() => {
+    if (preselectedRef.current || !preselectId || selected || !items.length) return;
+    const found = items.find((i) => i.id === preselectId);
+    if (!found) return;
+    preselectedRef.current = true;
+    onSelect(found);
+  }, [items, preselectId, selected, onSelect]);
 
   const uploaded = group.items[0];
 
