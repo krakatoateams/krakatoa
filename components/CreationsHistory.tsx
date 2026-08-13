@@ -690,9 +690,9 @@ export default function CreationsHistory({
     const prev = prevLiveActiveRef.current;
     prevLiveActiveRef.current = liveActiveKey;
     if (!prev) return;
-    const prevIds = new Set(prev.split(",").filter(Boolean));
+    const prevIds = prev.split(",").filter(Boolean);
     const nextIds = new Set(liveActiveKey.split(",").filter(Boolean));
-    const finished = [...prevIds].some((id) => !nextIds.has(id));
+    const finished = prevIds.some((id) => !nextIds.has(id));
     if (!finished) return;
     historyCache.clear();
     void load();
