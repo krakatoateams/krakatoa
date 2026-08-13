@@ -78,6 +78,7 @@ import {
   ProductPhotoResolution,
 } from "@/lib/product-photo";
 import CreationsHistory from "@/components/CreationsHistory";
+import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import {
   ChipDropdown,
   CreditActionButton,
@@ -1588,9 +1589,11 @@ function PhotoOmniPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               {charactersLoading ? (
-                <div className="flex items-center justify-center py-16 text-gray-500">
-                  <Loader2 className="h-7 w-7 animate-spin" />
-                </div>
+                <TileSkeleton
+                  count={8}
+                  gridClassName="grid grid-cols-3 gap-3 sm:grid-cols-4"
+                  label="Loading your characters"
+                />
               ) : savedCharacters.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] py-16 text-center">
                   <Users className="mx-auto mb-3 h-10 w-10 text-gray-600" />

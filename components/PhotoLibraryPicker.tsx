@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Plus, Loader2, AlertCircle, Check, Info } from "lucide-react";
 import { Tooltip } from "@/components/studio/Tooltip";
+import { TileSkeleton } from "@/components/ui/TileSkeleton";
 
 export type LibraryImage = { id: string; url: string; title: string };
 
@@ -232,10 +233,15 @@ export default function PhotoLibraryPicker({
           />
         </>
       ) : loadState === "loading" || loadState === "idle" ? (
-        <div className="flex h-16 items-center gap-2 text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
-          Loading your library…
-        </div>
+        // One row only: a second row of tiles would be clipped mid-tile by the
+        // grid's max height.
+        <TileSkeleton
+          count={3}
+          gridClassName="grid grid-cols-3 gap-2 pr-1"
+          tileClassName="rounded-[6px]"
+          lines={0}
+          label="Loading your library"
+        />
       ) : loadState === "error" ? (
         <div className="flex h-16 flex-wrap items-center gap-2 text-sm text-red-300">
           <AlertCircle className="h-4 w-4 shrink-0" />
