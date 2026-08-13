@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
+import { useActiveGenerations } from "@/app/(app)/active-generations-context";
+import { isLiveStatus } from "@/lib/active-generations-pure";
 import type { ToolSidebarVisibility } from "@/lib/tool-configs-db";
 
 interface NavItem {
@@ -76,6 +78,12 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const { status, name, email, image } = useCurrentUser();
+  const { items: activeGenerations } = useActiveGenerations();
+  const generatingNav = new Set(
+    activeGenerations
+      .filter((g) => isLiveStatus(g.status) || g.status === "recoverable")
+      .map((g) => g.navHref),
+  );
   const [isAdmin, setIsAdmin] = useState(false);
   const [toolVisibility, setToolVisibility] = useState<Record<string, ToolVisibility> | null>(
     initialToolVisibility
@@ -242,6 +250,12 @@ export default function Sidebar({
                         {item.icon}
                       </span>
                       {item.label}
+                      {generatingNav.has(item.href) && (
+                        <span
+                          className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-400"
+                          aria-label="Generation in progress"
+                        />
+                      )}
                     </Link>
                   </li>
                 );
@@ -312,13 +326,19 @@ export default function Sidebar({
                   href={item.href}
                   aria-label={item.label}
                   title={item.label}
-                  className={`flex h-14 shrink-0 items-center justify-center gap-2 rounded-full shadow-lg shadow-black/30 transition-colors [&_svg]:h-6 [&_svg]:w-6 ${
+                  className={`relative flex h-14 shrink-0 items-center justify-center gap-2 rounded-full shadow-lg shadow-black/30 transition-colors [&_svg]:h-6 [&_svg]:w-6 ${
                     active
                       ? "bg-white px-5 text-gray-900"
                       : "w-14 border border-white/20 bg-white/10 text-gray-200 ring-1 ring-inset ring-white/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-white/20 hover:text-white"
                   }`}
                 >
                   {renderNavIcon(item, { onLight: active, sizeClass: active ? "h-8 w-8" : "h-6 w-6" })}
+                  {generatingNav.has(item.href) && (
+                    <span
+                      className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse"
+                      aria-hidden
+                    />
+                  )}
                   {active && (
                     <span className="whitespace-nowrap text-sm font-semibold">
                       {item.label}

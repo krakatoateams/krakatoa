@@ -35,6 +35,7 @@ import {
   Info,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
+import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import MentionTextarea from "@/components/MentionTextarea";
 import PhotoLibraryPicker, {
   type LibraryImage,
@@ -2828,10 +2829,12 @@ function StoryboardToVideoComposer({
           </div>
 
           {listState === "loading" ? (
-            <div className="flex h-24 items-center gap-2 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
-              Loading your storyboards…
-            </div>
+            <TileSkeleton
+              count={3}
+              gridClassName="grid grid-cols-2 gap-3 sm:grid-cols-3"
+              aspectClassName="aspect-[3/2]"
+              label="Loading your storyboards"
+            />
           ) : listState === "error" ? (
             <div className="flex h-24 items-center gap-2 text-sm text-red-300">
               <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your storyboards.

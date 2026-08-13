@@ -6,24 +6,33 @@ import Link from "next/link";
 import {
   ChevronLeft,
   ChevronRight,
-  Clapperboard,
   Download,
   History,
   ImageIcon,
   Layers,
   LayoutGrid,
   Loader2,
-  RotateCcw,
   Star,
   Trash2,
   User,
   Video,
-  X,
   type LucideIcon,
 } from "lucide-react";
-import { CreationHistoryItem, CreationTool } from "@/lib/creations";
-import { animateVideoHref, canAnimateCreation } from "@/lib/animate-handoff";
-import { getCreationModelLabel } from "@/lib/creation-model-label";
+import {
+  CreationHistoryItem,
+  CreationTool,
+  characterDisplayName,
+  isCharacterItem,
+  isTrashedItem,
+} from "@/lib/creations";
+import { CreationPreviewModal } from "@/components/CreationPreviewModal";
+import { ActiveGenerationTiles } from "@/components/ActiveGenerationTiles";
+import { TileSkeleton } from "@/components/ui/TileSkeleton";
+import { useActiveGenerations } from "@/app/(app)/active-generations-context";
+import {
+  filterActiveGenerations,
+  isLiveStatus,
+} from "@/lib/active-generations-pure";
 
 type Props = {
   title?: string;
@@ -118,23 +127,8 @@ const historyCache = new Map<string, CachedHistory>();
 
 const FAVORITES_KEY = "krakatoa:library:favorites";
 
-/** A creation tagged as a Character creation (turnaround sheet) in the omni-form. */
-function isCharacterItem(item: CreationHistoryItem): boolean {
-  return item.metadata?.creationKind === "character";
-}
-
-/** A creation that has been soft-deleted (lives in Trash until purged). */
-function isTrashedItem(item: CreationHistoryItem): boolean {
-  const deletedAt = item.metadata?.deletedAt;
-  return typeof deletedAt === "string" && deletedAt.trim().length > 0;
-}
-
-/** Display name for a character creation (its given name, falling back to title). */
-function characterDisplayName(item: CreationHistoryItem): string {
-  const name = item.metadata?.characterName;
-  if (typeof name === "string" && name.trim()) return name.trim();
-  return item.title || "Character";
-}
+const DEFAULT_GRID_CLASS =
+  "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4";
 
 function loadFavorites(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -360,9 +354,7 @@ export default function CreationsHistory({
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [savingName, setSavingName] = useState(false);
-  const [nameError, setNameError] = useState<string | null>(null);
+  const { items: activeJobs } = useActiveGenerations();
 
   const downloadItem = useCallback(async (item: CreationHistoryItem) => {
     setDownloadingId(item.id);
@@ -385,6 +377,9 @@ export default function CreationsHistory({
       setDownloadingId(null);
     }
   }, []);
+
+  // Stable so the preview's key handler doesn't resubscribe on every render.
+  const closePreview = useCallback(() => setPreviewItem(null), []);
 
   // Navigate the preview across the currently loaded page of items.
   const previewIndex = previewItem
@@ -409,52 +404,13 @@ export default function CreationsHistory({
     });
   }, [items]);
 
-  useEffect(() => {
-    if (!previewItem) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPreviewItem(null);
-      else if (e.key === "ArrowLeft") showPrevPreview();
-      else if (e.key === "ArrowRight") showNextPreview();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [previewItem, showPrevPreview, showNextPreview]);
-
-  // Seed the rename field whenever a new item opens in the preview.
-  useEffect(() => {
-    if (previewItem) {
-      setNameDraft(characterDisplayName(previewItem));
-      setNameError(null);
-    }
-  }, [previewItem]);
-
-  const saveCharacterName = useCallback(async () => {
-    if (!previewItem) return;
-    const name = nameDraft.trim();
-    if (!name) {
-      setNameError("Enter a name.");
-      return;
-    }
-    setSavingName(true);
-    setNameError(null);
-    try {
-      const res = await fetch(`/api/creations/${previewItem.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to save name");
-      const updated = data.item as CreationHistoryItem;
-      setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
-      setPreviewItem(updated);
-      historyCache.clear();
-    } catch (err: unknown) {
-      setNameError(err instanceof Error ? err.message : "Failed to save name");
-    } finally {
-      setSavingName(false);
-    }
-  }, [previewItem, nameDraft]);
+  // A rename lands as a fresh row: patch it into the list and drop the cached
+  // pages so the next load doesn't serve the old name back.
+  const applyItemUpdate = useCallback((updated: CreationHistoryItem) => {
+    setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
+    setPreviewItem(updated);
+    historyCache.clear();
+  }, []);
 
   useEffect(() => {
     if (richUI) setFavorites(loadFavorites());
@@ -717,6 +673,31 @@ export default function CreationsHistory({
   // Items are already filtered + paged by the server.
   const pagedItems = items;
 
+  const showActiveTiles =
+    richUI && !isFavoriteTab && !isTrashTab && activeTab !== "character";
+  const activeTiles = showActiveTiles
+    ? filterActiveGenerations(activeJobs, {
+        tools: isStoryboardTab ? ["storyboard"] : tools,
+        mediaType: effectiveMediaType,
+      })
+    : [];
+  const liveActiveKey = activeTiles
+    .filter((j) => isLiveStatus(j.status))
+    .map((j) => j.jobId)
+    .join(",");
+  const prevLiveActiveRef = useRef(liveActiveKey);
+  useEffect(() => {
+    const prev = prevLiveActiveRef.current;
+    prevLiveActiveRef.current = liveActiveKey;
+    if (!prev) return;
+    const prevIds = prev.split(",").filter(Boolean);
+    const nextIds = new Set(liveActiveKey.split(",").filter(Boolean));
+    const finished = prevIds.some((id) => !nextIds.has(id));
+    if (!finished) return;
+    historyCache.clear();
+    void load();
+  }, [liveActiveKey, load]);
+
   const TABS: { id: LibraryTab; label: string; icon: LucideIcon }[] = [
     { id: "all", label: "All", icon: LayoutGrid },
     { id: "video", label: "Videos", icon: Video },
@@ -728,20 +709,6 @@ export default function CreationsHistory({
       ? [{ id: "trash" as LibraryTab, label: "Trash", icon: Trash2 }]
       : []),
   ];
-
-  const previewMeta = previewItem?.metadata ?? {};
-  const previewPrompt =
-    typeof previewMeta.prompt === "string" ? previewMeta.prompt.trim() : "";
-  const previewScenePrompts = Array.isArray(previewMeta.scenePrompts)
-    ? (previewMeta.scenePrompts as unknown[]).filter(
-        (s): s is string => typeof s === "string" && s.trim().length > 0
-      )
-    : [];
-  const previewNarration =
-    typeof previewMeta.narration === "string" ? previewMeta.narration.trim() : "";
-  const hasPreviewDetails =
-    !!previewPrompt || previewScenePrompts.length > 0 || !!previewNarration;
-  const previewModelLabel = previewItem ? getCreationModelLabel(previewItem) : null;
 
   const refreshButton = (
     <button
@@ -813,12 +780,16 @@ export default function CreationsHistory({
 
       {loading ? (
         // `loading` is only true on a cache miss (a cached chip serves instantly
-        // and revalidates silently), so this spinner marks a real fresh load —
-        // including switching to a chip that hasn't been opened yet.
-        <div className="flex items-center justify-center py-20 text-gray-500">
-          <Loader2 className="w-8 h-8 animate-spin" />
-        </div>
-      ) : pagedItems.length === 0 ? (
+        // and revalidates silently), so these placeholders mark a real fresh load
+        // — including switching to a chip that hasn't been opened yet.
+        <TileSkeleton
+          count={Math.min(pageSize, 10)}
+          gridClassName={gridClassName ?? DEFAULT_GRID_CLASS}
+          tileClassName="rounded-2xl border border-white/10"
+          lines={showMeta ? 3 : 1}
+          label="Loading generations"
+        />
+      ) : pagedItems.length === 0 && activeTiles.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
           {enableTabs && activeTab === "favorite" ? (
             <>
@@ -874,12 +845,8 @@ export default function CreationsHistory({
         </div>
       ) : (
         <>
-        <div
-          className={
-            gridClassName ??
-            "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
-          }
-        >
+        <div className={gridClassName ?? DEFAULT_GRID_CLASS}>
+          <ActiveGenerationTiles items={activeTiles} />
           {pagedItems.map((item) => {
             const selectable = !!onSelect && !richUI;
             const isFavorite = favorites.has(item.id);
@@ -1143,239 +1110,25 @@ export default function CreationsHistory({
       )}
 
       {previewItem && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Asset preview"
-          onClick={() => setPreviewItem(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-950"
-          >
-            <button
-              type="button"
-              onClick={() => setPreviewItem(null)}
-              aria-label="Close preview"
-              className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            {hasPrevPreview && (
-              <button
-                type="button"
-                onClick={showPrevPreview}
-                aria-label="Previous asset"
-                className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-            )}
-            {hasNextPreview && (
-              <button
-                type="button"
-                onClick={showNextPreview}
-                aria-label="Next asset"
-                className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            )}
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="flex items-center justify-center bg-black">
-                {previewItem.mediaType === "video" ? (
-                  <video
-                    src={previewItem.mediaUrl}
-                    className="max-h-[70vh] w-full object-contain"
-                    controls
-                    autoPlay
-                    playsInline
-                  />
-                ) : (
-                  <Image
-                    src={previewItem.mediaUrl}
-                    alt={previewItem.title || previewItem.toolLabel}
-                    width={1080}
-                    height={1350}
-                    sizes="(min-width: 768px) 720px, 100vw"
-                    className="max-h-[70vh] w-auto object-contain"
-                  />
-                )}
-              </div>
-
-              {richUI && isCharacterItem(previewItem) && (
-                <div className="border-b border-white/10 px-4 py-4">
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-                    Character name
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      maxLength={80}
-                      placeholder="Name this character"
-                      className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={saveCharacterName}
-                      disabled={savingName}
-                      className="flex h-9 items-center gap-1.5 rounded-xl bg-purple-500/20 px-4 text-sm font-medium text-purple-200 transition-colors hover:bg-purple-500/30 disabled:opacity-50"
-                    >
-                      {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-                    </button>
-                  </div>
-                  {nameError && <p className="mt-1.5 text-xs text-red-400">{nameError}</p>}
-                </div>
-              )}
-
-              {hasPreviewDetails && (
-                <div className="space-y-4 px-4 py-4">
-                  {previewPrompt && (
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-                        Prompt
-                      </p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
-                        {previewPrompt}
-                      </p>
-                    </div>
-                  )}
-
-                  {previewScenePrompts.length > 0 && (
-                    <div>
-                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-                        Scene prompts
-                      </p>
-                      <ol className="space-y-1.5">
-                        {previewScenePrompts.map((scenePrompt, i) => (
-                          <li
-                            key={i}
-                            className="flex gap-2 text-sm leading-relaxed text-gray-300"
-                          >
-                            <span className="shrink-0 text-gray-600 tabular-nums">
-                              {String(i + 1).padStart(2, "0")}
-                            </span>
-                            <span className="whitespace-pre-wrap">{scenePrompt}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-
-                  {previewNarration && (
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-                        Narration
-                      </p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
-                        {previewNarration}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
-              <p className="text-xs text-gray-400">
-                {previewItem &&
-                  new Date(previewItem.createdAt).toLocaleDateString()}
-                {previewModelLabel ? ` · ${previewModelLabel}` : ""}
-              </p>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {richUI && !isTrashedItem(previewItem) && (
-                  <button
-                    type="button"
-                    onClick={() => toggleFavorite(previewItem.id)}
-                    aria-pressed={favorites.has(previewItem.id)}
-                    className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
-                      favorites.has(previewItem.id)
-                        ? "bg-amber-400/20 text-amber-300"
-                        : "bg-white/5 text-gray-300 hover:text-white"
-                    }`}
-                  >
-                    <Star
-                      className="h-3.5 w-3.5"
-                      fill={favorites.has(previewItem.id) ? "currentColor" : "none"}
-                    />
-                    {favorites.has(previewItem.id) ? "Favorited" : "Favorite"}
-                  </button>
-                )}
-                {/* Hand-off to the Video studio. A link (not a router push) so the
-                    photo can be animated in a new tab. Hidden on picker surfaces
-                    (no richUI) where leaving the page would drop the selection. */}
-                {richUI && canAnimateCreation(previewItem) && (
-                  <Link
-                    href={animateVideoHref(previewItem.id)}
-                    className="flex h-8 items-center gap-1.5 rounded-full border border-purple-400/30 bg-purple-500/15 px-3 text-xs font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
-                  >
-                    <Clapperboard className="h-3.5 w-3.5" />
-                    Animate
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  onClick={() => downloadItem(previewItem)}
-                  disabled={downloadingId === previewItem.id}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
-                >
-                  {downloadingId === previewItem.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Download className="h-3.5 w-3.5" />
-                  )}
-                  Download
-                </button>
-                {richUI &&
-                  (isTrashedItem(previewItem) ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => restoreItem(previewItem)}
-                        disabled={mutatingId === previewItem.id}
-                        className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
-                      >
-                        {mutatingId === previewItem.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        )}
-                        Restore
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteForever(previewItem)}
-                        disabled={mutatingId === previewItem.id}
-                        className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete permanently
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => trashItem(previewItem)}
-                      disabled={mutatingId === previewItem.id}
-                      className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
-                    >
-                      {mutatingId === previewItem.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                      Delete
-                    </button>
-                  ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <CreationPreviewModal
+          // Remount per asset so the load placeholder and the name draft reset
+          // as plain initial state — nothing has to be un-set in an effect.
+          key={previewItem.id}
+          item={previewItem}
+          richUI={richUI}
+          isFavorite={favorites.has(previewItem.id)}
+          isDownloading={downloadingId === previewItem.id}
+          isMutating={mutatingId === previewItem.id}
+          onClose={closePreview}
+          onPrev={hasPrevPreview ? showPrevPreview : undefined}
+          onNext={hasNextPreview ? showNextPreview : undefined}
+          onToggleFavorite={toggleFavorite}
+          onDownload={downloadItem}
+          onTrash={trashItem}
+          onRestore={restoreItem}
+          onDeleteForever={deleteForever}
+          onItemUpdated={applyItemUpdate}
+        />
       )}
     </section>
   );
