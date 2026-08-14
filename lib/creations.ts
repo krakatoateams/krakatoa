@@ -23,6 +23,24 @@ export type CreationHistoryItem = {
   metadata: Record<string, unknown>;
 };
 
+/** A creation tagged as a Character creation (turnaround sheet) in the omni-form. */
+export function isCharacterItem(item: CreationHistoryItem): boolean {
+  return item.metadata?.creationKind === "character";
+}
+
+/** A creation that has been soft-deleted (lives in Trash until purged). */
+export function isTrashedItem(item: CreationHistoryItem): boolean {
+  const deletedAt = item.metadata?.deletedAt;
+  return typeof deletedAt === "string" && deletedAt.trim().length > 0;
+}
+
+/** Display name for a character creation (its given name, falling back to title). */
+export function characterDisplayName(item: CreationHistoryItem): string {
+  const name = item.metadata?.characterName;
+  if (typeof name === "string" && name.trim()) return name.trim();
+  return item.title || "Character";
+}
+
 export function parseToolsQuery(raw: string | null): CreationTool[] | undefined {
   if (!raw?.trim()) return undefined;
   const parts = raw.split(",").map((s) => s.trim());

@@ -36,6 +36,7 @@ import {
   isValidIdempotencyKey,
   computeRequestHash,
   beginGenerationRequest,
+  attachGenerationRequestJob,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
@@ -284,6 +285,11 @@ export async function POST(req: Request) {
     if (job) {
       jobId = job.id;
       await safe("startJob", () => startJob(profileId!, jobId!));
+      if (generationRequestId) {
+        await safe("attachJob", () =>
+          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
+        );
+      }
     }
 
     // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----

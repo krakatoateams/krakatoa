@@ -59,7 +59,7 @@ Krakatoa's product identity, observability, and billing primitives live in seven
 - **jobs** — every generation job (queued / running / succeeded / failed / cancelled), with `cost_credits` as a display snapshot.
 - **job_steps** — queryable pipeline-step diary attached to a job.
 - **assets** — long-term source of truth for generated files (image, video, audio, subtitle, ...). Carries `cost_credits` as a display snapshot.
-- **asset_relations** — flexible parent/child links (`derived_from`, `thumbnail_of`, `caption_for`, `audio_for`, `storyboard_for`, `source_for`, `variant_of`, `contains`).
+- **asset_relations** — flexible parent/child links (`derived_from`, `thumbnail_of`, `caption_for`, `audio_for`, `storyboard_for`, `source_for`, `variant_of`, `contains`). Only two are written today: `storyboard_for` (storyboard sheet → its video) and `source_for` (library photo → the clip it seeded, see Cross-tool hand-offs). Parent is always the source asset, child the derived one.
 - **posts** — evolved with `profile_id`, `project_id`, `asset_id` platform columns; existing scheduler columns intact.
 - **credit_wallets** — fast-read balance cache per profile.
 - **credit_transactions** — append-mostly ledger (`purchase`/`spend`/`refund`/`bonus`/`adjustment`/`expiry`); idempotent via `idempotency_key`. **Billing source of truth.**
@@ -97,11 +97,41 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 ### Generation cancel (in-flight v1)
 Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested`, `generation_predictions`, `cancel_allowed`, `assertNotCancelled`). The generate route owns refund + `cancelJob`; cancel endpoint never refunds in-flight attempts. After provider output is committed (`markProviderCommitted` in `lib/generation-commit.ts` flips `cancel_allowed=false`), cancel API returns 409 `CANCEL_NOT_ALLOWED` and post-commit user cancel does not refund. Recoverable jobs (`pipeline-recovery/`, status `recoverable`): credits held for **Try again**; refund only on genuine delivery failure (`lib/pipeline-recovery/refund-policy-pure.ts` — resume exhausted, terminal resume error, TTL after at least one resume attempt). Abandon recoverable (`cancel` + `jobId`) does not refund. Commit points: first Reels scene / Veo clip, video/image generation success, storyboard import vision LLM. Client: `useIdempotentSubmit().cancel()` + `useGenerationStatusPoll` + `GenerationCancelButton` (shows “Finalizing…” when locked). Stuck runs: `GET /api/cron/generation-reconcile`. Plans: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md), [`docs/generation/no-refund-after-replicate-plan.md`](docs/generation/no-refund-after-replicate-plan.md).
 
+### Active generations (survive navigation)
+Composer `loading` state dies on unmount. In-flight work lives on `jobs` (`queued` / `running` / `recoverable`) plus recent `failed` rows. `GET /api/generations/active` lists those for the signed-in profile; `ActiveGenerationsProvider` in `app/(app)/layout.tsx` polls it and drives the layout banner, sidebar dots, and processing tiles in `CreationsHistory` (library-style views only — pickers stay finished-asset-only). The banner hides on the tool that already shows the composer. Mapping job_type → label/href/history tool is `lib/active-generations-pure.ts`. `generation_requests.job_id` is written at `createJob` (`attachGenerationRequestJob`) so cancel-from-tile keys the right attempt. Check: `npm run test:active-generations`.
+
 ### Known limitations (intentional)
 - No Xendit / payment gateway / subscription plans yet.
 - No credit-balance UI yet.
 - Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
+
+## Cross-tool hand-offs
+
+Tools hand work to each other with **URL query params** — there is no shared client store. Existing links:
+
+| From | To | Link |
+|---|---|---|
+| Photo storyboard result | Storyboard to video | `/tools/video?type=storyboard&storyboardId=…` |
+| Photo result + library preview | Image to video | `/tools/video?type=image2video&startImageCreationId=…` |
+| Photo social post result | Scheduler | `/tools/scheduler?assetUrl=…&mediaType=image&title=…&caption=…` |
+| Video empty state | Photo storyboard | `/tools/photo-v2?type=storyboard` |
+| Dashboard trending template | Motion control | `/tools/video?type=motion_control&templateVideo=…` |
+
+`?type=` preselects a composer in `app/(app)/tools/video/page.tsx`; every param is read **once on mount** (see `initialType`), so switching modes in the UI never rewrites the URL.
+
+**Animate (photo → video).** [`lib/animate-handoff.ts`](lib/animate-handoff.ts) owns both halves of that contract — build the link with `animateVideoHref()` and gate the CTA with `canAnimateCreation()`; never inline the URL or re-derive the exclusions (videos, character turnaround sheets, storyboard sheets, trashed items). The CTA lives on the Photo result card and in the `CreationsHistory` preview modal, so it appears in Photo Studio history, `/dashboard/assets` and the dashboard — and stays hidden on Scheduler pickers, which render without `richUI`. Check: `npm run test:animate-handoff`.
+
+The CTA and its landing picker are coupled: the picker lists `tool="product_photo"` only, so an animatable creation from any other tool would deep-link into a picker that can never preselect it. `animateHandoffSelfCheck()` pins that invariant — **adding an image-media tool to `CREATION_TOOLS` fails `npm run test:animate-handoff`** until the tool either joins that picker or is excluded from `canAnimateCreation`.
+
+The id travelling in the URL is a **`user_creations.id`**, not an `assets.id`; `POST /api/generate-video` resolves it owner-scoped via `resolveMentionCreations` and, on success, links photo → clip in `asset_relations` (`source_for`) by matching `storage_path` through `findAssetByStoragePath`. Pre-Phase 4 photos with no `assets` row simply get no relation.
+
+**Frame matching.** Whenever an Image to Video start frame is set — deep-linked, picked from the library, or uploaded — the composer snaps the ratio chip to the closest shape the selected model offers via `nearestAspectRatio()` in [`lib/aspect-ratio-match.ts`](lib/aspect-ratio-match.ts), so a square photo isn't letterboxed into the 9:16 default. Two constraints to preserve:
+
+- The photo's shape is **not** stored on `user_creations` or `assets`, so it is measured in the browser. Measure the **`/_next/image` 64 px thumbnail**, never the signed URL directly — resizing preserves the ratio, and pulling a multi-megabyte original just to read `naturalWidth` is precisely the Supabase egress the optimizer exists to avoid (~839 B vs. megabytes). `64` must stay within Next's default `imageSizes` or the optimizer rejects the width and the ratio silently stays on the model default.
+- `ratioTouchedRef` makes an explicit chip pick final; auto-matching must never overwrite a ratio the user chose by hand.
+
+Distance is compared in log space (relative error) because a raw difference of ratios is asymmetric and drags ambiguous shapes toward the portrait end of the list. Check: `npm run test:aspect-ratio`.
 
 ## Reels Creator AI Pipeline Architecture
 The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contract (profile, tool gate, idempotency, spend/refund, jobs/assets, history) and dispatches by engine/mode into `lib/reels-pipeline/` (`runSeedancePipeline`, `runVeoSinglePipeline`, `runVeoPerScenePipeline`). The Seedance pipeline below orchestrates LLM scripting, one continuous voiceover, transcription, parallel scene video generation, ASS subtitles, Rendi stitching, and Supabase upload of the final MP4. The Veo pipelines reuse the same shared modules — Veo `single` uses the model's native audio (extract → Whisper → burn-in); Veo `perScene` runs Seedance-style continuous TTS mapped onto the concatenated timeline.
@@ -186,11 +216,13 @@ Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-mon
 
 ## Developer Guidelines
 1. **Design philosophy:** Premium, dark-first, glassmorphism; smooth Tailwind transitions and micro-interactions.
-2. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.
-3. **Long-running routes & Vercel plan limits:** `maxDuration` is set on the heavy routes; handle Rendi polling timeouts gracefully. **Vercel's Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds** (deployment fails outright with `Builder returned invalid maxDuration value ... must have a maxDuration between 1 and 300 for plan hobby` if a route exceeds it). All heavy routes (`api/generate-reels`, `api/generate-storyboard-video`) are therefore pinned to `300`. **Trade-off:** real generations that run longer than 5 minutes will be killed by Vercel's function timeout at runtime. The Pro plan raises the ceiling to 800s — if/when upgraded, these routes can be raised back to `600` (search the codebase for the `Vercel Hobby plan caps` comments). Never set a route above `300` while the project is on Hobby.
-4. **LLM prompts:** Always interpolate concrete strings (e.g. `style_anchor`) into prompts; never rely on “the provided X” placeholders — add post-parse safety nets.
-5. **FFmpeg concat:** Always normalize fps/scale/SAR/pixel format before `concat` when inputs come from generative video models.
-6. **Environment variables (common):**
+2. **Loading states:** Content that is *about to appear* loads as a skeleton shaped like the real thing — never a centered spinner, which drops the layout and lets the surrounding chrome render alone. Media grids reuse [`components/ui/TileSkeleton.tsx`](components/ui/TileSkeleton.tsx) and pass the grid's own classes, so the placeholders occupy the exact slots the cards will. Spinners stay for *actions* (download, delete, save) and for generation progress, where there is no shape to reserve. When media has no intrinsic size yet, hold the frame open (`min-h-*`) and fade it in on `onLoad`/`onLoadedData`, clearing the placeholder on `onError` too so a broken asset can't pulse forever.
+   **Never reset that per-item load state in an effect.** `next/image` delivers `onLoad` **at most once per element+src** (it dedupes on `data-loaded-src`), and for an image already in the browser cache it fires from the ref during the commit phase — *before* any `useEffect`. An effect that clears the flag therefore runs last and strands the placeholder over an `opacity-0` image with no second load event coming. Mount the owner with `key={item.id}` instead and let plain `useState` reset on remount; [`components/CreationPreviewModal.tsx`](components/CreationPreviewModal.tsx) is the reference (a fresh element also gives next/image a fresh `useRef(onLoad)`, so the deferred `decode().then` can't call a stale closure).
+3. **Reels Creator UI:** Keep the Live Caption Preview math (in the Reels Creator composer inside `app/(app)/tools/video/page.tsx`) aligned with the ASS `maxMarginV` / margin logic in `lib/reels-pipeline/ass.ts`.
+4. **Long-running routes & Vercel plan limits:** `maxDuration` is set on the heavy routes; handle Rendi polling timeouts gracefully. **Vercel's Hobby (free) plan hard-caps every Serverless Function at `maxDuration = 300` seconds** (deployment fails outright with `Builder returned invalid maxDuration value ... must have a maxDuration between 1 and 300 for plan hobby` if a route exceeds it). All heavy routes (`api/generate-reels`, `api/generate-storyboard-video`) are therefore pinned to `300`. **Trade-off:** real generations that run longer than 5 minutes will be killed by Vercel's function timeout at runtime. The Pro plan raises the ceiling to 800s — if/when upgraded, these routes can be raised back to `600` (search the codebase for the `Vercel Hobby plan caps` comments). Never set a route above `300` while the project is on Hobby.
+5. **LLM prompts:** Always interpolate concrete strings (e.g. `style_anchor`) into prompts; never rely on “the provided X” placeholders — add post-parse safety nets.
+6. **FFmpeg concat:** Always normalize fps/scale/SAR/pixel format before `concat` when inputs come from generative video models.
+7. **Environment variables (common):**
    - `REPLICATE_API_TOKEN` — Replicate (Gemini, Seedance, MiniMax TTS, Whisper, caption model).
    - `RENDI_API_KEY` — Rendi FFmpeg API.
    - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL.

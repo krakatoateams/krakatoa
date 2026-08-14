@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Plus, Loader2, AlertCircle, Check, Info } from "lucide-react";
 import { Tooltip } from "@/components/studio/Tooltip";
+import { TileSkeleton } from "@/components/ui/TileSkeleton";
 
 export type LibraryImage = { id: string; url: string; title: string };
 
@@ -22,6 +23,29 @@ export type PhotoUploadGroup = {
   remove: (id: string) => void;
   uploading: boolean;
 };
+
+type HistoryResponse = {
+  items?: {
+    id: string;
+    mediaUrl?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  }[];
+};
+
+/** Creations-history payload → picker items, dropping anything unusable here. */
+function toLibraryImages(data: HistoryResponse): LibraryImage[] {
+  return (data.items ?? [])
+    .filter((it) => !!it.mediaUrl)
+    // Character turnaround sheets are multi-pose grids, not usable as a single
+    // source photo, so they never belong in this picker.
+    .filter((it) => it.metadata?.creationKind !== "character")
+    .map((it) => ({
+      id: it.id,
+      url: it.mediaUrl as string,
+      title: it.title || "Image",
+    }));
+}
 
 function RefTile({
   item,
@@ -70,6 +94,7 @@ export default function PhotoLibraryPicker({
   libraryHref = "/tools/photo-v2",
   libraryEmptyLabel = "No saved images yet.",
   libraryTool = "product_photo",
+  preselectId,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -85,49 +110,58 @@ export default function PhotoLibraryPicker({
   libraryEmptyLabel?: string;
   /** Creations `tool` to list from (default "product_photo"). */
   libraryTool?: string;
+  /**
+   * Creation id to select once the library has loaded — used by the Photo → video
+   * "Animate" deep link. Fetched by id and pinned to the top of the grid, so it
+   * works for photos older than the newest page. Ignored when the id isn't an
+   * image the user owns.
+   */
+  preselectId?: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<LibraryImage[]>([]);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const startedRef = useRef(false);
+  const preselectedRef = useRef(false);
 
   const loadLibrary = useCallback(() => {
     startedRef.current = true;
     setLoadState("loading");
-    fetch(
-      `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image&limit=100`
-    )
-      .then((r) => r.json())
-      .then(
-        (d: {
-          items?: {
-            id: string;
-            mediaUrl?: string;
-            title?: string;
-            metadata?: Record<string, unknown>;
-          }[];
-        }) => {
-          const list: LibraryImage[] = (d.items ?? [])
-            .filter((it) => !!it.mediaUrl)
-            // Character turnaround sheets are multi-pose grids, not usable as a
-            // single source photo, so they never belong in this picker.
-            .filter((it) => it.metadata?.creationKind !== "character")
-            .map((it) => ({
-              id: it.id,
-              url: it.mediaUrl as string,
-              title: it.title || "Image",
-            }));
-          setItems(list);
-          setLoadState("loaded");
-        }
-      )
+    const base = `/api/creations/history?tool=${encodeURIComponent(libraryTool)}&mediaType=image`;
+    // The newest 100, plus the deep-linked photo itself when there is one: it can
+    // be older than that window, and a CTA landing on an unselected picker is a
+    // dead end. `mediaType=image` also stops a video id from being pinned here.
+    Promise.all([
+      fetch(`${base}&limit=100`).then((r) => r.json()),
+      preselectId
+        ? fetch(`${base}&limit=1&ids=${encodeURIComponent(preselectId)}`)
+            .then((r) => r.json())
+            // Settled separately: a deep link that fails to resolve costs the user
+            // its preselection, not the whole picker.
+            .catch(() => ({}) as HistoryResponse)
+        : Promise.resolve({} as HistoryResponse),
+    ])
+      .then(([page, pinned]: HistoryResponse[]) => {
+        const list = toLibraryImages(page);
+        const [target] = toLibraryImages(pinned);
+        setItems(target && !list.some((i) => i.id === target.id) ? [target, ...list] : list);
+        setLoadState("loaded");
+      })
       .catch(() => setLoadState("error"));
-  }, [libraryTool]);
+  }, [libraryTool, preselectId]);
 
   useEffect(() => {
     if (source !== "library" || startedRef.current) return;
     loadLibrary();
   }, [source, loadLibrary]);
+
+  useEffect(() => {
+    if (preselectedRef.current || !preselectId || selected || !items.length) return;
+    const found = items.find((i) => i.id === preselectId);
+    if (!found) return;
+    preselectedRef.current = true;
+    onSelect(found);
+  }, [items, preselectId, selected, onSelect]);
 
   const uploaded = group.items[0];
 
@@ -199,10 +233,15 @@ export default function PhotoLibraryPicker({
           />
         </>
       ) : loadState === "loading" || loadState === "idle" ? (
-        <div className="flex h-16 items-center gap-2 text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin text-gray-300" />
-          Loading your library…
-        </div>
+        // One row only: a second row of tiles would be clipped mid-tile by the
+        // grid's max height.
+        <TileSkeleton
+          count={3}
+          gridClassName="grid grid-cols-3 gap-2 pr-1"
+          tileClassName="rounded-[6px]"
+          lines={0}
+          label="Loading your library"
+        />
       ) : loadState === "error" ? (
         <div className="flex h-16 flex-wrap items-center gap-2 text-sm text-red-300">
           <AlertCircle className="h-4 w-4 shrink-0" />

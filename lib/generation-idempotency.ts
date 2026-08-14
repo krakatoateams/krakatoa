@@ -164,6 +164,21 @@ export async function beginGenerationRequest(params: {
   return { action: "in_progress" };
 }
 
+/** Link the in-flight generation_request to its job as soon as the job exists.
+ *  Cancel-from-history keys off this; waiting until finish left a window where
+ *  two concurrent gens could be paired by created_at guesswork. */
+export async function attachGenerationRequestJob(params: {
+  id: string;
+  jobId: string;
+}): Promise<void> {
+  const { error } = await supabaseServer
+    .from(TABLE)
+    .update({ job_id: params.jobId })
+    .eq("id", params.id);
+
+  handleError(error, "Failed to attach job to generation request.");
+}
+
 export async function finishGenerationRequestSuccess(params: {
   id: string;
   jobId?: string | null;
