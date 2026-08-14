@@ -83,6 +83,13 @@ export const HERO_HEADLINE_LINES = HERO_HEADLINE.map((line) =>
 
 export const HERO_CTA = { label: "See how", href: "#features" };
 
+/**
+ * Supporting statement rendered beneath the hero showreel. Kept as plain copy
+ * here; the /hello variant reveals it word-by-word on scroll.
+ */
+export const HERO_SUBCOPY =
+  "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes — all from a single prompt.";
+
 export const AI_MODELS_LABEL = "Powered by leading AI models";
 export const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
 

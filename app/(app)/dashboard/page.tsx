@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCurrentUser } from "@/lib/auth-context";
-import { Video, Camera, Zap, CalendarClock } from "lucide-react";
+import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
 import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
 import TrendingTemplates from "./TrendingTemplates";
@@ -26,16 +26,16 @@ const TOOLS: ToolDef[] = [
   {
     name: "Video",
     href: "/tools/video?type=reels-creator",
-    icon: <Video className="h-5 w-5 text-indigo-400" />,
-    accent: "bg-indigo-500/10",
+    icon: <Video className="h-5 w-5 text-gray-300" />,
+    accent: "bg-white/10",
     thumbMediaType: "video" as const,
     thumbOutlined: true,
   },
   {
     name: "Photo",
     href: "/tools/photo-v2",
-    icon: <Camera className="h-5 w-5 text-purple-400" />,
-    accent: "bg-purple-500/10",
+    icon: <Camera className="h-5 w-5 text-gray-300" />,
+    accent: "bg-white/10",
     thumbMediaType: "image" as const,
     thumbOutlined: true,
   },
@@ -46,11 +46,10 @@ const TOOLS: ToolDef[] = [
     accent: "bg-emerald-500/10",
   },
   {
-    name: "Instagram",
-    href: "/tools/ig",
-    icon: <Zap className="h-5 w-5 text-amber-400" />,
-    accent: "bg-amber-500/10",
-    comingSoon: true,
+    name: "Calendar",
+    href: "/tools/scheduler/calendar",
+    icon: <CalendarDays className="h-5 w-5 text-sky-400" />,
+    accent: "bg-sky-500/10",
   },
 ];
 

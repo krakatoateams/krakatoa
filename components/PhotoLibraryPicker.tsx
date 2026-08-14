@@ -62,7 +62,7 @@ function RefTile({
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-gray-500">
           {item.status === "uploading" ? (
-            <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
+            <Loader2 className="h-4 w-4 animate-spin text-gray-300" />
           ) : (
             "Error"
           )}
@@ -169,7 +169,7 @@ export default function PhotoLibraryPicker({
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
-          <span className="text-purple-300">{icon}</span>
+          <span className="text-gray-300">{icon}</span>
           {label}
           {hint ? (
             <Tooltip label={hint}>
@@ -194,7 +194,7 @@ export default function PhotoLibraryPicker({
               onClick={() => onSourceChange(opt.id)}
               className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-40 ${
                 source === opt.id
-                  ? "bg-purple-500/25 text-white"
+                  ? "bg-white/15 text-white"
                   : "text-gray-400 hover:text-white"
               }`}
             >
@@ -214,7 +214,7 @@ export default function PhotoLibraryPicker({
                 type="button"
                 disabled={disabled}
                 onClick={() => inputRef.current?.click()}
-                className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-xs font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-xs font-semibold normal-case tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add</span>
@@ -249,7 +249,7 @@ export default function PhotoLibraryPicker({
           <button
             type="button"
             onClick={loadLibrary}
-            className="font-semibold text-purple-300 underline-offset-2 hover:underline"
+            className="font-semibold text-gray-300 underline-offset-2 hover:underline"
           >
             Try again
           </button>
@@ -257,7 +257,7 @@ export default function PhotoLibraryPicker({
       ) : items.length === 0 ? (
         <div className="flex h-16 flex-col justify-center gap-1 text-sm text-gray-500">
           <span>{libraryEmptyLabel}</span>
-          <a href={libraryHref} className="font-semibold text-purple-300 hover:text-purple-200">
+          <a href={libraryHref} className="font-semibold text-gray-300 hover:text-gray-200">
             Create one in Photo Studio →
           </a>
         </div>
@@ -274,7 +274,7 @@ export default function PhotoLibraryPicker({
                 title={img.title}
                 className={`relative aspect-square overflow-hidden rounded-[6px] border transition-colors disabled:opacity-40 ${
                   active
-                    ? "border-purple-400 ring-2 ring-purple-400/40"
+                    ? "border-white/40 ring-2 ring-white/25"
                     : "border-white/10 hover:border-white/30"
                 }`}
               >
@@ -286,7 +286,7 @@ export default function PhotoLibraryPicker({
                   className="object-cover"
                 />
                 {active && (
-                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-white">
+                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-gray-900">
                     <Check className="h-2.5 w-2.5" />
                   </span>
                 )}

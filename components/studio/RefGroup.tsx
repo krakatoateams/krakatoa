@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Info, Loader2, Music, Plus, X } from "lucide-react";
+import { AlertCircle, Film, Image as ImageIcon, Info, Loader2, Music, Plus, X } from "lucide-react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { Tooltip } from "./Tooltip";
@@ -151,7 +151,7 @@ export function useMediaRefs(kind: RefKind, max: number): RefGroupApi {
 
 export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => void }) {
   return (
-    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-white/5">
+    <div className="relative h-16 w-20 shrink-0 overflow-hidden rounded-[4px] bg-white/5">
       {item.kind === "image" && item.preview ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.preview} alt="reference" className="absolute inset-0 h-full w-full object-cover" />
@@ -166,7 +166,7 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
 
       {item.status === "uploading" && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-300" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
         </div>
       )}
       {item.status === "error" && (
@@ -207,6 +207,7 @@ export function RefGroup({
   group,
   disabled,
   disabledReason,
+  bare = false,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -216,30 +217,34 @@ export function RefGroup({
   group: RefGroupApi;
   disabled?: boolean;
   disabledReason?: string;
+  /** Render without the card wrapper / header / count — for inline use beside a prompt. */
+  bare?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const full = group.items.length >= group.max;
   const addDisabled = disabled || full;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
-          <span className="text-purple-300">{icon}</span>
-          {label}
-          {hint ? (
-            <Tooltip label={hint}>
-              <Info
-                className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
-                aria-label={hint}
-              />
-            </Tooltip>
-          ) : null}
+    <div className={bare ? "" : "rounded-2xl bg-white/[0.03] p-3"}>
+      {!bare && (
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
+            <span className="text-gray-300">{icon}</span>
+            {label}
+            {hint ? (
+              <Tooltip label={hint}>
+                <Info
+                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  aria-label={hint}
+                />
+              </Tooltip>
+            ) : null}
+          </div>
+          <span className="text-xs text-gray-500">
+            {group.items.length}/{group.max}
+          </span>
         </div>
-        <span className="text-xs text-gray-500">
-          {group.items.length}/{group.max}
-        </span>
-      </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {group.items.map((it) => (
@@ -250,11 +255,11 @@ export function RefGroup({
             type="button"
             disabled={addDisabled}
             onClick={() => inputRef.current?.click()}
-            title={disabled ? disabledReason : `Add ${label.toLowerCase()}`}
-            className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-[4px] border border-dashed border-white/15 bg-white/5 text-xs font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            title={disabled ? disabledReason : bare ? hint ?? `Add ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
+            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <Plus className="h-4 w-4" />
-            <span>Add</span>
+            {bare ? <span className="text-gray-300">{icon}</span> : <Plus className="h-4 w-4" />}
+            <span>{bare ? label : "Add"}</span>
           </button>
         )}
       </div>
@@ -271,6 +276,94 @@ export function RefGroup({
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) group.add(e.target.files);
+          if (inputRef.current) inputRef.current.value = "";
+        }}
+      />
+    </div>
+  );
+}
+
+// A single inline "Reference" tile that accepts BOTH images and videos, routing
+// each dropped file to the right group by MIME type. The video (Film) icon and
+// video acceptance only appear when a videoGroup is supplied (i.e. the model
+// supports reference video). Card-less, sized to match the bare RefGroup tiles.
+export function RefMediaGroup({
+  imageGroup,
+  videoGroup,
+  imageAccept,
+  videoAccept,
+  label,
+  disabled,
+  disabledReason,
+  hint,
+}: {
+  imageGroup: RefGroupApi;
+  videoGroup?: RefGroupApi;
+  imageAccept: string;
+  videoAccept?: string;
+  label: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  hint?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const acceptsVideo = !!videoGroup && !!videoAccept;
+
+  const canAddImage = imageGroup.items.length < imageGroup.max;
+  const canAddVideo = acceptsVideo && videoGroup!.items.length < videoGroup!.max;
+  const canAdd = canAddImage || canAddVideo;
+
+  const accept = [canAddImage ? imageAccept : null, canAddVideo ? videoAccept : null]
+    .filter(Boolean)
+    .join(",");
+
+  const routeFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    const images = list.filter((f) => !f.type.startsWith("video/"));
+    const videos = list.filter((f) => f.type.startsWith("video/"));
+    if (images.length && canAddImage) imageGroup.add(images);
+    if (videos.length && canAddVideo) videoGroup!.add(videos);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2">
+        {imageGroup.items.map((it) => (
+          <RefTile key={it.id} item={it} onRemove={() => imageGroup.remove(it.id)} />
+        ))}
+        {acceptsVideo &&
+          videoGroup!.items.map((it) => (
+            <RefTile key={it.id} item={it} onRemove={() => videoGroup!.remove(it.id)} />
+          ))}
+        {canAdd && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => inputRef.current?.click()}
+            title={disabled ? disabledReason : hint ?? `Add ${label.toLowerCase()}`}
+            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <span className="flex items-center gap-1 text-gray-300">
+              <ImageIcon className="h-3.5 w-3.5" />
+              {acceptsVideo && <Film className="h-3.5 w-3.5" />}
+            </span>
+            <span>{label}</span>
+          </button>
+        )}
+      </div>
+
+      {disabled && disabledReason ? (
+        <p className="mt-2 text-sm leading-snug text-amber-300/85">{disabledReason}</p>
+      ) : null}
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) routeFiles(e.target.files);
           if (inputRef.current) inputRef.current.value = "";
         }}
       />

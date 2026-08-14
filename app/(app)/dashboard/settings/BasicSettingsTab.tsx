@@ -49,7 +49,7 @@ export default function BasicSettingsTab() {
                 className="h-12 w-12 rounded-full opacity-70"
               />
             ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-500/20 text-sm font-semibold text-violet-300">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-gray-200">
                 {user?.name?.[0]?.toUpperCase() ?? "?"}
               </div>
             )}

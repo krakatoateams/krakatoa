@@ -56,7 +56,7 @@ export function HelloNav() {
   return (
     <>
       <div className="pointer-events-none fixed inset-x-0 top-0 z-40 mx-auto max-w-[800px] px-3 py-3 sm:py-5">
-        <nav className="pointer-events-auto grid grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-2xl bg-[#171717]/90 p-2.5 backdrop-blur-[15px] sm:px-5 sm:py-3">
+        <nav className="pointer-events-auto grid grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-full border border-white/[0.08] bg-[#171717]/45 p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-[20px] backdrop-saturate-150 sm:px-5 sm:py-3">
           {/* Left: section links (desktop) / menu toggle (mobile) */}
           <div className="hidden items-center gap-6 md:flex">
             {NAV_LINKS.map((link) => (

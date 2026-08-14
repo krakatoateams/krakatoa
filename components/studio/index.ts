@@ -24,6 +24,7 @@ export {
 } from "./UploadTile";
 export {
   RefGroup,
+  RefMediaGroup,
   RefTile,
   useMediaRefs,
   uploadRefFile,

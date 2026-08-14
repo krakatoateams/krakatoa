@@ -35,7 +35,7 @@ export default function AccountTab() {
               className="h-14 w-14 shrink-0 rounded-full"
             />
           ) : (
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-lg font-semibold text-violet-300">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 text-lg font-semibold text-gray-200">
               {displayUser?.name?.[0]?.toUpperCase() ?? "?"}
             </div>
           )}

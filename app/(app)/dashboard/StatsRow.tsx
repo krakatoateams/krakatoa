@@ -18,7 +18,7 @@ interface StatsCardProps {
 
 function StatsCard({ label, value, icon, accent, loading }: StatsCardProps) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+    <div className="rounded-xl bg-white/[0.04] p-5">
       <div className="flex items-center gap-3">
         <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent}`}>
           {icon}

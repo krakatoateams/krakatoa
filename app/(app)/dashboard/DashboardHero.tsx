@@ -49,7 +49,7 @@ export default function DashboardHero() {
         animated
         colors={["#c084fc", "#f472b6", "#818cf8"]}
       >
-      <div className="relative overflow-hidden rounded-[inherit] bg-gradient-to-b from-violet-600/20 via-gray-900 to-gray-950">
+      <div className="relative overflow-hidden rounded-[inherit] bg-gradient-to-b from-white/10 via-gray-900 to-gray-950">
         {/* Animated Grainient background */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
           <Grainient
@@ -116,7 +116,7 @@ export default function DashboardHero() {
               const Icon = item.icon;
               return (
                 <span key={i} className="flex items-center gap-2">
-                  <Icon className="h-3.5 w-3.5 text-violet-300" />
+                  <Icon className="h-3.5 w-3.5 text-gray-300" />
                   {item.text}
                 </span>
               );

@@ -71,10 +71,10 @@ const STATUS_CFG = {
   },
   publishing: {
     label: "Publishing",
-    dot: "bg-violet-400",
-    badge: "border-violet-500/30 bg-violet-500/10 text-violet-300",
-    chip: "border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20",
-    stat: "text-violet-300",
+    dot: "bg-white/70",
+    badge: "border-white/20 bg-white/10 text-neutral-300",
+    chip: "border-white/25 bg-white/10 text-neutral-300 hover:bg-white/15",
+    stat: "text-neutral-300",
   },
   published: {
     label: "Published",
@@ -92,17 +92,17 @@ const STATUS_CFG = {
   },
   canceled: {
     label: "Canceled",
-    dot: "bg-gray-600",
-    badge: "border-gray-700 bg-gray-800 text-gray-500",
-    chip: "border-gray-700/60 bg-gray-800/60 text-gray-500 line-through hover:bg-gray-700/60",
-    stat: "text-gray-500",
+    dot: "bg-neutral-600",
+    badge: "border-neutral-700 bg-neutral-800 text-neutral-500",
+    chip: "border-neutral-700/60 bg-neutral-800/60 text-neutral-500 line-through hover:bg-neutral-700/60",
+    stat: "text-neutral-500",
   },
   draft: {
     label: "Draft",
-    dot: "bg-gray-500",
-    badge: "border-gray-700 bg-gray-800 text-gray-400",
-    chip: "border-gray-700 bg-gray-800 text-gray-400 hover:bg-gray-700",
-    stat: "text-gray-400",
+    dot: "bg-neutral-500",
+    badge: "border-neutral-700 bg-neutral-800 text-neutral-400",
+    chip: "border-neutral-700 bg-neutral-800 text-neutral-400 hover:bg-neutral-700",
+    stat: "text-neutral-400",
   },
 } as const;
 
@@ -316,7 +316,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
   };
 
   const inputCls =
-    "w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none transition-colors focus:border-violet-500";
+    "w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white placeholder-neutral-600 outline-none transition-colors focus:border-white/40";
 
   return (
     <div
@@ -326,18 +326,18 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900 shadow-2xl">
-        <div className="flex items-start justify-between border-b border-gray-800 p-5">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl">
+        <div className="flex items-start justify-between border-b border-white/10 p-5">
           <div className="flex items-center gap-2.5">
             {post.platform === "tiktok" ? (
               <>
                 <Music2 className="h-5 w-5 text-pink-400" />
-                <span className="text-xs font-medium uppercase tracking-wider text-gray-500">TikTok</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">TikTok</span>
               </>
             ) : (
               <>
                 <YoutubeIcon className="h-5 w-5 text-red-400" />
-                <span className="text-xs font-medium uppercase tracking-wider text-gray-500">YouTube</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">YouTube</span>
               </>
             )}
           </div>
@@ -346,7 +346,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
               {cfg.label}
             </span>
-            <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer rounded-md p-1 text-gray-600 transition-colors hover:bg-gray-800 hover:text-white">
+            <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-800 hover:text-white">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -355,15 +355,15 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
         {editing ? (
           <div className="space-y-4 p-5">
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Title</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Title</label>
               <input className={inputCls} value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="Video title" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Scheduled date &amp; time</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Scheduled date &amp; time</label>
               <input type="datetime-local" className={inputCls} value={fWhen} onChange={(e) => setFWhen(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Format</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Format</label>
               <div className="flex gap-2">
                 {(["short", "video"] as const).map((opt) => (
                   <button
@@ -372,8 +372,8 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                     onClick={() => setFFormat(opt)}
                     className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-colors ${
                       fFormat === opt
-                        ? "border-violet-500 bg-violet-500/15 text-violet-300"
-                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                        ? "border-white/40 bg-white/10 text-neutral-300"
+                        : "border-neutral-700 bg-neutral-800 text-neutral-400 hover:border-neutral-600"
                     }`}
                   >
                     {opt === "short" ? "Short" : "Video"}
@@ -382,11 +382,11 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               </div>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Description</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Description</label>
               <textarea className={`${inputCls} min-h-[96px] resize-y`} value={fDescription} onChange={(e) => setFDescription(e.target.value)} placeholder="Caption / description" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-600">Tags (comma-separated)</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Tags (comma-separated)</label>
               <input className={inputCls} value={fTags} onChange={(e) => setFTags(e.target.value)} placeholder="tag1, tag2, tag3" />
             </div>
           </div>
@@ -394,8 +394,8 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
           <div className="space-y-4 p-5">
             <h3 className="text-base font-semibold leading-snug text-white">{post.title}</h3>
 
-            <div className="flex items-center gap-1.5 text-sm text-gray-400">
-              <Clock className="h-3.5 w-3.5 text-gray-600" />
+            <div className="flex items-center gap-1.5 text-sm text-neutral-400">
+              <Clock className="h-3.5 w-3.5 text-neutral-600" />
               {fmtDateTime(post.scheduled_time)}
             </div>
 
@@ -408,19 +408,19 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
 
             {post.description && (
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-600">Description</p>
-                <p className="text-sm leading-relaxed text-gray-300">{post.description}</p>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-neutral-600">Description</p>
+                <p className="text-sm leading-relaxed text-neutral-300">{post.description}</p>
               </div>
             )}
 
             {tags.length > 0 && (
               <div>
-                <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-gray-600">
+                <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-neutral-600">
                   <Tag className="h-3 w-3" /> Tags
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {tags.map((tag) => (
-                    <span key={tag} className="rounded-full border border-gray-700 bg-gray-800 px-2.5 py-0.5 text-xs text-gray-400">
+                    <span key={tag} className="rounded-full border border-neutral-700 bg-neutral-800 px-2.5 py-0.5 text-xs text-neutral-400">
                       #{tag}
                     </span>
                   ))}
@@ -430,14 +430,14 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
           </div>
         )}
 
-        <div className="space-y-2 border-t border-gray-800 p-5">
+        <div className="space-y-2 border-t border-white/10 p-5">
           {editing ? (
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 transition-colors hover:bg-gray-200 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 Save changes
@@ -446,7 +446,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 type="button"
                 onClick={() => setEditing(false)}
                 disabled={saving}
-                className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white disabled:opacity-50"
+                className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -458,7 +458,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   <button
                     type="button"
                     onClick={startEdit}
-                    className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-500"
+                    className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 transition-colors hover:bg-gray-200"
                   >
                     <Pencil className="h-4 w-4" />
                     Edit post
@@ -477,7 +477,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                     <button
                       type="button"
                       onClick={() => setConfirmingCancel(true)}
-                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-300"
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-400 transition-colors hover:border-red-500/40 hover:text-red-300"
                       aria-label="Cancel this post"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -505,7 +505,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   href={post.tiktok_share_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-900"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800"
                 >
                   <Music2 className="h-4 w-4" />
                   View on TikTok
@@ -516,7 +516,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   href={post.video_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
                 >
                   <ExternalLink className="h-4 w-4" />
                   View source video
@@ -554,7 +554,7 @@ function PostChip({ post, onClick, onDragStart, isDragging }: PostChipProps) {
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       title={post.title}
       className={`group flex w-full cursor-grab items-center gap-1.5 truncate rounded border px-1.5 py-0.5 text-left text-[11px] font-medium transition-all active:cursor-grabbing ${cfg.chip} ${
-        isDragging ? "opacity-40 ring-1 ring-violet-500" : ""
+        isDragging ? "opacity-40 ring-1 ring-white/30" : ""
       }`}
     >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${cfg.dot}`} />
@@ -611,10 +611,10 @@ function DayCell({
       className={`group relative flex flex-col gap-1 rounded-lg border p-2 transition-all duration-150 ${
         compact ? "min-h-[68px]" : "min-h-[120px]"
       } ${
-        !isCurrentMonth ? "border-gray-800/50 bg-gray-900/30" :
-        isOver ? "border-violet-500/60 bg-violet-500/10 ring-1 ring-violet-500/40" :
-        isToday ? "border-violet-500/30 bg-violet-500/5" :
-        "border-gray-800 bg-gray-900 hover:border-gray-700"
+        !isCurrentMonth ? "border-white/5 bg-white/[0.02]" :
+        isOver ? "border-white/30 bg-white/10 ring-1 ring-white/25" :
+        isToday ? "border-white/20 bg-white/5" :
+        "border-white/10 bg-white/[0.04] hover:border-white/20"
       }`}
     >
       <div className="flex items-center justify-between">
@@ -622,7 +622,7 @@ function DayCell({
           {compact && (
             <span
               className={`text-[11px] font-semibold uppercase tracking-wider ${
-                isToday ? "text-violet-300" : "text-gray-500"
+                isToday ? "text-neutral-300" : "text-neutral-500"
               }`}
             >
               {DAY_NAMES[date.getDay()]}
@@ -630,16 +630,16 @@ function DayCell({
           )}
           <span
             className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-              isToday ? "bg-violet-500 text-white" :
-              isCurrentMonth ? "text-gray-300" :
-              "text-gray-700"
+              isToday ? "bg-white text-neutral-900" :
+              isCurrentMonth ? "text-neutral-300" :
+              "text-neutral-700"
             }`}
           >
             {date.getDate()}
           </span>
         </span>
         {isOver && (
-          <span className="rounded text-[10px] font-medium text-violet-400">Drop here</span>
+          <span className="rounded text-[10px] font-medium text-neutral-300">Drop here</span>
         )}
       </div>
 
@@ -657,7 +657,7 @@ function DayCell({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-            className="cursor-pointer pl-1 text-left text-[10px] text-gray-500 underline decoration-dotted transition-colors hover:text-violet-400"
+            className="cursor-pointer pl-1 text-left text-[10px] text-neutral-500 underline decoration-dotted transition-colors hover:text-neutral-300"
           >
             +{overflow} more
           </button>
@@ -666,7 +666,7 @@ function DayCell({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
-            className="cursor-pointer pl-1 text-left text-[10px] text-gray-500 underline decoration-dotted transition-colors hover:text-violet-400"
+            className="cursor-pointer pl-1 text-left text-[10px] text-neutral-500 underline decoration-dotted transition-colors hover:text-neutral-300"
           >
             Show less
           </button>
@@ -810,7 +810,7 @@ export default function SchedulerCalendarPage() {
   void toastTimer;
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen">
       <PageContainer>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -825,7 +825,7 @@ export default function SchedulerCalendarPage() {
             <button
               type="button"
               onClick={goToToday}
-              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:border-gray-600 hover:text-white"
+              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
             >
               Today
             </button>
@@ -834,7 +834,7 @@ export default function SchedulerCalendarPage() {
               onClick={fetchPosts}
               disabled={loading}
               aria-label="Refresh posts"
-              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white disabled:opacity-40"
+              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:opacity-40"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -854,8 +854,8 @@ export default function SchedulerCalendarPage() {
                 </div>
               );
             })}
-            <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2">
-              <span className="text-xs text-gray-500">Total this month</span>
+            <div className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-2">
+              <span className="text-xs text-neutral-500">Total this month</span>
               <span className="text-sm font-bold text-white">{monthPosts.length}</span>
             </div>
           </div>
@@ -865,7 +865,7 @@ export default function SchedulerCalendarPage() {
               type="button"
               onClick={() => shiftPeriod(-1)}
               aria-label={isWeekView ? "Previous week" : "Previous month"}
-              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -876,7 +876,7 @@ export default function SchedulerCalendarPage() {
               type="button"
               onClick={() => shiftPeriod(1)}
               aria-label={isWeekView ? "Next week" : "Next month"}
-              className="cursor-pointer rounded-lg border border-gray-700 bg-gray-800 p-1.5 text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -891,12 +891,12 @@ export default function SchedulerCalendarPage() {
         )}
 
         {/* Calendar grid */}
-        <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-2">
+        <div className="rounded-xl bg-white/[0.03] p-2">
           {/* The week view labels each row with its own weekday instead. */}
           {!isWeekView && (
             <div className="mb-1 grid grid-cols-7 gap-1">
               {DAY_NAMES.map((day) => (
-                <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-600">
+                <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-neutral-600">
                   {day}
                 </div>
               ))}
@@ -908,7 +908,7 @@ export default function SchedulerCalendarPage() {
               {Array.from({ length: isWeekView ? 7 : 42 }).map((_, i) => (
                 <div
                   key={i}
-                  className={`animate-pulse rounded-lg border border-gray-800 bg-gray-900 ${
+                  className={`animate-pulse rounded-lg bg-white/[0.04] ${
                     isWeekView ? "min-h-[68px]" : "min-h-[120px]"
                   }`}
                 />
@@ -941,8 +941,8 @@ export default function SchedulerCalendarPage() {
         </div>
 
         {/* Legend */}
-        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-gray-600">
-          <span className="font-medium text-gray-500">Legend:</span>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-neutral-600">
+          <span className="font-medium text-neutral-500">Legend:</span>
           {(["scheduled", "published", "failed", "canceled", "draft"] as const).map((s) => (
             <span key={s} className="flex items-center gap-1.5">
               <span className={`h-2 w-2 rounded-full ${STATUS_CFG[s].dot}`} />

@@ -1,7 +1,6 @@
 /**
  * Predefined credit packs — the single source of truth for what users can buy.
  *
- * Reused from the marketing packs in components/landing/PricingSectionAlt.tsx.
  * DOKU charges in IDR, so each pack carries an explicit `priceIdr` (derived from
  * the original USD price at ~Rp18,000/USD, matching billing_settings.usd_to_idr).
  *

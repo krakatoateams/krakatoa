@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Upload, Users, X } from "lucide-react";
+import { ImagePlus, Plus, Upload, Users, X } from "lucide-react";
 
 export type ImageUpload = {
   file: File | null;
@@ -58,25 +58,32 @@ export function UploadTile({
   upload,
   disabled,
   fluid = false,
+  iconOnly = false,
 }: {
   label: string;
   upload: ImageUpload;
   disabled?: boolean;
   fluid?: boolean;
+  /** Compact + button with no label — used inline beside the prompt on desktop. */
+  iconOnly?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={upload.open}
       disabled={disabled}
-      className={`group relative flex h-16 items-center justify-center overflow-hidden border font-semibold uppercase tracking-wide transition-colors ${
+      className={`group relative flex overflow-hidden font-semibold normal-case tracking-wide transition-colors ${
         fluid
-          ? "w-full flex-1 flex-row gap-2 rounded-[16px] text-xs"
-          : "w-16 shrink-0 flex-col gap-1 rounded-[4px] text-xs"
+          ? "h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-[16px] text-xs"
+          : iconOnly
+            ? upload.preview
+              ? "h-16 w-16 shrink-0 items-center justify-center rounded-[16px]"
+              : "h-10 w-10 shrink-0 items-center justify-center rounded-[10px]"
+            : "h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] p-2 text-xs"
       } ${
         upload.preview
-          ? "border-purple-400/50"
-          : "border-white/10 bg-white/5 text-gray-400 hover:border-purple-400/50 hover:text-white"
+          ? ""
+          : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
       }`}
       title={upload.preview ? `Change ${label.toLowerCase()} image` : `Add ${label.toLowerCase()} image`}
     >
@@ -106,6 +113,8 @@ export function UploadTile({
             <X className="h-3 w-3" />
           </span>
         </>
+      ) : iconOnly ? (
+        <ImagePlus className="h-4 w-4" />
       ) : (
         <>
           <Plus className={fluid ? "h-5 w-5" : "h-4 w-4"} />
@@ -182,8 +191,8 @@ export function CharacterTile({
     return (
       <div
         className={`relative h-16 ${
-          fluid ? "w-full flex-1 rounded-[16px]" : "w-16 shrink-0 rounded-[4px]"
-        } overflow-hidden border border-purple-400/50`}
+          fluid ? "w-full flex-1 rounded-[16px]" : "w-20 shrink-0 rounded-[4px]"
+        } overflow-hidden`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={preview} alt="Character" className="absolute inset-0 h-full w-full object-cover" />
@@ -208,10 +217,10 @@ export function CharacterTile({
         type="button"
         disabled={disabled}
         onClick={() => setMenuOpen((o) => !o)}
-        className={`group flex h-16 items-center justify-center border border-white/10 bg-white/5 font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white ${
+        className={`group flex h-16 bg-white/5 font-semibold normal-case tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white ${
           fluid
-            ? "w-full flex-row gap-2 rounded-[16px] text-xs"
-            : "w-16 flex-col gap-1 rounded-[4px] text-xs"
+            ? "w-full flex-row items-center justify-center gap-2 rounded-[16px] text-xs"
+            : "w-20 flex-col items-start justify-between rounded-[4px] p-2 text-xs"
         }`}
         title="Add character"
       >
@@ -221,7 +230,7 @@ export function CharacterTile({
 
       {/* Desktop: anchored menu under the tile. */}
       {menuOpen && !isMobile && (
-        <div className="absolute left-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
           {renderMenuOptions(false)}
         </div>
       )}
@@ -243,7 +252,7 @@ export function CharacterTile({
               ref={sheetRef}
               role="dialog"
               aria-modal="true"
-              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-[#0b1020] p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-black/60 transition-transform duration-200 ease-out ${
+              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-[#171717] p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-black/60 transition-transform duration-200 ease-out ${
                 sheetShown ? "translate-y-0" : "translate-y-full"
               }`}
             >
@@ -271,7 +280,7 @@ export function CharacterTile({
           }}
           className={rowClass}
         >
-          <Upload className="h-4 w-4 text-purple-300" />
+          <Upload className="h-4 w-4 text-gray-300" />
           Upload image
         </button>
         <button
@@ -282,7 +291,7 @@ export function CharacterTile({
           }}
           className={rowClass}
         >
-          <Users className="h-4 w-4 text-purple-300" />
+          <Users className="h-4 w-4 text-gray-300" />
           Use a saved character
         </button>
       </>
