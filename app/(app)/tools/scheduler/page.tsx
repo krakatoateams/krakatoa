@@ -450,7 +450,7 @@ function ConnectionStatusPrompt({ platforms }: { platforms: VideoItem["platforms
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-gray-800 bg-gray-900 ${className}`}>
+    <div className={`rounded-xl bg-white/[0.04] ${className}`}>
       {children}
     </div>
   );
@@ -458,8 +458,8 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 function CardHeader({ title, icon }: { title: string; icon: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-4">
-      <span className="text-violet-400">{icon}</span>
+    <div className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4">
+      <span className="text-neutral-300">{icon}</span>
       <h2 className="text-sm font-semibold text-white">{title}</h2>
     </div>
   );
@@ -476,13 +476,13 @@ function InfoTooltip({ text, label = "More information" }: { text: string; label
       <button
         type="button"
         aria-label={label}
-        className="cursor-help text-gray-500 transition-colors hover:text-gray-300 focus:outline-none focus-visible:text-gray-300"
+        className="cursor-help text-neutral-500 transition-colors hover:text-neutral-300 focus:outline-none focus-visible:text-neutral-300"
       >
         <Info className="h-3 w-3" aria-hidden />
       </button>
       <span
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-60 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-[11px] font-normal leading-relaxed text-gray-300 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute bottom-full left-0 z-20 mb-1.5 w-60 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-[11px] font-normal leading-relaxed text-neutral-300 opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {text}
       </span>
@@ -661,11 +661,11 @@ function UploadCard({
   const hasSelectedMedia = !!(file || videoUrl || storagePath);
 
   const dropZoneClass =
-    isDragging ? "border-violet-500 bg-violet-500/10" :
+    isDragging ? "border-white/40 bg-white/10" :
     uploadStatus === "error" ? "border-red-500/40 bg-red-500/5" :
-    uploadStatus === "uploading" ? "border-violet-500/40 bg-violet-500/5 cursor-not-allowed" :
+    uploadStatus === "uploading" ? "border-white/25 bg-white/5 cursor-not-allowed" :
     hasSelectedMedia ? "border-green-500/40 bg-green-500/5" :
-    "border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800";
+    "border-neutral-700 bg-neutral-800/50 hover:border-neutral-600 hover:bg-neutral-800";
 
   // TikTok photo post: entirely different media source (multi-select photo
   // carousel instead of a single video), so this replaces the whole card body
@@ -682,9 +682,9 @@ function UploadCard({
 
     return (
       <Card>
-        <div className="flex items-center justify-between gap-2.5 border-b border-gray-800 px-5 py-4">
+        <div className="flex items-center justify-between gap-2.5 border-b border-white/10 px-5 py-4">
           <div className="flex items-center gap-2.5">
-            <span className="text-violet-400"><ImageIcon className="h-4 w-4" /></span>
+            <span className="text-neutral-300"><ImageIcon className="h-4 w-4" /></span>
             <h2 className="text-sm font-semibold text-white">Select Photos</h2>
           </div>
           {/* Escape hatch: picking a photo (e.g. from "My Assets") permanently
@@ -695,7 +695,7 @@ function UploadCard({
             type="button"
             onClick={onRemove}
             aria-label="Cancel photo post"
-            className="text-gray-500 transition-colors hover:text-white"
+            className="text-neutral-500 transition-colors hover:text-white"
           >
             <X className="h-4 w-4" />
           </button>
@@ -705,7 +705,7 @@ function UploadCard({
               upload itself happens in the parent's handleFilesAdded; this
               card just reflects its status. */}
           {uploadStatus === "uploading" && (
-            <div className="mb-3 flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-300">
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs text-neutral-300">
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               Uploading {file?.name}…
             </div>
@@ -733,7 +733,7 @@ function UploadCard({
               </p>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                 {file && previewUrl && (
-                  <div className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-gray-700 bg-black">
+                  <div className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-neutral-700 bg-black">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={previewUrl} alt="" className="h-full w-full object-cover" />
                     {(photoUrls.length > 0 || uploadStatus === "uploading") && (
@@ -754,7 +754,7 @@ function UploadCard({
                 {photoUrls.map((url, i) => (
                   <div
                     key={url}
-                    className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-gray-700 bg-black"
+                    className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-neutral-700 bg-black"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <SchedulerPhotoImg src={url} alt="" className="h-full w-full object-cover" />
@@ -789,7 +789,7 @@ function UploadCard({
               type="button"
               onClick={() => setAddPhotoMode(photoUrls.length >= 35 ? "closed" : "choice")}
               disabled={photoUrls.length >= 35}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-700 px-3 py-2.5 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700 px-3 py-2.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus className="h-3.5 w-3.5" />
               Add photos
@@ -797,14 +797,14 @@ function UploadCard({
           )}
 
           {addPhotoMode === "choice" && (
-            <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3.5">
+            <div className="rounded-lg border border-neutral-700 bg-neutral-800/50 p-3.5">
               <div className="mb-2.5 flex items-center justify-between">
                 <p className="text-sm font-semibold text-white">Add photos to this post</p>
                 <button
                   type="button"
                   onClick={() => setAddPhotoMode("closed")}
                   aria-label="Cancel"
-                  className="text-gray-500 transition-colors hover:text-white"
+                  className="text-neutral-500 transition-colors hover:text-white"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -816,7 +816,7 @@ function UploadCard({
                     setAddPhotoMode("closed");
                     newPhotoInputRef.current?.click();
                   }}
-                  className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                  className="flex flex-col items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-3 text-xs font-medium text-neutral-300 transition-colors hover:border-white/30 hover:text-white"
                 >
                   <Upload className="h-4 w-4" />
                   Upload new
@@ -824,7 +824,7 @@ function UploadCard({
                 <button
                   type="button"
                   onClick={() => setAddPhotoMode("library")}
-                  className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                  className="flex flex-col items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-3 text-xs font-medium text-neutral-300 transition-colors hover:border-white/30 hover:text-white"
                 >
                   <FolderOpen className="h-4 w-4" />
                   Choose from your library
@@ -840,7 +840,7 @@ function UploadCard({
                 <button
                   type="button"
                   onClick={() => setAddPhotoMode("closed")}
-                  className="text-xs font-medium text-violet-400 transition-colors hover:text-violet-300"
+                  className="text-xs font-medium text-neutral-300 transition-colors hover:text-neutral-300"
                 >
                   Done
                 </button>
@@ -865,7 +865,7 @@ function UploadCard({
           )}
 
           {addPhotoStatus === "uploading" && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-violet-300">
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-neutral-300">
               <RefreshCw className="h-3 w-3 animate-spin" />
               Uploading…
             </p>
@@ -891,12 +891,12 @@ function UploadCard({
     <Card>
       <CardHeader title="Upload Media" icon={<FileVideo className="h-4 w-4" />} />
       <div className="p-5">
-        <div className="mb-4 inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+        <div className="mb-4 inline-flex rounded-lg border border-neutral-700 bg-neutral-800 p-0.5">
           <button
             type="button"
             onClick={() => setTab("upload")}
             className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              tab === "upload" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+              tab === "upload" ? "bg-white text-neutral-900" : "text-neutral-400 hover:text-white"
             }`}
           >
             📁 Upload from device
@@ -905,7 +905,7 @@ function UploadCard({
             type="button"
             onClick={() => setTab("assets")}
             className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              tab === "assets" ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+              tab === "assets" ? "bg-white text-neutral-900" : "text-neutral-400 hover:text-white"
             }`}
           >
             🎬 My Assets
@@ -922,17 +922,17 @@ function UploadCard({
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-6 py-10 text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${dropZoneClass}`}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-6 py-10 text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${dropZoneClass}`}
         >
           {uploadStatus === "uploading" && (
             <>
-              <RefreshCw className="h-8 w-8 animate-spin text-violet-400" />
+              <RefreshCw className="h-8 w-8 animate-spin text-neutral-300" />
               <div>
                 <p className="text-sm font-medium text-white">Uploading…</p>
-                <p className="mt-0.5 text-xs text-gray-500">{file?.name}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">{file?.name}</p>
               </div>
-              <div className="w-full max-w-xs overflow-hidden rounded-full bg-gray-700">
-                <div className="h-1.5 animate-[progress_1.5s_ease-in-out_infinite] rounded-full bg-violet-500" />
+              <div className="w-full max-w-xs overflow-hidden rounded-full bg-neutral-700">
+                <div className="h-1.5 animate-[progress_1.5s_ease-in-out_infinite] rounded-full bg-white/70" />
               </div>
             </>
           )}
@@ -943,12 +943,12 @@ function UploadCard({
                 <p className="text-sm font-semibold text-green-400">
                   {uploadStatus === "done" ? "✓ Video ready" : "✓ Video selected"}
                 </p>
-                <p className="mt-0.5 text-xs text-gray-400">{file?.name}</p>
-                <p className="mt-0.5 text-xs text-gray-500">
+                <p className="mt-0.5 text-xs text-neutral-400">{file?.name}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">
                   {file ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : ""}
                 </p>
               </div>
-              <button type="button" onClick={handleRemove} className="cursor-pointer rounded-md px-3 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-700 hover:text-white">
+              <button type="button" onClick={handleRemove} className="cursor-pointer rounded-md px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-white">
                 Remove
               </button>
             </>
@@ -958,21 +958,21 @@ function UploadCard({
               <AlertCircle className="h-8 w-8 text-red-400" />
               <div>
                 <p className="text-sm font-medium text-red-400">Upload failed</p>
-                <p className="mt-0.5 text-xs text-gray-500">{uploadError}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">{uploadError}</p>
               </div>
-              <button type="button" onClick={handleRemove} className="cursor-pointer rounded-md px-3 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-700 hover:text-white">
+              <button type="button" onClick={handleRemove} className="cursor-pointer rounded-md px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-white">
                 Try again
               </button>
             </>
           )}
           {uploadStatus !== "uploading" && uploadStatus !== "error" && !hasSelectedMedia && (
             <>
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-800">
-                <Upload className="h-5 w-5 text-gray-400" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-800">
+                <Upload className="h-5 w-5 text-neutral-400" />
               </div>
               <div>
                 <p className="text-sm font-medium text-white">Drop your video or photo here</p>
-                <p className="mt-0.5 text-xs text-gray-500">or click to browse</p>
+                <p className="mt-0.5 text-xs text-neutral-500">or click to browse</p>
               </div>
             </>
           )}
@@ -1006,7 +1006,7 @@ function UploadCard({
         {previewUrl && uploadStatus !== "uploading" && uploadStatus !== "error" && (
           <div className="mt-4 space-y-2">
             <div
-              className={`mx-auto w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${
+              className={`mx-auto w-full overflow-hidden rounded-lg border border-neutral-700 bg-black ${
                 format === "short" ? "aspect-[9/16] max-w-[240px]" : "aspect-video"
               }`}
             >
@@ -1018,7 +1018,7 @@ function UploadCard({
               />
             </div>
             {duration !== null && (
-              <p className="text-center text-xs text-gray-500">
+              <p className="text-center text-xs text-neutral-500">
                 Duration: {fmtDuration(duration)}
               </p>
             )}
@@ -1026,14 +1026,14 @@ function UploadCard({
         )}
 
         <input ref={inputRef} type="file" multiple accept=".mp4,.mov,.avi,.jpg,.jpeg,.png,.webp,video/mp4,video/quicktime,video/avi,video/x-msvideo,image/jpeg,image/png,image/webp" onChange={handleChange} className="hidden" aria-label="Media file input" />
-        <p className="mt-3 text-center text-xs text-gray-600">
+        <p className="mt-3 text-center text-xs text-neutral-600">
           Up to 5 items · Video: MP4, MOV, AVI (≤ 50MB, Shorts ≤ 3 min) · Photo: JPEG, PNG, WebP (≤ 10MB)
         </p>
         {/* openspec/changes/tiktok-photo-post: dropping N photos at once makes
             N separate single-photo cards (one-file-per-card model) — not one
             N-photo carousel. Clarify the combine path since it's not obvious
             on first use. */}
-        <p className="mt-1 text-center text-xs text-gray-600">
+        <p className="mt-1 text-center text-xs text-neutral-600">
           Dropping multiple photos creates separate posts — to combine photos into one carousel, drop one first, then add more with &ldquo;pick more from history&rdquo; on that card.
         </p>
       </div>
@@ -1088,7 +1088,7 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, stor
       <CardHeader title="Caption" icon={<Sparkles className="h-4 w-4" />} />
       <div className="space-y-4 p-5">
         <div>
-          <label htmlFor="video-caption" className="mb-1.5 block text-xs font-medium text-gray-400">
+          <label htmlFor="video-caption" className="mb-1.5 block text-xs font-medium text-neutral-400">
             Caption
           </label>
           <textarea
@@ -1098,9 +1098,9 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, stor
             placeholder="Write your caption here, or generate one with AI below..."
             rows={5}
             aria-label="Caption (editable)"
-            className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-800 px-3.5 py-3 text-sm text-white placeholder-neutral-600 transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
           />
-          <p className="mt-1 text-right text-xs text-gray-600">
+          <p className="mt-1 text-right text-xs text-neutral-600">
             {format === "short" ? `${caption.length} / 300 chars` : `${caption.length} chars`}
           </p>
         </div>
@@ -1141,7 +1141,7 @@ function FormatToggle({
     <div
       role="group"
       aria-label="Publish format"
-      className="inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5"
+      className="inline-flex rounded-lg border border-neutral-700 bg-neutral-800 p-0.5"
     >
       {opts.map((o) => (
         <button
@@ -1150,7 +1150,7 @@ function FormatToggle({
           aria-pressed={value === o.id}
           onClick={() => onChange(o.id)}
           className={`cursor-pointer rounded-md font-medium transition-colors ${pad} ${
-            value === o.id ? "bg-violet-600 text-white" : "text-gray-400 hover:text-white"
+            value === o.id ? "bg-white text-neutral-900" : "text-neutral-400 hover:text-white"
           }`}
         >
           {o.label}
@@ -1179,7 +1179,7 @@ const PLATFORM_LABELS: Record<"youtube" | "tiktok", string> = {
 // when both platforms are selected at once.
 function PlatformTag({ platform }: { platform: "youtube" | "tiktok" }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-gray-800 px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-gray-500">
+    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-800 px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-neutral-500">
       {platform === "tiktok" ? (
         <Music2 className="h-2.5 w-2.5 text-pink-400" />
       ) : (
@@ -1257,7 +1257,7 @@ function PlatformFields({
   return (
     <div className="space-y-3">
       <div>
-        <label className="mb-1.5 block text-xs font-medium text-gray-400">
+        <label className="mb-1.5 block text-xs font-medium text-neutral-400">
           Platform <span className="text-red-400" aria-hidden>*</span>
         </label>
         <div className="flex flex-wrap gap-2">
@@ -1265,10 +1265,10 @@ function PlatformFields({
             title={isPhoto ? "YouTube doesn't support photo posts" : undefined}
             className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
               isPhoto
-                ? "cursor-not-allowed border-gray-800 bg-gray-800/50 text-gray-600"
+                ? "cursor-not-allowed border-white/10 bg-neutral-800/50 text-neutral-600"
                 : hasYoutube
-                  ? "cursor-pointer border-violet-500/50 bg-violet-500/10 text-white"
-                  : "cursor-pointer border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                  ? "cursor-pointer border-white/30 bg-white/10 text-white"
+                  : "cursor-pointer border-neutral-700 bg-neutral-800 text-neutral-400 hover:border-neutral-600"
             }`}
           >
             <input
@@ -1276,23 +1276,23 @@ function PlatformFields({
               checked={hasYoutube}
               disabled={isPhoto}
               onChange={(e) => toggleYoutube(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
+              className="h-3.5 w-3.5 rounded border-neutral-700 bg-neutral-800 text-white focus:ring-white/30 disabled:cursor-not-allowed"
             />
-            <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-gray-600" : "text-red-400"}`} />
+            <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-neutral-600" : "text-red-400"}`} />
             YouTube
           </label>
 
           {tiktokConnected && (
             <label
               className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
-                hasTiktok ? "border-violet-500/50 bg-violet-500/10 text-white" : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                hasTiktok ? "border-white/30 bg-white/10 text-white" : "border-neutral-700 bg-neutral-800 text-neutral-400 hover:border-neutral-600"
               }`}
             >
               <input
                 type="checkbox"
                 checked={hasTiktok}
                 onChange={(e) => toggleTiktok(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+                className="h-3.5 w-3.5 rounded border-neutral-700 bg-neutral-800 text-white focus:ring-white/30"
               />
               <Music2 className="h-4 w-4 text-pink-400" />
               TikTok
@@ -1300,10 +1300,10 @@ function PlatformFields({
           )}
         </div>
         {!tiktokConnected && (
-          <p className="mt-1 text-xs text-gray-600">Connect TikTok in Settings to publish there too.</p>
+          <p className="mt-1 text-xs text-neutral-600">Connect TikTok in Settings to publish there too.</p>
         )}
         {isPhoto && (
-          <p className="mt-1 text-xs text-gray-600">YouTube doesn&apos;t support photo posts.</p>
+          <p className="mt-1 text-xs text-neutral-600">YouTube doesn&apos;t support photo posts.</p>
         )}
         {platforms.length === 0 && (
           <p className="mt-1 text-xs text-amber-400">Select at least one platform.</p>
@@ -1313,7 +1313,7 @@ function PlatformFields({
       {hasTiktok && (
         <>
           <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-neutral-400">
               Privacy <span className="text-red-400" aria-hidden>*</span>
               <PlatformTag platform="tiktok" />
             </label>
@@ -1328,7 +1328,7 @@ function PlatformFields({
                     : { tiktokPrivacyLevel: next },
                 );
               }}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3.5 py-2.5 text-sm text-white transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
             >
               <option value="" disabled>
                 {tiktokPrivacyOptions.length === 0 ? "Loading…" : "Select privacy…"}
@@ -1342,7 +1342,7 @@ function PlatformFields({
           </div>
 
           <div>
-            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-gray-400">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-neutral-400">
               <input
                 type="checkbox"
                 checked={discloseOpen}
@@ -1351,7 +1351,7 @@ function PlatformFields({
                   setDiscloseOpen(open);
                   if (!open) onChange({ tiktokBrandOrganicToggle: false, tiktokBrandContentToggle: false });
                 }}
-                className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+                className="h-3.5 w-3.5 rounded border-neutral-700 bg-neutral-800 text-white focus:ring-white/30"
               />
               Disclose video content
               <PlatformTag platform="tiktok" />
@@ -1359,29 +1359,29 @@ function PlatformFields({
 
             {discloseOpen && (
               <div className="mt-2 space-y-1.5 pl-5.5">
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-neutral-300">
                   <input
                     type="checkbox"
                     checked={tiktokBrandOrganicToggle}
                     onChange={(e) => onChange({ tiktokBrandOrganicToggle: e.target.checked })}
-                    className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500"
+                    className="h-3.5 w-3.5 rounded border-neutral-700 bg-neutral-800 text-white focus:ring-white/30"
                   />
                   Your Brand
                 </label>
                 <label
-                  className={`flex items-center gap-2 text-xs ${isSelfOnly ? "cursor-not-allowed text-gray-600" : "cursor-pointer text-gray-300"}`}
+                  className={`flex items-center gap-2 text-xs ${isSelfOnly ? "cursor-not-allowed text-neutral-600" : "cursor-pointer text-neutral-300"}`}
                 >
                   <input
                     type="checkbox"
                     checked={tiktokBrandContentToggle}
                     disabled={isSelfOnly}
                     onChange={(e) => onChange({ tiktokBrandContentToggle: e.target.checked })}
-                    className="h-3.5 w-3.5 rounded border-gray-700 bg-gray-800 text-violet-600 focus:ring-violet-500 disabled:cursor-not-allowed"
+                    className="h-3.5 w-3.5 rounded border-neutral-700 bg-neutral-800 text-white focus:ring-white/30 disabled:cursor-not-allowed"
                   />
                   Branded Content
                 </label>
                 {isSelfOnly && (
-                  <p className="text-[11px] text-gray-600">
+                  <p className="text-[11px] text-neutral-600">
                     Branded content must be public — unavailable while privacy is &ldquo;Only me&rdquo;.
                   </p>
                 )}
@@ -1673,12 +1673,12 @@ function ScheduleCard({
         {platforms.includes("youtube") && (
           <>
             <div>
-              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-neutral-400">
                 Format
                 <PlatformTag platform="youtube" />
               </label>
               <FormatToggle value={format} onChange={onFormatChange} />
-              <p className="mt-1 text-xs text-gray-600">
+              <p className="mt-1 text-xs text-neutral-600">
                 {format === "short"
                   ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
                   : "Any aspect ratio or length · publishes as a regular video"}
@@ -1697,7 +1697,7 @@ function ScheduleCard({
 
         {/* Title */}
         <div>
-          <label htmlFor="post-title" className="mb-1.5 block text-xs font-medium text-gray-400">
+          <label htmlFor="post-title" className="mb-1.5 block text-xs font-medium text-neutral-400">
             Title <span className="text-red-400" aria-hidden>*</span>
           </label>
           <input
@@ -1706,47 +1706,47 @@ function ScheduleCard({
             value={title}
             onChange={(e) => onTitleChange(e.target.value)}
             placeholder="My awesome video title"
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3.5 py-2.5 text-sm text-white placeholder-neutral-600 transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
           />
         </div>
 
         {/* Tags */}
         <div>
-          <label htmlFor="post-tags" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-gray-400">
+          <label htmlFor="post-tags" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-neutral-400">
             Tags
             <InfoTooltip text={TAGS_TOOLTIP} />
           </label>
           <div className="relative">
-            <Tag className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
+            <Tag className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
             <input
               id="post-tags"
               type="text"
               value={tags}
               onChange={(e) => onTagsChange(e.target.value)}
               placeholder="tutorial, automation, content"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2.5 pl-9 pr-3.5 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 py-2.5 pl-9 pr-3.5 text-sm text-white placeholder-neutral-600 transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
             />
           </div>
-          <p className="mt-1 text-xs text-gray-600">Comma-separated</p>
+          <p className="mt-1 text-xs text-neutral-600">Comma-separated</p>
         </div>
 
         {/* Date & Time */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="schedule-date" className="mb-1.5 block text-xs font-medium text-gray-400">
+            <label htmlFor="schedule-date" className="mb-1.5 block text-xs font-medium text-neutral-400">
               <Calendar className="mr-1 inline h-3 w-3" />
               Date <span className="text-red-400" aria-hidden>*</span>
             </label>
             <input id="schedule-date" type="date" value={form.date} min={today} onChange={set("date")}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 [color-scheme:dark]" />
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2.5 text-sm text-white transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30 [color-scheme:dark]" />
           </div>
           <div>
-            <label htmlFor="schedule-time" className="mb-1.5 block text-xs font-medium text-gray-400">
+            <label htmlFor="schedule-time" className="mb-1.5 block text-xs font-medium text-neutral-400">
               <Clock className="mr-1 inline h-3 w-3" />
               Time <span className="text-red-400" aria-hidden>*</span>
             </label>
             <input id="schedule-time" type="time" value={form.time} onChange={set("time")}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 [color-scheme:dark]" />
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2.5 text-sm text-white transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30 [color-scheme:dark]" />
           </div>
         </div>
 
@@ -1757,7 +1757,7 @@ function ScheduleCard({
           Use Best Time · 6:00 PM today
         </button>
 
-        <div className="border-t border-gray-800 pt-1" />
+        <div className="border-t border-white/10 pt-1" />
 
         {/* Soft warning: empty caption — does not block, just confirms */}
         {confirmEmptyCaption && !caption.trim() && (
@@ -1775,7 +1775,7 @@ function ScheduleCard({
           type="button"
           onClick={handleSubmit}
           disabled={!isReady || submitting}
-          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-semibold text-neutral-900 shadow-lg shadow-black/30 transition-all duration-200 hover:bg-gray-200 hover:shadow-black/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
           {uploadingMedia
             ? <><RefreshCw className="h-4 w-4 animate-spin" />Uploading…</>
@@ -1784,7 +1784,7 @@ function ScheduleCard({
               : <><Calendar className="h-4 w-4" />Schedule Post</>}
         </button>
 
-        <p className="text-center text-xs text-gray-600">
+        <p className="text-center text-xs text-neutral-600">
           {!hasMedia ? (contentType === "photo" ? "Add a photo to enable scheduling" : "Add a video to enable scheduling")
             : !title.trim() ? "Add a title to schedule"
             : ""}
@@ -1799,11 +1799,11 @@ function ScheduleCard({
 const STATUS_CFG = {
   scheduled:  { label: "Scheduled",  badge: "border-blue-500/30 bg-blue-500/10 text-blue-400",       dot: "bg-blue-400"   },
   overdue:    { label: "Overdue",    badge: "border-amber-500/30 bg-amber-500/10 text-amber-400",    dot: "bg-amber-400"  },
-  publishing: { label: "Publishing", badge: "border-violet-500/30 bg-violet-500/10 text-violet-300", dot: "bg-violet-400" },
+  publishing: { label: "Publishing", badge: "border-white/20 bg-white/10 text-neutral-300", dot: "bg-white/70" },
   published:  { label: "Published",  badge: "border-green-500/30 bg-green-500/10 text-green-400",     dot: "bg-green-400"  },
   failed:     { label: "Failed",     badge: "border-red-500/30 bg-red-500/10 text-red-400",           dot: "bg-red-400"    },
-  canceled:   { label: "Canceled",   badge: "border-gray-700 bg-gray-800 text-gray-500",              dot: "bg-gray-600"   },
-  draft:      { label: "Draft",      badge: "border-gray-700 bg-gray-800 text-gray-400",              dot: "bg-gray-500"   },
+  canceled:   { label: "Canceled",   badge: "border-neutral-700 bg-neutral-800 text-neutral-500",              dot: "bg-neutral-600"   },
+  draft:      { label: "Draft",      badge: "border-neutral-700 bg-neutral-800 text-neutral-400",              dot: "bg-neutral-500"   },
 } as const;
 
 interface RecentPostsCardProps {
@@ -1816,17 +1816,17 @@ interface RecentPostsCardProps {
 function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCardProps) {
   return (
     <Card>
-      <div className="flex items-center justify-between border-b border-gray-800 px-5 py-4">
+      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
         <div className="flex items-center gap-2.5">
-          <span className="text-violet-400"><CalendarDays className="h-4 w-4" /></span>
+          <span className="text-neutral-300"><CalendarDays className="h-4 w-4" /></span>
           <h2 className="text-sm font-semibold text-white">Your Recent Posts</h2>
         </div>
-        {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-gray-600" />}
+        {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-neutral-600" />}
       </div>
 
       <div className="divide-y divide-gray-800/60">
         {posts.length === 0 && !loading && (
-          <p className="px-5 py-6 text-center text-sm text-gray-600">
+          <p className="px-5 py-6 text-center text-sm text-neutral-600">
             No posts yet. Schedule your first video above.
           </p>
         )}
@@ -1844,7 +1844,7 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
               )}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{post.title}</p>
-                <p className="mt-0.5 text-xs text-gray-500">{fmtScheduledTime(post.scheduled_time)}</p>
+                <p className="mt-0.5 text-xs text-neutral-500">{fmtScheduledTime(post.scheduled_time)}</p>
                 {post.status === "failed" && post.last_error && (
                   <p className="mt-1 truncate text-xs text-red-400/80" title={post.last_error}>
                     {post.last_error}
@@ -1861,7 +1861,7 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="View on YouTube"
-                  className="shrink-0 cursor-pointer rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
+                  className="shrink-0 cursor-pointer rounded-md p-1.5 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
@@ -1871,7 +1871,7 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
                 <button
                   type="button"
                   onClick={() => onRetry(post.id)}
-                  className="shrink-0 cursor-pointer rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+                  className="shrink-0 cursor-pointer rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
                 >
                   Retry
                 </button>
@@ -1883,10 +1883,10 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
 
       {/* Task 5.8: "View all" link if more posts exist */}
       {totalCount > 5 && (
-        <div className="border-t border-gray-800 px-5 py-3">
+        <div className="border-t border-white/10 px-5 py-3">
           <Link
             href="/tools/scheduler/calendar"
-            className="flex items-center gap-1.5 text-xs text-violet-400 transition-colors hover:text-violet-300"
+            className="flex items-center gap-1.5 text-xs text-neutral-300 transition-colors hover:text-neutral-300"
           >
             View all in Calendar
             <ArrowRight className="h-3 w-3" />
@@ -2074,7 +2074,7 @@ function CaptionControls({
           type="button"
           onClick={onGenerate}
           disabled={isBusy || !hasVideo}
-          className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 transition-all duration-200 hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {ai.busy === "generate" ? (
             <>
@@ -2094,7 +2094,7 @@ function CaptionControls({
             type="button"
             onClick={onPolish}
             disabled={isBusy}
-            className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-300 transition-all duration-200 hover:bg-violet-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-medium text-neutral-300 transition-all duration-200 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {ai.busy === "polish" ? (
               <>
@@ -2109,13 +2109,13 @@ function CaptionControls({
       </div>
 
       {ai.busy && (
-        <p className="text-center text-xs text-gray-500">
+        <p className="text-center text-xs text-neutral-500">
           {ai.busy === "generate" ? "🎙️ Transcribing & writing…" : "✍️ Polishing your caption…"}
         </p>
       )}
 
       {!ai.busy && !hasContent && !hasVideo && emptyHint && (
-        <p className="text-center text-xs text-gray-600">{emptyHint}</p>
+        <p className="text-center text-xs text-neutral-600">{emptyHint}</p>
       )}
 
       {ai.error && (
@@ -2268,7 +2268,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               <SchedulerPhotoImg
                 src={item.photoUrls[0]}
                 alt=""
-                className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
+                className={`w-full overflow-hidden rounded-lg border border-neutral-700 bg-black object-contain ${frameClass}`}
               />
             ) : previewUrl ? (
               // Staged raw photo, not yet uploaded (upload is deferred until
@@ -2279,15 +2279,15 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               <img
                 src={previewUrl}
                 alt=""
-                className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black object-contain ${frameClass}`}
+                className={`w-full overflow-hidden rounded-lg border border-neutral-700 bg-black object-contain ${frameClass}`}
               />
             ) : (
-              <div className={`flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 ${frameClass}`}>
-                <ImageIcon className="h-6 w-6 text-gray-600" />
+              <div className={`flex w-full items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800/50 ${frameClass}`}>
+                <ImageIcon className="h-6 w-6 text-neutral-600" />
               </div>
             )
           ) : previewUrl ? (
-            <div className={`w-full overflow-hidden rounded-lg border border-gray-700 bg-black ${frameClass}`}>
+            <div className={`w-full overflow-hidden rounded-lg border border-neutral-700 bg-black ${frameClass}`}>
               <video
                 src={previewUrl}
                 controls
@@ -2296,8 +2296,8 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               />
             </div>
           ) : (
-            <div className={`flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 ${frameClass}`}>
-              <FileVideo className="h-6 w-6 text-gray-600" />
+            <div className={`flex w-full items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800/50 ${frameClass}`}>
+              <FileVideo className="h-6 w-6 text-neutral-600" />
             </div>
           )}
 
@@ -2310,7 +2310,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             />
           )}
 
-          <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
+          <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500">
             <span className="truncate">
               {item.contentType === "photo"
                 ? `Photo post ${index + 1} (${item.photoUrls.length + (item.file ? 1 : 0)}/35)`
@@ -2345,7 +2345,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             <h2 className="text-sm font-semibold text-white">Post {index + 1}</h2>
             <div className="flex items-center gap-2">
               {item.scheduleStatus === "scheduling" ? (
-                <span className="flex items-center gap-1 text-xs text-violet-400">
+                <span className="flex items-center gap-1 text-xs text-neutral-300">
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   Scheduling…
                 </span>
@@ -2381,7 +2381,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               ) : (
                 <>
                   {item.uploadStatus === "uploading" && (
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-violet-400" />
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-neutral-300" />
                   )}
                   {item.uploadStatus === "done" && (
                     <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
@@ -2395,7 +2395,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 type="button"
                 onClick={onRemove}
                 aria-label={`Remove post ${index + 1}`}
-                className="cursor-pointer rounded-md p-1 text-gray-500 transition-colors hover:bg-gray-800 hover:text-red-400"
+                className="cursor-pointer rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -2411,7 +2411,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
+              <label className="mb-1 block text-xs font-medium text-neutral-400">
                 Title <span className="text-red-400">*</span>
               </label>
               <input
@@ -2419,11 +2419,11 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 value={item.title}
                 onChange={(e) => onUpdate({ title: e.target.value })}
                 placeholder="My awesome video title"
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
               />
             </div>
             <div>
-              <label className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-400">
+              <label className="mb-1 flex items-center gap-1 text-xs font-medium text-neutral-400">
                 Tags
                 <InfoTooltip text={TAGS_TOOLTIP} />
               </label>
@@ -2432,7 +2432,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 value={item.tags}
                 onChange={(e) => onUpdate({ tags: e.target.value })}
                 placeholder="tutorial, automation"
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
               />
             </div>
           </div>
@@ -2445,7 +2445,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               jumping straight to the library grid. */}
           {item.contentType === "photo" && (
             <div>
-              <p className="mb-1.5 text-xs text-gray-500">
+              <p className="mb-1.5 text-xs text-neutral-500">
                 {photoCountLabel(item.photoUrls.length + (item.file ? 1 : 0))}
               </p>
               {item.photoUrls.length === 0 && !item.file && (
@@ -2457,7 +2457,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                   type="button"
                   onClick={() => setAddPhotoMode(item.photoUrls.length >= 35 ? "closed" : "choice")}
                   disabled={item.photoUrls.length >= 35}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-700 px-3 py-2.5 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700 px-3 py-2.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add photos
@@ -2465,14 +2465,14 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               )}
 
               {addPhotoMode === "choice" && (
-                <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3.5">
+                <div className="rounded-lg border border-neutral-700 bg-neutral-800/50 p-3.5">
                   <div className="mb-2.5 flex items-center justify-between">
                     <p className="text-sm font-semibold text-white">Add photos to this post</p>
                     <button
                       type="button"
                       onClick={() => setAddPhotoMode("closed")}
                       aria-label="Cancel"
-                      className="text-gray-500 transition-colors hover:text-white"
+                      className="text-neutral-500 transition-colors hover:text-white"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -2484,7 +2484,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                         setAddPhotoMode("closed");
                         newPhotoInputRef.current?.click();
                       }}
-                      className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                      className="flex flex-col items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-3 text-xs font-medium text-neutral-300 transition-colors hover:border-white/30 hover:text-white"
                     >
                       <Upload className="h-4 w-4" />
                       Upload new
@@ -2492,7 +2492,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                     <button
                       type="button"
                       onClick={() => setAddPhotoMode("library")}
-                      className="flex flex-col items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-3 text-xs font-medium text-gray-300 transition-colors hover:border-violet-500/50 hover:text-white"
+                      className="flex flex-col items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-3 text-xs font-medium text-neutral-300 transition-colors hover:border-white/30 hover:text-white"
                     >
                       <FolderOpen className="h-4 w-4" />
                       Choose from your library
@@ -2508,7 +2508,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                     <button
                       type="button"
                       onClick={() => setAddPhotoMode("closed")}
-                      className="text-xs font-medium text-violet-400 transition-colors hover:text-violet-300"
+                      className="text-xs font-medium text-neutral-300 transition-colors hover:text-neutral-300"
                     >
                       Done
                     </button>
@@ -2540,7 +2540,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               )}
 
               {addPhotoStatus === "uploading" && (
-                <p className="mt-2 flex items-center gap-1.5 text-xs text-violet-300">
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-neutral-300">
                   <RefreshCw className="h-3 w-3 animate-spin" />
                   Uploading…
                 </p>
@@ -2574,7 +2574,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
+              <label className="mb-1 block text-xs font-medium text-neutral-400">
                 <Calendar className="mr-1 inline h-3 w-3" />
                 Date <span className="text-red-400">*</span>
               </label>
@@ -2583,11 +2583,11 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 value={item.date}
                 min={today}
                 onChange={(e) => onUpdate({ date: e.target.value })}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
+              <label className="mb-1 block text-xs font-medium text-neutral-400">
                 <Clock className="mr-1 inline h-3 w-3" />
                 Time <span className="text-red-400">*</span>
               </label>
@@ -2595,7 +2595,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 type="time"
                 value={item.time}
                 onChange={(e) => onUpdate({ time: e.target.value })}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-2.5 py-2 text-sm text-white [color-scheme:dark] focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
               />
             </div>
           </div>
@@ -2610,9 +2610,9 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                   : "Set by the shared caption above — edit to override this video…"
               }
               rows={2}
-              className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white placeholder-neutral-600 focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
             />
-            <p className="mt-0.5 text-right text-[11px] text-gray-600">
+            <p className="mt-0.5 text-right text-[11px] text-neutral-600">
               {item.format === "short" ? `${item.caption.length} / 300 chars` : `${item.caption.length} chars`}
             </p>
           </div>
@@ -3221,7 +3221,7 @@ export default function SchedulerDashboardPage() {
   }, [fetchPosts]);
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen">
       <Suspense fallback={null}>
         <DeepLinkIntake onAsset={handleDeepLinkAsset} />
       </Suspense>
@@ -3307,15 +3307,15 @@ export default function SchedulerDashboardPage() {
             />
 
             <div className="flex items-center gap-3">
-              <span className="text-xs font-medium text-gray-400">Caption</span>
-              <div className="inline-flex rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+              <span className="text-xs font-medium text-neutral-400">Caption</span>
+              <div className="inline-flex rounded-lg border border-neutral-700 bg-neutral-800 p-0.5">
                 <button
                   type="button"
                   onClick={() => setCaptionMode("individual")}
                   className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     captionMode === "individual"
-                      ? "bg-violet-600 text-white"
-                      : "text-gray-400 hover:text-white"
+                      ? "bg-white text-neutral-900"
+                      : "text-neutral-400 hover:text-white"
                   }`}
                 >
                   Individual
@@ -3325,8 +3325,8 @@ export default function SchedulerDashboardPage() {
                   onClick={() => setCaptionMode("same")}
                   className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     captionMode === "same"
-                      ? "bg-violet-600 text-white"
-                      : "text-gray-400 hover:text-white"
+                      ? "bg-white text-neutral-900"
+                      : "text-neutral-400 hover:text-white"
                   }`}
                 >
                   Same for all
@@ -3345,9 +3345,9 @@ export default function SchedulerDashboardPage() {
                       placeholder="Write one caption for every video, or generate a general one from your titles & tags below…"
                       rows={4}
                       aria-label="Shared caption for all videos"
-                      className="w-full resize-none rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-3 text-sm text-white placeholder-gray-600 transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                      className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-800 px-3.5 py-3 text-sm text-white placeholder-neutral-600 transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
                     />
-                    <p className="mt-1 text-right text-xs text-gray-600">
+                    <p className="mt-1 text-right text-xs text-neutral-600">
                       {sharedCaption.length} / 300 chars
                     </p>
                   </div>
@@ -3363,7 +3363,7 @@ export default function SchedulerDashboardPage() {
                     emptyHint={null}
                   />
 
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-neutral-600">
                     {hasCaptionContext
                       ? "Generated from the titles & tags of all your videos (no audio) — one caption that broadly fits the whole batch. Applies to all videos; edit any card below to override."
                       : "Add a title or tags to at least one video to generate a shared caption."}
@@ -3416,7 +3416,7 @@ export default function SchedulerDashboardPage() {
                 type="button"
                 onClick={handleScheduleAll}
                 disabled={!canScheduleAll}
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-semibold text-neutral-900 shadow-lg shadow-black/30 transition-all duration-200 hover:bg-gray-200 hover:shadow-black/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 {schedulingAll ? (
                   <>
@@ -3435,13 +3435,13 @@ export default function SchedulerDashboardPage() {
                 <button
                   type="button"
                   onClick={clearScheduledItems}
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-700 px-4 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-white"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
                 >
                   Clear scheduled & keep editing
                 </button>
               )}
 
-              <p className="text-center text-xs text-gray-600">
+              <p className="text-center text-xs text-neutral-600">
                 {scheduleTargets.length > 0
                   ? "Schedules every ready video to YouTube. Failed cards stay for retry."
                   : hasScheduled

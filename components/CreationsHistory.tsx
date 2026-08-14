@@ -746,7 +746,7 @@ export default function CreationsHistory({
       type="button"
       onClick={() => load()}
       disabled={loading}
-      className="text-sm px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 hover:text-white hover:border-white/20 transition-colors disabled:opacity-50 shrink-0"
+      className="text-sm px-4 py-2 rounded-xl bg-white/5 text-neutral-300 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 shrink-0"
     >
       {loading ? "Refreshing…" : "Refresh"}
     </button>
@@ -758,10 +758,10 @@ export default function CreationsHistory({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              <History className="w-6 h-6 text-indigo-400" />
+              <History className="w-6 h-6 text-neutral-300" />
               {title}
             </h2>
-            <p className="text-sm text-gray-500 mt-1">{description}</p>
+            <p className="text-sm text-neutral-500 mt-1">{description}</p>
           </div>
           {showRefresh && refreshButton}
         </div>
@@ -780,8 +780,8 @@ export default function CreationsHistory({
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-full border transition-colors ${
                     active
-                      ? "bg-violet-500/15 border-violet-400/40 text-violet-200"
-                      : "bg-white/[0.03] border-white/10 text-gray-400 hover:text-white hover:border-white/25"
+                      ? "bg-white/10 border-white/25 text-neutral-200"
+                      : "bg-white/[0.03] border-white/10 text-neutral-400 hover:text-white hover:border-white/25"
                   }`}
                 >
                   <Icon
@@ -791,7 +791,7 @@ export default function CreationsHistory({
                     }
                   />
                   {tab.label}
-                  <span className={active ? "text-violet-300/70" : "text-gray-600"}>
+                  <span className={active ? "text-neutral-400" : "text-neutral-600"}>
                     ({counts[tab.id]})
                   </span>
                 </button>
@@ -813,34 +813,34 @@ export default function CreationsHistory({
         // `loading` is only true on a cache miss (a cached chip serves instantly
         // and revalidates silently), so this spinner marks a real fresh load —
         // including switching to a chip that hasn't been opened yet.
-        <div className="flex items-center justify-center py-20 text-gray-500">
+        <div className="flex items-center justify-center py-20 text-neutral-500">
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
       ) : pagedItems.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
           {enableTabs && activeTab === "favorite" ? (
             <>
-              <Star className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">No favorites yet.</p>
+              <Star className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+              <p className="text-neutral-400">No favorites yet.</p>
             </>
           ) : enableTabs && activeTab === "trash" ? (
             <>
-              <Trash2 className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">Trash is empty.</p>
+              <Trash2 className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+              <p className="text-neutral-400">Trash is empty.</p>
             </>
           ) : enableTabs && activeTab === "storyboard" ? (
             <>
-              <Layers className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">No storyboards yet.</p>
+              <Layers className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+              <p className="text-neutral-400">No storyboards yet.</p>
             </>
           ) : (
             <>
               {mediaType === "video" || activeTab === "video" ? (
-                <Video className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
               ) : (
-                <ImageIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                <ImageIcon className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
               )}
-              <p className="text-gray-400">
+              <p className="text-neutral-400">
                 {showCreateCta
                   ? "You don't have any assets yet — head over to create some."
                   : "No generations yet."}
@@ -850,7 +850,7 @@ export default function CreationsHistory({
                   {effectiveMediaType !== "image" && (
                     <Link
                       href="/tools/video"
-                      className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#F26522] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a]"
                     >
                       <Video className="h-3.5 w-3.5" />
                       Reels Generation
@@ -859,7 +859,7 @@ export default function CreationsHistory({
                   {effectiveMediaType !== "video" && (
                     <Link
                       href="/tools/photo"
-                      className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#F26522] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a]"
                     >
                       <ImageIcon className="h-3.5 w-3.5" />
                       Product Photo
@@ -889,7 +889,7 @@ export default function CreationsHistory({
               : selectedUrl === item.mediaUrl;
             const cardClass = `group relative text-left rounded-2xl overflow-hidden border transition-all hover:scale-[1.02] ${
               isSelected
-                ? "border-indigo-400/60 ring-2 ring-indigo-400/30"
+                ? "border-white/30 ring-2 ring-white/20"
                 : "border-white/10 hover:border-white/25"
             }`;
 
@@ -912,13 +912,13 @@ export default function CreationsHistory({
                   />
                 )}
                 {isCharacterItem(item) && (
-                  <span className="absolute left-2 top-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full bg-purple-500/80 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
+                  <span className="absolute left-2 top-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
                     <User className="h-3 w-3 shrink-0" />
                     <span className="truncate">{characterDisplayName(item)}</span>
                   </span>
                 )}
                 {multiSelect && isSelected && (
-                  <span className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500 text-xs font-semibold text-white shadow">
+                  <span className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-semibold text-neutral-900 shadow">
                     {selectionIndex + 1}
                   </span>
                 )}
@@ -932,10 +932,10 @@ export default function CreationsHistory({
                     <p className="text-xs font-medium text-white truncate">
                       {item.title || item.toolLabel}
                     </p>
-                    <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{item.toolLabel}</p>
+                    <p className="mt-0.5 text-xs text-neutral-500 sm:text-sm">{item.toolLabel}</p>
                   </>
                 )}
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-neutral-500 mt-1">
                   {new Date(item.createdAt).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
@@ -1021,7 +1021,7 @@ export default function CreationsHistory({
 
         {totalPages > 1 && (
           <div className="mt-8 flex flex-col items-center justify-between gap-3 sm:flex-row">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-neutral-500">
               {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
             </p>
             <div className="flex items-center gap-1.5">
@@ -1030,13 +1030,13 @@ export default function CreationsHistory({
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
                 aria-label="Previous page"
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-gray-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-neutral-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               {pageWindow(page, totalPages).map((p, i) =>
                 p === "ellipsis" ? (
-                  <span key={`e${i}`} className="px-1 text-sm text-gray-600">
+                  <span key={`e${i}`} className="px-1 text-sm text-neutral-600">
                     …
                   </span>
                 ) : (
@@ -1047,8 +1047,8 @@ export default function CreationsHistory({
                     aria-current={p === page ? "page" : undefined}
                     className={`h-8 min-w-8 rounded-lg border px-2 text-sm transition-colors ${
                       p === page
-                        ? "border-violet-400/40 bg-violet-500/15 text-violet-200"
-                        : "border-white/10 bg-white/[0.03] text-gray-300 hover:border-white/25 hover:text-white"
+                        ? "border-white/25 bg-white/10 text-neutral-200"
+                        : "border-white/10 bg-white/[0.03] text-neutral-300 hover:border-white/25 hover:text-white"
                     }`}
                   >
                     {p}
@@ -1060,7 +1060,7 @@ export default function CreationsHistory({
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
                 aria-label="Next page"
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-gray-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-neutral-300 transition-colors hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -1072,7 +1072,7 @@ export default function CreationsHistory({
 
       {enableTabs && activeTab === "trash" && counts.trash > 0 && (
         <div className="mt-8 flex flex-col items-center gap-3 border-t border-white/10 pt-6">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-neutral-500">
             Items in Trash are kept for 14 days, then deleted automatically.
           </p>
           <button
@@ -1101,7 +1101,7 @@ export default function CreationsHistory({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl border border-white/10 bg-gray-950 p-6"
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-neutral-950 p-6"
           >
             <div className="mb-4 flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/15 text-red-300">
@@ -1109,7 +1109,7 @@ export default function CreationsHistory({
               </span>
               <h3 className="text-base font-semibold text-white">Empty Trash?</h3>
             </div>
-            <p className="mb-6 text-sm text-gray-400">
+            <p className="mb-6 text-sm text-neutral-400">
               This permanently deletes all {counts.trash} item
               {counts.trash === 1 ? "" : "s"} in Trash. This can&apos;t be undone.
             </p>
@@ -1118,7 +1118,7 @@ export default function CreationsHistory({
                 type="button"
                 onClick={() => setConfirmEmptyTrash(false)}
                 disabled={emptyingTrash}
-                className="flex h-9 items-center rounded-full bg-white/5 px-4 text-sm text-gray-300 transition-colors hover:text-white disabled:opacity-50"
+                className="flex h-9 items-center rounded-full bg-white/5 px-4 text-sm text-neutral-300 transition-colors hover:text-white disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -1150,7 +1150,7 @@ export default function CreationsHistory({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-950"
+            className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-950"
           >
             <button
               type="button"
@@ -1206,7 +1206,7 @@ export default function CreationsHistory({
 
               {richUI && isCharacterItem(previewItem) && (
                 <div className="border-b border-white/10 px-4 py-4">
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-neutral-500 sm:text-sm">
                     Character name
                   </label>
                   <div className="flex items-center gap-2">
@@ -1216,13 +1216,13 @@ export default function CreationsHistory({
                       onChange={(e) => setNameDraft(e.target.value)}
                       maxLength={80}
                       placeholder="Name this character"
-                      className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
+                      className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:border-white/25 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={saveCharacterName}
                       disabled={savingName}
-                      className="flex h-9 items-center gap-1.5 rounded-xl bg-purple-500/20 px-4 text-sm font-medium text-purple-200 transition-colors hover:bg-purple-500/30 disabled:opacity-50"
+                      className="flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-4 text-sm font-medium text-neutral-200 transition-colors hover:bg-white/20 disabled:opacity-50"
                     >
                       {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
                     </button>
@@ -1235,10 +1235,10 @@ export default function CreationsHistory({
                 <div className="space-y-4 px-4 py-4">
                   {previewPrompt && (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-neutral-500 sm:text-sm">
                         Prompt
                       </p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">
                         {previewPrompt}
                       </p>
                     </div>
@@ -1246,16 +1246,16 @@ export default function CreationsHistory({
 
                   {previewScenePrompts.length > 0 && (
                     <div>
-                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-neutral-500 sm:text-sm">
                         Scene prompts
                       </p>
                       <ol className="space-y-1.5">
                         {previewScenePrompts.map((scenePrompt, i) => (
                           <li
                             key={i}
-                            className="flex gap-2 text-sm leading-relaxed text-gray-300"
+                            className="flex gap-2 text-sm leading-relaxed text-neutral-300"
                           >
-                            <span className="shrink-0 text-gray-600 tabular-nums">
+                            <span className="shrink-0 text-neutral-600 tabular-nums">
                               {String(i + 1).padStart(2, "0")}
                             </span>
                             <span className="whitespace-pre-wrap">{scenePrompt}</span>
@@ -1267,10 +1267,10 @@ export default function CreationsHistory({
 
                   {previewNarration && (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-neutral-500 sm:text-sm">
                         Narration
                       </p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">
                         {previewNarration}
                       </p>
                     </div>
@@ -1280,7 +1280,7 @@ export default function CreationsHistory({
             </div>
 
             <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-neutral-400">
                 {previewItem &&
                   new Date(previewItem.createdAt).toLocaleDateString()}
                 {previewModelLabel ? ` · ${previewModelLabel}` : ""}
@@ -1294,7 +1294,7 @@ export default function CreationsHistory({
                     className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
                       favorites.has(previewItem.id)
                         ? "bg-amber-400/20 text-amber-300"
-                        : "bg-white/5 text-gray-300 hover:text-white"
+                        : "bg-white/5 text-neutral-300 hover:text-white"
                     }`}
                   >
                     <Star
@@ -1308,7 +1308,7 @@ export default function CreationsHistory({
                   type="button"
                   onClick={() => downloadItem(previewItem)}
                   disabled={downloadingId === previewItem.id}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
+                  className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-neutral-300 transition-colors hover:text-white disabled:opacity-60"
                 >
                   {downloadingId === previewItem.id ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1324,7 +1324,7 @@ export default function CreationsHistory({
                         type="button"
                         onClick={() => restoreItem(previewItem)}
                         disabled={mutatingId === previewItem.id}
-                        className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
+                        className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-neutral-300 transition-colors hover:text-white disabled:opacity-60"
                       >
                         {mutatingId === previewItem.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />

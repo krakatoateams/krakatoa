@@ -334,7 +334,7 @@ export default function CreditsTab() {
               ? "border-green-500/30 bg-green-500/10 text-green-300"
               : banner.kind === "failed"
                 ? "border-red-500/30 bg-red-500/10 text-red-300"
-                : "border-violet-500/30 bg-violet-500/10 text-violet-200"
+                : "border-white/20 bg-white/10 text-gray-200"
           }`}
         >
           {banner.kind === "success" ? (
@@ -351,8 +351,8 @@ export default function CreditsTab() {
       {/* Buy credits */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
         <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/15">
-            <Sparkles className="h-5 w-5 text-violet-300" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
+            <Sparkles className="h-5 w-5 text-gray-200" />
           </div>
           <div>
             <p className="text-sm font-medium text-white">Buy credits</p>
@@ -371,12 +371,12 @@ export default function CreditsTab() {
                 key={pack.id}
                 className={`relative flex flex-col rounded-xl border p-4 transition-colors ${
                   pack.popular
-                    ? "border-violet-500/40 bg-violet-500/[0.06]"
+                    ? "border-white/30 bg-white/[0.06]"
                     : "border-gray-800 bg-gray-950"
                 }`}
               >
                 {pack.popular ? (
-                  <span className="absolute -top-2 right-3 rounded-full bg-violet-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                  <span className="absolute -top-2 right-3 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-900">
                     Popular
                   </span>
                 ) : null}
@@ -400,7 +400,7 @@ export default function CreditsTab() {
                   disabled={anyBusy}
                   className={`mt-4 flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                     pack.popular
-                      ? "bg-violet-500 text-white hover:bg-violet-400"
+                      ? "bg-[#F26522] text-white hover:bg-[#e05a1a]"
                       : "border border-gray-700 bg-gray-800 text-white hover:bg-gray-700"
                   }`}
                 >

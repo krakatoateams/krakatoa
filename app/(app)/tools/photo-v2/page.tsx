@@ -276,7 +276,7 @@ function StoryboardComposer({
         className="hidden"
         onChange={themeReference.onChange}
       />
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-[200px] lg:py-0">
+      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ChipDropdown
             sheetTitle="Select creation type"
@@ -298,7 +298,7 @@ function StoryboardComposer({
           <UploadTile label="Theme" upload={themeReference} disabled={loading} fluid />
         </div>
 
-        <div className="rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+        <div className="rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
           <div className="flex items-start gap-3">
             <MentionTextarea
               value={theme}
@@ -414,7 +414,7 @@ function StoryboardComposer({
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           Drafting your six-panel storyboard — it will appear below when ready.
         </div>
       )}
@@ -495,7 +495,7 @@ function BatchThumb({
       aria-pressed={selected}
       className={`relative cursor-pointer overflow-hidden rounded-lg border transition-opacity ${
         selected
-          ? "border-purple-400/70 ring-1 ring-purple-400/50"
+          ? "border-white/40 ring-1 ring-white/30"
           : "border-white/10 opacity-60 hover:opacity-100"
       }`}
     >
@@ -940,11 +940,7 @@ function PhotoOmniPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-white selection:bg-purple-500/30">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-[10%] -top-[10%] h-[40%] w-[40%] rounded-full bg-purple-900/20 blur-[120px]" />
-        <div className="absolute -right-[10%] top-[20%] h-[30%] w-[30%] rounded-full bg-indigo-900/20 blur-[120px]" />
-      </div>
+    <div className="min-h-screen text-white selection:bg-white/20">
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
@@ -985,28 +981,7 @@ function PhotoOmniPage() {
         />
 
         {/* Omni-form composer */}
-        <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-[200px] lg:py-0">
-          {/* Animated dot-grid spotlight behind the composer */}
-          <style>{`
-            @keyframes omniDotDrift { from { background-position: 0 0; } to { background-position: 48px 48px; } }
-            @keyframes omniDotsPulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
-          `}</style>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-[180%] w-[135%] -translate-x-1/2 -translate-y-1/2"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, rgba(168,85,247,0.55) 1.2px, transparent 1.6px)",
-              backgroundSize: "24px 24px",
-              maskImage:
-                "radial-gradient(ellipse 55% 55% at 50% 50%, #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%)",
-              WebkitMaskImage:
-                "radial-gradient(ellipse 55% 55% at 50% 50%, #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%)",
-              animation:
-                "omniDotDrift 14s linear infinite, omniDotsPulse 5s ease-in-out infinite",
-            }}
-          />
-
+        <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
           {/* Top-left chips: creation type + model */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <ChipDropdown
@@ -1064,11 +1039,11 @@ function PhotoOmniPage() {
             </div>
           )}
 
-          <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+          <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
             {/* Character name (Character creation only) */}
             {isCharacterMode && (
               <div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-3">
-                <User className="h-4 w-4 shrink-0 text-purple-300" />
+                <User className="h-4 w-4 shrink-0 text-gray-300" />
                 <input
                   type="text"
                   value={characterName}
@@ -1082,6 +1057,12 @@ function PhotoOmniPage() {
 
             {/* Prompt row */}
             <div className="flex items-start gap-3">
+              {/* Reference tile stays inline before the prompt on desktop */}
+              {allowReferenceUpload && (
+                <div className="hidden shrink-0 items-start gap-3 lg:flex">
+                  <UploadTile label="Reference" upload={reference} disabled={loading} iconOnly />
+                </div>
+              )}
               <MentionTextarea
                 value={prompt}
                 onChange={setPrompt}
@@ -1099,24 +1080,19 @@ function PhotoOmniPage() {
                         : "Describe the shot — type @ to reference a saved character or storyboard…"
                 }
               />
-              {/* Upload tiles stay inline beside the prompt on desktop */}
-              <div className="hidden shrink-0 items-start gap-3 lg:flex">
-                {requiresProduct && (
-                  <>
-                    <UploadTile label="Product" upload={product} disabled={loading} />
-                    <CharacterTile
-                      preview={selectedCharacter?.url ?? character.preview}
-                      onUpload={character.open}
-                      onPick={openCharacterPicker}
-                      onClear={clearCharacter}
-                      disabled={loading}
-                    />
-                  </>
-                )}
-                {allowReferenceUpload && (
-                  <UploadTile label="Reference" upload={reference} disabled={loading} />
-                )}
-              </div>
+              {/* Product + Character tiles stay inline after the prompt on desktop */}
+              {requiresProduct && (
+                <div className="hidden shrink-0 items-start gap-3 lg:flex">
+                  <UploadTile label="Product" upload={product} disabled={loading} />
+                  <CharacterTile
+                    preview={selectedCharacter?.url ?? character.preview}
+                    onUpload={character.open}
+                    onPick={openCharacterPicker}
+                    onClear={clearCharacter}
+                    disabled={loading}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Controls row */}
@@ -1276,6 +1252,7 @@ function PhotoOmniPage() {
                   ready={canGenerate}
                   loading={loading}
                   label="Generate"
+                  className={`${GENERATE_BTN_CLASS} w-[172px]`}
                 />
                 <GenerationCancelButton
                   visible={loading}
@@ -1352,7 +1329,7 @@ function PhotoOmniPage() {
 
         {loading && (
           <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-            <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
             {isCharacterMode
               ? `Creating your character turnaround with ${tier.label} — it will appear below when ready.`
               : isSocialMode
@@ -1446,7 +1423,7 @@ function PhotoOmniPage() {
                         {captionLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Sparkles className="h-3.5 w-3.5 text-purple-300" />
+                          <Sparkles className="h-3.5 w-3.5 text-gray-300" />
                         )}
                         {captionLoading
                           ? "Writing…"
@@ -1527,7 +1504,7 @@ function PhotoOmniPage() {
           >
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-                <Users className="h-4 w-4 text-purple-300" />
+                <Users className="h-4 w-4 text-gray-300" />
                 Choose a character
               </h3>
               <button
@@ -1569,8 +1546,8 @@ function PhotoOmniPage() {
                         onClick={() => chooseSavedCharacter(item)}
                         className={`group overflow-hidden rounded-xl border text-left transition-colors ${
                           active
-                            ? "border-purple-400/70 ring-2 ring-purple-400/30"
-                            : "border-white/10 hover:border-purple-400/50"
+                            ? "border-white/40 ring-2 ring-white/20"
+                            : "border-white/10 hover:border-white/30"
                         }`}
                       >
                         <div className="relative aspect-square w-full bg-black/40">

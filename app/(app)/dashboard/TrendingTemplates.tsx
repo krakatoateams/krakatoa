@@ -33,14 +33,14 @@ export default function TrendingTemplates() {
     <section className="mb-10">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500">
-          Trending templates
+          Try-on templates
         </h2>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => scrollBy(-1)}
             aria-label="Scroll left"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-800 bg-gray-900 text-gray-400 transition-colors hover:border-violet-500/40 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-white"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -48,7 +48,7 @@ export default function TrendingTemplates() {
             type="button"
             onClick={() => scrollBy(1)}
             aria-label="Scroll right"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-800 bg-gray-900 text-gray-400 transition-colors hover:border-violet-500/40 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-white"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -79,7 +79,7 @@ function TemplateCard({
   onUse: () => void;
 }) {
   return (
-    <div className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-gray-800 bg-gray-900 sm:w-44">
+    <div className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl bg-white/[0.04] sm:w-44">
       <video
         src={template.videoUrl}
         autoPlay

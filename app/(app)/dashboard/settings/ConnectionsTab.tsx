@@ -198,7 +198,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/youtube/start"
-                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
                 >
                   Connect
                 </a>
@@ -267,7 +267,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/instagram/start"
-                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
                 >
                   Connect
                 </a>
@@ -336,7 +336,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/tiktok/start"
-                  className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
                 >
                   Connect
                 </a>

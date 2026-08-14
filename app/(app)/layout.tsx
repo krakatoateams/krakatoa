@@ -22,9 +22,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <CreditBalanceProvider>
       <PricingProvider>
-        <div className="flex min-h-screen bg-gray-950 text-white">
+        <div className="flex min-h-screen bg-N50 text-white md:gap-2 md:bg-black md:p-2">
           <Sidebar initialToolVisibility={initialToolVisibility} />
-          <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:pb-0">
+          <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:h-[calc(100vh-1rem)] md:rounded-2xl md:pb-0">
             {children}
           </main>
         </div>

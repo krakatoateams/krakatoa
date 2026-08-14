@@ -158,15 +158,15 @@ export function ChipDropdown({
         }}
         className={`flex w-full items-center justify-between gap-3 rounded-xl text-left text-sm transition-colors ${
           big ? "px-4 py-3" : "px-3 py-2"
-        } ${active ? "bg-purple-500/20 text-gray-100" : "text-gray-400 hover:bg-white/5"}`}
+        } ${active ? "bg-white/15 text-gray-100" : "text-gray-400 hover:bg-white/5"}`}
       >
         <span className="flex items-center gap-2">
           {withMinorWordCase(opt.label)}
           {opt.hint && (
-            <span className="text-xs font-medium text-purple-300 sm:text-sm">{opt.hint}</span>
+            <span className="text-xs font-medium text-gray-300 sm:text-sm">{opt.hint}</span>
           )}
         </span>
-        {active && <Check className="h-4 w-4 shrink-0 text-purple-400" />}
+        {active && <Check className="h-4 w-4 shrink-0 text-gray-300" />}
       </button>
     );
   };
@@ -200,15 +200,15 @@ export function ChipDropdown({
               } ${
                 square
                   ? open
-                    ? "bg-purple-500/15 text-white"
+                    ? "bg-white/10 text-white"
                     : "bg-white/5 text-gray-200 hover:bg-white/10"
                   : open
-                    ? "border-purple-400/50 bg-purple-500/15 text-white"
+                    ? "border-white/30 bg-white/10 text-white"
                     : "border-white/10 bg-white/5 text-gray-200 hover:border-white/25"
               }`
         }
       >
-        {!bare && <span className="text-purple-300">{icon}</span>}
+        {!bare && <span className="text-gray-300">{icon}</span>}
         <span className={`font-semibold ${dimValue ? "text-gray-500" : ""}`}>
           {withMinorWordCase(value)}
         </span>
@@ -228,7 +228,7 @@ export function ChipDropdown({
           <div
             ref={menuRef}
             style={{ position: "fixed", top: coords.top, left: coords.left }}
-            className="z-[80] w-max min-w-[14rem] max-w-[18rem] overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50"
+            className="z-[80] w-max min-w-[14rem] max-w-[18rem] overflow-hidden rounded-2xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50"
           >
             {options.map((opt) => renderOption(opt, false))}
           </div>,
@@ -252,7 +252,7 @@ export function ChipDropdown({
               ref={menuRef}
               role="dialog"
               aria-modal="true"
-              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-[#0b1020] p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-black/60 transition-transform duration-200 ease-out ${
+              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-[#171717] p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-black/60 transition-transform duration-200 ease-out ${
                 sheetShown ? "translate-y-0" : "translate-y-full"
               }`}
             >

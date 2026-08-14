@@ -17,8 +17,8 @@ export default function ToolCard({ name, href, icon, accent, comingSoon, thumbna
   return (
     <Wrapper
       {...(wrapperProps as { href: string })}
-      className={`group relative flex flex-col rounded-xl border border-gray-800 bg-gray-900 p-5 transition-all ${
-        comingSoon ? "opacity-60" : "hover:border-violet-500/40 hover:bg-gray-900/80"
+      className={`group relative flex flex-col rounded-xl bg-white/[0.04] p-5 transition-all ${
+        comingSoon ? "opacity-60" : "hover:bg-white/[0.06]"
       }`}
     >
       {thumbnail}
@@ -37,7 +37,7 @@ export default function ToolCard({ name, href, icon, accent, comingSoon, thumbna
 
       <div
         className={`mt-4 inline-flex items-center gap-1.5 text-sm font-medium ${
-          comingSoon ? "text-gray-600" : "text-violet-400 group-hover:gap-2.5 transition-all"
+          comingSoon ? "text-gray-600" : "text-gray-300 group-hover:gap-2.5 transition-all"
         }`}
       >
         {comingSoon ? "Coming soon" : "Open Tool"}

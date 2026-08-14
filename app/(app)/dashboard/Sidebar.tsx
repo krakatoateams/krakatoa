@@ -198,13 +198,13 @@ export default function Sidebar({
   return (
     <>
       <aside
-        className="hidden h-screen w-60 shrink-0 flex-col border-r border-gray-800 bg-gray-950 md:sticky md:top-0 md:flex"
+        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-[#181818] md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
       {/* Logo — doubles as the way back out to the landing page */}
       <Link
         href="/"
         aria-label="Kelolako home"
-        className="flex items-center gap-2.5 border-b border-gray-800 px-5 py-5 transition-opacity hover:opacity-80"
+        className="flex items-center gap-2.5 px-5 py-5 transition-opacity hover:opacity-80"
       >
         <Image
           src="/Logo White transparent.svg"
@@ -234,11 +234,11 @@ export default function Sidebar({
                       href={item.href}
                       className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
                         active
-                          ? "bg-violet-500/15 text-violet-300"
-                          : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                          ? "bg-white/10 text-white"
+                          : "text-gray-400 hover:bg-white/10 hover:text-white"
                       }`}
                     >
-                      <span className={active ? "text-violet-400" : "text-gray-500"}>
+                      <span className={active ? "text-white" : "text-gray-500"}>
                         {item.icon}
                       </span>
                       {item.label}
@@ -252,7 +252,7 @@ export default function Sidebar({
       </nav>
 
       {/* User profile */}
-      <div className="hidden border-t border-gray-800 p-3 md:block">
+      <div className="hidden p-3 md:block">
         {status === "authenticated" ? (
           <div className="relative rounded-xl border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-white/20 hover:bg-white/[0.05]">
             <button
@@ -277,7 +277,7 @@ export default function Sidebar({
                   className="h-10 w-10 shrink-0 rounded-full ring-2 ring-white/10"
                 />
               ) : (
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/40 to-indigo-500/20 text-sm font-semibold text-violet-100 ring-2 ring-white/10">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-white/25 to-white/10 text-sm font-semibold text-white ring-2 ring-white/10">
                   {name?.[0]?.toUpperCase() ?? "?"}
                 </div>
               )}

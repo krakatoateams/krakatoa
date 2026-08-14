@@ -24,7 +24,7 @@ function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.Re
     nodes.push(
       <span
         key={key++}
-        className="rounded bg-purple-500/30 text-purple-100 shadow-[0_0_0_2px_rgba(168,85,247,0.30)]"
+        className="rounded bg-white/20 text-white shadow-[0_0_0_2px_rgba(255,255,255,0.25)]"
       >
         {m[0]}
       </span>
@@ -217,7 +217,7 @@ export default function MentionTextarea({
       />
 
       {query !== null && matches.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
           {matches.map((asset, i) => (
             <button
               key={asset.id}
@@ -242,7 +242,7 @@ export default function MentionTextarea({
         </div>
       )}
       {query !== null && matches.length === 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-gray-400 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#171717] px-3 py-2 text-sm text-gray-400 shadow-2xl shadow-black/50">
           No matching library images.
         </div>
       )}

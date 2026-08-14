@@ -54,6 +54,7 @@ import {
   GenerationCancelButton,
   Tooltip,
   RefGroup,
+  RefMediaGroup,
   useMediaRefs,
   uploadRefFile,
   STUDIO_CHIP_ROW_CLASS,
@@ -647,12 +648,27 @@ function VideoOmniPage() {
 
   const selectedCreation = CREATION_TYPES.find((c) => c.id === "text2video");
 
+  // Reference-images uploader now lives inline beside the prompt (desktop) and
+  // above it (mobile), so its gating is shared by both placements.
+  const refImagesDisabled =
+    loading || (blocksFramesWithRefs && hasFrames) || refImagesBlocked1080p;
+  const refImagesDisabledReason =
+    blocksFramesWithRefs && hasFrames
+      ? "Remove first/last frame to use reference images."
+      : refImagesBlocked1080p
+        ? "Reference images are only supported at 480p or 720p."
+        : undefined;
+  const refImagesHint =
+    blocksFramesWithRefs && hasFrames
+      ? "Style and scene elements. Remove first/last frame to use reference images instead."
+      : refImagesBlocked1080p
+        ? "Style and scene elements. Only available at 480p or 720p — lower the resolution to use."
+        : model.providerFamily === "kling3omni"
+          ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
+          : "Scene elements (up to 4). Tag with @ or upload.";
+
   return (
-    <div className="min-h-screen bg-[#030712] text-white selection:bg-purple-500/30">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-[10%] -top-[10%] h-[40%] w-[40%] rounded-full bg-purple-900/20 blur-[120px]" />
-        <div className="absolute -right-[10%] top-[20%] h-[30%] w-[30%] rounded-full bg-indigo-900/20 blur-[120px]" />
-      </div>
+    <div className="min-h-screen text-white selection:bg-white/20">
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
@@ -663,26 +679,6 @@ function VideoOmniPage() {
 
         {creationType === "text2video" && (
         <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
-          <style>{`
-            @keyframes omniDotDrift { from { background-position: 0 0; } to { background-position: 48px 48px; } }
-            @keyframes omniDotsPulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.6; } }
-          `}</style>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-[180%] w-[135%] -translate-x-1/2 -translate-y-1/2"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, rgba(168,85,247,0.55) 1.2px, transparent 1.6px)",
-              backgroundSize: "24px 24px",
-              maskImage:
-                "radial-gradient(ellipse 55% 55% at 50% 50%, #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%)",
-              WebkitMaskImage:
-                "radial-gradient(ellipse 55% 55% at 50% 50%, #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%)",
-              animation:
-                "omniDotDrift 14s linear infinite, omniDotsPulse 5s ease-in-out infinite",
-            }}
-          />
-
           {/* Top-left chips: creation type + model */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <ChipDropdown
@@ -716,29 +712,64 @@ function VideoOmniPage() {
             </div>
           </div>
 
-          <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
-            {supportsMentions ? (
-              <MentionTextarea
-                value={prompt}
-                onChange={setPrompt}
-                mentions={mentions}
-                onMentionsChange={setMentions}
-                assets={mentionAssets}
-                maxLength={model.promptMaxChars}
-                placeholder='Describe the scene — camera moves, subject, mood. Type @ to tag a saved image from your library, or attach references below.'
-                rows={3}
-                disabled={loading}
-                className="min-h-[64px] text-base"
-              />
-            ) : (
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                maxLength={model.promptMaxChars}
-                placeholder="Describe the scene — camera moves, subject, mood."
-                rows={3}
-                className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
-              />
+          <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+            <div className="flex items-start gap-3">
+              {/* Reference media inline before the prompt on desktop */}
+              {model.references.referenceImages > 0 && (
+                <div className="hidden shrink-0 items-start gap-3 lg:flex">
+                  <RefMediaGroup
+                    label="Reference"
+                    imageGroup={refImages}
+                    imageAccept={IMAGE_ACCEPT}
+                    videoGroup={model.references.referenceVideos > 0 ? refVideos : undefined}
+                    videoAccept={VIDEO_ACCEPT}
+                    disabled={refImagesDisabled}
+                    disabledReason={refImagesDisabledReason}
+                    hint={refImagesHint}
+                  />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                {supportsMentions ? (
+                  <MentionTextarea
+                    value={prompt}
+                    onChange={setPrompt}
+                    mentions={mentions}
+                    onMentionsChange={setMentions}
+                    assets={mentionAssets}
+                    maxLength={model.promptMaxChars}
+                    placeholder='Describe the scene — camera moves, subject, mood. Type @ to tag a saved image from your library, or attach references below.'
+                    rows={3}
+                    disabled={loading}
+                    className="min-h-[64px] text-base"
+                  />
+                ) : (
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    maxLength={model.promptMaxChars}
+                    placeholder="Describe the scene — camera moves, subject, mood."
+                    rows={3}
+                    className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Reference media above the controls on mobile */}
+            {model.references.referenceImages > 0 && (
+              <div className="mt-3 lg:hidden">
+                <RefMediaGroup
+                  label="Reference"
+                  imageGroup={refImages}
+                  imageAccept={IMAGE_ACCEPT}
+                  videoGroup={model.references.referenceVideos > 0 ? refVideos : undefined}
+                  videoAccept={VIDEO_ACCEPT}
+                  disabled={refImagesDisabled}
+                  disabledReason={refImagesDisabledReason}
+                  hint={refImagesHint}
+                />
+              </div>
             )}
 
             {/* Controls row */}
@@ -809,16 +840,16 @@ function VideoOmniPage() {
                       type="button"
                       disabled={loading || audioBlockedByRefVideo}
                       onClick={() => setGenerateAudio((v) => !v)}
-                      className={`flex h-10 items-center gap-2 rounded-[4px] border px-3 text-sm font-semibold transition-colors disabled:opacity-40 ${
+                      className={`flex h-10 items-center gap-2 rounded-[4px] px-3 text-sm transition-colors disabled:opacity-40 ${
                         generateAudio
-                          ? "border-purple-400/50 bg-purple-500/15 text-white"
-                          : "border-white/10 bg-white/5 text-gray-300 hover:border-white/25"
+                          ? "bg-white/5 text-gray-200 hover:bg-white/10"
+                          : "bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300"
                       }`}
                     >
                       {generateAudio ? (
-                        <Volume2 className="h-3.5 w-3.5 text-purple-300" />
+                        <Volume2 className="h-3.5 w-3.5 text-gray-300" />
                       ) : (
-                        <VolumeX className="h-3.5 w-3.5 text-gray-400" />
+                        <VolumeX className="h-3.5 w-3.5 text-gray-500" />
                       )}
                       Audio
                     </button>
@@ -883,10 +914,16 @@ function VideoOmniPage() {
             />
           </div>
 
-          {/* References */}
+          {/* References — reference images live inline beside the prompt; this
+              section only carries the non-image reference types (frames, video,
+              audio) and hides entirely when none apply. */}
+          {(model.references.firstFrame ||
+            model.references.lastFrame ||
+            (model.references.referenceVideos > 0 && model.references.referenceImages === 0) ||
+            model.references.referenceAudios > 0) && (
           <div className="mt-4">
             <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-              <Sparkles className="h-3.5 w-3.5 text-purple-300" />
+              <Sparkles className="h-3.5 w-3.5 text-gray-300" />
               References
               <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
             </div>
@@ -929,33 +966,7 @@ function VideoOmniPage() {
                   hint="Optional end frame for image-to-video. Upload a first frame to unlock."
                 />
               )}
-              {model.references.referenceImages > 0 && (
-                <RefGroup
-                  icon={<ImageIcon className="h-3.5 w-3.5" />}
-                  label="Reference images"
-                  accept={IMAGE_ACCEPT}
-                  multiple
-                  group={refImages}
-                  disabled={loading || (blocksFramesWithRefs && hasFrames) || refImagesBlocked1080p}
-                  disabledReason={
-                    blocksFramesWithRefs && hasFrames
-                      ? "Remove first/last frame to use reference images."
-                      : refImagesBlocked1080p
-                        ? "Reference images are only supported at 480p or 720p."
-                        : undefined
-                  }
-                  hint={
-                    blocksFramesWithRefs && hasFrames
-                      ? "Style and scene elements. Remove first/last frame to use reference images instead."
-                      : refImagesBlocked1080p
-                        ? "Style and scene elements. Only available at 480p or 720p — lower the resolution to use."
-                        : model.providerFamily === "kling3omni"
-                          ? `Style/scene refs (up to ${refVideos.done.length > 0 ? 4 : 7}). Tag with @ or upload.`
-                          : "Scene elements (up to 4). Tag with @ or upload."
-                  }
-                />
-              )}
-              {model.references.referenceVideos > 0 && (
+              {model.references.referenceVideos > 0 && model.references.referenceImages === 0 && (
                 <RefGroup
                   icon={<Film className="h-3.5 w-3.5" />}
                   label="Reference videos"
@@ -993,6 +1004,7 @@ function VideoOmniPage() {
               )}
             </div>
           </div>
+          )}
 
           {!refCheck.ok && (
             <p className="mt-2 pl-1 text-sm text-amber-300/80">{refCheck.error}</p>
@@ -1017,7 +1029,7 @@ function VideoOmniPage() {
 
         {creationType === "text2video" && loading && (
           <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-            <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
             Generating your video with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
           </div>
         )}
@@ -1403,7 +1415,7 @@ function ImageToVideoComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
           <div
             className={`grid grid-cols-1 gap-3 ${
               model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
@@ -1633,7 +1645,7 @@ function ImageToVideoComposer({
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           Generating with {model.modelLabel} — this can take a couple of minutes.
         </div>
       )}
@@ -1910,7 +1922,7 @@ function MotionControlComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
           {/* Uploads: character image + motion video (both required) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CharacterPicker
@@ -1925,11 +1937,11 @@ function MotionControlComposer({
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                    <span className="text-purple-300">
+                    <span className="text-gray-300">
                       <Film className="h-3.5 w-3.5" />
                     </span>
                     Motion to copy
-                    <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-200">
+                    <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-gray-200">
                       template
                     </span>
                   </div>
@@ -1996,10 +2008,10 @@ function MotionControlComposer({
               aria-expanded={advancedOpen}
               className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 transition-colors hover:text-gray-200"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5 text-purple-300" />
+              <SlidersHorizontal className="h-3.5 w-3.5 text-gray-300" />
               Advanced settings
               {!advancedOpen && prompt.trim() && (
-                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-medium text-purple-200">
+                <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-medium text-gray-200">
                   prompt added
                 </span>
               )}
@@ -2052,16 +2064,16 @@ function MotionControlComposer({
                   type="button"
                   disabled={loading}
                   onClick={() => setKeepOriginalSound((v) => !v)}
-                  className={`flex h-10 w-full items-center justify-center gap-2 rounded-[4px] px-3 text-sm font-semibold transition-colors disabled:opacity-40 lg:w-auto lg:justify-start ${
+                  className={`flex h-10 w-full items-center justify-center gap-2 rounded-[4px] px-3 text-sm transition-colors disabled:opacity-40 lg:w-auto lg:justify-start ${
                     keepOriginalSound
-                      ? "bg-purple-500/15 text-white"
-                      : "bg-white/5 text-gray-200 hover:bg-white/10"
+                      ? "bg-white/5 text-gray-200 hover:bg-white/10"
+                      : "bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300"
                   }`}
                 >
                   {keepOriginalSound ? (
-                    <Volume2 className="h-3.5 w-3.5 text-purple-300" />
+                    <Volume2 className="h-3.5 w-3.5 text-gray-300" />
                   ) : (
-                    <VolumeX className="h-3.5 w-3.5 text-gray-400" />
+                    <VolumeX className="h-3.5 w-3.5 text-gray-500" />
                   )}
                   Original sound
                 </button>
@@ -2141,7 +2153,7 @@ function MotionControlComposer({
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           Generating with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
         </div>
       )}
@@ -2319,7 +2331,7 @@ function ImportStoryboardModal({
       <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#0e0e12] shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
           <div className="flex items-center gap-2">
-            <Upload className="h-4 w-4 text-purple-300" />
+            <Upload className="h-4 w-4 text-gray-300" />
             <h3 className="text-sm font-bold text-white">Upload your own storyboard</h3>
           </div>
           <button
@@ -2336,7 +2348,7 @@ function ImportStoryboardModal({
           {/* File picker / preview */}
           <label
             className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-6 text-center transition-colors ${
-              previewUrl ? "border-white/15 bg-black/30" : "border-white/20 hover:border-purple-400/50"
+              previewUrl ? "border-white/15 bg-black/30" : "border-white/20 hover:border-white/30"
             } ${busy ? "pointer-events-none opacity-60" : ""}`}
           >
             {previewUrl ? (
@@ -2361,7 +2373,7 @@ function ImportStoryboardModal({
               onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             />
             {previewUrl && (
-              <span className="text-sm font-semibold text-purple-300">Change image</span>
+              <span className="text-sm font-semibold text-gray-300">Change image</span>
             )}
           </label>
 
@@ -2382,7 +2394,7 @@ function ImportStoryboardModal({
               rows={2}
               disabled={busy}
               placeholder="What should happen in the video? Helps steer the analysis."
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white placeholder:text-gray-600 focus:border-white/25 focus:outline-none"
             />
           </div>
 
@@ -2460,7 +2472,7 @@ function ImportStoryboardModal({
             ready={!!file}
             loading={busy}
             label="Analyze"
-            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-fuchsia-500 to-pink-500 px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-pink-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>
       </div>
@@ -2765,11 +2777,11 @@ function StoryboardToVideoComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
-              <span className="text-purple-300">
+              <span className="text-gray-300">
                 <ImageIcon className="h-3.5 w-3.5" />
               </span>
               Choose a storyboard
@@ -2784,7 +2796,7 @@ function StoryboardToVideoComposer({
 
           {listState === "loading" ? (
             <div className="flex h-24 items-center gap-2 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin text-purple-300" />
+              <Loader2 className="h-4 w-4 animate-spin text-gray-300" />
               Loading your storyboards…
             </div>
           ) : listState === "error" ? (
@@ -2797,7 +2809,7 @@ function StoryboardToVideoComposer({
                 <span>You don&apos;t have any storyboards yet.</span>
                 <a
                   href="/tools/photo-v2?type=storyboard"
-                  className="font-semibold text-purple-300 hover:text-purple-200"
+                  className="font-semibold text-gray-300 hover:text-gray-200"
                 >
                   Create one in Photo → Storyboard →
                 </a>
@@ -2806,7 +2818,7 @@ function StoryboardToVideoComposer({
                 type="button"
                 disabled={loading}
                 onClick={() => setShowUpload(true)}
-                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-gray-300 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
+                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
               >
                 <Upload className="h-4 w-4" />
                 Upload your own storyboard
@@ -2818,7 +2830,7 @@ function StoryboardToVideoComposer({
                 type="button"
                 disabled={loading}
                 onClick={() => setShowUpload(true)}
-                className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-purple-400/50 hover:text-white disabled:opacity-40"
+                className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
               >
                 <Upload className="h-5 w-5" />
                 <span className="text-sm font-semibold">Upload your own</span>
@@ -2834,7 +2846,7 @@ function StoryboardToVideoComposer({
                     title={s.theme}
                     className={`group relative overflow-hidden rounded-xl border text-left transition-colors disabled:opacity-40 ${
                       active
-                        ? "border-purple-400 ring-2 ring-purple-400/40"
+                        ? "border-white/40 ring-2 ring-white/25"
                         : "border-white/10 hover:border-white/30"
                     }`}
                   >
@@ -2861,12 +2873,12 @@ function StoryboardToVideoComposer({
                       </span>
                     )}
                     {s.source === "uploaded" && (
-                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-300">
+                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-gray-300">
                         Uploaded
                       </span>
                     )}
                     {active && (
-                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-white">
+                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-gray-900">
                         <Check className="h-3 w-3" />
                       </span>
                     )}
@@ -2960,10 +2972,10 @@ function StoryboardToVideoComposer({
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
                 />
-                <Pencil className="h-3.5 w-3.5 text-purple-300" />
+                <Pencil className="h-3.5 w-3.5 text-gray-300" />
                 Advanced — edit prompt
                 {promptDirty && (
-                  <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-xs font-bold text-purple-200">
+                  <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-bold text-gray-200">
                     Edited
                   </span>
                 )}
@@ -2976,7 +2988,7 @@ function StoryboardToVideoComposer({
                     rows={6}
                     disabled={loading}
                     placeholder="The video prompt Seedance will follow…"
-                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-purple-400/40 focus:outline-none"
+                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-white/25 focus:outline-none"
                   />
                   <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-gray-500">
                     <span>
@@ -3085,7 +3097,7 @@ function StoryboardToVideoComposer({
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           Rendering your storyboard into a 15s clip — it will appear below when ready.
         </div>
       )}
@@ -3249,7 +3261,7 @@ function ThemedSelect({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-black/30 p-2.5 text-left text-sm text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-          open ? "border-purple-400/50 bg-purple-500/10" : "border-white/10 hover:border-white/25"
+          open ? "border-white/30 bg-white/10" : "border-white/10 hover:border-white/25"
         }`}
       >
         <span style={previewFont ? { fontFamily: `"${value}", sans-serif` } : undefined}>
@@ -3260,7 +3272,7 @@ function ThemedSelect({
         />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#0b1020] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
           {options.map((opt) => {
             const active = opt === value;
             return (
@@ -3272,12 +3284,12 @@ function ThemedSelect({
                   setOpen(false);
                 }}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                  active ? "bg-purple-500/20 text-white" : "text-gray-300 hover:bg-white/5"
+                  active ? "bg-white/15 text-white" : "text-gray-300 hover:bg-white/5"
                 }`}
                 style={previewFont ? { fontFamily: `"${opt}", sans-serif` } : undefined}
               >
                 {opt}
-                {active && <Check className="h-4 w-4 shrink-0 text-purple-400" />}
+                {active && <Check className="h-4 w-4 shrink-0 text-gray-300" />}
               </button>
             );
           })}
@@ -3309,7 +3321,7 @@ function NumberStepper({
     if (!Number.isNaN(n)) onChange(clamp(n));
   };
   return (
-    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-black/30 transition-colors focus-within:border-purple-400/40">
+    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-black/30 transition-colors focus-within:border-white/25">
       <button
         type="button"
         disabled={disabled || value <= min}
@@ -3587,7 +3599,7 @@ function ReelsCreatorComposer({
           )}
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm transition-colors focus-within:border-purple-400/40 sm:p-5">
+        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
           {/* Theme */}
           <textarea
             value={theme}
@@ -3827,7 +3839,7 @@ function ReelsCreatorComposer({
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
             <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400 sm:text-sm">
-              <Type className="h-3.5 w-3.5 text-purple-300" />
+              <Type className="h-3.5 w-3.5 text-gray-300" />
               Caption style
             </div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -3920,7 +3932,7 @@ function ReelsCreatorComposer({
                     <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
                       Vertical position
                     </label>
-                    <span className="text-sm font-bold text-purple-300">
+                    <span className="text-sm font-bold text-gray-300">
                       {captionStyle.marginV}%
                     </span>
                   </div>
@@ -3933,7 +3945,7 @@ function ReelsCreatorComposer({
                       setCaptionStyle({ ...captionStyle, marginV: Number(e.target.value) })
                     }
                     disabled={loading}
-                    className="w-full accent-purple-500"
+                    className="w-full accent-white"
                   />
                 </div>
                 <label className="flex cursor-pointer items-center gap-3 pt-1">
@@ -3944,7 +3956,7 @@ function ReelsCreatorComposer({
                       setCaptionStyle({ ...captionStyle, highlightOnly: e.target.checked })
                     }
                     disabled={loading}
-                    className="h-4 w-4 cursor-pointer rounded border-white/10 bg-black/30 accent-purple-600"
+                    className="h-4 w-4 cursor-pointer rounded border-white/10 bg-black/30 accent-white"
                   />
                   <span className="text-sm font-semibold text-gray-300">
                     Highlight only mode
@@ -4049,7 +4061,7 @@ function ReelsCreatorComposer({
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
           Writing the script, generating scenes, narration &amp; captions — this can take a
           few minutes. It will appear below when ready.
         </div>

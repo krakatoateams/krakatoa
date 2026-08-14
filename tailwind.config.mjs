@@ -6,7 +6,7 @@
 // collide with Tailwind's own built-in "neutral"/"orange"/"blue"/etc. palettes.
 const N = {
   0: "#000000",
-  50: "#1A1A1A",
+  50: "#121212",
   100: "#333333",
   200: "#4D4D4D",
   300: "#666666",

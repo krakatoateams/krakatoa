@@ -11,12 +11,12 @@ export function TooltipBubble({ label, show }: { label: string; show: boolean })
   return (
     <span
       role="tooltip"
-      className={`pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 w-max max-w-[260px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#0b1020]/95 px-3 py-2 text-center text-sm font-medium normal-case leading-snug text-gray-200 shadow-2xl shadow-black/60 backdrop-blur-md transition-all duration-150 ${
+      className={`pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 w-max max-w-[260px] -translate-x-1/2 rounded-xl border border-white/10 bg-[#171717]/95 px-3 py-2 text-center text-sm font-medium normal-case leading-snug text-gray-200 shadow-2xl shadow-black/60 backdrop-blur-md transition-all duration-150 ${
         show ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
       }`}
     >
       {label}
-      <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-[#0b1020]/95" />
+      <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-[#171717]/95" />
     </span>
   );
 }
