@@ -42,6 +42,7 @@ export type PromoTier = {
 };
 
 export const PROMO_TIERS: PromoTier[] = [
+  { packId: "p3", originalPriceIdr: 108_000 },
   { packId: "p4", originalPriceIdr: 225_000 },
   { packId: "p5", originalPriceIdr: 675_000, recommended: true },
 ];

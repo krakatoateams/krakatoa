@@ -391,28 +391,30 @@ export default function CreditsTab() {
                 <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
                   credits · {pack.label}
                 </p>
-                <p className="mt-3 text-sm font-semibold text-gray-200">
-                  {formatIdr(pack.priceIdr)}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => handleBuy(pack.id)}
-                  disabled={anyBusy}
-                  className={`mt-4 flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-                    pack.popular
-                      ? "bg-[#F26522] text-white hover:bg-[#e05a1a]"
-                      : "border border-white/10 bg-white/10 text-white hover:bg-white/20"
-                  }`}
-                >
-                  {isBusy ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Redirecting…
-                    </>
-                  ) : (
-                    "Buy"
-                  )}
-                </button>
+                <div className="mt-auto pt-3">
+                  <p className="text-sm font-semibold text-gray-200">
+                    {formatIdr(pack.priceIdr)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleBuy(pack.id)}
+                    disabled={anyBusy}
+                    className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                      pack.popular
+                        ? "bg-[#F26522] text-white hover:bg-[#e05a1a]"
+                        : "border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                    }`}
+                  >
+                    {isBusy ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Redirecting…
+                      </>
+                    ) : (
+                      "Buy"
+                    )}
+                  </button>
+                </div>
               </div>
             );
           })}

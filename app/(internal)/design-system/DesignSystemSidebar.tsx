@@ -21,6 +21,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Components",
     items: [
       { href: "/design-system/button", label: "Button" },
+      { href: "/design-system/promo-offer", label: "Welcome Offer" },
       // Add new components here as they're built — this group is the
       // intended home for all of them, Button is just the first.
     ],

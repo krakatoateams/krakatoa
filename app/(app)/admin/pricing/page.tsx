@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, Plus, Trash2 } from "lucide-react";
 import { formatIdr } from "@/lib/credit-packs";
+import PromoOfferModal from "@/components/PromoOfferModal";
 
 type AdminCreditPack = {
   id: string;
@@ -92,6 +93,11 @@ export default function AdminPricingPage() {
   const [welcomeAmount, setWelcomeAmount] = useState("0");
   const [welcomeBusy, setWelcomeBusy] = useState(false);
   const [welcomeMsg, setWelcomeMsg] = useState<string | null>(null);
+  // Welcome offer (promo popup) config.
+  const [offerEnabled, setOfferEnabled] = useState(false);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerMsg, setOfferMsg] = useState<string | null>(null);
+  const [offerPreview, setOfferPreview] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +113,40 @@ export default function AdminPricingPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/welcome-offer", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { settings?: { enabled: boolean } } | null) => {
+        if (cancelled || !d?.settings) return;
+        setOfferEnabled(d.settings.enabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveOffer = async () => {
+    setOfferBusy(true);
+    setOfferMsg(null);
+    try {
+      const res = await fetch("/api/admin/welcome-offer", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: offerEnabled }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      setOfferEnabled(data.settings.enabled);
+      setOfferMsg("Welcome offer saved.");
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setOfferBusy(false);
+    }
+  };
 
   const saveWelcome = async () => {
     setWelcomeBusy(true);
@@ -235,6 +275,65 @@ export default function AdminPricingPage() {
         it can&apos;t be changed once a tier exists — add a new tier instead.
         Inactive tiers are hidden from customers but kept for history.
       </div>
+
+      {/* Welcome offer — the promo popup shown once per session on the dashboard. */}
+      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white">Welcome offer</h3>
+            <p className="mt-1 max-w-xl text-xs text-gray-500">
+              Master switch for the limited-time promo popup shown once per
+              session to signed-in users on the dashboard. Purely marketing —
+              the Claim button still charges the real, server-authoritative pack
+              price. Copy, deadline, and tiers live in{" "}
+              <span className="text-gray-200">lib/promo-offer.ts</span>.
+            </p>
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              checked={offerEnabled}
+              onChange={(e) => {
+                setOfferEnabled(e.target.checked);
+                setOfferMsg(null);
+              }}
+              className="h-4 w-4 accent-emerald-500"
+            />
+            Active
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setOfferPreview(true)}
+            className="flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-white/30 hover:text-white"
+          >
+            <Eye className="h-4 w-4" />
+            Preview
+          </button>
+          <div className="flex-1" />
+          {offerMsg && (
+            <span
+              className={`text-xs ${
+                offerMsg.includes("saved") ? "text-emerald-400" : "text-red-400"
+              }`}
+            >
+              {offerMsg}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={saveOffer}
+            disabled={offerBusy}
+            className="rounded-md bg-[#F26522] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
+          >
+            {offerBusy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </section>
+
+      <PromoOfferModal open={offerPreview} onClose={() => setOfferPreview(false)} />
 
       {/* Welcome bonus — credits auto-granted to new users on sign-up. */}
       <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">

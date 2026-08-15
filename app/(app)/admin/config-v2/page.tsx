@@ -306,7 +306,7 @@ function VariantTable({
             <th className={`${TH} w-16`}></th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/10/80">
+        <tbody className="divide-y divide-white/10">
           {variants.map((v) => {
             const suggested = suggestCreditsFromProvider(v.providerReferenceUsd, billingSettings);
             const custom = v.credits !== suggested;
@@ -404,7 +404,7 @@ function ModesTable({
               <th className={`${TH} w-16`}>Default</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/10/80">
+          <tbody className="divide-y divide-white/10">
             {features.map((f) => {
               const soleDefault = isSoleDefault(tool, modelId, f.key);
               return (
@@ -458,7 +458,7 @@ function PipelineRolesTable({
             <th className={`${TH} w-12`}>On</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/10/80">
+        <tbody className="divide-y divide-white/10">
           {roles.map((role) => (
             <tr key={`${role.modelConfigToolKey}.${role.configKey}`} className="text-gray-300">
               <td className="px-2 py-2">
@@ -625,7 +625,7 @@ function ModelSection({
   };
 
   return (
-    <div className={`border-l border-white/10/60 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
+    <div className={`border-l border-white/10 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2 py-2">
         <button
           type="button"
@@ -861,7 +861,7 @@ function ToolSection({
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
         <div className="px-3 py-2">
           {featureOptions.length > 0 ? (
-            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-white/10/60 pb-2">
+            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-white/10 pb-2">
               <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-gray-500">
                 Filter by feature
               </span>
