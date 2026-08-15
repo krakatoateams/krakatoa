@@ -46,6 +46,16 @@ import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { useCurrentUser } from "@/lib/auth-context";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { consumePendingDraft, savePendingDraft, hasPendingDraft } from "@/lib/pending-form-draft";
+
+// Distinct draft key for ImportStoryboardModal — separate from the page's
+// bare pathname (which StoryboardToVideoComposer could use for its own
+// state later) since this modal's fields aren't part of that composer.
+function IMPORT_STORYBOARD_DRAFT_KEY(): string {
+  return window.location.pathname + ":import-storyboard";
+}
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
@@ -292,6 +302,8 @@ const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio
 
 function VideoOmniPage() {
   const searchParams = useSearchParams();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
 
   // Deep-link support: the Photo → Storyboard "Create video" CTA navigates here
   // with ?type=storyboard&storyboardId=...; the dashboard reels links use
@@ -419,6 +431,23 @@ function VideoOmniPage() {
     setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
     if (!m.supportsAudio) setGenerateAudio(false);
   }, [modelId]);
+
+  // Restore what was typed before a gated Generate click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      prompt?: string;
+      duration?: number;
+      resolution?: VideoResolution;
+      aspectRatio?: VideoAspectRatio;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.prompt) setPrompt(draft.prompt);
+    if (draft.duration) setDuration(draft.duration);
+    if (draft.resolution) setResolution(draft.resolution);
+    if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep duration valid for the current model + resolution. Some models restrict
   // durations at certain resolutions (e.g. Veo 3.1 Lite only allows 8s at 1080p).
@@ -561,6 +590,10 @@ function VideoOmniPage() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, { prompt, duration, resolution, aspectRatio });
+      return;
+    }
 
     const toRef = (items: { url: string; path: string }[]) =>
       items.map((r) => ({ url: r.url, path: r.path }));
@@ -677,7 +710,7 @@ function VideoOmniPage() {
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
-          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Video studio
           </h1>
         </div>
@@ -1114,27 +1147,31 @@ function VideoOmniPage() {
           />
         )}
 
-        {/* Video generation history */}
-        <div className="mt-0 lg:mt-[120px]">
-          <CreationsHistory
-            className="!mt-0"
-            title="Generation history"
-            description="Every video you create appears here. Click any clip to preview it."
-            tools={[
-              "video_text2video",
-              "video_image2video",
-              "video_motion_control",
-              "storyboard_video",
-              "reels_seedance",
-              "reels_veo",
-            ]}
-            mediaType="video"
-            refreshKey={historyRefreshKey}
-            showActions
-            showMeta={false}
-            limit={20}
-          />
-        </div>
+        {/* Video generation history — hidden logged-out: CreationsHistory
+            surfaces a dev-facing error banner on a 401 rather than staying
+            quiet, same issue found on Photo studio and Scheduler. */}
+        {status === "authenticated" && (
+          <div className="mt-0 lg:mt-[120px]">
+            <CreationsHistory
+              className="!mt-0"
+              title="Generation history"
+              description="Every video you create appears here. Click any clip to preview it."
+              tools={[
+                "video_text2video",
+                "video_image2video",
+                "video_motion_control",
+                "storyboard_video",
+                "reels_seedance",
+                "reels_veo",
+              ]}
+              mediaType="video"
+              refreshKey={historyRefreshKey}
+              showActions
+              showMeta={false}
+              limit={20}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1211,6 +1248,26 @@ function ImageToVideoComposer({
     if (!m.references.lastFrame) setEndLibraryImage(null);
   }, [modelId]);
 
+  // Restore what was typed before a gated Generate click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      prompt?: string;
+      duration?: number;
+      resolution?: VideoResolution;
+      aspectRatio?: VideoAspectRatio;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.prompt) setPrompt(draft.prompt);
+    if (draft.duration) setDuration(draft.duration);
+    if (draft.resolution) setResolution(draft.resolution);
+    if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    // Any uploaded start/end frame image can't survive the round trip (see
+    // lib/pending-form-draft.ts) — say so explicitly.
+    setRestoreNotice("Signed in — your settings were saved. Please re-attach your start/end image if you'd uploaded one.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const m = getVideoModel(modelId);
     const allowed = getAllowedDurations(m, resolution);
@@ -1229,10 +1286,15 @@ function ImageToVideoComposer({
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+  // Shown once, after a gated Generate click's draft is restored — see the
+  // restore effect below.
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
 
   const startImage = useMediaRefs("image", 1);
   const endImage = useMediaRefs("image", 1);
@@ -1336,6 +1398,10 @@ function ImageToVideoComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, { prompt, duration, resolution, aspectRatio });
+      return;
+    }
 
     const body = {
       modelId,
@@ -1689,6 +1755,13 @@ function ImageToVideoComposer({
         </div>
       )}
 
+      {restoreNotice && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{restoreNotice}</span>
+        </div>
+      )}
+
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
           <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
@@ -1777,12 +1850,36 @@ function MotionControlComposer({
   const [resultSeed, setResultSeed] = useState<string | null>(null);
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
+  // Shown once, after a gated Generate click's draft is restored — see the
+  // restore effect below.
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
+
+  // Restore what was typed before a gated Generate click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      prompt?: string;
+      mode?: MotionControlMode;
+      keepOriginalSound?: boolean;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.prompt) setPrompt(draft.prompt);
+    if (draft.mode) setMode(draft.mode);
+    if (typeof draft.keepOriginalSound === "boolean") setKeepOriginalSound(draft.keepOriginalSound);
+    // The character image and motion-reference video can't survive the round
+    // trip (see lib/pending-form-draft.ts) — say so explicitly.
+    setRestoreNotice("Signed in — your settings were saved. Please re-attach your character image and motion video.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
 
   const charImage = useMediaRefs("image", 1);
   const motionVideo = useMediaRefs("video", 1);
@@ -1857,6 +1954,10 @@ function MotionControlComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, { prompt, mode, keepOriginalSound });
+      return;
+    }
 
     const body = {
       modelId,
@@ -2197,6 +2298,13 @@ function MotionControlComposer({
         </div>
       )}
 
+      {restoreNotice && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{restoreNotice}</span>
+        </div>
+      )}
+
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
           <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
@@ -2274,6 +2382,8 @@ function ImportStoryboardModal({
 }) {
   const { imageCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -2282,6 +2392,7 @@ function ImportStoryboardModal({
   const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
@@ -2293,6 +2404,31 @@ function ImportStoryboardModal({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // Restore what was typed before a gated Analyze click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts. Keyed separately from
+  // the page's bare pathname (see IMPORT_STORYBOARD_DRAFT_KEY) since this
+  // modal's fields are unrelated to StoryboardToVideoComposer's own state;
+  // StoryboardToVideoComposer itself peeks the same key to decide whether to
+  // re-open this modal on mount (it would otherwise be closed, and this
+  // restore would have nothing to show).
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      description?: string;
+      aspect?: StoryboardAspectRatio;
+      language?: StoryboardLanguageId;
+      style?: StoryboardStyleKey;
+    }>(IMPORT_STORYBOARD_DRAFT_KEY());
+    if (!draft) return;
+    if (draft.description) setDescription(draft.description);
+    if (draft.aspect) setAspect(draft.aspect);
+    if (draft.language) setLanguage(draft.language);
+    if (draft.style) setStyle(draft.style);
+    // The image itself can't survive the round trip (see
+    // lib/pending-form-draft.ts) — say so explicitly.
+    setRestoreNotice("Signed in — your details were saved. Please re-select the storyboard image.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pickFile = (f: File | null) => {
     if (!f) return;
@@ -2308,6 +2444,14 @@ function ImportStoryboardModal({
 
   const analyze = async () => {
     if (!file || busy) return;
+    if (status !== "authenticated") {
+      // Saved directly (not via openSignInModal's draft param, which always
+      // keys on the bare pathname) — this modal's fields need their own key,
+      // see the mount-time restore effect above.
+      savePendingDraft(IMPORT_STORYBOARD_DRAFT_KEY(), { description, aspect, language, style });
+      openSignInModal();
+      return;
+    }
     // Acquire the synchronous in-flight lock BEFORE the upload so a double-click
     // can't upload the sheet and charge the vision pass twice. Each attempt
     // re-uploads to a fresh temp path (which the server folds into its request
@@ -2498,6 +2642,13 @@ function ImportStoryboardModal({
               <span>{error}</span>
             </div>
           )}
+
+          {restoreNotice && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-200">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{restoreNotice}</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
@@ -2546,6 +2697,8 @@ function StoryboardToVideoComposer({
   );
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
 
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
@@ -2584,8 +2737,13 @@ function StoryboardToVideoComposer({
   // blip can never spawn a second Replicate run for the same storyboard.
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
-  // "Upload your own storyboard" modal.
-  const [showUpload, setShowUpload] = useState(false);
+  // "Upload your own storyboard" modal. Starts open if there's a pending
+  // draft for it — i.e. a gated Analyze click sent the visitor through
+  // sign-in while this modal was open; without this it would restore
+  // ImportStoryboardModal's fields into a modal nobody can see.
+  const [showUpload, setShowUpload] = useState(
+    () => typeof window !== "undefined" && hasPendingDraft(IMPORT_STORYBOARD_DRAFT_KEY()),
+  );
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
   // to the selected storyboard; only sent (and persisted) when actually changed.
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -2702,6 +2860,10 @@ function StoryboardToVideoComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate || !selectedId) return;
+    if (status !== "authenticated") {
+      openSignInModal();
+      return;
+    }
 
     const editedPrompt = promptDirty ? promptDraft.trim() : undefined;
     // Signature mirrors the fields the server hashes for idempotency (durationSec
@@ -3416,6 +3578,8 @@ function ReelsCreatorComposer({
   const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
@@ -3462,6 +3626,31 @@ function ReelsCreatorComposer({
   const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+
+  // Restore what was typed before a gated Generate click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      theme?: string;
+      engine?: ReelsEngine;
+      veoMode?: ReelsVeoMode;
+      numScenes?: number;
+      durationPerScene?: number;
+      resolution?: SeedanceResolution;
+      veoDuration?: 4 | 6 | 8;
+      veoResolution?: VeoResolution;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.theme) setTheme(draft.theme);
+    if (draft.engine) setEngine(draft.engine);
+    if (draft.veoMode) setVeoMode(draft.veoMode);
+    if (draft.numScenes) setNumScenes(draft.numScenes);
+    if (draft.durationPerScene) setDurationPerScene(draft.durationPerScene);
+    if (draft.resolution) setResolution(draft.resolution);
+    if (draft.veoDuration) setVeoDuration(draft.veoDuration);
+    if (draft.veoResolution) setVeoResolution(draft.veoResolution);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleResumeRecoverable = async () => {
     if (!recoverableJobId) return;
@@ -3516,6 +3705,19 @@ function ReelsCreatorComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, {
+        theme,
+        engine,
+        veoMode,
+        numScenes,
+        durationPerScene,
+        resolution,
+        veoDuration,
+        veoResolution,
+      });
+      return;
+    }
 
     const body: Record<string, unknown> =
       engine === "seedance"

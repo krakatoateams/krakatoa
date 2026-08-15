@@ -57,7 +57,10 @@ export async function GET(request: NextRequest) {
   // Code missing or exchange failed. A password-recovery link that's
   // expired/already-used sends the user back to /forgot-password with a
   // specific message instead of the generic login failure below.
-  if (next.startsWith("/reset-password")) {
+  // `next` is /reset-password for older emails sent before the reset flow
+  // moved into a modal (app/reset-password/page.tsx stays as a fallback for
+  // those), or /dashboard?resetPassword=1 for anything sent after.
+  if (next.startsWith("/reset-password") || next.includes("resetPassword=")) {
     return NextResponse.redirect(`${origin}/forgot-password?error=expired`);
   }
 

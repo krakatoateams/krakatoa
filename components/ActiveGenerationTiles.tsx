@@ -38,7 +38,7 @@ async function postAction(
 /** In-progress tiles meant to sit in the same grid as finished history cards. */
 export function ActiveGenerationTiles({
   items,
-  tileClassName = "rounded-2xl border border-violet-400/30",
+  tileClassName = "rounded-2xl border border-brand-primary/30",
 }: {
   items: ActiveGeneration[];
   tileClassName?: string;
@@ -106,7 +106,7 @@ export function ActiveGenerationTiles({
               {live && <div className="absolute inset-0 animate-pulse bg-white/[0.04]" />}
               <Loader2
                 className={`relative h-7 w-7 ${
-                  live ? "animate-spin text-violet-300" : "text-amber-400/80"
+                  live ? "animate-spin text-brand-primary" : "text-amber-400/80"
                 }`}
               />
               <p className="relative mt-3 px-3 text-center text-xs font-medium text-white">
@@ -140,7 +140,7 @@ export function ActiveGenerationTiles({
                   type="button"
                   onClick={() => void resumeJob(item)}
                   disabled={busy}
-                  className="text-xs text-violet-300 hover:text-white disabled:opacity-50"
+                  className="text-xs text-brand-primary hover:text-white disabled:opacity-50"
                 >
                   {busy ? "Retrying" : "Try again"}
                 </button>

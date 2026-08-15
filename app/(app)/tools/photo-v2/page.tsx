@@ -91,6 +91,9 @@ import {
 } from "@/components/studio";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
+import { useCurrentUser } from "@/lib/auth-context";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { consumePendingDraft } from "@/lib/pending-form-draft";
 import { animateVideoHref } from "@/lib/animate-handoff";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
@@ -154,6 +157,8 @@ function StoryboardComposer({
   const router = useRouter();
   const { imageCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
 
   const [theme, setTheme] = useState("");
   const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
@@ -195,6 +200,26 @@ function StoryboardComposer({
     void loadMentionAssets();
   }, [loadMentionAssets, historyRefreshKey]);
 
+  // Restore what was typed before a gated Generate click sent the visitor
+  // through sign-in (see lib/pending-form-draft.ts) — runs once on mount, so
+  // it only ever finds something after the Google OAuth round-trip (a full
+  // reload); email/password never unmounts this component in the first
+  // place, so the fields are already there.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      theme?: string;
+      style?: StoryboardStyleKey;
+      aspect?: StoryboardAspectRatio;
+      language?: StoryboardLanguageId;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.theme) setTheme(draft.theme);
+    if (draft.style) setStyle(draft.style);
+    if (draft.aspect) setAspect(draft.aspect);
+    if (draft.language) setLanguage(draft.language);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const cost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
   const canGenerate = !loading && theme.trim().length > 0;
 
@@ -206,6 +231,10 @@ function StoryboardComposer({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, { theme, style, aspect, language });
+      return;
+    }
 
     const fileSig = (f: File | null) =>
       f ? `${f.name}/${f.size}/${f.lastModified}` : "";
@@ -458,20 +487,24 @@ function StoryboardComposer({
       )}
 
       {/* Storyboard generation history — matches the other photo subtools:
-          the tool's own outputs, action-rich, no tab bar. */}
-      <div className="mt-0 lg:mt-[150px]">
-        <CreationsHistory
-          className="!mt-0"
-          title="Generation history"
-          description="Every storyboard you create appears here. Click any sheet to view it full size."
-          tools={["storyboard"]}
-          mediaType="image"
-          refreshKey={historyRefreshKey}
-          showActions
-          showMeta={false}
-          limit={20}
-        />
-      </div>
+          the tool's own outputs, action-rich, no tab bar. Hidden logged-out:
+          CreationsHistory surfaces a dev-facing error banner on a 401,
+          which reads as broken rather than "sign in to see your history." */}
+      {status === "authenticated" && (
+        <div className="mt-0 lg:mt-[150px]">
+          <CreationsHistory
+            className="!mt-0"
+            title="Generation history"
+            description="Every storyboard you create appears here. Click any sheet to view it full size."
+            tools={["storyboard"]}
+            mediaType="image"
+            refreshKey={historyRefreshKey}
+            showActions
+            showMeta={false}
+            limit={20}
+          />
+        </div>
+      )}
     </>
   );
 }
@@ -517,6 +550,8 @@ function BatchThumb({
 function PhotoOmniPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
   // so we open the storyboard sub-tool preselected.
   const initialCreationType: CreationTypeId =
@@ -567,6 +602,40 @@ function PhotoOmniPage() {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  // Restore what was filled in before a gated Generate click sent the
+  // visitor through sign-in — see the matching note in StoryboardComposer
+  // above (lib/pending-form-draft.ts).
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      prompt?: string;
+      characterName?: string;
+      characterStyle?: CharacterStyleId;
+      characterGender?: CharacterGenderId;
+      characterAge?: CharacterAgeId;
+      poseId?: ModelPoseId;
+      styleId?: PhotoStyleId;
+      modelTier?: ProductPhotoModelTier;
+      resolution?: ProductPhotoResolution;
+      aspectRatio?: PhotoAspectRatio;
+    }>(window.location.pathname);
+    if (!draft) return;
+    if (draft.prompt) setPrompt(draft.prompt);
+    if (draft.characterName) setCharacterName(draft.characterName);
+    if (draft.characterStyle) setCharacterStyle(draft.characterStyle);
+    if (draft.characterGender) setCharacterGender(draft.characterGender);
+    if (draft.characterAge) setCharacterAge(draft.characterAge);
+    if (draft.poseId) setPoseId(draft.poseId);
+    if (draft.styleId) setStyleId(draft.styleId);
+    if (draft.modelTier) setModelTier(draft.modelTier);
+    if (draft.resolution) setResolution(draft.resolution);
+    if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    // Uploaded images (product/character/reference) can't survive the round
+    // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
+    // leaving the visitor to notice a silently-empty upload tile.
+    setWarning("Signed in — your settings were saved. Please re-attach any photos you'd uploaded.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Social media post: the caption is written after the image, on the result card.
   const [caption, setCaption] = useState("");
@@ -772,6 +841,21 @@ function PhotoOmniPage() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loading || !canGenerate) return;
+    if (status !== "authenticated") {
+      openSignInModal(undefined, {
+        prompt,
+        characterName,
+        characterStyle,
+        characterGender,
+        characterAge,
+        poseId,
+        styleId,
+        modelTier,
+        resolution,
+        aspectRatio,
+      });
+      return;
+    }
 
     const mode = isCharacterMode
       ? "character"
@@ -979,7 +1063,7 @@ function PhotoOmniPage() {
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
-          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Photo studio
           </h1>
         </div>
@@ -1519,20 +1603,23 @@ function PhotoOmniPage() {
           </div>
         )}
 
-        {/* Image generation history */}
-        <div className="mt-0 lg:mt-[150px]">
-          <CreationsHistory
-            className="!mt-0"
-            title="Generation history"
-            description="Every product photo you create appears here. Click any photo to view it full size."
-            tools={["product_photo"]}
-            mediaType="image"
-            refreshKey={historyRefreshKey}
-            showActions
-            showMeta={false}
-            limit={20}
-          />
-        </div>
+        {/* Image generation history — hidden logged-out, see the storyboard
+            composer's identical CreationsHistory note above. */}
+        {status === "authenticated" && (
+          <div className="mt-0 lg:mt-[150px]">
+            <CreationsHistory
+              className="!mt-0"
+              title="Generation history"
+              description="Every product photo you create appears here. Click any photo to view it full size."
+              tools={["product_photo"]}
+              mediaType="image"
+              refreshKey={historyRefreshKey}
+              showActions
+              showMeta={false}
+              limit={20}
+            />
+          </div>
+        )}
           </>
         )}
       </div>

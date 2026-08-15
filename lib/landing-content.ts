@@ -22,12 +22,15 @@ export const NAV_CTA = {
 export const NAV_LOGIN = { label: "Log in", href: "/login" };
 
 /**
- * Primary conversion CTA, used by the hero and the closing footer. Label and
- * destination both depend on whether the visitor is signed in.
+ * Primary conversion CTA, used by the closing footer (the hero has its own
+ * local override — see HERO_PRIMARY_CTA in HelloHero.tsx). Label and
+ * destination both depend on whether the visitor is signed in — guests land
+ * on /dashboard's logged-out state rather than a standalone /login page, per
+ * kelolako-dashboard-nonlogin-plan.
  */
 export const PRIMARY_CTA = {
   authed: { label: "Go to dashboard", href: "/dashboard" },
-  guest: { label: "Get started", href: "/login" },
+  guest: { label: "Get started", href: "/dashboard" },
 };
 
 /* -------------------------------------------------------------------------- */
@@ -200,10 +203,9 @@ export const CREDIT_POLICY = {
   ],
 };
 
-// Where the "Purchase" CTA sends visitors. Signed-in users go straight to the
-// add-credit page; everyone else is funneled through login first.
+// Where the "Purchase" CTA sends signed-in visitors. Guests never navigate —
+// HelloPricing's CreditRow opens the sign-in modal in place instead.
 export const CREDIT_CTA_HREF_AUTHED = "/dashboard/settings?tab=credits";
-export const CREDIT_CTA_HREF_GUEST = "/login";
 
 // Rough spend rates used only to estimate what a pack buys (matches the copy in
 // the aside: ~50 credits per AI reel · 4 per product photo).

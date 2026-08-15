@@ -17,8 +17,11 @@ import {
   Settings,
   Shield,
   LogOut,
+  LogIn,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
+import { Button } from "@/components/ui/Button";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 import { useActiveGenerations } from "@/app/(app)/active-generations-context";
 import { isLiveStatus } from "@/lib/active-generations-pure";
@@ -31,6 +34,10 @@ interface NavItem {
   // Maps to tool_configs.tool_key. When set, the item is hidden if the tool is
   // disabled or not visible_in_sidebar. Items without a toolKey always show.
   toolKey?: string;
+  // Hidden entirely for a logged-out visitor — for items that only make
+  // sense with an account (e.g. Settings), as opposed to toolKey items
+  // (which stay visible logged-out; see isItemVisible).
+  authOnly?: boolean;
 }
 
 const SECTIONS: { title: string; items: NavItem[] }[] = [
@@ -64,7 +71,12 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Account",
     items: [
-      { label: "Settings", href: "/dashboard/settings", icon: <Settings className="h-4 w-4" /> },
+      {
+        label: "Settings",
+        href: "/dashboard/settings",
+        icon: <Settings className="h-4 w-4" />,
+        authOnly: true,
+      },
     ],
   },
 ];
@@ -78,6 +90,7 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const { status, name, email, image } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const { items: activeGenerations } = useActiveGenerations();
   const generatingNav = new Set(
     activeGenerations
@@ -133,9 +146,16 @@ export default function Sidebar({
   }, [status, initialToolVisibility]);
 
   // Items without toolKey always show. Gated items stay hidden until config is
-  // known (fail closed) so disabled tools never flash on load.
+  // known (fail closed) so disabled tools never flash on load — EXCEPT for a
+  // confirmed-logged-out visitor: there's no session to fetch tool_configs
+  // with, and toolsConfigReady would otherwise never become true, hiding
+  // almost the entire nav forever. Show everything in that case (the
+  // logged-out dashboard plan — kelolako-dashboard-nonlogin-plan — gates
+  // individual actions per page, not nav visibility).
   const isItemVisible = (item: NavItem): boolean => {
+    if (item.authOnly && status !== "authenticated") return false;
     if (!item.toolKey) return true;
+    if (status === "unauthenticated") return true;
     if (!toolsConfigReady) return false;
     if (!toolVisibility) return true;
     const cfg = toolVisibility[item.toolKey];
@@ -206,7 +226,7 @@ export default function Sidebar({
   return (
     <>
       <aside
-        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-[#181818] md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
+        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-N50 md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
       {/* Logo — doubles as the way back out to the landing page */}
       <Link
@@ -221,7 +241,7 @@ export default function Sidebar({
           height={28}
           className="h-7 w-7 shrink-0 object-contain"
         />
-        <span className="text-base font-black uppercase tracking-[-0.5px] text-white">
+        <span className="font-display text-base font-black uppercase tracking-[-0.5px] text-white">
           KELOLAKO
         </span>
       </Link>
@@ -230,7 +250,7 @@ export default function Sidebar({
       <nav className="flex-1 overflow-y-auto px-3 py-5">
         {sectionsToRender.map((section) => (
           <div key={section.title} className="mb-6">
-            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+            <p className="mb-2 px-3 text-extra-small font-semibold uppercase tracking-widest text-text-secondary">
               {section.title}
             </p>
             <ul className="space-y-0.5">
@@ -240,19 +260,19 @@ export default function Sidebar({
                   <li key={item.href}>
                     <Link
                       href={item.href}
-                      className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
+                      className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-body-3 transition-colors ${
                         active
-                          ? "bg-white/10 text-white"
-                          : "text-gray-400 hover:bg-white/10 hover:text-white"
+                          ? "bg-white/10 text-text-primary"
+                          : "text-text-secondary hover:bg-white/10 hover:text-white"
                       }`}
                     >
-                      <span className={active ? "text-white" : "text-gray-500"}>
+                      <span className={active ? "text-icon-high-emphasis" : "text-icon-low-emphasis"}>
                         {item.icon}
                       </span>
                       {item.label}
                       {generatingNav.has(item.href) && (
                         <span
-                          className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-400"
+                          className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-brand-primary"
                           aria-label="Generation in progress"
                         />
                       )}
@@ -271,9 +291,9 @@ export default function Sidebar({
           <div className="relative rounded-xl border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-white/20 hover:bg-white/[0.05]">
             <button
               type="button"
-              onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
+              onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/dashboard"; })}
               aria-label="Sign out"
-              className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
+              className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-red-500/10 hover:text-red-300"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>
@@ -291,19 +311,23 @@ export default function Sidebar({
                   className="h-10 w-10 shrink-0 rounded-full ring-2 ring-white/10"
                 />
               ) : (
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-white/25 to-white/10 text-sm font-semibold text-white ring-2 ring-white/10">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-white/25 to-white/10 text-body-3 font-semibold text-text-primary ring-2 ring-white/10">
                   {name?.[0]?.toUpperCase() ?? "?"}
                 </div>
               )}
               <div className="min-w-0 w-full">
-                <p className="truncate text-sm font-semibold text-white">{name}</p>
-                <p className="truncate text-[10px] text-gray-500">{email}</p>
+                <p className="truncate text-body-3 font-semibold text-text-primary">{name}</p>
+                <p className="truncate text-extra-small text-text-secondary">{email}</p>
               </div>
               <CreditBadge />
             </Link>
           </div>
-        ) : (
+        ) : status === "loading" ? (
           <div className="h-32 animate-pulse rounded-xl bg-white/[0.03]" />
+        ) : (
+          <Button variant="primary" size="md" className="w-full" onClick={() => openSignInModal()}>
+            Sign in
+          </Button>
         )}
       </div>
       </aside>
@@ -316,7 +340,7 @@ export default function Sidebar({
         >
           <div
             onScroll={handleHapticScroll}
-            className="flex items-center gap-2.5 overflow-x-auto rounded-full border border-white/10 bg-gray-950/60 px-2 py-2 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex items-center gap-2.5 overflow-x-auto rounded-full border border-white/10 bg-N0/60 px-2 py-2 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {mobileNavItems.map((item) => {
               const active = isActive(item.href);
@@ -328,25 +352,41 @@ export default function Sidebar({
                   title={item.label}
                   className={`relative flex h-14 shrink-0 items-center justify-center gap-2 rounded-full shadow-lg shadow-black/30 transition-colors [&_svg]:h-6 [&_svg]:w-6 ${
                     active
-                      ? "bg-white px-5 text-gray-900"
-                      : "w-14 border border-white/20 bg-white/10 text-gray-200 ring-1 ring-inset ring-white/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-white/20 hover:text-white"
+                      ? "bg-white px-5 text-N50"
+                      : "w-14 border border-white/20 bg-white/10 text-text-primary ring-1 ring-inset ring-white/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-white/20 hover:text-white"
                   }`}
                 >
                   {renderNavIcon(item, { onLight: active, sizeClass: active ? "h-8 w-8" : "h-6 w-6" })}
                   {generatingNav.has(item.href) && (
                     <span
-                      className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse"
+                      className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-primary animate-pulse"
                       aria-hidden
                     />
                   )}
                   {active && (
-                    <span className="whitespace-nowrap text-sm font-semibold">
+                    <span className="whitespace-nowrap text-body-3 font-semibold">
                       {item.label}
                     </span>
                   )}
                 </Link>
               );
             })}
+            {/* Desktop's Sidebar has its own Sign in button (in the profile
+                card slot), but that <aside> is `hidden md:flex` — without
+                this, a logged-out mobile visitor has no way to sign in
+                except by first triggering a gated action somewhere. */}
+            {status === "unauthenticated" && (
+              <button
+                type="button"
+                onClick={() => openSignInModal()}
+                aria-label="Sign in"
+                title="Sign in"
+                className="flex h-14 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-primary px-5 text-text-on-solid shadow-lg shadow-black/30 transition-colors hover:bg-brand-primary-hover"
+              >
+                <LogIn className="h-5 w-5" />
+                <span className="whitespace-nowrap text-body-3 font-semibold">Sign in</span>
+              </button>
+            )}
           </div>
         </nav>
       )}

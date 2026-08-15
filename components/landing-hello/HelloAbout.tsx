@@ -4,7 +4,7 @@ import Image from "next/image";
 import { TextRollButton } from "@/components/landing/TextRollButton";
 import { FadePhotoCarousel } from "@/components/landing/FadePhotoCarousel";
 import { ABOUT, ABOUT_PHOTOS } from "@/lib/landing-content";
-import { ctaAccent, eyebrow, panel } from "./theme";
+import { ctaAccent, eyebrow, heading, panel } from "./theme";
 import { GatherGrid, GatherItem } from "./GatherReveal";
 
 /** Lead text in the manifesto and stat panels, kept at one scale across both. */
@@ -14,7 +14,7 @@ export function HelloAbout() {
   return (
     <section
       id="about"
-      className="relative overflow-hidden bg-[#0a0a0a] pt-16 pb-12 sm:pt-20 sm:pb-16 lg:pt-28 lg:pb-20"
+      className="relative overflow-hidden bg-N0 pt-16 pb-12 sm:pt-20 sm:pb-16 lg:pt-28 lg:pb-20"
     >
       <div className="relative z-10 mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
         <GatherGrid className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
@@ -26,7 +26,7 @@ export function HelloAbout() {
           >
             <span className={eyebrow}>About</span>
             <h2
-              className="mt-5 font-medium leading-[1.06] tracking-[-0.02em] text-white"
+              className={`mt-5 ${heading}`}
               style={{ fontSize: "clamp(1.75rem, 4.2vw, 3rem)" }}
             >
               {ABOUT.headingLines.map((line, i) => (
@@ -41,7 +41,7 @@ export function HelloAbout() {
                 </span>
               ))}
             </h2>
-            <p className="mt-6 max-w-md text-base leading-relaxed text-[#8a8a8a] sm:mt-7">
+            <p className="mt-6 max-w-md text-base leading-relaxed text-text-disabled sm:mt-7">
               {ABOUT.body}
             </p>
             <div className="mt-auto pt-8 lg:pt-10">
@@ -66,7 +66,7 @@ export function HelloAbout() {
             {/* Desaturate so the photography doesn't reintroduce colour. */}
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 bg-[#0a0a0a]/35 mix-blend-multiply"
+              className="pointer-events-none absolute inset-0 bg-N0/35 mix-blend-multiply"
             />
           </GatherItem>
 
@@ -77,13 +77,13 @@ export function HelloAbout() {
             className={`relative flex flex-col justify-start overflow-hidden p-7 sm:col-span-2 sm:p-8 lg:col-span-3 lg:p-10 ${panel}`}
           >
             <p
-              className="max-w-2xl font-medium leading-[1.25] text-[#dddddd]"
+              className="max-w-2xl font-medium leading-[1.25] text-N800"
               style={{ fontSize: PANEL_LEAD_SIZE }}
             >
               {ABOUT.manifesto}
             </p>
-            <div className="mt-6 flex items-center gap-3 text-sm text-[#8a8a8a]">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#2a2a2a] bg-[#0a0a0a]">
+            <div className="mt-6 flex items-center gap-3 text-sm text-text-disabled">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-N0">
                 <Image
                   src="/Logo White transparent.svg"
                   alt="Kelolako"
@@ -104,12 +104,12 @@ export function HelloAbout() {
           >
             <div>
               <p
-                className="font-medium leading-[1.25] tracking-[-0.03em] text-white"
+                className="font-medium leading-[1.25] tracking-[-0.03em] text-N900"
                 style={{ fontSize: PANEL_LEAD_SIZE }}
               >
                 {ABOUT.stat.value}
               </p>
-              <p className="mt-2 text-sm leading-snug text-[#8a8a8a]">
+              <p className="mt-2 text-sm leading-snug text-text-disabled">
                 {ABOUT.stat.label}
               </p>
             </div>

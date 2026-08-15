@@ -200,7 +200,7 @@ export default function ToolsGrid({ isLoggedIn = false }: ToolsGridProps) {
             {/* CTA */}
             <Link
               href={ctaHref}
-              className="flex items-center justify-center gap-2 w-full px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-900/40"
+              className="flex items-center justify-center gap-2 w-full px-6 py-3.5 bg-gradient-to-r from-brand-primary-light to-brand-primary hover:from-brand-primary-gradient-hover-start hover:to-brand-primary-gradient-hover-end text-white font-bold rounded-2xl transition-all shadow-lg shadow-orange-900/40"
             >
               {ctaLabel}
               <ArrowRight className="w-4 h-4" />

@@ -18,7 +18,7 @@ import { ctaAccent, ctaGhost } from "./theme";
  * hero, so they only need a light knock-back instead of being pushed all the
  * way down to the stage colour.
  */
-const VIDEO_OVERLAY = "bg-black/15";
+const VIDEO_OVERLAY = "bg-N0/15";
 
 const SHOWREEL_SRCS = LANDING_SHOWREEL.map((entry) => entry.src);
 
@@ -38,8 +38,8 @@ function ModelStrip({
   onSelect: (index: number) => void;
 }) {
   return (
-    <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/85 via-black/45 to-transparent px-5 pb-6 pt-20 sm:pb-8">
-      <span className="block text-[10px] font-medium uppercase tracking-[0.22em] text-white/55 sm:text-[11px]">
+    <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-N0/85 via-N0/45 to-transparent px-5 pb-6 pt-20 sm:pb-8">
+      <span className="block text-[10px] font-medium uppercase tracking-[0.22em] text-N900/55 sm:text-[11px]">
         {AI_MODELS_LABEL}
       </span>
       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 sm:gap-x-14">
@@ -53,7 +53,7 @@ function ModelStrip({
               aria-current={active ? "true" : undefined}
               aria-label={`Play the ${model} clip`}
               className={`text-sm font-medium tracking-tight transition-colors sm:text-lg ${
-                active ? "text-white" : "text-white/45 hover:text-white/80"
+                active ? "text-N900" : "text-N900/45 hover:text-N900/80"
               }`}
             >
               {model}
@@ -69,12 +69,12 @@ export function HelloHero() {
   const [activeClip, setActiveClip] = useState(0);
 
   return (
-    <section className="relative flex min-h-screen flex-col overflow-hidden bg-[#0a0a0a]">
+    <section className="relative flex min-h-screen flex-col overflow-hidden bg-N0">
       <HelloNav />
 
       <div className="relative z-20 mx-auto flex w-full max-w-[1440px] flex-1 flex-col items-center justify-center px-5 pt-32 pb-16 text-center sm:px-8 sm:pt-36 lg:px-12 lg:pb-20">
         <h1
-          className="max-w-4xl font-medium leading-[1.04] tracking-[-0.035em] text-white"
+          className="max-w-4xl font-display font-medium leading-[1.04] tracking-[-0.035em] text-N900"
           style={{ fontSize: "clamp(2.25rem, 6vw, 4.5rem)" }}
         >
           {HERO_HEADLINE_LINES.map((line) => (
@@ -108,7 +108,7 @@ export function HelloHero() {
         </div>
 
         {/* Showreel panel: the clips, plus the models that power them. */}
-        <div className="relative mt-12 aspect-[16/10] w-full overflow-hidden rounded-2xl bg-[#171717] sm:mt-16 sm:aspect-video lg:aspect-[21/9]">
+        <div className="relative mt-12 aspect-[16/10] w-full overflow-hidden rounded-2xl bg-N50 sm:mt-16 sm:aspect-video lg:aspect-[21/9]">
           <VideoBackdrop
             srcs={SHOWREEL_SRCS}
             overlayClassName={VIDEO_OVERLAY}

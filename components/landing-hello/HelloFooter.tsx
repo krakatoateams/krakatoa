@@ -5,7 +5,7 @@ import { Mail } from "lucide-react";
 import { TextRollButton } from "@/components/landing/TextRollButton";
 import { useCurrentUser } from "@/lib/auth-context";
 import { FOOTER, PRIMARY_CTA } from "@/lib/landing-content";
-import { ctaAccent } from "./theme";
+import { ctaAccent, heading } from "./theme";
 
 export function HelloFooter() {
   const { status } = useCurrentUser();
@@ -15,16 +15,13 @@ export function HelloFooter() {
   return (
     <footer
       id="experience"
-      className="relative flex w-full flex-col bg-[#0a0a0a] px-5 pt-24 pb-6 sm:px-8 sm:pt-32 lg:px-12 lg:pt-40"
+      className="relative flex w-full flex-col bg-N0 px-5 pt-24 pb-6 sm:px-8 sm:pt-32 lg:px-12 lg:pt-40"
     >
       <div className="mx-auto w-full max-w-2xl text-center">
-        <h2
-          className="font-medium leading-[1.1] tracking-[-0.02em] text-white"
-          style={{ fontSize: "clamp(1.75rem, 4.2vw, 3.5rem)" }}
-        >
+        <h2 className={heading} style={{ fontSize: "clamp(1.75rem, 4.2vw, 3.5rem)" }}>
           {FOOTER.heading}
         </h2>
-        <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-[#8a8a8a] sm:mt-5 sm:text-base">
+        <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-text-disabled sm:mt-5 sm:text-base">
           {FOOTER.body}
         </p>
         <TextRollButton
@@ -47,13 +44,13 @@ export function HelloFooter() {
           className="h-9 w-auto shrink-0 object-contain sm:justify-self-start"
         />
 
-        <p className="text-center text-[11px] font-medium tracking-wide text-[#8a8a8a] sm:justify-self-center sm:text-xs">
+        <p className="text-center text-[11px] font-medium tracking-wide text-text-disabled sm:justify-self-center sm:text-xs">
           {FOOTER.copyright}
         </p>
 
         <a
           href={`mailto:${FOOTER.supportEmail}`}
-          className="inline-flex items-center gap-2 rounded-full border border-[#2a2a2a] px-4 py-2 text-[11px] font-medium text-[#aaaaaa] transition-colors hover:border-[#3a3a3a] hover:bg-white/[0.06] hover:text-white sm:justify-self-end sm:text-xs"
+          className="inline-flex items-center gap-2 rounded-radius-xl border border-white/10 px-4 py-2 text-[11px] font-medium text-text-secondary transition-colors hover:border-white/20 hover:bg-white/[0.06] hover:text-N900 sm:justify-self-end sm:text-xs"
         >
           <Mail className="h-3.5 w-3.5" strokeWidth={2} />
           {FOOTER.supportLabel}

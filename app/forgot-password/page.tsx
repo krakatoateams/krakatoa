@@ -6,6 +6,11 @@ import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 
+// Standalone fallback route — the primary flow is now the in-place
+// ForgotPasswordForm view inside SignInModal (opened via "Forgot password?"
+// there), which never navigates away. This page is still reachable directly
+// and is where app/auth/callback/route.ts sends an expired/reused reset
+// link, since that failure has no app page to reopen a modal over.
 function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const expired = searchParams.get("error") === "expired";
