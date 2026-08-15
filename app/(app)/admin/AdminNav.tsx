@@ -21,7 +21,7 @@ export default function AdminNav() {
     href === "/admin" ? pathname === "/admin" : pathname?.startsWith(href);
 
   return (
-    <nav className="flex flex-wrap gap-1 border-b border-gray-800">
+    <nav className="flex flex-wrap gap-1 border-b border-white/10">
       {TABS.map((tab) => {
         const active = isActive(tab.href);
         return (
@@ -30,7 +30,7 @@ export default function AdminNav() {
             href={tab.href}
             className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               active
-                ? "border-violet-500 text-violet-300"
+                ? "border-white text-white"
                 : "border-transparent text-gray-400 hover:text-white"
             }`}
           >

@@ -16,12 +16,12 @@ export default function BasicSettingsTab() {
             Your profile details. Editing is coming soon.
           </p>
         </div>
-        <span className="shrink-0 rounded-full border border-gray-700 bg-gray-800 px-3 py-1 text-xs font-medium text-gray-500">
+        <span className="shrink-0 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-500">
           Coming soon
         </span>
       </header>
 
-      <div className="space-y-5 rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <div className="space-y-5 rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div>
           <label className="mb-1.5 block text-xs font-medium text-gray-400">
             Display name
@@ -31,7 +31,7 @@ export default function BasicSettingsTab() {
             value={user?.name ?? ""}
             disabled
             readOnly
-            className="w-full cursor-not-allowed rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-400"
+            className="w-full cursor-not-allowed rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-gray-400"
           />
         </div>
 
@@ -56,7 +56,7 @@ export default function BasicSettingsTab() {
             <button
               type="button"
               disabled
-              className="cursor-not-allowed rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-sm font-medium text-gray-500"
+              className="cursor-not-allowed rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-sm font-medium text-gray-500"
             >
               Change avatar
             </button>

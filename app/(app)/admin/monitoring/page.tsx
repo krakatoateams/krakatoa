@@ -171,12 +171,12 @@ function StatusPill({ status }: { status: string }) {
       : status === "failed"
         ? "bg-red-500/15 text-red-300"
         : status === "running"
-          ? "bg-sky-500/15 text-sky-300"
+          ? "bg-white/10 text-gray-200"
           : status === "recoverable"
             ? "bg-amber-500/15 text-amber-300"
             : status === "cancelled"
               ? "bg-orange-500/15 text-orange-300"
-              : "bg-gray-700 text-gray-300";
+              : "bg-white/10 text-gray-300";
   return <span className={`rounded-full px-2 py-0.5 text-xs ${color}`}>{status}</span>;
 }
 
@@ -208,13 +208,13 @@ function Chip({
   const base =
     tone === "red"
       ? "border-red-900/60 bg-red-950/30 text-red-200"
-      : "border-gray-800 bg-gray-900/50 text-gray-300";
+      : "border-white/10 bg-white/[0.04] text-gray-300";
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-xl border px-3 py-2 text-left transition-colors ${base} ${
-        active ? "ring-1 ring-violet-500" : "hover:border-gray-700"
+        active ? "ring-1 ring-white/40" : "hover:border-white/20"
       } ${onClick ? "" : "cursor-default"}`}
     >
       <div className="text-[11px] uppercase tracking-wider text-gray-500">{label}</div>
@@ -287,7 +287,7 @@ function PromptSection({
       ) : (
         <div className="space-y-2">
           {prompt || theme ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
                 {prompt ? "User prompt" : "Theme — the seed the LLM expands"}
               </div>
@@ -295,7 +295,7 @@ function PromptSection({
             </div>
           ) : null}
           {assembled ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
                 Assembled prompt — what the model actually received
               </div>
@@ -303,7 +303,7 @@ function PromptSection({
             </div>
           ) : null}
           {styleAnchor ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
                 Style anchor — appended verbatim to every scene prompt
               </div>
@@ -311,7 +311,7 @@ function PromptSection({
             </div>
           ) : null}
           {negativePrompt ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-gray-600">
                 Negative prompt
               </div>
@@ -362,7 +362,7 @@ function JobDetail({ jobId }: { jobId: string }) {
   const { job, steps, transactions, request, predictions, assets, recovery } = detail;
 
   return (
-    <div className="grid gap-6 border-t border-gray-800 bg-black/20 p-4 lg:grid-cols-2">
+    <div className="grid gap-6 border-t border-white/10 bg-black/20 p-4 lg:grid-cols-2">
       <div className="lg:col-span-2">
         <PromptSection input={job.input} steps={steps} />
       </div>
@@ -380,7 +380,7 @@ function JobDetail({ jobId }: { jobId: string }) {
               return (
                 <li
                   key={s.id}
-                  className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2"
+                  className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs text-gray-200">{s.step_key}</span>
@@ -411,7 +411,7 @@ function JobDetail({ jobId }: { jobId: string }) {
               {transactions.map((t) => (
                 <li
                   key={t.id}
-                  className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
                 >
                   <span className="font-medium text-gray-200">{t.type}</span>
                   <span className="tabular-nums text-gray-300">
@@ -469,7 +469,7 @@ function JobDetail({ jobId }: { jobId: string }) {
                     href={`https://replicate.com/p/${p.prediction_id}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-mono text-violet-300 hover:underline"
+                    className="inline-flex items-center gap-1 font-mono text-gray-300 hover:underline"
                   >
                     {p.prediction_id}
                     <ExternalLink className="h-3 w-3" />
@@ -586,7 +586,7 @@ export default function AdminMonitoringPage() {
         <button
           type="button"
           onClick={() => setLive((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-sm text-gray-300 hover:border-gray-700"
+          className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-gray-300 hover:border-white/20"
         >
           {live ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {live ? `Live · every ${POLL_MS / 1000}s` : "Paused"}
@@ -594,7 +594,7 @@ export default function AdminMonitoringPage() {
         <button
           type="button"
           onClick={() => load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-sm text-gray-300 hover:border-gray-700"
+          className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-gray-300 hover:border-white/20"
         >
           <RefreshCw className="h-4 w-4" />
           Refresh
@@ -602,7 +602,7 @@ export default function AdminMonitoringPage() {
         <select
           value={windowHours}
           onChange={(e) => setWindowHours(Number(e.target.value))}
-          className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-sm text-gray-300"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-gray-300"
         >
           <option value={1}>Last 1h</option>
           <option value={6}>Last 6h</option>
@@ -614,7 +614,7 @@ export default function AdminMonitoringPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-sm text-gray-300"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-gray-300"
         >
           <option value="">All statuses</option>
           <option value="running">running</option>
@@ -628,7 +628,7 @@ export default function AdminMonitoringPage() {
           <button
             type="button"
             onClick={() => setFlag(null)}
-            className="rounded-lg border border-violet-800 bg-violet-950/40 px-3 py-1.5 text-sm text-violet-200"
+            className="rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-gray-200"
           >
             {FLAG_LABEL[flag]} ✕
           </button>
@@ -713,7 +713,7 @@ export default function AdminMonitoringPage() {
                     <button
                       type="button"
                       onClick={() => setExpanded(expanded === r.id ? null : r.id)}
-                      className="ml-auto text-xs text-violet-300 hover:underline"
+                      className="ml-auto text-xs text-gray-300 hover:underline"
                     >
                       Open
                     </button>
@@ -730,9 +730,9 @@ export default function AdminMonitoringPage() {
             {rows.length === 0 ? (
               <p className="text-sm text-gray-500">Nothing matches this filter.</p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-gray-800">
+              <div className="overflow-x-auto rounded-xl border border-white/10">
                 <table className="w-full">
-                  <thead className="bg-gray-900/60">
+                  <thead className="bg-white/[0.04]">
                     <tr>
                       <th className={TH}></th>
                       <th className={TH}>User</th>
@@ -746,7 +746,7 @@ export default function AdminMonitoringPage() {
                       <th className={TH}>Age</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody className="divide-y divide-white/10">
                     {pageRows.map((r) => {
                       const open = expanded === r.id;
                       const step = r.currentStep;
@@ -756,7 +756,7 @@ export default function AdminMonitoringPage() {
                         <tr
                           key={r.id}
                           onClick={() => setExpanded(open ? null : r.id)}
-                          className="cursor-pointer text-sm text-gray-300 hover:bg-gray-900/40"
+                          className="cursor-pointer text-sm text-gray-300 hover:bg-white/[0.03]"
                         >
                           <td className="px-2 py-2 text-gray-600">
                             {open ? (
@@ -811,7 +811,7 @@ export default function AdminMonitoringPage() {
                               {r.cancelRequested && !r.cancelAllowed ? (
                                 <span
                                   title="Cancel arrived after provider output was committed — credits are kept by design."
-                                  className="rounded-full bg-gray-700 px-2 py-0.5 text-[11px] text-gray-300"
+                                  className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-gray-300"
                                 >
                                   cancel locked
                                 </span>
@@ -851,7 +851,7 @@ export default function AdminMonitoringPage() {
                     type="button"
                     disabled={safePage === 0}
                     onClick={() => setPage(safePage - 1)}
-                    className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-gray-300 hover:border-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-gray-300 hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Prev
                   </button>
@@ -862,7 +862,7 @@ export default function AdminMonitoringPage() {
                     type="button"
                     disabled={safePage >= pageCount - 1}
                     onClick={() => setPage(safePage + 1)}
-                    className="rounded-lg border border-gray-800 bg-gray-900/50 px-3 py-1.5 text-gray-300 hover:border-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-gray-300 hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Next
                   </button>
@@ -876,9 +876,9 @@ export default function AdminMonitoringPage() {
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
                 Failing steps across all users
               </h2>
-              <div className="overflow-x-auto rounded-xl border border-gray-800">
+              <div className="overflow-x-auto rounded-xl border border-white/10">
                 <table className="w-full">
-                  <thead className="bg-gray-900/60">
+                  <thead className="bg-white/[0.04]">
                     <tr>
                       <th className={TH}>Tool</th>
                       <th className={TH}>Step</th>
@@ -887,7 +887,7 @@ export default function AdminMonitoringPage() {
                       <th className={TH}>Last message</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody className="divide-y divide-white/10">
                     {failedSteps.map((s) => (
                       <tr
                         key={`${s.tool}-${s.step_key}`}

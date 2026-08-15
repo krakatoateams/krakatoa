@@ -113,7 +113,7 @@ export default function AdminCreditsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+      <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
         <h2 className="text-sm font-semibold text-white">Dummy credits</h2>
         <p className="mt-1 text-xs leading-relaxed text-gray-400">
           Only admins / owners are auto-granted the initial 500 dummy credits on
@@ -130,9 +130,9 @@ export default function AdminCreditsPage() {
       {loading ? (
         <AdminTableSkeleton rows={6} />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-800">
+        <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-left text-sm">
-            <thead className="bg-gray-900/60 text-[11px] uppercase tracking-wider text-gray-500">
+            <thead className="bg-white/[0.04] text-[11px] uppercase tracking-wider text-gray-500">
               <tr>
                 <th className="px-4 py-2 font-semibold">Admin</th>
                 <th className="px-4 py-2 font-semibold">Role</th>
@@ -148,7 +148,7 @@ export default function AdminCreditsPage() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800">
+            <tbody className="divide-y divide-white/10">
               {wallets.map((w) => {
                 const key = w.profile_id ?? w.email;
                 const busy = busyId === w.profile_id;
@@ -161,7 +161,7 @@ export default function AdminCreditsPage() {
                         className={`rounded-full px-2 py-0.5 text-xs ${
                           w.role === "owner"
                             ? "bg-amber-500/15 text-amber-300"
-                            : "bg-violet-500/15 text-violet-300"
+                            : "bg-white/10 text-gray-300"
                         }`}
                       >
                         {w.role}
@@ -189,7 +189,7 @@ export default function AdminCreditsPage() {
                                 [w.profile_id as string]: e.target.value,
                               }))
                             }
-                            className="w-24 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                            className="w-24 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
                           />
                           <button
                             type="button"
@@ -203,7 +203,7 @@ export default function AdminCreditsPage() {
                               }
                               setBalance(w, Math.trunc(value));
                             }}
-                            className="rounded-md bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                            className="rounded-md bg-[#F26522] px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
                           >
                             {busy ? "Saving…" : "Set"}
                           </button>
@@ -211,7 +211,7 @@ export default function AdminCreditsPage() {
                             type="button"
                             disabled={busy}
                             onClick={() => setBalance(w, DEFAULT_TOPUP)}
-                            className="rounded-md border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-emerald-500 hover:text-emerald-300 disabled:opacity-50"
+                            className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-emerald-500 hover:text-emerald-300 disabled:opacity-50"
                           >
                             Reset to {DEFAULT_TOPUP}
                           </button>
@@ -238,7 +238,7 @@ export default function AdminCreditsPage() {
                                 [w.profile_id as string]: e.target.value,
                               }))
                             }
-                            className="w-20 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                            className="w-20 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
                           />
                           <select
                             value={
@@ -250,7 +250,7 @@ export default function AdminCreditsPage() {
                                 [w.profile_id as string]: e.target.value,
                               }))
                             }
-                            className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-white outline-none focus:border-violet-500"
+                            className="rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-xs text-white outline-none focus:border-white/30"
                           >
                             <option value="new_user_bonus">New-user</option>
                             <option value="purchase_bonus">Purchase</option>

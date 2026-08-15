@@ -72,7 +72,7 @@ function StatusPill({ status }: { status: string }) {
       ? "bg-emerald-500/15 text-emerald-300"
       : status === "failed"
         ? "bg-red-500/15 text-red-300"
-        : "bg-gray-700 text-gray-300";
+        : "bg-white/10 text-gray-300";
   return <span className={`rounded-full px-2 py-0.5 text-xs ${color}`}>{status}</span>;
 }
 
@@ -112,9 +112,9 @@ export default function AdminUsagePage() {
         {usage.length === 0 ? (
           <p className="text-sm text-gray-500">No usage events yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-800">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full">
-              <thead className="bg-gray-900/60">
+              <thead className="bg-white/[0.04]">
                 <tr>
                   <th className={TH}>Tool</th>
                   <th className={TH}>Provider</th>
@@ -126,7 +126,7 @@ export default function AdminUsagePage() {
                   <th className={TH}>Est. Rupiah</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
+              <tbody className="divide-y divide-white/10">
                 {usage.map((u, i) => (
                   <tr key={`${u.tool}-${u.model}-${i}`} className="text-sm text-gray-300">
                     <td className="px-3 py-2">{u.tool}</td>
@@ -152,16 +152,16 @@ export default function AdminUsagePage() {
         {topUsers.length === 0 ? (
           <p className="text-sm text-gray-500">No data.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-800">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full">
-              <thead className="bg-gray-900/60">
+              <thead className="bg-white/[0.04]">
                 <tr>
                   <th className={TH}>User</th>
                   <th className={TH}>Balance</th>
                   <th className={TH}>Lifetime spent</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
+              <tbody className="divide-y divide-white/10">
                 {topUsers.map((u) => (
                   <tr key={u.profile_id} className="text-sm text-gray-300">
                     <td className="px-3 py-2">{u.email ?? u.display_name ?? u.profile_id}</td>
@@ -182,9 +182,9 @@ export default function AdminUsagePage() {
         {jobs.length === 0 ? (
           <p className="text-sm text-gray-500">No jobs yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-800">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full">
-              <thead className="bg-gray-900/60">
+              <thead className="bg-white/[0.04]">
                 <tr>
                   <th className={TH}>Tool</th>
                   <th className={TH}>Job type</th>
@@ -194,7 +194,7 @@ export default function AdminUsagePage() {
                   <th className={TH}>When</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
+              <tbody className="divide-y divide-white/10">
                 {jobs.map((j) => (
                   <tr key={j.id} className="text-sm text-gray-300">
                     <td className="px-3 py-2">{j.tool}</td>
@@ -222,9 +222,9 @@ export default function AdminUsagePage() {
         {tx.length === 0 ? (
           <p className="text-sm text-gray-500">No transactions yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-800">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full">
-              <thead className="bg-gray-900/60">
+              <thead className="bg-white/[0.04]">
                 <tr>
                   <th className={TH}>Type</th>
                   <th className={TH}>Direction</th>
@@ -234,7 +234,7 @@ export default function AdminUsagePage() {
                   <th className={TH}>When</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
+              <tbody className="divide-y divide-white/10">
                 {tx.map((t) => (
                   <tr key={t.id} className="text-sm text-gray-300">
                     <td className="px-3 py-2">{t.type}</td>

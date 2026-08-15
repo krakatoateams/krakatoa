@@ -156,7 +156,7 @@ export default function AdminExpiryPage() {
   const renderRow = (field: FieldDef) => (
     <div
       key={field.key}
-      className="flex items-center justify-between gap-4 border-b border-gray-800 py-3 last:border-b-0"
+      className="flex items-center justify-between gap-4 border-b border-white/10 py-3 last:border-b-0"
     >
       <div className="min-w-0">
         <p className="text-sm font-medium text-white">{field.label}</p>
@@ -171,7 +171,7 @@ export default function AdminExpiryPage() {
           placeholder="Never"
           value={form[field.key]}
           onChange={(e) => setField(field.key, e.target.value)}
-          className="w-28 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+          className="w-28 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
         />
         <span className="w-10 text-xs text-gray-500">days</span>
       </div>
@@ -180,7 +180,7 @@ export default function AdminExpiryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4 text-sm text-gray-400">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
         Set how long each credit source and creation type lasts before it expires.
         Leave a field blank for <span className="text-gray-200">Never</span>. Credit
         durations apply to <span className="text-gray-200">new</span> grants (existing
@@ -201,7 +201,7 @@ export default function AdminExpiryPage() {
       )}
 
       {/* Credits */}
-      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">
             Credit expiry
@@ -210,7 +210,7 @@ export default function AdminExpiryPage() {
             type="button"
             disabled={runningTarget !== null}
             onClick={() => runNow("credits", "Credits")}
-            className="rounded-md border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-violet-500 hover:text-violet-300 disabled:opacity-50"
+            className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
           >
             {runningTarget === "credits" ? "Running…" : "Run credit expiry now"}
           </button>
@@ -219,7 +219,7 @@ export default function AdminExpiryPage() {
       </section>
 
       {/* Creations */}
-      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">
             Creation expiry
@@ -229,7 +229,7 @@ export default function AdminExpiryPage() {
               type="button"
               disabled={runningTarget !== null}
               onClick={() => runNow("photo", "Photos")}
-              className="rounded-md border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-violet-500 hover:text-violet-300 disabled:opacity-50"
+              className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
             >
               {runningTarget === "photo" ? "Running…" : "Run photos"}
             </button>
@@ -237,7 +237,7 @@ export default function AdminExpiryPage() {
               type="button"
               disabled={runningTarget !== null}
               onClick={() => runNow("video", "Videos")}
-              className="rounded-md border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-violet-500 hover:text-violet-300 disabled:opacity-50"
+              className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
             >
               {runningTarget === "video" ? "Running…" : "Run videos"}
             </button>
@@ -251,7 +251,7 @@ export default function AdminExpiryPage() {
           type="button"
           disabled={saving || !dirty}
           onClick={save}
-          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+          className="rounded-md bg-[#F26522] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save changes"}
         </button>

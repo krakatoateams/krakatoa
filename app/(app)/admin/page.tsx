@@ -58,7 +58,7 @@ function SummaryStats({ data }: { data: Summary }) {
             {Object.entries(data.jobs.byTool).map(([tool, count]) => (
               <span
                 key={tool}
-                className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300"
+                className="rounded-full bg-white/10 px-3 py-1 text-xs text-gray-300"
               >
                 {tool}: {count}
               </span>
