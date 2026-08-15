@@ -9,7 +9,6 @@ import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import {
   Video,
   Camera,
-  Aperture,
   CalendarClock,
   CalendarDays,
   LayoutDashboard,
@@ -18,10 +17,12 @@ import {
   Shield,
   LogOut,
   LogIn,
+  Coins,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { Button } from "@/components/ui/Button";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 import { useActiveGenerations } from "@/app/(app)/active-generations-context";
 import { isLiveStatus } from "@/lib/active-generations-pure";
@@ -52,7 +53,6 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Video", href: "/tools/video", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
       { label: "Photo", href: "/tools/photo-v2", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
-      { label: "Instagram", href: "/tools/ig", icon: <Aperture className="h-4 w-4" />, toolKey: "ig" },
     ],
   },
   {
@@ -91,6 +91,8 @@ export default function Sidebar({
   const pathname = usePathname();
   const { status, name, email, image } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
+  const { balance } = useCreditBalance();
+  const lowCredits = balance !== null && balance < 50;
   const { items: activeGenerations } = useActiveGenerations();
   const generatingNav = new Set(
     activeGenerations
@@ -225,8 +227,17 @@ export default function Sidebar({
 
   return (
     <>
+      <style>{`
+        @keyframes creditNudge {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [style*="creditNudge"] { animation: none !important; }
+        }
+      `}</style>
       <aside
-        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-N50 md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
+        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-[#181818] md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
       {/* Logo — doubles as the way back out to the landing page */}
       <Link
@@ -288,7 +299,29 @@ export default function Sidebar({
       {/* User profile */}
       <div className="hidden p-3 md:block">
         {status === "authenticated" ? (
-          <div className="relative rounded-xl border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-white/20 hover:bg-white/[0.05]">
+          <div className="relative rounded-xl bg-white/[0.03] p-3 transition-colors hover:bg-white/[0.05]">
+            {lowCredits && (
+              <Link
+                href="/dashboard/settings?tab=credits"
+                aria-label="Top up credits"
+                className="absolute inset-x-0 bottom-full z-10 mb-2 flex items-center gap-2 rounded-xl border border-blue-400/40 bg-[#111c33] px-3 py-2 text-left transition-colors hover:border-blue-400/60 hover:bg-[#152441]"
+                style={{ animation: "creditNudge 2.4s ease-in-out infinite" }}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
+                  <Coins className="h-4 w-4 text-blue-400" />
+                </span>
+                <span className="min-w-0 flex-1 leading-tight">
+                  <span className="block text-[11px] font-semibold text-white">
+                    Low on credits
+                  </span>
+                  <span className="block text-[10px] text-text-secondary">
+                    Tap to top up
+                  </span>
+                </span>
+                {/* Caret pointing down at the profile card */}
+                <span className="absolute -bottom-1 left-5 h-2 w-2 rotate-45 border-b border-r border-blue-400/40 bg-[#111c33]" />
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/dashboard"; })}

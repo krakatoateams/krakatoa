@@ -43,8 +43,15 @@ export function CreditActionButton({
   const creditHint =
     ready && !canAfford ? insufficientCreditsTooltip(balance, cost) : null;
 
+  // Ineligible (not ready / can't afford) → clear grey button. The loading state
+  // keeps the orange gradient with its spinner, so we only grey out when idle.
+  const greyedOut = disabled && !loading;
+  const buttonClass = greyedOut
+    ? `${className} !bg-none !bg-white/10 !text-white/40 !shadow-none !opacity-100 cursor-not-allowed`
+    : className;
+
   const button = (
-    <button type={type} onClick={onClick} disabled={disabled} className={className}>
+    <button type={type} onClick={onClick} disabled={disabled} className={buttonClass}>
       {loading ? (
         <Loader2 className="h-5 w-5 animate-spin" />
       ) : (

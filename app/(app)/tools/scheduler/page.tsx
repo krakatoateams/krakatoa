@@ -396,59 +396,6 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
   );
 }
 
-// ─── Connection status prompt ────────────────────────────────────────────────
-// Reflects whichever platform(s) are currently selected in the form (item0's
-// platforms for single mode; multi-select means more than one can be
-// unconnected at once). Renders nothing when every selected platform is
-// connected — a healthy state doesn't need to occupy header space. Only
-// surfaces the ones that ISN'T connected yet, as an actionable prompt (with a
-// direct link) rather than a passive status label.
-
-function ConnectionStatusPrompt({ platforms }: { platforms: VideoItem["platforms"] }) {
-  const { status } = useCurrentUser();
-  const [youtubeConnected, setYoutubeConnected] = useState<boolean | null>(null);
-  const [tiktokConnected, setTiktokConnected] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (status === "loading") return;
-    if (status === "unauthenticated") {
-      setYoutubeConnected(false);
-      setTiktokConnected(false);
-      return;
-    }
-    fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false }))
-      .then((data: { youtube?: boolean; tiktok?: boolean }) => {
-        setYoutubeConnected(Boolean(data.youtube));
-        setTiktokConnected(Boolean(data.tiktok));
-      })
-      .catch(() => {
-        setYoutubeConnected(false);
-        setTiktokConnected(false);
-      });
-  }, [status]);
-
-  if (status === "loading") return null;
-
-  const unconnected = platforms.filter((p) => (p === "tiktok" ? tiktokConnected : youtubeConnected) === false);
-  if (unconnected.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {unconnected.map((p) => (
-        <Link
-          key={p}
-          href="/dashboard/settings?tab=connections"
-          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/20"
-        >
-          <AlertCircle className="h-3.5 w-3.5" />
-          {PLATFORM_LABELS[p]} not connected — Connect it
-        </Link>
-      ))}
-    </div>
-  );
-}
-
 // ─── Card shell ───────────────────────────────────────────────────────────────
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -3345,7 +3292,6 @@ export default function SchedulerDashboardPage() {
                 <ConnectionStatusBadge platform="youtube" />
                 <ConnectionStatusBadge platform="tiktok" />
                 <ConnectionStatusBadge platform="instagram" />
-                <ConnectionStatusPrompt platforms={item0.platforms} />
               </div>
             ) : undefined
           }

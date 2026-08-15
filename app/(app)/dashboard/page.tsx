@@ -95,12 +95,26 @@ export default function DashboardPage() {
   const [promoOpen, setPromoOpen] = useState(false);
 
   // Gate to signed-in users: the Claim CTA starts checkout, which requires
-  // auth. Re-evaluates once auth status resolves.
+  // auth. The code-level deadline (isPromoLive) is a fast pre-check; the admin
+  // master switch lives in the DB, so confirm with /api/promo-offer before
+  // auto-opening. Re-evaluates once auth status resolves.
   useEffect(() => {
     if (!isAuthenticated) return;
     if (!isPromoLive()) return;
     if (sessionStorage.getItem(PROMO_DISMISS_KEY)) return;
-    setPromoOpen(true);
+
+    let cancelled = false;
+    fetch("/api/promo-offer", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { live?: boolean } | null) => {
+        if (cancelled || !d?.live) return;
+        if (sessionStorage.getItem(PROMO_DISMISS_KEY)) return;
+        setPromoOpen(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [isAuthenticated]);
 
   const closePromo = () => {
