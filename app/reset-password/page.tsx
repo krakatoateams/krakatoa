@@ -8,6 +8,10 @@ import { AuthLayout } from "@/components/auth/AuthLayout";
 
 type SessionState = "checking" | "valid" | "invalid";
 
+// Standalone fallback route, kept only for reset-password emails sent
+// before the flow moved into ResetPasswordModal (auto-opened over
+// /dashboard via ?resetPassword=1 — see ForgotPasswordForm's redirectTo and
+// app/auth/callback/route.ts). New reset links never land here.
 export default function ResetPasswordPage() {
   const router = useRouter();
   const supabase = getSupabaseAuthBrowser();

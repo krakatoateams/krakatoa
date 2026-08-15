@@ -14,7 +14,7 @@ import { HelloFooter } from "./HelloFooter";
  */
 export function HelloLanding() {
   return (
-    <div className="flex min-h-screen flex-col overflow-x-clip bg-[#0a0a0a] text-[#cccccc]">
+    <div className="flex min-h-screen flex-col overflow-x-clip bg-N0 text-N700">
       <HelloHero />
       <HelloStatement />
       <HelloAbout />

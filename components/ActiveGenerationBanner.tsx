@@ -30,14 +30,14 @@ export function ActiveGenerationBanner() {
         : `${lead.label} is still generating`;
 
   return (
-    <div className="sticky top-0 z-30 border-b border-violet-500/20 bg-violet-500/10 px-4 py-2 backdrop-blur-md">
+    <div className="sticky top-0 z-30 border-b border-O500/20 bg-O500/10 px-4 py-2 backdrop-blur-md">
       <Link
         href={live.length > 1 ? "/dashboard/assets" : lead.href}
-        className="mx-auto flex max-w-5xl items-center justify-center gap-2 text-sm text-violet-100 hover:text-white"
+        className="mx-auto flex max-w-5xl items-center justify-center gap-2 text-sm text-O900 hover:text-white"
       >
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
         <span>{copy}</span>
-        <span className="text-violet-300/80">View</span>
+        <span className="text-brand-primary/80">View</span>
       </Link>
     </div>
   );

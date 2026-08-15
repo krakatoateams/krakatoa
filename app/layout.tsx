@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { DM_Sans, Space_Grotesk } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { PwaRegister } from "@/components/PwaRegister";
 import "@/app/globals.css";
@@ -10,7 +10,11 @@ const spaceGrotesk = Space_Grotesk({
   weight: ["500", "600", "700"],
 });
 
-const dmSans = DM_Sans({
+// Design-system-v2's body font, promoted from being scoped to /design-system
+// (see the removed --font-ds-body there) to the app-wide default — replaces
+// DM Sans everywhere `.font-body`/`--font-body` is used, which is just this
+// one place: <body className="font-body"> below.
+const inter = Inter({
   subsets: ["latin"],
   variable: "--font-body",
   weight: ["400", "500", "600", "700"],
@@ -66,7 +70,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${spaceGrotesk.variable} ${dmSans.variable}`}>
+    <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable}`}>
       <body className="font-body">
         <PwaRegister />
         <Providers>{children}</Providers>

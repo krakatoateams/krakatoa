@@ -38,7 +38,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       {/* ── Video panel — hidden below lg, sticky so it stays in viewport as form scrolls ── */}
-      <div className="relative hidden overflow-hidden bg-gradient-to-br from-gray-900 to-gray-950 lg:sticky lg:top-0 lg:block lg:h-screen lg:w-[62%]">
+      <div className="relative hidden overflow-hidden bg-gradient-to-br from-N50 to-N0 lg:sticky lg:top-0 lg:block lg:h-screen lg:w-[62%]">
         <video
           ref={videoRef}
           src={VIDEOS[currentIdx]}
@@ -51,18 +51,18 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
           style={{ opacity, transition: "opacity 0.5s ease" }}
         />
         {/* Right-edge vignette softens the hard seam into the form panel */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-gray-950/60" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-N0/60" />
         {/* Bottom vignette for visual depth */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-gray-950/40 via-transparent to-transparent" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-N0/40 via-transparent to-transparent" />
       </div>
 
       {/* ── Form panel — full width on mobile, 38% on lg+ ── */}
-      <div className="flex w-full flex-col items-center justify-center bg-gray-950 px-6 py-12 lg:w-[38%]">
+      <div className="flex w-full flex-col items-center justify-center bg-N0 px-6 py-12 lg:w-[38%]">
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <Link
               href="/"
-              className="font-display text-lg font-black tracking-normal text-white"
+              className="font-display text-lg font-black tracking-normal text-text-primary"
             >
               KELOLAKO.
             </Link>

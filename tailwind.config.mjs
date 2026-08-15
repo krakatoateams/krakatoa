@@ -234,9 +234,6 @@ const config = {
         // Reuses the existing --font-display variable already loaded in
         // app/layout.tsx (Space Grotesk) — not loaded again here.
         display: ["var(--font-display)", "ui-sans-serif", "system-ui", "sans-serif"],
-        // New — Inter, loaded only by app/(internal)/design-system's own
-        // scoped layout. Resolves to the fallback stack anywhere else.
-        "ds-body": ["var(--font-ds-body)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       fontSize: {
         h1: ["56px", { lineHeight: "62px", letterSpacing: "0" }],

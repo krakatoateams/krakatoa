@@ -10,10 +10,10 @@ import { RevealText } from "./RevealText";
  */
 export function HelloStatement() {
   return (
-    <section className="relative flex flex-col items-center justify-center overflow-hidden bg-[#0a0a0a] px-5 py-28 text-center sm:px-8 sm:py-36 lg:px-12">
+    <section className="relative flex flex-col items-center justify-center overflow-hidden bg-N0 px-5 py-28 text-center sm:px-8 sm:py-36 lg:px-12">
       <RevealText
         text={HERO_SUBCOPY}
-        className="max-w-[1000px] text-center font-medium text-[#ededed]"
+        className="max-w-[1000px] text-center font-medium text-N800"
         stagger={70}
         duration={1100}
         style={{

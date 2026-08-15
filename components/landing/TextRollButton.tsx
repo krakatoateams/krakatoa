@@ -23,15 +23,15 @@ type BaseProps = {
 type IconVariant = "dark" | "orange" | "invert";
 
 const ICON_CIRCLE_CLASS: Record<IconVariant, string> = {
-  dark: "bg-white",
-  orange: "bg-white",
-  invert: "bg-[#111111]",
+  dark: "bg-bg-static-white",
+  orange: "bg-bg-static-white",
+  invert: "bg-bg-static-black",
 };
 
 const ICON_ARROW_CLASS: Record<IconVariant, string> = {
-  dark: "text-gray-900",
-  orange: "text-[#F26522]",
-  invert: "text-white",
+  dark: "text-N50",
+  orange: "text-brand-primary",
+  invert: "text-text-static-white",
 };
 
 type ButtonProps = BaseProps &

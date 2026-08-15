@@ -57,7 +57,7 @@ export function GrowthToggleLogin() {
             aria-checked={on}
             aria-label="Growth mode"
             onClick={handleToggle}
-            className="relative mx-[0.06em] inline-flex shrink-0 cursor-pointer items-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet-500"
+            className="relative mx-[0.06em] inline-flex shrink-0 cursor-pointer items-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-primary"
             style={{
               width: "1.12em",
               height: "0.52em",
@@ -65,7 +65,7 @@ export function GrowthToggleLogin() {
             }}
           >
             <span
-              className="absolute inset-0 rounded-full bg-gradient-to-r from-violet-200 via-violet-300 to-violet-500 shadow-inner"
+              className="absolute inset-0 rounded-full bg-gradient-to-r from-O900 via-O700 to-brand-primary shadow-inner"
               aria-hidden
             />
             <span

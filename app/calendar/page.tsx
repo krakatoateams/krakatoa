@@ -173,7 +173,7 @@ function Navbar() {
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-800 bg-gray-950/80 px-6 backdrop-blur-md">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-primary">
             <Zap className="h-4 w-4 text-white" />
           </div>
           <span className="text-base font-semibold tracking-tight text-white">Autopilot Scheduler</span>
@@ -338,7 +338,7 @@ function PostChip({ post, onClick, onDragStart, isDragging }: PostChipProps) {
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       title={post.title}
       className={`group flex w-full cursor-grab items-center gap-1.5 truncate rounded border px-1.5 py-0.5 text-left text-[11px] font-medium transition-all active:cursor-grabbing ${cfg.chip} ${
-        isDragging ? "opacity-40 ring-1 ring-violet-500" : ""
+        isDragging ? "opacity-40 ring-1 ring-brand-primary" : ""
       }`}
     >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${cfg.dot}`} />
@@ -390,8 +390,8 @@ function DayCell({
       onDrop={(e) => { e.preventDefault(); onDrop(dateKey); }}
       className={`group relative flex min-h-[120px] flex-col gap-1 rounded-lg border p-2 transition-all duration-150 ${
         !isCurrentMonth ? "border-gray-800/50 bg-gray-900/30" :
-        isOver ? "border-violet-500/60 bg-violet-500/10 ring-1 ring-violet-500/40" :
-        isToday ? "border-violet-500/30 bg-violet-500/5" :
+        isOver ? "border-brand-primary/60 bg-O500/10 ring-1 ring-brand-primary/40" :
+        isToday ? "border-brand-primary/30 bg-O500/5" :
         "border-gray-800 bg-gray-900 hover:border-gray-700"
       }`}
     >
@@ -399,7 +399,7 @@ function DayCell({
       <div className="flex items-center justify-between">
         <span
           className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-            isToday ? "bg-violet-500 text-white" :
+            isToday ? "bg-brand-primary text-white" :
             isCurrentMonth ? "text-gray-300" :
             "text-gray-700"
           }`}
@@ -407,7 +407,7 @@ function DayCell({
           {date.getDate()}
         </span>
         {isOver && (
-          <span className="rounded text-[10px] font-medium text-violet-400">Drop here</span>
+          <span className="rounded text-[10px] font-medium text-brand-primary">Drop here</span>
         )}
       </div>
 

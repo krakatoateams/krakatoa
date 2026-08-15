@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { Button } from "@/components/ui/Button";
 
 type SignupError =
   | { kind: "duplicate_google" }
@@ -115,9 +116,9 @@ export default function SignupPage() {
     return (
       <AuthLayout>
         <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/20">
             <svg
-              className="h-6 w-6 text-green-400"
+              className="h-6 w-6 text-success"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -131,13 +132,13 @@ export default function SignupPage() {
               />
             </svg>
           </div>
-          <h2 className="font-display text-lg font-semibold text-white">Check your email!</h2>
-          <p className="text-sm text-gray-400">
+          <h2 className="font-display text-lg font-semibold text-text-primary">Check your email!</h2>
+          <p className="text-body-3 text-text-secondary">
             We&apos;ve sent a verification link to{" "}
-            <strong className="text-white">{email}</strong>. Click the link to
+            <strong className="text-text-primary">{email}</strong>. Click the link to
             activate your account.
           </p>
-          <Link href="/login" className="block text-sm text-[#F26522] hover:text-[#e05a1a]">
+          <Link href="/login" className="block text-body-3 text-brand-primary hover:text-brand-primary-hover">
             Back to login
           </Link>
         </div>
@@ -149,10 +150,10 @@ export default function SignupPage() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Create an account</h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <h1 className="font-display text-xl font-bold text-text-primary">Create an account</h1>
+          <p className="mt-1 text-body-3 text-text-secondary">
             Already have an account?{" "}
-            <Link href="/login" className="text-[#F26522] hover:text-[#e05a1a]">
+            <Link href="/login" className="text-brand-primary hover:text-brand-primary-hover">
               Log in here
             </Link>
           </p>
@@ -162,21 +163,21 @@ export default function SignupPage() {
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          className="flex w-full items-center justify-center gap-3 rounded-full border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20 disabled:opacity-50"
         >
           <GoogleIcon />
           Continue with Google
         </button>
 
         <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-800" />
-          <span className="text-xs text-gray-600">or</span>
-          <div className="h-px flex-1 bg-gray-800" />
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-small text-text-disabled">or</span>
+          <div className="h-px flex-1 bg-white/10" />
         </div>
 
         <form onSubmit={handleSignUp} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               Full name
             </label>
             <input
@@ -186,11 +187,11 @@ export default function SignupPage() {
               required
               autoComplete="name"
               placeholder="Your name"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               Email
             </label>
             <input
@@ -199,11 +200,11 @@ export default function SignupPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               Password
             </label>
             <input
@@ -213,25 +214,25 @@ export default function SignupPage() {
               required
               minLength={6}
               autoComplete="new-password"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
 
           {/* Error states */}
           {signupError?.kind === "duplicate_google" && (
-            <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+            <div className="space-y-3 rounded-radius-md border border-warning/30 bg-warning/10 px-3 py-3">
               <div>
-                <p className="text-xs font-medium text-amber-300">
+                <p className="text-small font-medium text-warning">
                   This email is already registered with Google.
                 </p>
-                <p className="mt-0.5 text-xs text-amber-400/70">
+                <p className="mt-0.5 text-small text-warning/70">
                   Log in directly with the button below.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
-                className="flex w-full items-center justify-center gap-2.5 rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-100"
+                className="flex w-full items-center justify-center gap-2.5 rounded-radius-md bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100"
               >
                 <GoogleIcon />
                 Continue with Google
@@ -240,11 +241,11 @@ export default function SignupPage() {
           )}
 
           {signupError?.kind === "duplicate_email" && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
+            <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2.5 text-small text-error">
               This email is already registered. Already have an account?{" "}
               <Link
                 href={`/login?email=${encodeURIComponent(email)}`}
-                className="underline hover:text-red-300"
+                className="underline hover:text-white"
               >
                 Log in here
               </Link>
@@ -252,26 +253,22 @@ export default function SignupPage() {
           )}
 
           {signupError?.kind === "other" && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2 text-small text-error">
               {signupError.message}
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
-          >
-            {loading ? "Creating account…" : "Create account"}
-          </button>
+          <Button type="submit" variant="primary" size="md" loading={loading} className="w-full">
+            Create account
+          </Button>
 
-          <p className="text-center text-xs text-gray-500">
+          <p className="text-center text-small text-text-secondary">
             By creating an account, you agree to our{" "}
-            <Link href="/terms" target="_blank" className="text-gray-400 underline hover:text-gray-300">
+            <Link href="/terms" target="_blank" className="text-text-secondary underline hover:text-text-primary">
               Terms of Service
             </Link>{" "}
             and{" "}
-            <Link href="/privacy" target="_blank" className="text-gray-400 underline hover:text-gray-300">
+            <Link href="/privacy" target="_blank" className="text-text-secondary underline hover:text-text-primary">
               Privacy Policy
             </Link>
             .
