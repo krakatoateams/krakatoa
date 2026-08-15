@@ -814,7 +814,7 @@ export default function SchedulerCalendarPage() {
       <PageContainer>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+            <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
               Content Calendar
             </h1>
           </div>

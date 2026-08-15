@@ -88,8 +88,8 @@ const VARIANT_STYLES: Record<ButtonVariant, VariantRecipe> = {
 const DISABLED_STYLES = "bg-bg-surface-2 text-text-secondary border border-border-default";
 
 const BASE_STYLES = [
-  "inline-flex items-center justify-center gap-spacing-sm rounded-radius-md",
-  "font-ds-body font-semibold whitespace-nowrap",
+  "inline-flex items-center justify-center gap-spacing-sm rounded-radius-xl",
+  "font-body font-semibold whitespace-nowrap",
   "transition-colors duration-150",
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
   "focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base",

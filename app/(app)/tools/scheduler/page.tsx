@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { consumePendingDraft } from "@/lib/pending-form-draft";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import {
@@ -533,6 +535,8 @@ function UploadCard({
   photoUrls = [],
   onPhotoUrlsChange,
 }: UploadCardProps) {
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const [isDragging, setIsDragging] = useState(false);
   const [tab, setTab] = useState<"upload" | "assets">("upload");
   // Task 2.1: local object URL for instant preview
@@ -788,7 +792,15 @@ function UploadCard({
           {addPhotoMode === "closed" && (
             <button
               type="button"
-              onClick={() => setAddPhotoMode(photoUrls.length >= 35 ? "closed" : "choice")}
+              onClick={() => {
+                // Both branches this opens (upload / choose from library) hit
+                // an authed API immediately — gate the single entry point.
+                if (status !== "authenticated") {
+                  openSignInModal();
+                  return;
+                }
+                setAddPhotoMode(photoUrls.length >= 35 ? "closed" : "choice");
+              }}
               disabled={photoUrls.length >= 35}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700 px-3 py-2.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -904,7 +916,15 @@ function UploadCard({
           </button>
           <button
             type="button"
-            onClick={() => setTab("assets")}
+            onClick={() => {
+              // A logged-out visitor has no assets to show — CreationsHistory
+              // would just surface a dev-facing 401 error banner in that tab.
+              if (status !== "authenticated") {
+                openSignInModal();
+                return;
+              }
+              setTab("assets");
+            }}
             className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === "assets" ? "bg-white text-neutral-900" : "text-neutral-400 hover:text-white"
             }`}
@@ -1224,6 +1244,7 @@ function PlatformFields({
   // reads it, to gray out YouTube (no photo-post support) when it's "photo".
   contentType: VideoItem["contentType"];
 }) {
+  const { status } = useCurrentUser();
   // Local UI-only switch for whether the disclosure sub-checkboxes are shown.
   // Not persisted — derived once from any existing toggle so a card loaded
   // with disclosure already set opens with it visible.
@@ -1300,7 +1321,7 @@ function PlatformFields({
             </label>
           )}
         </div>
-        {!tiktokConnected && (
+        {!tiktokConnected && status === "authenticated" && (
           <p className="mt-1 text-xs text-neutral-600">Connect TikTok in Settings to publish there too.</p>
         )}
         {isPhoto && (
@@ -1475,6 +1496,8 @@ function ScheduleCard({
   contentType,
   photoUrls,
 }: ScheduleCardProps) {
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
   const [submitting, setSubmitting] = useState(false);
@@ -1507,6 +1530,11 @@ function ScheduleCard({
     const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
 
     if (!hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
+      return;
+    }
+
+    if (status !== "authenticated") {
+      openSignInModal(undefined, { title, tags, caption });
       return;
     }
 
@@ -2156,6 +2184,8 @@ interface BulkVideoCardProps {
 }
 
 function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokPrivacyOptions }: BulkVideoCardProps) {
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const today = new Date().toISOString().split("T")[0];
   const ai = useCaptionAI();
@@ -2456,7 +2486,13 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               {addPhotoMode === "closed" && (
                 <button
                   type="button"
-                  onClick={() => setAddPhotoMode(item.photoUrls.length >= 35 ? "closed" : "choice")}
+                  onClick={() => {
+                    if (status !== "authenticated") {
+                      openSignInModal();
+                      return;
+                    }
+                    setAddPhotoMode(item.photoUrls.length >= 35 ? "closed" : "choice");
+                  }}
                   disabled={item.photoUrls.length >= 35}
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-700 px-3 py-2.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -2673,6 +2709,8 @@ function DeepLinkIntake({
 
 export default function SchedulerDashboardPage() {
   const router = useRouter();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const today = new Date().toISOString().split("T")[0];
   // Unified state: single mode = one item, bulk mode = 2..5 items.
   // Always holds at least one (empty) draft so the form is editable pre-upload.
@@ -2739,6 +2777,61 @@ export default function SchedulerDashboardPage() {
     (t: string) => updateItem(item0Id, { tags: t }),
     [updateItem, item0Id],
   );
+
+  // Restore what was typed before a gated Schedule click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts. Covers both single mode
+  // (title/tags/caption patched onto item0) and bulk mode (the whole `items`
+  // array rebuilt from scratch, since the count itself needs restoring, not
+  // just field values). Either way, every item's file is unavoidably gone —
+  // it never leaves the browser as anything sessionStorage can hold — so the
+  // toast always says to re-attach.
+  useEffect(() => {
+    const draft = consumePendingDraft<{
+      title?: string;
+      tags?: string;
+      caption?: string;
+      bulkItems?: Array<{
+        title: string;
+        tags: string;
+        caption: string;
+        platforms: Array<"youtube" | "tiktok">;
+        contentType: "video" | "photo";
+      }>;
+    }>(window.location.pathname);
+    if (!draft) return;
+
+    if (draft.bulkItems && draft.bulkItems.length > 0) {
+      setItems(
+        draft.bulkItems.map((bi) => ({
+          ...makeDraft(today),
+          title: bi.title,
+          tags: bi.tags,
+          caption: bi.caption,
+          platforms: bi.platforms,
+          contentType: bi.contentType,
+        })),
+      );
+      setToast({
+        type: "success",
+        message: "Signed in — your posts' titles/captions were saved. Please re-attach each video or photo.",
+      });
+      return;
+    }
+
+    updateItem(item0Id, {
+      ...(draft.title ? { title: draft.title } : {}),
+      ...(draft.tags ? { tags: draft.tags } : {}),
+      ...(draft.caption ? { caption: draft.caption } : {}),
+    });
+    // The video/photo file itself can never survive this round trip (see
+    // lib/pending-form-draft.ts) — say so explicitly rather than leaving the
+    // visitor to notice a silently-empty upload card.
+    setToast({
+      type: "success",
+      message: "Signed in — your title/caption were saved. Please re-attach your video or photo.",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const handleItem0PlatformPatch = useCallback(
     (patch: Partial<VideoItem>) => updateItem(item0Id, patch),
     [updateItem, item0Id],
@@ -3064,6 +3157,19 @@ export default function SchedulerDashboardPage() {
     );
     if (targets.length === 0 || schedulingAll) return;
 
+    if (status !== "authenticated") {
+      openSignInModal(undefined, {
+        bulkItems: items.map((i) => ({
+          title: i.title,
+          tags: i.tags,
+          caption: i.caption,
+          platforms: i.platforms,
+          contentType: i.contentType,
+        })),
+      });
+      return;
+    }
+
     // One confirming click for the whole batch when any target has no caption.
     const anyEmptyCaption = targets.some((i) => !i.caption.trim());
     if (anyEmptyCaption && !confirmEmptyBatch) {
@@ -3230,12 +3336,18 @@ export default function SchedulerDashboardPage() {
         <PageHeader
           title="Create & Schedule"
           actions={
-            <div className="flex flex-wrap items-center gap-2">
-              <ConnectionStatusBadge platform="youtube" />
-              <ConnectionStatusBadge platform="tiktok" />
-              <ConnectionStatusBadge platform="instagram" />
-              <ConnectionStatusPrompt platforms={item0.platforms} />
-            </div>
+            // Connection status is meaningless without an account — nothing
+            // to be "connected" yet — and the badges' CTA points at
+            // /dashboard/settings, which just bounces a logged-out visitor
+            // into the sign-in modal anyway. Skip the whole row.
+            status === "authenticated" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <ConnectionStatusBadge platform="youtube" />
+                <ConnectionStatusBadge platform="tiktok" />
+                <ConnectionStatusBadge platform="instagram" />
+                <ConnectionStatusPrompt platforms={item0.platforms} />
+              </div>
+            ) : undefined
           }
         />
 

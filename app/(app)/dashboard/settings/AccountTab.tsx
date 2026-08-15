@@ -54,7 +54,7 @@ export default function AccountTab() {
         <div className="mt-6 border-t border-white/10 pt-5">
           <button
             type="button"
-            onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
+            onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/dashboard"; })}
             className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-300"
           >
             <LogOut className="h-4 w-4" />

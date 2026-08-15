@@ -25,7 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <CreditBalanceProvider>
       <PricingProvider>
         <ActiveGenerationsProvider>
-          <div className="flex min-h-screen bg-N50 text-white md:gap-2 md:p-2">
+          <div className="flex min-h-screen bg-N50 text-text-primary md:gap-2 md:p-2">
             <Sidebar initialToolVisibility={initialToolVisibility} />
             <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#181818] pb-24 md:h-[calc(100vh-1rem)] md:rounded-2xl md:pb-0">
               <ActiveGenerationBanner />
