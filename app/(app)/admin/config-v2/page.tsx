@@ -29,7 +29,7 @@ import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 
 const INPUT =
-  "w-full min-h-[36px] rounded border border-gray-700/80 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500";
+  "w-full min-h-[36px] rounded border border-white/10 bg-white/[0.02] px-2 py-1 text-sm text-white outline-none focus:border-white/30";
 
 function PricingNumberInput({
   value,
@@ -246,7 +246,7 @@ function OverrideDefaultDialog({
       aria-modal="true"
       aria-labelledby="override-default-title"
     >
-      <div className="w-full max-w-sm rounded-lg border border-gray-700 bg-gray-900 p-5 shadow-2xl">
+      <div className="w-full max-w-sm rounded-lg border border-white/10 bg-white/[0.04] p-5 shadow-2xl">
         <h3 id="override-default-title" className="text-sm font-semibold text-white">
           Change default model?
         </h3>
@@ -259,14 +259,14 @@ function OverrideDefaultDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-300 hover:border-gray-500"
+            className="rounded border border-white/10 px-3 py-1.5 text-xs font-medium text-gray-300 hover:border-white/20"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500"
+            className="rounded bg-[#F26522] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#e05a1a]"
           >
             Override
           </button>
@@ -294,9 +294,9 @@ function VariantTable({
   onToggle: (variant: AdminCostVariant) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-800/80">
+    <div className="overflow-x-auto rounded-lg border border-white/10">
       <table className="w-full text-sm">
-        <thead className="border-b border-gray-800 bg-gray-900/40">
+        <thead className="border-b border-white/10 bg-white/[0.03]">
           <tr>
             <th className={TH}>Variant</th>
             <th className={`${TH} w-24`}>Replicate $</th>
@@ -306,7 +306,7 @@ function VariantTable({
             <th className={`${TH} w-16`}></th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800/80">
+        <tbody className="divide-y divide-white/10/80">
           {variants.map((v) => {
             const suggested = suggestCreditsFromProvider(v.providerReferenceUsd, billingSettings);
             const custom = v.credits !== suggested;
@@ -316,7 +316,7 @@ function VariantTable({
                 <td className="px-2 py-2 font-medium text-white">
                   {v.label}
                   {dirty ? (
-                    <span className="ml-2 text-xs font-medium text-violet-400">unsaved</span>
+                    <span className="ml-2 text-xs font-medium text-gray-300">unsaved</span>
                   ) : null}
                   {!dirty && custom ? (
                     <span className="ml-2 text-xs font-medium text-amber-400/90">custom</span>
@@ -341,7 +341,7 @@ function VariantTable({
                     type="button"
                     title={`Suggest ${suggested} credits from Replicate price`}
                     onClick={() => onChange(v.pricingKey, { credits: suggested })}
-                    className="whitespace-nowrap rounded border border-gray-700 px-2 py-1 text-[11px] text-gray-400 hover:border-violet-500 hover:text-white"
+                    className="whitespace-nowrap rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white"
                   >
                     → {suggested}
                   </button>
@@ -365,8 +365,8 @@ function VariantTable({
                     onClick={() => onSave(v)}
                     className={
                       dirty
-                        ? "rounded bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-                        : "rounded border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-[11px] font-medium text-gray-600 disabled:cursor-default"
+                        ? "rounded bg-[#F26522] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#e05a1a] disabled:opacity-50"
+                        : "rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-gray-600 disabled:cursor-default"
                     }
                   >
                     Save
@@ -395,16 +395,16 @@ function ModesTable({
   onDefaultChange: (key: string, checked: boolean) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-800/80">
+    <div className="overflow-x-auto rounded-lg border border-white/10">
         <table className="w-full text-sm">
-          <thead className="border-b border-gray-800 bg-gray-900/40">
+          <thead className="border-b border-white/10 bg-white/[0.03]">
             <tr>
               <th className={TH}>Mode</th>
               <th className={`${TH} w-12`}>On</th>
               <th className={`${TH} w-16`}>Default</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800/80">
+          <tbody className="divide-y divide-white/10/80">
             {features.map((f) => {
               const soleDefault = isSoleDefault(tool, modelId, f.key);
               return (
@@ -449,16 +449,16 @@ function PipelineRolesTable({
   if (roles.length === 0) return null;
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-800/80">
+    <div className="overflow-x-auto rounded-lg border border-white/10">
       <table className="w-full text-sm">
-        <thead className="border-b border-gray-800 bg-gray-900/40">
+        <thead className="border-b border-white/10 bg-white/[0.03]">
           <tr>
             <th className={TH}>Role</th>
             <th className={TH}>Provider / model</th>
             <th className={`${TH} w-12`}>On</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800/80">
+        <tbody className="divide-y divide-white/10/80">
           {roles.map((role) => (
             <tr key={`${role.modelConfigToolKey}.${role.configKey}`} className="text-gray-300">
               <td className="px-2 py-2">
@@ -532,7 +532,7 @@ function PipelineSection({
   };
 
   return (
-    <div className="mt-3 border-t border-gray-800/80 pt-3">
+    <div className="mt-3 border-t border-white/10 pt-3">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -551,7 +551,7 @@ function PipelineSection({
           {pipelines.map((group) => (
             <div key={group.key} className="space-y-2">
               <div>
-                <h3 className="text-sm font-medium text-violet-300">{group.label}</h3>
+                <h3 className="text-sm font-medium text-gray-300">{group.label}</h3>
                 {group.description ? (
                   <p className="text-[11px] leading-relaxed text-gray-500">{group.description}</p>
                 ) : null}
@@ -625,7 +625,7 @@ function ModelSection({
   };
 
   return (
-    <div className={`border-l border-gray-800/60 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
+    <div className={`border-l border-white/10/60 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2 py-2">
         <button
           type="button"
@@ -815,17 +815,17 @@ function ToolSection({
         onConfirm={confirmOverride}
         onCancel={() => setOverridePrompt(null)}
       />
-      <section className="rounded-lg border border-gray-800/80">
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-800/80 px-3 py-2.5">
+      <section className="rounded-lg border border-white/10">
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2.5">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex flex-1 items-center gap-2 text-left"
         >
           {open ? (
-            <ChevronDown className="h-4 w-4 text-violet-400" />
+            <ChevronDown className="h-4 w-4 text-gray-300" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-violet-400" />
+            <ChevronRight className="h-4 w-4 text-gray-300" />
           )}
           <h2 className="text-sm font-semibold text-white">{tool.label}</h2>
         </button>
@@ -861,7 +861,7 @@ function ToolSection({
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
         <div className="px-3 py-2">
           {featureOptions.length > 0 ? (
-            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-gray-800/60 pb-2">
+            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-white/10/60 pb-2">
               <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-gray-500">
                 Filter by feature
               </span>
@@ -1242,7 +1242,7 @@ export default function AdminConfigV2Page() {
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
         <span>
           Credits = user charge · Replicate $ = provider reference · toggles save automatically · pricing rows use Save ·{" "}
-          <button type="button" onClick={() => void load()} className="text-violet-400 hover:text-violet-300">
+          <button type="button" onClick={() => void load()} className="text-gray-300 hover:text-white">
             Refresh
           </button>
         </span>

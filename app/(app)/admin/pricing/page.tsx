@@ -228,7 +228,7 @@ export default function AdminPricingPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4 text-sm text-gray-400">
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
         Manage the credit purchase tiers shown on the Buy credits panel and the
         landing page. Price is in whole IDR and is charged via DOKU. The tier{" "}
         <span className="text-gray-200">id</span> is referenced by past orders, so
@@ -237,7 +237,7 @@ export default function AdminPricingPage() {
       </div>
 
       {/* Welcome bonus — credits auto-granted to new users on sign-up. */}
-      <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h3 className="text-sm font-semibold text-white">Welcome bonus</h3>
@@ -277,7 +277,7 @@ export default function AdminPricingPage() {
             }}
             disabled={!welcomeEnabled}
             placeholder="0"
-            className="w-32 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500 disabled:opacity-40"
+            className="w-32 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30 disabled:opacity-40"
           />
           <span className="text-sm text-gray-500">credits</span>
           <div className="flex-1" />
@@ -294,7 +294,7 @@ export default function AdminPricingPage() {
             type="button"
             onClick={saveWelcome}
             disabled={welcomeBusy}
-            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+            className="rounded-md bg-[#F26522] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
           >
             {welcomeBusy ? "Saving…" : "Save"}
           </button>
@@ -323,7 +323,7 @@ export default function AdminPricingPage() {
           value={kurs}
           onChange={(e) => setKurs(e.target.value.replace(/[^\d]/g, ""))}
           placeholder="18000"
-          className="w-32 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+          className="w-32 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
         />
         <span className="text-xs text-gray-600">
           Used only to compute the informational USD / margin columns.
@@ -360,7 +360,7 @@ export default function AdminPricingPage() {
           {rows.map((row, i) => (
             <div
               key={`${row.id}-${i}`}
-              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_72px_120px_64px_64px_32px] items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-2 py-1.5"
+              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_72px_120px_64px_64px_32px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5"
             >
               <div className="flex items-center gap-0.5">
                 <button
@@ -368,7 +368,7 @@ export default function AdminPricingPage() {
                   onClick={() => move(i, -1)}
                   disabled={i === 0}
                   aria-label="Move up"
-                  className="rounded p-1 text-gray-400 transition-colors hover:text-violet-300 disabled:opacity-30"
+                  className="rounded p-1 text-gray-400 transition-colors hover:text-white disabled:opacity-30"
                 >
                   <ArrowUp className="h-3.5 w-3.5" />
                 </button>
@@ -377,7 +377,7 @@ export default function AdminPricingPage() {
                   onClick={() => move(i, 1)}
                   disabled={i === rows.length - 1}
                   aria-label="Move down"
-                  className="rounded p-1 text-gray-400 transition-colors hover:text-violet-300 disabled:opacity-30"
+                  className="rounded p-1 text-gray-400 transition-colors hover:text-white disabled:opacity-30"
                 >
                   <ArrowDown className="h-3.5 w-3.5" />
                 </button>
@@ -388,7 +388,7 @@ export default function AdminPricingPage() {
                 readOnly={!row.isNew}
                 placeholder="p6"
                 title={row.isNew ? "Tier id" : "Id can't change once a tier exists"}
-                className={`w-full rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500 ${
+                className={`w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-sm text-white outline-none focus:border-white/30 ${
                   !row.isNew ? "cursor-not-allowed text-gray-500" : ""
                 }`}
               />
@@ -396,7 +396,7 @@ export default function AdminPricingPage() {
                 value={row.label}
                 onChange={(e) => patch(i, { label: e.target.value })}
                 placeholder="Label"
-                className="w-full rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-white outline-none focus:border-violet-500"
+                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-sm text-white outline-none focus:border-white/30"
               />
               <input
                 type="number"
@@ -404,7 +404,7 @@ export default function AdminPricingPage() {
                 value={row.credits}
                 placeholder="0"
                 onChange={(e) => patch(i, { credits: e.target.value.replace(/[^\d]/g, "") })}
-                className="w-full rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
               />
               <input
                 type="number"
@@ -414,7 +414,7 @@ export default function AdminPricingPage() {
                 onChange={(e) =>
                   patch(i, { bonusCredits: e.target.value.replace(/[^\d]/g, "") })
                 }
-                className="w-full rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
               />
               <span
                 title="100 tokens = US$1"
@@ -429,7 +429,7 @@ export default function AdminPricingPage() {
                 placeholder="0"
                 title={row.priceIdr ? formatIdr(Number(row.priceIdr)) : undefined}
                 onChange={(e) => patch(i, { priceIdr: e.target.value.replace(/[^\d]/g, "") })}
-                className="w-full rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-right text-sm text-white outline-none focus:border-violet-500"
+                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
               />
               {(() => {
                 const eco = economicsFor(
@@ -459,7 +459,7 @@ export default function AdminPricingPage() {
                   checked={row.popular}
                   onChange={() => setPopular(i)}
                   aria-label="Popular"
-                  className="h-4 w-4 accent-violet-500"
+                  className="h-4 w-4 accent-white"
                 />
               </div>
               <div className="flex justify-center">
@@ -488,7 +488,7 @@ export default function AdminPricingPage() {
         <button
           type="button"
           onClick={addTier}
-          className="flex items-center gap-1.5 rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-violet-500 hover:text-violet-300"
+          className="flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-white/30 hover:text-white"
         >
           <Plus className="h-4 w-4" />
           Add tier
@@ -498,7 +498,7 @@ export default function AdminPricingPage() {
           type="button"
           onClick={save}
           disabled={saving}
-          className="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+          className="rounded-md bg-[#F26522] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save changes"}
         </button>

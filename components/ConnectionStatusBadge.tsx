@@ -54,7 +54,7 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
   }, [status, platform]);
 
   if (status === "loading" || connected === null) {
-    return <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />;
+    return <div className="h-9 w-44 animate-pulse rounded-lg bg-white/10" />;
   }
   if (connected) {
     return (
@@ -72,10 +72,10 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
   return (
     <Link
       href="/dashboard/settings?tab=connections"
-      className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 transition-colors hover:border-gray-600 hover:bg-gray-700"
+      className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 transition-colors hover:border-white/20 hover:bg-white/10"
     >
-      <Icon className="h-3.5 w-3.5 text-gray-500" />
-      <span className="text-xs font-medium text-gray-500">Connect {label}</span>
+      <Icon className="h-3.5 w-3.5 text-gray-400" />
+      <span className="text-xs font-medium text-gray-400">Connect {label}</span>
     </Link>
   );
 }

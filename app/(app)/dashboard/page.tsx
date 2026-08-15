@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
 import DashboardHero from "./DashboardHero";
@@ -11,6 +11,8 @@ import ToolCard from "./ToolCard";
 import ToolCardThumbnail from "./ToolCardThumbnail";
 import PageContainer from "./PageContainer";
 import PageHeader from "./PageHeader";
+import PromoOfferModal from "@/components/PromoOfferModal";
+import { PROMO_DEADLINE, isPromoLive } from "@/lib/promo-offer";
 
 type ToolDef = {
   name: string;
@@ -26,16 +28,16 @@ const TOOLS: ToolDef[] = [
   {
     name: "Video",
     href: "/tools/video?type=reels-creator",
-    icon: <Video className="h-5 w-5 text-gray-300" />,
-    accent: "bg-white/10",
+    icon: <Video className="h-5 w-5 text-[#F26522]" />,
+    accent: "bg-[#F26522]/10",
     thumbMediaType: "video" as const,
     thumbOutlined: true,
   },
   {
     name: "Photo",
     href: "/tools/photo-v2",
-    icon: <Camera className="h-5 w-5 text-gray-300" />,
-    accent: "bg-white/10",
+    icon: <Camera className="h-5 w-5 text-[#F26522]" />,
+    accent: "bg-[#F26522]/10",
     thumbMediaType: "image" as const,
     thumbOutlined: true,
   },
@@ -53,9 +55,26 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
+// Session-scoped so the promo shows once per browser session; the deadline is
+// baked into the key so a new promo (new deadline) re-shows even if the last
+// one was dismissed.
+const PROMO_DISMISS_KEY = `promo:${PROMO_DEADLINE}`;
+
 export default function DashboardPage() {
   const { name } = useCurrentUser();
   const firstName = name?.split(" ")[0] ?? "there";
+  const [promoOpen, setPromoOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isPromoLive()) return;
+    if (sessionStorage.getItem(PROMO_DISMISS_KEY)) return;
+    setPromoOpen(true);
+  }, []);
+
+  const closePromo = () => {
+    sessionStorage.setItem(PROMO_DISMISS_KEY, "1");
+    setPromoOpen(false);
+  };
 
   return (
     <PageContainer>
@@ -97,6 +116,8 @@ export default function DashboardPage() {
       <TrendingTemplates />
 
       <RecentCreations />
+
+      <PromoOfferModal open={promoOpen} onClose={closePromo} />
     </PageContainer>
   );
 }

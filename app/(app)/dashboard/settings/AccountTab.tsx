@@ -9,7 +9,7 @@ export default function AccountTab() {
   const { status, user, name, email, image } = useCurrentUser();
 
   if (status === "loading") {
-    return <div className="h-40 animate-pulse rounded-xl bg-gray-900" />;
+    return <div className="h-40 animate-pulse rounded-xl bg-white/5" />;
   }
 
   const displayUser = { name, email, image };
@@ -24,7 +24,7 @@ export default function AccountTab() {
         </p>
       </header>
 
-      <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="flex items-center gap-4">
           {displayUser?.image ? (
             <Image
@@ -44,18 +44,18 @@ export default function AccountTab() {
               {displayUser?.name ?? "Unknown user"}
             </p>
             <p className="truncate text-sm text-gray-500">{displayUser?.email}</p>
-            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gray-800 px-2.5 py-0.5 text-[11px] font-medium text-gray-300">
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-gray-300">
               <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
               {isGoogleUser ? "Signed in with Google" : "Signed in with email"}
             </span>
           </div>
         </div>
 
-        <div className="mt-6 border-t border-gray-800 pt-5">
+        <div className="mt-6 border-t border-white/10 pt-5">
           <button
             type="button"
             onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/"; })}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-300"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-300"
           >
             <LogOut className="h-4 w-4" />
             Sign out

@@ -14,7 +14,7 @@ export default function CreditBadge() {
 
   if (balance === null) {
     if (loading) {
-      return <div className="h-4 w-14 animate-pulse rounded bg-gray-800" />;
+      return <div className="h-4 w-14 animate-pulse rounded bg-white/10" />;
     }
     return null;
   }

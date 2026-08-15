@@ -63,7 +63,7 @@ function SettingsContent() {
                     className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors ${
                       active
                         ? "bg-white/10 text-white"
-                        : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                        : "text-gray-400 hover:bg-white/10 hover:text-white"
                     }`}
                   >
                     <Icon
@@ -96,7 +96,7 @@ export default function SettingsPage() {
     <Suspense
       fallback={
         <PageContainer>
-          <div className="h-8 w-48 animate-pulse rounded bg-gray-900" />
+          <div className="h-8 w-48 animate-pulse rounded bg-white/5" />
         </PageContainer>
       }
     >

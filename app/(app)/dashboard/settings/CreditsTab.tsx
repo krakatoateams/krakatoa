@@ -84,7 +84,7 @@ function formatExpiry(iso: string): string {
 
 function StatCard({ label, value }: { label: string; value: number | null }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+    <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
       <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
         {label}
       </p>
@@ -281,15 +281,15 @@ export default function CreditsTab() {
 
       {/* Credit breakdown: which credits expire, and when. */}
       {lotSummary && lotSummary.buckets.length > 0 ? (
-        <div className="rounded-xl border border-gray-800 bg-gray-900">
-          <div className="flex items-center justify-between border-b border-gray-800 px-5 py-3">
+        <div className="rounded-xl border border-white/10 bg-white/[0.04]">
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
             <h3 className="text-sm font-semibold text-white">Credit breakdown</h3>
             <span className="text-[11px] text-gray-500">
               Earliest-expiring credits are used first
             </span>
           </div>
 
-          <ul className="divide-y divide-gray-800">
+          <ul className="divide-y divide-white/10">
             {lotSummary.buckets.map((b, i) => {
               const soon = b.expiresAt !== null && daysUntil(b.expiresAt) <= 30;
               return (
@@ -349,7 +349,7 @@ export default function CreditsTab() {
       ) : null}
 
       {/* Buy credits */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+      <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
             <Sparkles className="h-5 w-5 text-gray-200" />
@@ -372,7 +372,7 @@ export default function CreditsTab() {
                 className={`relative flex flex-col rounded-xl border p-4 transition-colors ${
                   pack.popular
                     ? "border-white/30 bg-white/[0.06]"
-                    : "border-gray-800 bg-gray-950"
+                    : "border-white/10 bg-white/[0.02]"
                 }`}
               >
                 {pack.popular ? (
@@ -401,7 +401,7 @@ export default function CreditsTab() {
                   className={`mt-4 flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                     pack.popular
                       ? "bg-[#F26522] text-white hover:bg-[#e05a1a]"
-                      : "border border-gray-700 bg-gray-800 text-white hover:bg-gray-700"
+                      : "border border-white/10 bg-white/10 text-white hover:bg-white/20"
                   }`}
                 >
                   {isBusy ? (
@@ -424,8 +424,8 @@ export default function CreditsTab() {
       </div>
 
       {/* Transaction history */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900">
-        <div className="border-b border-gray-800 px-5 py-3">
+      <div className="rounded-xl border border-white/10 bg-white/[0.04]">
+        <div className="border-b border-white/10 px-5 py-3">
           <h3 className="text-sm font-semibold text-white">Transaction history</h3>
         </div>
 
@@ -441,7 +441,7 @@ export default function CreditsTab() {
             <p className="text-sm text-gray-500">No transactions yet.</p>
           </div>
         ) : (
-          <ul className="divide-y divide-gray-800">
+          <ul className="divide-y divide-white/10">
             {items.map((tx) => {
               const isCredit = tx.direction === "credit";
               return (

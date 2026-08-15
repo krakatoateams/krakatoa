@@ -33,10 +33,10 @@ export function AdminToast({
 
   const styles =
     toast.type === "success"
-      ? "border-emerald-500/30 bg-gray-900/95 text-emerald-300"
+      ? "border-emerald-500/30 bg-neutral-900/95 text-emerald-300"
       : toast.type === "error"
-        ? "border-red-500/30 bg-gray-900/95 text-red-300"
-        : "border-violet-500/30 bg-gray-900/95 text-violet-200";
+        ? "border-red-500/30 bg-neutral-900/95 text-red-300"
+        : "border-white/20 bg-neutral-900/95 text-gray-200";
 
   return (
     <div
@@ -74,7 +74,7 @@ export function useAdminToast() {
 }
 
 function Bone({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-gray-800/80 ${className ?? ""}`} />;
+  return <div className={`animate-pulse rounded-lg bg-white/10 ${className ?? ""}`} />;
 }
 
 export function AdminOverviewSkeleton() {
@@ -111,15 +111,15 @@ export function AdminOverviewSkeleton() {
 
 export function AdminTableSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-800">
-      <div className="border-b border-gray-800 bg-gray-900/40 px-4 py-3">
+    <div className="overflow-hidden rounded-xl border border-white/10">
+      <div className="border-b border-white/10 bg-white/[0.03] px-4 py-3">
         <div className="flex gap-6">
           {Array.from({ length: 5 }).map((_, i) => (
             <Bone key={i} className="h-3 w-20" />
           ))}
         </div>
       </div>
-      <div className="divide-y divide-gray-800">
+      <div className="divide-y divide-white/10">
         {Array.from({ length: rows }).map((_, i) => (
           <div key={i} className="flex items-center gap-6 px-4 py-3">
             <Bone className="h-4 w-40" />
@@ -154,7 +154,7 @@ export function StatCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+    <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
         {label}
       </p>
@@ -189,16 +189,16 @@ export function AdminTable<T>({
 }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border border-gray-800 bg-gray-900/30 px-4 py-6 text-sm text-gray-500">
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-6 text-sm text-gray-500">
         {empty}
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-800">
+    <div className="overflow-x-auto rounded-xl border border-white/10">
       <table className="w-full text-left text-sm">
-        <thead className="bg-gray-900/60 text-[11px] uppercase tracking-wider text-gray-500">
+        <thead className="bg-white/[0.04] text-[11px] uppercase tracking-wider text-gray-500">
           <tr>
             {columns.map((col) => (
               <th
@@ -212,7 +212,7 @@ export function AdminTable<T>({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800">
+        <tbody className="divide-y divide-white/10">
           {rows.map((row, i) => (
             <tr key={rowKey(row, i)} className="text-gray-300">
               {columns.map((col) => (
@@ -256,7 +256,7 @@ export function AdminPagination({
   const first = (page - 1) * pageSize + 1;
   const last = Math.min(page * pageSize, total);
   const btn =
-    "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-800 text-gray-400 transition-colors hover:border-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
+    "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 text-gray-400 transition-colors hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <div className="mt-2 flex items-center justify-between px-1">
@@ -308,7 +308,7 @@ export function AdminConfigSkeleton() {
     <div className="mx-auto max-w-5xl space-y-3">
       <Bone className="h-4 w-full max-w-xl" />
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="space-y-3 rounded-lg border border-gray-800/80 p-3">
+        <div key={i} className="space-y-3 rounded-lg border border-white/10 p-3">
           <div className="flex items-center gap-3">
             <Bone className="h-4 w-4" />
             <Bone className="h-5 w-28" />
