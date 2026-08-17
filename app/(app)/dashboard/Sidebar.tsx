@@ -237,7 +237,7 @@ export default function Sidebar({
         }
       `}</style>
       <aside
-        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl bg-[#181818] md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
+        className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-N50 md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
       {/* Logo — doubles as the way back out to the landing page */}
       <Link
@@ -304,14 +304,14 @@ export default function Sidebar({
               <Link
                 href="/dashboard/settings?tab=credits"
                 aria-label="Top up credits"
-                className="absolute inset-x-0 bottom-full z-10 mb-2 flex items-center gap-2 rounded-xl border border-blue-400/40 bg-[#111c33] px-3 py-2 text-left transition-colors hover:border-blue-400/60 hover:bg-[#152441]"
+                className="absolute inset-x-0 bottom-full z-10 mb-2 flex items-center gap-2 rounded-xl border border-info/40 bg-B100 px-3 py-2 text-left transition-colors hover:border-info/60 hover:bg-B200"
                 style={{ animation: "creditNudge 2.4s ease-in-out infinite" }}
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/15">
-                  <Coins className="h-4 w-4 text-blue-400" />
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-info/15">
+                  <Coins className="h-4 w-4 text-info" />
                 </span>
                 <span className="min-w-0 flex-1 leading-tight">
-                  <span className="block text-[11px] font-semibold text-white">
+                  <span className="block text-[11px] font-semibold text-N900">
                     Low on credits
                   </span>
                   <span className="block text-[10px] text-text-secondary">
@@ -319,14 +319,14 @@ export default function Sidebar({
                   </span>
                 </span>
                 {/* Caret pointing down at the profile card */}
-                <span className="absolute -bottom-1 left-5 h-2 w-2 rotate-45 border-b border-r border-blue-400/40 bg-[#111c33]" />
+                <span className="absolute -bottom-1 left-5 h-2 w-2 rotate-45 border-b border-r border-info/40 bg-B100" />
               </Link>
             )}
             <button
               type="button"
               onClick={() => getSupabaseAuthBrowser().auth.signOut().then(() => { window.location.href = "/dashboard"; })}
               aria-label="Sign out"
-              className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-red-500/10 hover:text-red-300"
+              className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-error/10 hover:text-error"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>

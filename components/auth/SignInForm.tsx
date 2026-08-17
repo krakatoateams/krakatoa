@@ -179,7 +179,7 @@ export function SignInForm({
       <button
         type="button"
         onClick={handleGoogleSignIn}
-        className="flex w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20"
+        className="flex w-full items-center justify-center gap-3 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20"
       >
         <GoogleIcon />
         Continue with Google
@@ -201,7 +201,7 @@ export function SignInForm({
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
           />
         </div>
         <div>
@@ -227,7 +227,7 @@ export function SignInForm({
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete="current-password"
-            className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
           />
         </div>
 
@@ -245,7 +245,7 @@ export function SignInForm({
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              className="flex w-full items-center justify-center gap-2.5 rounded-radius-md bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100"
+              className="flex w-full items-center justify-center gap-2.5 rounded-radius-xl bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100"
             >
               <GoogleIcon className="h-4 w-4" />
               Continue with Google
@@ -274,7 +274,7 @@ export function SignInForm({
                 type="button"
                 onClick={handleResendVerification}
                 disabled={resending}
-                className="mt-1 w-full rounded-radius-sm border border-warning/40 bg-warning/10 px-3 py-1.5 text-small font-medium text-warning transition-colors hover:bg-warning/20 disabled:opacity-50"
+                className="mt-1 w-full rounded-radius-xl border border-warning/40 bg-warning/10 px-3 py-1.5 text-small font-medium text-warning transition-colors hover:bg-warning/20 disabled:opacity-50"
               >
                 {resending ? "Sending…" : "Resend verification email"}
               </button>

@@ -74,16 +74,16 @@ export function UploadTile({
       disabled={disabled}
       className={`group relative flex overflow-hidden font-semibold normal-case tracking-wide transition-colors ${
         fluid
-          ? "h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-[16px] text-xs"
+          ? "h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-radius-xl text-xs"
           : iconOnly
             ? upload.preview
-              ? "h-16 w-16 shrink-0 items-center justify-center rounded-[16px]"
+              ? "h-16 w-16 shrink-0 items-center justify-center rounded-radius-xl"
               : "h-10 w-10 shrink-0 items-center justify-center rounded-[10px]"
-            : "h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] p-2 text-xs"
+            : "h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm p-2 text-xs"
       } ${
         upload.preview
           ? ""
-          : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+          : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-N900"
       }`}
       title={upload.preview ? `Change ${label.toLowerCase()} image` : `Add ${label.toLowerCase()} image`}
     >
@@ -108,7 +108,7 @@ export function UploadTile({
                 upload.clear();
               }
             }}
-            className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+            className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-N0/70 text-N900 hover:bg-error/80"
           >
             <X className="h-3 w-3" />
           </span>
@@ -191,7 +191,7 @@ export function CharacterTile({
     return (
       <div
         className={`relative h-16 ${
-          fluid ? "w-full flex-1 rounded-[16px]" : "w-20 shrink-0 rounded-[4px]"
+          fluid ? "w-full flex-1 rounded-radius-xl" : "w-20 shrink-0 rounded-radius-sm"
         } overflow-hidden`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -203,7 +203,7 @@ export function CharacterTile({
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") onClear();
           }}
-          className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+          className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-N0/70 text-N900 hover:bg-error/80"
         >
           <X className="h-3 w-3" />
         </span>
@@ -217,10 +217,10 @@ export function CharacterTile({
         type="button"
         disabled={disabled}
         onClick={() => setMenuOpen((o) => !o)}
-        className={`group flex h-16 bg-white/5 font-semibold normal-case tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white ${
+        className={`group flex h-16 bg-white/5 font-semibold normal-case tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 ${
           fluid
-            ? "w-full flex-row items-center justify-center gap-2 rounded-[16px] text-xs"
-            : "w-20 flex-col items-start justify-between rounded-[4px] p-2 text-xs"
+            ? "w-full flex-row items-center justify-center gap-2 rounded-radius-xl text-xs"
+            : "w-20 flex-col items-start justify-between rounded-radius-sm p-2 text-xs"
         }`}
         title="Add character"
       >
@@ -230,7 +230,7 @@ export function CharacterTile({
 
       {/* Desktop: anchored menu under the tile. */}
       {menuOpen && !isMobile && (
-        <div className="absolute left-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50">
           {renderMenuOptions(false)}
         </div>
       )}
@@ -244,7 +244,7 @@ export function CharacterTile({
             <div
               onClick={() => setMenuOpen(false)}
               aria-hidden="true"
-              className={`fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
+              className={`fixed inset-0 z-[90] bg-N0/60 backdrop-blur-sm transition-opacity duration-200 ${
                 sheetShown ? "opacity-100" : "opacity-0"
               }`}
             />
@@ -252,12 +252,12 @@ export function CharacterTile({
               ref={sheetRef}
               role="dialog"
               aria-modal="true"
-              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-[#171717] p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-black/60 transition-transform duration-200 ease-out ${
+              className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-N50 p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-N0/60 transition-transform duration-200 ease-out ${
                 sheetShown ? "translate-y-0" : "translate-y-full"
               }`}
             >
               <div className="mx-auto mb-2 mt-1 h-1.5 w-10 rounded-full bg-white/20" />
-              <p className="mb-2 px-3 text-lg font-semibold text-white">Add character</p>
+              <p className="mb-2 px-3 text-lg font-semibold text-N900">Add character</p>
               <div className="max-h-[70vh] overflow-y-auto">{renderMenuOptions(true)}</div>
             </div>
           </>,
@@ -267,7 +267,7 @@ export function CharacterTile({
   );
 
   function renderMenuOptions(big: boolean) {
-    const rowClass = `flex w-full items-center gap-2 rounded-xl text-left text-gray-300 transition-colors hover:bg-white/5 ${
+    const rowClass = `flex w-full items-center gap-2 rounded-xl text-left text-text-secondary transition-colors hover:bg-white/5 ${
       big ? "px-4 py-3 text-base" : "px-3 py-2 text-sm"
     }`;
     return (
@@ -280,7 +280,7 @@ export function CharacterTile({
           }}
           className={rowClass}
         >
-          <Upload className="h-4 w-4 text-gray-300" />
+          <Upload className="h-4 w-4 text-text-secondary" />
           Upload image
         </button>
         <button
@@ -291,7 +291,7 @@ export function CharacterTile({
           }}
           className={rowClass}
         >
-          <Users className="h-4 w-4 text-gray-300" />
+          <Users className="h-4 w-4 text-text-secondary" />
           Use a saved character
         </button>
       </>

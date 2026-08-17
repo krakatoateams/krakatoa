@@ -38,14 +38,14 @@ export default function ToolCardThumbnail({
   return (
     <div className="pointer-events-none absolute -top-2 right-3 h-20 w-20 translate-x-[-5px] translate-y-[5px]">
       {/* Stacked cards behind for a layered look */}
-      <div className="absolute inset-0 translate-x-2 rotate-[-22deg] scale-[0.82] rounded-lg bg-gray-800 opacity-40 outline outline-[4px] outline-white" />
-      <div className="absolute inset-0 translate-x-1 rotate-[-12deg] scale-[0.9] rounded-lg bg-gray-700 outline outline-[4px] outline-white" />
+      <div className="absolute inset-0 translate-x-2 rotate-[-22deg] scale-[0.82] rounded-lg bg-N50 opacity-40 outline outline-[4px] outline-N900" />
+      <div className="absolute inset-0 translate-x-1 rotate-[-12deg] scale-[0.9] rounded-lg bg-N100 outline outline-[4px] outline-N900" />
       <div
-        className={`relative h-full w-full overflow-hidden rounded-[10px] shadow-lg shadow-black/40 ${
-          outlined ? "bg-white p-[4px]" : "border border-white/15 bg-black/40"
+        className={`relative h-full w-full overflow-hidden rounded-[10px] shadow-lg shadow-N0/40 ${
+          outlined ? "bg-bg-static-white p-[4px]" : "border border-white/15 bg-N0/40"
         }`}
       >
-        <div className="relative h-full w-full overflow-hidden rounded-[7px] bg-black/40">
+        <div className="relative h-full w-full overflow-hidden rounded-[7px] bg-N0/40">
           {item.mediaType === "video" ? (
             <video
               src={item.mediaUrl}

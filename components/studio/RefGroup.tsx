@@ -151,32 +151,32 @@ export function useMediaRefs(kind: RefKind, max: number): RefGroupApi {
 
 export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => void }) {
   return (
-    <div className="relative h-16 w-20 shrink-0 overflow-hidden rounded-[4px] bg-white/5">
+    <div className="relative h-16 w-20 shrink-0 overflow-hidden rounded-radius-sm bg-white/5">
       {item.kind === "image" && item.preview ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.preview} alt="reference" className="absolute inset-0 h-full w-full object-cover" />
       ) : item.kind === "video" && item.preview ? (
         <video src={item.preview} muted playsInline className="absolute inset-0 h-full w-full object-cover" />
       ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-gray-400">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-text-secondary">
           <Music className="h-5 w-5" />
           <span className="max-w-full truncate px-1 text-xs">{item.file.name}</span>
         </div>
       )}
 
       {item.status === "uploading" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="absolute inset-0 flex items-center justify-center bg-N0/60">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
         </div>
       )}
       {item.status === "error" && (
         <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-900/60 px-1"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-error/40 px-1"
           title={item.error || "Upload failed"}
         >
-          <AlertCircle className="h-5 w-5 shrink-0 text-red-300" />
+          <AlertCircle className="h-5 w-5 shrink-0 text-error" />
           {item.error ? (
-            <span className="line-clamp-2 w-full text-center text-[10px] leading-tight text-red-100">
+            <span className="line-clamp-2 w-full text-center text-[10px] leading-tight text-R800">
               {item.error}
             </span>
           ) : null}
@@ -190,7 +190,7 @@ export function RefTile({ item, onRemove }: { item: MediaRef; onRemove: () => vo
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") onRemove();
         }}
-        className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+        className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-N0/70 text-N900 hover:bg-error/80"
       >
         <X className="h-3 w-3" />
       </span>
@@ -228,19 +228,19 @@ export function RefGroup({
     <div className={bare ? "" : "rounded-2xl bg-white/[0.03] p-3"}>
       {!bare && (
         <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
-            <span className="text-gray-300">{icon}</span>
+          <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-text-secondary sm:text-sm">
+            <span className="text-text-secondary">{icon}</span>
             {label}
             {hint ? (
               <Tooltip label={hint}>
                 <Info
-                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  className="h-3.5 w-3.5 text-text-disabled transition-colors hover:text-text-secondary"
                   aria-label={hint}
                 />
               </Tooltip>
             ) : null}
           </div>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-text-disabled">
             {group.items.length}/{group.max}
           </span>
         </div>
@@ -256,16 +256,16 @@ export function RefGroup({
             disabled={addDisabled}
             onClick={() => inputRef.current?.click()}
             title={disabled ? disabledReason : bare ? hint ?? `Add ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
-            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
           >
-            {bare ? <span className="text-gray-300">{icon}</span> : <Plus className="h-4 w-4" />}
+            {bare ? <span className="text-text-secondary">{icon}</span> : <Plus className="h-4 w-4" />}
             <span>{bare ? label : "Add"}</span>
           </button>
         )}
       </div>
 
       {disabled && disabledReason ? (
-        <p className="mt-2 text-sm leading-snug text-amber-300/85">{disabledReason}</p>
+        <p className="mt-2 text-sm leading-snug text-warning/85">{disabledReason}</p>
       ) : null}
 
       <input
@@ -341,9 +341,9 @@ export function RefMediaGroup({
             disabled={disabled}
             onClick={() => inputRef.current?.click()}
             title={disabled ? disabledReason : hint ?? `Add ${label.toLowerCase()}`}
-            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <span className="flex items-center gap-1 text-gray-300">
+            <span className="flex items-center gap-1 text-text-secondary">
               <ImageIcon className="h-3.5 w-3.5" />
               {acceptsVideo && <Film className="h-3.5 w-3.5" />}
             </span>
@@ -353,7 +353,7 @@ export function RefMediaGroup({
       </div>
 
       {disabled && disabledReason ? (
-        <p className="mt-2 text-sm leading-snug text-amber-300/85">{disabledReason}</p>
+        <p className="mt-2 text-sm leading-snug text-warning/85">{disabledReason}</p>
       ) : null}
 
       <input

@@ -117,19 +117,19 @@ export default function ConnectionsTab() {
   return (
     <div className="space-y-6">
       <header>
-        <h2 className="text-lg font-semibold text-white">Connections</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <h2 className="text-lg font-semibold text-N900">Connections</h2>
+        <p className="mt-1 text-sm text-text-disabled">
           Social platforms used for publishing.
         </p>
       </header>
 
       {error && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
           <span className="flex-1">{error}</span>
           <button
             type="button"
             onClick={() => setError(null)}
-            className="mt-0.5 shrink-0 text-red-400/60 hover:text-red-400"
+            className="mt-0.5 shrink-0 text-error/60 hover:text-error"
             aria-label="Dismiss"
           >
             <X className="h-4 w-4" />
@@ -147,11 +147,11 @@ export default function ConnectionsTab() {
           <div className="flex items-center justify-between gap-4 px-5 py-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                <Video className="h-5 w-5 text-red-400" />
+                <Video className="h-5 w-5 text-R600" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">YouTube</p>
-                <p className="truncate text-xs text-gray-500">
+                <p className="text-sm font-medium text-N900">YouTube</p>
+                <p className="truncate text-xs text-text-disabled">
                   {youtubeConnected
                     ? "YouTube publishing enabled"
                     : "YouTube publishing not yet connected"}
@@ -162,7 +162,7 @@ export default function ConnectionsTab() {
             <div className="flex shrink-0 items-center gap-2">
               {youtubeConnected ? (
                 <>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-400">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
                     <Check className="h-3.5 w-3.5" />
                     Connected
                   </span>
@@ -172,7 +172,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={handleDisconnect}
                         disabled={disconnecting}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                        className="rounded-radius-xl border border-error/40 bg-error/10 px-3 py-1 text-xs font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
                       >
                         {disconnecting ? "Disconnecting…" : "Confirm"}
                       </button>
@@ -180,7 +180,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={() => setConfirmDisconnect(false)}
                         disabled={disconnecting}
-                        className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:text-white disabled:opacity-50"
+                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-N900 disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -189,7 +189,7 @@ export default function ConnectionsTab() {
                     <button
                       type="button"
                       onClick={() => setConfirmDisconnect(true)}
-                      className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
                     >
                       Disconnect
                     </button>
@@ -198,7 +198,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/youtube/start"
-                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
+                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
                 >
                   Connect
                 </a>
@@ -216,11 +216,11 @@ export default function ConnectionsTab() {
           <div className="flex items-center justify-between gap-4 px-5 py-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                <Camera className="h-5 w-5 text-gray-300" />
+                <Camera className="h-5 w-5 text-text-secondary" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">Instagram</p>
-                <p className="truncate text-xs text-gray-500">
+                <p className="text-sm font-medium text-N900">Instagram</p>
+                <p className="truncate text-xs text-text-disabled">
                   {instagramConnected
                     ? "Instagram publishing enabled"
                     : "Instagram publishing not yet connected"}
@@ -231,7 +231,7 @@ export default function ConnectionsTab() {
             <div className="flex shrink-0 items-center gap-2">
               {instagramConnected ? (
                 <>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-400">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
                     <Check className="h-3.5 w-3.5" />
                     Connected
                   </span>
@@ -241,7 +241,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={handleDisconnectInstagram}
                         disabled={disconnectingInstagram}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                        className="rounded-radius-xl border border-error/40 bg-error/10 px-3 py-1 text-xs font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
                       >
                         {disconnectingInstagram ? "Disconnecting…" : "Confirm"}
                       </button>
@@ -249,7 +249,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={() => setConfirmDisconnectInstagram(false)}
                         disabled={disconnectingInstagram}
-                        className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:text-white disabled:opacity-50"
+                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-N900 disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -258,7 +258,7 @@ export default function ConnectionsTab() {
                     <button
                       type="button"
                       onClick={() => setConfirmDisconnectInstagram(true)}
-                      className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
                     >
                       Disconnect
                     </button>
@@ -267,7 +267,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/instagram/start"
-                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
+                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
                 >
                   Connect
                 </a>
@@ -285,11 +285,11 @@ export default function ConnectionsTab() {
           <div className="flex items-center justify-between gap-4 px-5 py-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                <Music2 className="h-5 w-5 text-gray-300" />
+                <Music2 className="h-5 w-5 text-text-secondary" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">TikTok</p>
-                <p className="truncate text-xs text-gray-500">
+                <p className="text-sm font-medium text-N900">TikTok</p>
+                <p className="truncate text-xs text-text-disabled">
                   {tiktokConnected
                     ? "TikTok publishing enabled"
                     : "TikTok publishing not yet connected"}
@@ -300,7 +300,7 @@ export default function ConnectionsTab() {
             <div className="flex shrink-0 items-center gap-2">
               {tiktokConnected ? (
                 <>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-400">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
                     <Check className="h-3.5 w-3.5" />
                     Connected
                   </span>
@@ -310,7 +310,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={handleDisconnectTiktok}
                         disabled={disconnectingTiktok}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                        className="rounded-radius-xl border border-error/40 bg-error/10 px-3 py-1 text-xs font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
                       >
                         {disconnectingTiktok ? "Disconnecting…" : "Confirm"}
                       </button>
@@ -318,7 +318,7 @@ export default function ConnectionsTab() {
                         type="button"
                         onClick={() => setConfirmDisconnectTiktok(false)}
                         disabled={disconnectingTiktok}
-                        className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:text-white disabled:opacity-50"
+                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-N900 disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -327,7 +327,7 @@ export default function ConnectionsTab() {
                     <button
                       type="button"
                       onClick={() => setConfirmDisconnectTiktok(true)}
-                      className="rounded-lg border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-red-500/40 hover:text-red-400"
+                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
                     >
                       Disconnect
                     </button>
@@ -336,7 +336,7 @@ export default function ConnectionsTab() {
               ) : (
                 <a
                   href="/api/connections/tiktok/start"
-                  className="rounded-lg border border-[#F26522]/40 bg-[#F26522]/10 px-3 py-1 text-xs font-medium text-[#F26522] transition-colors hover:bg-[#F26522]/20"
+                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
                 >
                   Connect
                 </a>

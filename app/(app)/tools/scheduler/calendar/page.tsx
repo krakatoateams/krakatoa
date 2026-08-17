@@ -57,52 +57,52 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const STATUS_CFG = {
   scheduled: {
     label: "Scheduled",
-    dot: "bg-blue-400",
-    badge: "border-blue-500/30 bg-blue-500/10 text-blue-400",
-    chip: "border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20",
-    stat: "text-blue-400",
+    dot: "bg-info",
+    badge: "border-info/30 bg-info/10 text-info",
+    chip: "border-info/40 bg-info/10 text-info hover:bg-info/20",
+    stat: "text-info",
   },
   overdue: {
     label: "Overdue",
-    dot: "bg-amber-400",
-    badge: "border-amber-500/30 bg-amber-500/10 text-amber-400",
-    chip: "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20",
-    stat: "text-amber-400",
+    dot: "bg-warning",
+    badge: "border-warning/30 bg-warning/10 text-warning",
+    chip: "border-warning/40 bg-warning/10 text-warning hover:bg-warning/20",
+    stat: "text-warning",
   },
   publishing: {
     label: "Publishing",
-    dot: "bg-white/70",
-    badge: "border-white/20 bg-white/10 text-neutral-300",
-    chip: "border-white/25 bg-white/10 text-neutral-300 hover:bg-white/15",
-    stat: "text-neutral-300",
+    dot: "bg-N900/70",
+    badge: "border-white/20 bg-white/10 text-text-secondary",
+    chip: "border-white/25 bg-white/10 text-text-secondary hover:bg-white/15",
+    stat: "text-text-secondary",
   },
   published: {
     label: "Published",
-    dot: "bg-green-400",
-    badge: "border-green-500/30 bg-green-500/10 text-green-400",
-    chip: "border-green-500/40 bg-green-500/10 text-green-300 hover:bg-green-500/20",
-    stat: "text-green-400",
+    dot: "bg-success",
+    badge: "border-success/30 bg-success/10 text-success",
+    chip: "border-success/40 bg-success/10 text-success hover:bg-success/20",
+    stat: "text-success",
   },
   failed: {
     label: "Failed",
-    dot: "bg-red-400",
-    badge: "border-red-500/30 bg-red-500/10 text-red-400",
-    chip: "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20",
-    stat: "text-red-400",
+    dot: "bg-error",
+    badge: "border-error/30 bg-error/10 text-error",
+    chip: "border-error/40 bg-error/10 text-error hover:bg-error/20",
+    stat: "text-error",
   },
   canceled: {
     label: "Canceled",
-    dot: "bg-neutral-600",
-    badge: "border-neutral-700 bg-neutral-800 text-neutral-500",
-    chip: "border-neutral-700/60 bg-neutral-800/60 text-neutral-500 line-through hover:bg-neutral-700/60",
-    stat: "text-neutral-500",
+    dot: "bg-N300",
+    badge: "border-white/10 bg-white/10 text-text-disabled",
+    chip: "border-white/5 bg-white/5 text-text-disabled line-through hover:bg-white/10",
+    stat: "text-text-disabled",
   },
   draft: {
     label: "Draft",
-    dot: "bg-neutral-500",
-    badge: "border-neutral-700 bg-neutral-800 text-neutral-400",
-    chip: "border-neutral-700 bg-neutral-800 text-neutral-400 hover:bg-neutral-700",
-    stat: "text-neutral-400",
+    dot: "bg-N400",
+    badge: "border-white/10 bg-white/10 text-text-secondary",
+    chip: "border-white/10 bg-white/10 text-text-secondary hover:bg-white/20",
+    stat: "text-text-secondary",
   },
 } as const;
 
@@ -195,8 +195,8 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
       role="alert"
       aria-live="polite"
       className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border px-4 py-3 shadow-xl ${
-        ok ? "border-green-500/30 bg-green-500/10 text-green-400"
-           : "border-red-500/30 bg-red-500/10 text-red-400"
+        ok ? "border-success/30 bg-success/10 text-success"
+           : "border-error/30 bg-error/10 text-error"
       }`}
     >
       {ok ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
@@ -316,7 +316,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
   };
 
   const inputCls =
-    "w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-white placeholder-neutral-600 outline-none transition-colors focus:border-white/40";
+    "w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-sm text-text-primary placeholder-text-disabled outline-none transition-colors focus:border-brand-primary";
 
   return (
     <div
@@ -326,18 +326,18 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-N50 shadow-2xl">
         <div className="flex items-start justify-between border-b border-white/10 p-5">
           <div className="flex items-center gap-2.5">
             {post.platform === "tiktok" ? (
               <>
                 <Music2 className="h-5 w-5 text-pink-400" />
-                <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">TikTok</span>
+                <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">TikTok</span>
               </>
             ) : (
               <>
-                <YoutubeIcon className="h-5 w-5 text-red-400" />
-                <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">YouTube</span>
+                <YoutubeIcon className="h-5 w-5 text-R600" />
+                <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">YouTube</span>
               </>
             )}
           </div>
@@ -346,7 +346,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
               {cfg.label}
             </span>
-            <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-800 hover:text-white">
+            <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer rounded-radius-xl p-1 text-text-disabled transition-colors hover:bg-white/10 hover:text-N900">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -355,25 +355,25 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
         {editing ? (
           <div className="space-y-4 p-5">
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Title</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-disabled">Title</label>
               <input className={inputCls} value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="Video title" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Scheduled date &amp; time</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-disabled">Scheduled date &amp; time</label>
               <input type="datetime-local" className={inputCls} value={fWhen} onChange={(e) => setFWhen(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Format</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-disabled">Format</label>
               <div className="flex gap-2">
                 {(["short", "video"] as const).map((opt) => (
                   <button
                     key={opt}
                     type="button"
                     onClick={() => setFFormat(opt)}
-                    className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                    className={`flex-1 cursor-pointer rounded-radius-xl border px-3 py-2 text-sm font-medium capitalize transition-colors ${
                       fFormat === opt
-                        ? "border-white/40 bg-white/10 text-neutral-300"
-                        : "border-neutral-700 bg-neutral-800 text-neutral-400 hover:border-neutral-600"
+                        ? "border-white/40 bg-white/10 text-text-secondary"
+                        : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
                     }`}
                   >
                     {opt === "short" ? "Short" : "Video"}
@@ -382,25 +382,25 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               </div>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Description</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-disabled">Description</label>
               <textarea className={`${inputCls} min-h-[96px] resize-y`} value={fDescription} onChange={(e) => setFDescription(e.target.value)} placeholder="Caption / description" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-600">Tags (comma-separated)</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-text-disabled">Tags (comma-separated)</label>
               <input className={inputCls} value={fTags} onChange={(e) => setFTags(e.target.value)} placeholder="tag1, tag2, tag3" />
             </div>
           </div>
         ) : (
           <div className="space-y-4 p-5">
-            <h3 className="text-base font-semibold leading-snug text-white">{post.title}</h3>
+            <h3 className="text-base font-semibold leading-snug text-N900">{post.title}</h3>
 
-            <div className="flex items-center gap-1.5 text-sm text-neutral-400">
-              <Clock className="h-3.5 w-3.5 text-neutral-600" />
+            <div className="flex items-center gap-1.5 text-sm text-text-secondary">
+              <Clock className="h-3.5 w-3.5 text-text-disabled" />
               {fmtDateTime(post.scheduled_time)}
             </div>
 
             {post.status === "failed" && post.last_error && (
-              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span className="leading-relaxed">{post.last_error}</span>
               </div>
@@ -408,19 +408,19 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
 
             {post.description && (
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-neutral-600">Description</p>
-                <p className="text-sm leading-relaxed text-neutral-300">{post.description}</p>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-text-disabled">Description</p>
+                <p className="text-sm leading-relaxed text-text-secondary">{post.description}</p>
               </div>
             )}
 
             {tags.length > 0 && (
               <div>
-                <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-neutral-600">
+                <div className="mb-2 flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-text-disabled">
                   <Tag className="h-3 w-3" /> Tags
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {tags.map((tag) => (
-                    <span key={tag} className="rounded-full border border-neutral-700 bg-neutral-800 px-2.5 py-0.5 text-xs text-neutral-400">
+                    <span key={tag} className="rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-xs text-text-secondary">
                       #{tag}
                     </span>
                   ))}
@@ -437,7 +437,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 transition-colors hover:bg-gray-200 disabled:opacity-50"
+                className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-2.5 text-sm font-medium text-text-static-black transition-colors hover:bg-N800 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 Save changes
@@ -446,7 +446,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 type="button"
                 onClick={() => setEditing(false)}
                 disabled={saving}
-                className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white disabled:opacity-50"
+                className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:border-white/20 hover:text-N900 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -458,7 +458,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   <button
                     type="button"
                     onClick={startEdit}
-                    className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 transition-colors hover:bg-gray-200"
+                    className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-2.5 text-sm font-medium text-text-static-black transition-colors hover:bg-N800"
                   >
                     <Pencil className="h-4 w-4" />
                     Edit post
@@ -468,7 +468,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                       type="button"
                       onClick={handleCancelPost}
                       disabled={canceling}
-                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-radius-xl border border-error/40 bg-error/10 px-4 py-2.5 text-sm font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
                     >
                       {canceling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       Confirm cancel
@@ -477,7 +477,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                     <button
                       type="button"
                       onClick={() => setConfirmingCancel(true)}
-                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-400 transition-colors hover:border-red-500/40 hover:text-red-300"
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
                       aria-label="Cancel this post"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -490,7 +490,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   href={`https://www.youtube.com/watch?v=${post.youtube_video_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-R500 px-4 py-2.5 text-sm font-medium text-N900 transition-colors hover:bg-R600"
                 >
                   <YoutubeIcon className="h-4 w-4" />
                   View on YouTube
@@ -505,7 +505,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   href={post.tiktok_share_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-N0 px-4 py-2.5 text-sm font-medium text-N900 transition-colors hover:bg-N100"
                 >
                   <Music2 className="h-4 w-4" />
                   View on TikTok
@@ -516,7 +516,7 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                   href={post.video_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2.5 text-sm font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
                 >
                   <ExternalLink className="h-4 w-4" />
                   View source video
@@ -622,7 +622,7 @@ function DayCell({
           {compact && (
             <span
               className={`text-[11px] font-semibold uppercase tracking-wider ${
-                isToday ? "text-neutral-300" : "text-neutral-500"
+                isToday ? "text-text-secondary" : "text-text-disabled"
               }`}
             >
               {DAY_NAMES[date.getDay()]}
@@ -630,16 +630,16 @@ function DayCell({
           )}
           <span
             className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-              isToday ? "bg-white text-neutral-900" :
-              isCurrentMonth ? "text-neutral-300" :
-              "text-neutral-700"
+              isToday ? "bg-bg-static-white text-text-static-black" :
+              isCurrentMonth ? "text-text-secondary" :
+              "text-N200"
             }`}
           >
             {date.getDate()}
           </span>
         </span>
         {isOver && (
-          <span className="rounded text-[10px] font-medium text-neutral-300">Drop here</span>
+          <span className="rounded text-[10px] font-medium text-text-secondary">Drop here</span>
         )}
       </div>
 
@@ -657,7 +657,7 @@ function DayCell({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-            className="cursor-pointer pl-1 text-left text-[10px] text-neutral-500 underline decoration-dotted transition-colors hover:text-neutral-300"
+            className="cursor-pointer pl-1 text-left text-[10px] text-text-disabled underline decoration-dotted transition-colors hover:text-text-secondary"
           >
             +{overflow} more
           </button>
@@ -666,7 +666,7 @@ function DayCell({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
-            className="cursor-pointer pl-1 text-left text-[10px] text-neutral-500 underline decoration-dotted transition-colors hover:text-neutral-300"
+            className="cursor-pointer pl-1 text-left text-[10px] text-text-disabled underline decoration-dotted transition-colors hover:text-text-secondary"
           >
             Show less
           </button>
@@ -814,7 +814,7 @@ export default function SchedulerCalendarPage() {
       <PageContainer>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+            <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
               Content Calendar
             </h1>
           </div>
@@ -825,7 +825,7 @@ export default function SchedulerCalendarPage() {
             <button
               type="button"
               onClick={goToToday}
-              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-sm text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
+              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1.5 text-sm text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
             >
               Today
             </button>
@@ -834,7 +834,7 @@ export default function SchedulerCalendarPage() {
               onClick={fetchPosts}
               disabled={loading}
               aria-label="Refresh posts"
-              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white disabled:opacity-40"
+              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900 disabled:opacity-40"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -855,8 +855,8 @@ export default function SchedulerCalendarPage() {
               );
             })}
             <div className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-2">
-              <span className="text-xs text-neutral-500">Total this month</span>
-              <span className="text-sm font-bold text-white">{monthPosts.length}</span>
+              <span className="text-xs text-text-disabled">Total this month</span>
+              <span className="text-sm font-bold text-N900">{monthPosts.length}</span>
             </div>
           </div>
 
@@ -865,18 +865,18 @@ export default function SchedulerCalendarPage() {
               type="button"
               onClick={() => shiftPeriod(-1)}
               aria-label={isWeekView ? "Previous week" : "Previous month"}
-              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
+              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <h2 className="min-w-[150px] text-center text-lg font-semibold text-white">
+            <h2 className="min-w-[150px] text-center text-lg font-semibold text-N900">
               {periodLabel}
             </h2>
             <button
               type="button"
               onClick={() => shiftPeriod(1)}
               aria-label={isWeekView ? "Next week" : "Next month"}
-              className="cursor-pointer rounded-lg border border-neutral-700 bg-neutral-800 p-1.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:text-white"
+              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -884,7 +884,7 @@ export default function SchedulerCalendarPage() {
         </div>
 
         {fetchError && (
-          <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
             <AlertCircle className="h-4 w-4 shrink-0" />
             {fetchError}
           </div>
@@ -896,7 +896,7 @@ export default function SchedulerCalendarPage() {
           {!isWeekView && (
             <div className="mb-1 grid grid-cols-7 gap-1">
               {DAY_NAMES.map((day) => (
-                <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-neutral-600">
+                <div key={day} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-text-disabled">
                   {day}
                 </div>
               ))}
@@ -941,8 +941,8 @@ export default function SchedulerCalendarPage() {
         </div>
 
         {/* Legend */}
-        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-neutral-600">
-          <span className="font-medium text-neutral-500">Legend:</span>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-text-disabled">
+          <span className="font-medium text-text-disabled">Legend:</span>
           {(["scheduled", "published", "failed", "canceled", "draft"] as const).map((s) => (
             <span key={s} className="flex items-center gap-1.5">
               <span className={`h-2 w-2 rounded-full ${STATUS_CFG[s].dot}`} />

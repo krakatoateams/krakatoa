@@ -111,10 +111,10 @@ export default function PromoOfferModal({
       <div
         aria-hidden
         onClick={onClose}
-        className="absolute inset-0 bg-black/70 backdrop-blur-[15px]"
+        className="absolute inset-0 bg-N0/70 backdrop-blur-[15px]"
       />
 
-      <div className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#171717] shadow-2xl">
+      <div className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-N50 shadow-2xl">
         {/* Hero band */}
         <div className="relative h-40 w-full shrink-0 sm:h-48">
           <Image
@@ -125,32 +125,32 @@ export default function PromoOfferModal({
             className="object-cover"
             priority
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#171717] via-[#171717]/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-N50 via-N50/30 to-transparent" />
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+            className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-radius-xl bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
           >
             <X className="h-4 w-4" strokeWidth={2.25} />
           </button>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#F26522]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-primary">
             {PROMO_COPY.eyebrow}
           </p>
           <h2
             id="promo-offer-title"
-            className="mt-2 text-3xl font-bold leading-[1.05] tracking-[-0.02em] text-white sm:text-4xl"
+            className="mt-2 text-3xl font-bold leading-[1.05] tracking-[-0.02em] text-N900 sm:text-4xl"
           >
             {PROMO_COPY.headlinePrefix}{" "}
-            <span className="text-[#F26522]">{PROMO_COPY.headlinePercent}</span>{" "}
+            <span className="text-brand-primary">{PROMO_COPY.headlinePercent}</span>{" "}
             {PROMO_COPY.headlineSuffix}
           </h2>
-          <p className="mt-2 text-sm leading-relaxed text-gray-400">
+          <p className="mt-2 text-sm leading-relaxed text-text-secondary">
             {PROMO_COPY.subcopy} — before{" "}
-            <span className="font-semibold text-gray-200">
+            <span className="font-semibold text-N800">
               {formatPromoDeadline()}
             </span>
             .
@@ -169,7 +169,7 @@ export default function PromoOfferModal({
                   aria-pressed={active}
                   className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
                     active
-                      ? "border-[#F26522]/60 bg-[#F26522]/[0.08]"
+                      ? "border-brand-primary/60 bg-brand-primary/[0.08]"
                       : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
                   }`}
                 >
@@ -177,7 +177,7 @@ export default function PromoOfferModal({
                     aria-hidden
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
                       active
-                        ? "border-[#F26522] bg-[#F26522] text-white"
+                        ? "border-brand-primary bg-brand-primary text-text-on-solid"
                         : "border-white/25"
                     }`}
                   >
@@ -186,16 +186,16 @@ export default function PromoOfferModal({
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-white">
+                      <span className="font-semibold text-N900">
                         {pack.label}
                       </span>
                       {discount > 0 && (
-                        <span className="rounded-full bg-[#F26522]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#F26522]">
+                        <span className="rounded-full bg-brand-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-primary">
                           -{discount}%
                         </span>
                       )}
                     </div>
-                    <p className="mt-0.5 text-[11px] text-gray-500">
+                    <p className="mt-0.5 text-[11px] text-text-disabled">
                       {total.toLocaleString()} credits · ≈{" "}
                       {Math.floor(total / CREDITS_PER_IMAGE).toLocaleString()}{" "}
                       images ·{" "}
@@ -206,11 +206,11 @@ export default function PromoOfferModal({
 
                   <div className="flex shrink-0 flex-col items-end leading-tight">
                     {tier.originalPriceIdr > pack.priceIdr && (
-                      <span className="text-[11px] text-gray-500 line-through">
+                      <span className="text-[11px] text-text-disabled line-through">
                         {formatIdr(tier.originalPriceIdr)}
                       </span>
                     )}
-                    <span className="text-base font-bold text-white">
+                    <span className="text-base font-bold text-N900">
                       {formatIdr(pack.priceIdr)}
                     </span>
                   </div>
@@ -220,14 +220,14 @@ export default function PromoOfferModal({
           </div>
 
           {error && (
-            <p className="mt-3 text-xs font-medium text-red-400">{error}</p>
+            <p className="mt-3 text-xs font-medium text-error">{error}</p>
           )}
 
           <button
             type="button"
             onClick={claim}
             disabled={purchasing}
-            className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#F26522] text-sm font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#e05a1a] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-radius-xl bg-brand-primary text-sm font-bold uppercase tracking-wide text-text-on-solid transition-colors hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {purchasing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -242,7 +242,7 @@ export default function PromoOfferModal({
           <button
             type="button"
             onClick={onClose}
-            className="mt-3 text-center text-xs font-medium text-gray-500 transition-colors hover:text-gray-300"
+            className="mt-3 text-center text-xs font-medium text-text-disabled transition-colors hover:text-text-secondary"
           >
             Maybe later
           </button>

@@ -55,14 +55,14 @@ function RefTile({
   onRemove: () => void;
 }) {
   return (
-    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-black/40">
+    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-radius-sm border border-white/10 bg-N0/40">
       {item.preview && item.status !== "error" ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.preview} alt="" className="h-full w-full object-cover" />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500">
+        <div className="flex h-full w-full items-center justify-center text-xs text-text-disabled">
           {item.status === "uploading" ? (
-            <Loader2 className="h-4 w-4 animate-spin text-gray-300" />
+            <Loader2 className="h-4 w-4 animate-spin text-text-secondary" />
           ) : (
             "Error"
           )}
@@ -71,7 +71,7 @@ function RefTile({
       <button
         type="button"
         onClick={onRemove}
-        className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/80"
+        className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-N0/70 text-N900 hover:bg-error/80"
       >
         ×
       </button>
@@ -168,13 +168,13 @@ export default function PhotoLibraryPicker({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold capitalize text-gray-400 sm:text-sm">
-          <span className="text-gray-300">{icon}</span>
+        <span className="flex items-center gap-1.5 text-xs font-semibold capitalize text-text-secondary sm:text-sm">
+          <span className="text-text-secondary">{icon}</span>
           {label}
           {hint ? (
             <Tooltip label={hint}>
               <Info
-                className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                className="h-3.5 w-3.5 text-text-disabled transition-colors hover:text-text-secondary"
                 aria-label={hint}
               />
             </Tooltip>
@@ -194,8 +194,8 @@ export default function PhotoLibraryPicker({
               onClick={() => onSourceChange(opt.id)}
               className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-40 ${
                 source === opt.id
-                  ? "bg-white/15 text-white"
-                  : "text-gray-400 hover:text-white"
+                  ? "bg-white/15 text-N900"
+                  : "text-text-secondary hover:text-N900"
               }`}
             >
               {opt.label}
@@ -214,7 +214,7 @@ export default function PhotoLibraryPicker({
                 type="button"
                 disabled={disabled}
                 onClick={() => inputRef.current?.click()}
-                className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-[4px] bg-white/5 p-2 text-xs font-semibold normal-case tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm bg-white/5 p-2 text-xs font-semibold normal-case tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Plus className="h-4 w-4" />
                 <span>Add</span>
@@ -243,21 +243,21 @@ export default function PhotoLibraryPicker({
           label="Loading your library"
         />
       ) : loadState === "error" ? (
-        <div className="flex h-16 flex-wrap items-center gap-2 text-sm text-red-300">
+        <div className="flex h-16 flex-wrap items-center gap-2 text-sm text-error">
           <AlertCircle className="h-4 w-4 shrink-0" />
           Couldn&apos;t load your library.
           <button
             type="button"
             onClick={loadLibrary}
-            className="font-semibold text-gray-300 underline-offset-2 hover:underline"
+            className="font-semibold text-text-secondary underline-offset-2 hover:underline"
           >
             Try again
           </button>
         </div>
       ) : items.length === 0 ? (
-        <div className="flex h-16 flex-col justify-center gap-1 text-sm text-gray-500">
+        <div className="flex h-16 flex-col justify-center gap-1 text-sm text-text-disabled">
           <span>{libraryEmptyLabel}</span>
-          <a href={libraryHref} className="font-semibold text-gray-300 hover:text-gray-200">
+          <a href={libraryHref} className="font-semibold text-text-secondary hover:text-text-primary">
             Create one in Photo Studio →
           </a>
         </div>
@@ -286,7 +286,7 @@ export default function PhotoLibraryPicker({
                   className="object-cover"
                 />
                 {active && (
-                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-gray-900">
+                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-bg-static-white text-text-static-black">
                     <Check className="h-2.5 w-2.5" />
                   </span>
                 )}
@@ -297,7 +297,7 @@ export default function PhotoLibraryPicker({
       )}
 
       {source === "library" && selected ? (
-        <p className="mt-2 text-xs text-gray-500 sm:text-sm">Selected: {selected.title}</p>
+        <p className="mt-2 text-xs text-text-disabled sm:text-sm">Selected: {selected.title}</p>
       ) : null}
     </div>
   );

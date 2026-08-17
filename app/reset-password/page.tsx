@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { Button } from "@/components/ui/Button";
 
 type SessionState = "checking" | "valid" | "invalid";
 
@@ -60,7 +61,7 @@ export default function ResetPasswordPage() {
   if (sessionState === "checking") {
     return (
       <AuthLayout>
-        <div className="py-8 text-center text-sm text-gray-400">Checking link…</div>
+        <div className="py-8 text-center text-body-3 text-text-secondary">Checking link…</div>
       </AuthLayout>
     );
   }
@@ -69,13 +70,13 @@ export default function ResetPasswordPage() {
     return (
       <AuthLayout>
         <div className="space-y-4 text-center">
-          <h1 className="font-display text-xl font-bold text-white">Invalid link</h1>
-          <p className="text-sm text-gray-400">
+          <h1 className="font-display text-xl font-bold text-text-primary">Invalid link</h1>
+          <p className="text-body-3 text-text-secondary">
             This link is invalid or has expired.
           </p>
           <Link
             href="/forgot-password"
-            className="block text-sm text-[#F26522] hover:text-[#e05a1a]"
+            className="block text-body-3 text-brand-primary hover:text-brand-primary-hover"
           >
             Request a new password reset link
           </Link>
@@ -88,15 +89,15 @@ export default function ResetPasswordPage() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Create a new password</h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <h1 className="font-display text-xl font-bold text-text-primary">Create a new password</h1>
+          <p className="mt-1 text-body-3 text-text-secondary">
             Enter your new password below.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               New password
             </label>
             <input
@@ -106,11 +107,11 @@ export default function ResetPasswordPage() {
               required
               minLength={6}
               autoComplete="new-password"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               Confirm password
             </label>
             <input
@@ -120,23 +121,19 @@ export default function ResetPasswordPage() {
               required
               minLength={6}
               autoComplete="new-password"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
 
           {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
+            <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2.5 text-small text-error">
               {error}
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
-          >
-            {loading ? "Saving…" : "Save new password"}
-          </button>
+          <Button type="submit" variant="primary" size="md" loading={loading} className="w-full">
+            Save new password
+          </Button>
         </form>
       </div>
     </AuthLayout>

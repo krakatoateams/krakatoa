@@ -10,11 +10,11 @@ import { Tooltip } from "./Tooltip";
 // Canonical orange "Generate" button styling shared by every studio tool. Change
 // the radius / gradient here once and it applies to Photo + Video everywhere.
 export const GENERATE_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-[#f45906] px-6 text-sm font-bold capitalize tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+  "flex h-10 items-center justify-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-6 text-sm font-bold capitalize tracking-wide text-text-on-solid shadow-lg shadow-brand-primary/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
 
 // Shared "Cancel" button styling used beside Generate while a job is running.
 export const CANCEL_BTN_CLASS =
-  "flex h-10 items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 text-sm font-bold capitalize tracking-wide text-red-300 transition-all hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50";
+  "flex h-10 items-center justify-center gap-2 rounded-radius-xl border border-error/40 bg-error/10 px-4 text-sm font-bold capitalize tracking-wide text-error transition-all hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50";
 
 // Generate/submit button with credit cost display, affordability gate, and an
 // insufficient-credits tooltip. `balance === null` (unknown) never blocks — the
@@ -47,7 +47,7 @@ export function CreditActionButton({
   // keeps the orange gradient with its spinner, so we only grey out when idle.
   const greyedOut = disabled && !loading;
   const buttonClass = greyedOut
-    ? `${className} !bg-none !bg-white/10 !text-white/40 !shadow-none !opacity-100 cursor-not-allowed`
+    ? `${className} !bg-none !bg-white/10 !text-N900/40 !shadow-none !opacity-100 cursor-not-allowed`
     : className;
 
   const button = (

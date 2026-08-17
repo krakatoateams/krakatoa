@@ -62,13 +62,13 @@ function SettingsContent() {
                     onClick={() => setTab(tab.id)}
                     className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors ${
                       active
-                        ? "bg-white/10 text-white"
-                        : "text-gray-400 hover:bg-white/10 hover:text-white"
+                        ? "bg-white/10 text-N900"
+                        : "text-text-secondary hover:bg-white/10 hover:text-N900"
                     }`}
                   >
                     <Icon
                       className={`h-4 w-4 ${
-                        active ? "text-white" : "text-gray-500"
+                        active ? "text-N900" : "text-text-disabled"
                       }`}
                     />
                     {tab.label}

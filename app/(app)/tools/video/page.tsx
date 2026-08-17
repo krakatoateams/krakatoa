@@ -177,16 +177,16 @@ function GenerationRecoverableBanner({
   onResume: () => void;
 }) {
   return (
-    <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-3">
-        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
         <span>{message}</span>
       </div>
       <button
         type="button"
         onClick={onResume}
         disabled={loading}
-        className="rounded-xl bg-amber-500 px-4 py-2 font-medium text-black transition hover:bg-amber-400 disabled:opacity-50"
+        className="rounded-xl bg-warning px-4 py-2 font-medium text-static-black transition hover:brightness-110 disabled:opacity-50"
       >
         Try again
       </button>
@@ -706,11 +706,11 @@ function VideoOmniPage() {
           : "Scene elements (up to 4). Tag with @ or upload.";
 
   return (
-    <div className="min-h-screen text-white selection:bg-white/20">
+    <div className="min-h-screen text-text-primary selection:bg-white/20">
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
-          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+          <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Video studio
           </h1>
         </div>
@@ -750,7 +750,7 @@ function VideoOmniPage() {
             </div>
           </div>
 
-          <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+          <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
             <div className="flex items-start gap-3">
               {/* Reference media inline before the prompt on desktop */}
               {model.references.referenceImages > 0 && (
@@ -788,7 +788,7 @@ function VideoOmniPage() {
                     maxLength={model.promptMaxChars}
                     placeholder="Describe the scene — camera moves, subject, mood."
                     rows={3}
-                    className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+                    className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
                   />
                 )}
               </div>
@@ -878,16 +878,16 @@ function VideoOmniPage() {
                       type="button"
                       disabled={loading || audioBlockedByRefVideo}
                       onClick={() => setGenerateAudio((v) => !v)}
-                      className={`flex h-10 items-center gap-2 rounded-[4px] px-3 text-sm transition-colors disabled:opacity-40 ${
+                      className={`flex h-10 items-center gap-2 rounded-radius-sm px-3 text-sm transition-colors disabled:opacity-40 ${
                         generateAudio
-                          ? "bg-white/5 text-gray-200 hover:bg-white/10"
-                          : "bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300"
+                          ? "bg-white/5 text-N700 hover:bg-white/10"
+                          : "bg-white/5 text-text-disabled hover:bg-white/10 hover:text-text-secondary"
                       }`}
                     >
                       {generateAudio ? (
-                        <Volume2 className="h-3.5 w-3.5 text-gray-300" />
+                        <Volume2 className="h-3.5 w-3.5 text-text-secondary" />
                       ) : (
-                        <VolumeX className="h-3.5 w-3.5 text-gray-500" />
+                        <VolumeX className="h-3.5 w-3.5 text-text-disabled" />
                       )}
                       Audio
                     </button>
@@ -916,7 +916,7 @@ function VideoOmniPage() {
           {/* Model — attached under the form card on mobile only */}
           <StudioModelPanel>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-gray-500">Model</span>
+              <span className="text-sm font-medium text-text-disabled">Model</span>
               <ChipDropdown
                 sheetTitle="Select model"
                 bare
@@ -960,10 +960,10 @@ function VideoOmniPage() {
             (model.references.referenceVideos > 0 && model.references.referenceImages === 0) ||
             model.references.referenceAudios > 0) && (
           <div className="mt-4">
-            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
-              <Sparkles className="h-3.5 w-3.5 text-gray-300" />
+            <div className="mb-2 flex items-center gap-2 pl-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
+              <Sparkles className="h-3.5 w-3.5 text-text-secondary" />
               References
-              <span className="font-normal normal-case tracking-normal text-gray-600">(optional)</span>
+              <span className="font-normal normal-case tracking-normal text-text-disabled">(optional)</span>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {model.references.firstFrame && (
@@ -1045,7 +1045,7 @@ function VideoOmniPage() {
           )}
 
           {!refCheck.ok && (
-            <p className="mt-2 pl-1 text-sm text-amber-300/80">{refCheck.error}</p>
+            <p className="mt-2 pl-1 text-sm text-warning/80">{refCheck.error}</p>
           )}
         </form>
         )}
@@ -1059,15 +1059,15 @@ function VideoOmniPage() {
         )}
 
         {creationType === "text2video" && error && !recoverableJobId && (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {creationType === "text2video" && loading && (
-          <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+          <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+            <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
             Generating your video with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
           </div>
         )}
@@ -1078,17 +1078,17 @@ function VideoOmniPage() {
               src={resultUrl}
               controls
               playsInline
-              className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-black"
+              className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
             />
             <div className="min-w-0">
-              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
                 <Check className="h-3 w-3" />
                 Saved to your library
               </div>
-              <p className="text-sm text-gray-300">
+              <p className="text-sm text-text-secondary">
                 {model.modelLabel} · {duration}s · {resolution} · {ASPECT_RATIO_LABELS[aspectRatio]}
               </p>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-text-disabled">
                 Find it in your history below, or generate another.
               </p>
             </div>
@@ -1523,7 +1523,7 @@ function ImageToVideoComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
           <div
             className={`grid grid-cols-1 gap-3 ${
               model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
@@ -1573,7 +1573,7 @@ function ImageToVideoComposer({
               />
             )}
             <div
-              className={`flex min-h-[120px] flex-col rounded-2xl border border-dashed border-white/10 bg-black/20 p-3 ${
+              className={`flex min-h-[120px] flex-col rounded-2xl border border-dashed border-white/10 bg-N0/20 p-3 ${
                 model.references.lastFrame ? "lg:col-span-1" : "sm:col-span-1"
               }`}
             >
@@ -1703,7 +1703,7 @@ function ImageToVideoComposer({
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-gray-500">Model</span>
+            <span className="text-sm font-medium text-text-disabled">Model</span>
             <ChipDropdown
               sheetTitle="Select model"
               bare
@@ -1749,22 +1749,22 @@ function ImageToVideoComposer({
       )}
 
       {error && !recoverableJobId && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {restoreNotice && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{restoreNotice}</span>
         </div>
       )}
 
       {loading && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
           Generating with {model.modelLabel} — this can take a couple of minutes.
         </div>
       )}
@@ -1775,14 +1775,14 @@ function ImageToVideoComposer({
             src={resultUrl}
             controls
             playsInline
-            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-black"
+            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
           />
           <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
               <Check className="h-3 w-3" />
               Saved to your library
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-text-secondary">
               {model.modelLabel} · {duration}s · {ASPECT_RATIO_LABELS[aspectRatio]}
             </p>
           </div>
@@ -2069,7 +2069,7 @@ function MotionControlComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
           {/* Uploads: character image + motion video (both required) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CharacterPicker
@@ -2083,12 +2083,12 @@ function MotionControlComposer({
             {templateUrl ? (
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                    <span className="text-gray-300">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+                    <span className="text-text-secondary">
                       <Film className="h-3.5 w-3.5" />
                     </span>
                     Motion to copy
-                    <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-gray-200">
+                    <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-N700">
                       template
                     </span>
                   </div>
@@ -2096,13 +2096,13 @@ function MotionControlComposer({
                     type="button"
                     onClick={() => setTemplateUrl(null)}
                     disabled={loading}
-                    className="text-[10px] font-semibold text-gray-400 transition-colors hover:text-white disabled:opacity-40"
+                    className="text-[10px] font-semibold text-text-secondary transition-colors hover:text-text-primary disabled:opacity-40"
                   >
                     Use my own
                   </button>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-black/40">
+                  <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-radius-sm border border-white/10 bg-N0/40">
                     <video
                       src={templateUrl}
                       muted
@@ -2112,7 +2112,7 @@ function MotionControlComposer({
                       className="absolute inset-0 h-full w-full object-cover"
                     />
                   </div>
-                  <p className="text-[11px] text-gray-400">
+                  <p className="text-[11px] text-text-secondary">
                     {videoDurationSec
                       ? `Trending template ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s.`
                       : "Trending template loaded. Your character will copy this motion."}
@@ -2136,11 +2136,11 @@ function MotionControlComposer({
           </div>
 
           {durationError ? (
-            <p className="mt-2 text-sm leading-snug text-amber-300/90">{durationError}</p>
+            <p className="mt-2 text-sm leading-snug text-warning/90">{durationError}</p>
           ) : videoReady && videoDurationSec != null ? (
-            <p className="mt-2 text-sm leading-snug text-gray-400">
+            <p className="mt-2 text-sm leading-snug text-text-secondary">
               Motion clip limit:{" "}
-              <span className="text-gray-300">{MOTION_CONTROL_REF_DURATION_LABEL}</span>
+              <span className="text-text-secondary">{MOTION_CONTROL_REF_DURATION_LABEL}</span>
             </p>
           ) : null}
 
@@ -2153,12 +2153,12 @@ function MotionControlComposer({
               type="button"
               onClick={() => setAdvancedOpen((o) => !o)}
               aria-expanded={advancedOpen}
-              className="flex items-center gap-1.5 text-sm font-semibold text-gray-400 transition-colors hover:text-gray-200"
+              className="flex items-center gap-1.5 text-sm font-semibold text-text-secondary transition-colors hover:text-N700"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5 text-gray-300" />
+              <SlidersHorizontal className="h-3.5 w-3.5 text-text-secondary" />
               Advanced settings
               {!advancedOpen && prompt.trim() && (
-                <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-medium text-gray-200">
+                <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-medium text-N700">
                   prompt added
                 </span>
               )}
@@ -2169,8 +2169,8 @@ function MotionControlComposer({
             {advancedOpen && (
               <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-sm font-semibold text-gray-200">Prompt</span>
-                  <span className="text-sm font-medium text-gray-500">optional</span>
+                  <span className="text-sm font-semibold text-N700">Prompt</span>
+                  <span className="text-sm font-medium text-text-disabled">optional</span>
                 </div>
                 <textarea
                   value={prompt}
@@ -2178,7 +2178,7 @@ function MotionControlComposer({
                   maxLength={model.promptMaxChars}
                   placeholder={MOTION_CONTROL_PROMPT_PLACEHOLDER}
                   rows={3}
-                  className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+                  className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
                 />
               </div>
             )}
@@ -2211,16 +2211,16 @@ function MotionControlComposer({
                   type="button"
                   disabled={loading}
                   onClick={() => setKeepOriginalSound((v) => !v)}
-                  className={`flex h-10 w-full items-center justify-center gap-2 rounded-[4px] px-3 text-sm transition-colors disabled:opacity-40 lg:w-auto lg:justify-start ${
+                  className={`flex h-10 w-full items-center justify-center gap-2 rounded-radius-sm px-3 text-sm transition-colors disabled:opacity-40 lg:w-auto lg:justify-start ${
                     keepOriginalSound
-                      ? "bg-white/5 text-gray-200 hover:bg-white/10"
-                      : "bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300"
+                      ? "bg-white/5 text-N700 hover:bg-white/10"
+                      : "bg-white/5 text-text-disabled hover:bg-white/10 hover:text-text-secondary"
                   }`}
                 >
                   {keepOriginalSound ? (
-                    <Volume2 className="h-3.5 w-3.5 text-gray-300" />
+                    <Volume2 className="h-3.5 w-3.5 text-text-secondary" />
                   ) : (
-                    <VolumeX className="h-3.5 w-3.5 text-gray-500" />
+                    <VolumeX className="h-3.5 w-3.5 text-text-disabled" />
                   )}
                   Original sound
                 </button>
@@ -2245,7 +2245,7 @@ function MotionControlComposer({
           </div>
 
           {imageReady && videoReady && !durationError ? (
-            <p className="mt-3 pl-1 text-sm text-gray-500">
+            <p className="mt-3 pl-1 text-sm text-text-disabled">
               Motion clip length: {MOTION_CONTROL_REF_DURATION_LABEL}.
             </p>
           ) : null}
@@ -2254,7 +2254,7 @@ function MotionControlComposer({
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-gray-500">Model</span>
+            <span className="text-sm font-medium text-text-disabled">Model</span>
             <ChipDropdown
               sheetTitle="Select model"
               bare
@@ -2292,22 +2292,22 @@ function MotionControlComposer({
       </form>
 
       {error && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {restoreNotice && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{restoreNotice}</span>
         </div>
       )}
 
       {loading && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
           Generating with {model.modelLabel} — this can take a couple of minutes. It will appear below when ready.
         </div>
       )}
@@ -2318,17 +2318,17 @@ function MotionControlComposer({
             src={resultUrl}
             controls
             playsInline
-            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-black"
+            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
           />
           <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
               <Check className="h-3 w-3" />
               Saved to your library
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-text-secondary">
               {model.modelLabel} · {mode === "std" ? "Standard" : "Pro"} · {motionControlResolutionLabel(mode)}
             </p>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-text-disabled">
               Find it in your history below, or generate another.
             </p>
           </div>
@@ -2515,20 +2515,20 @@ function ImportStoryboardModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-N0/70 backdrop-blur-sm"
         onClick={busy ? undefined : onClose}
       />
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#0e0e12] shadow-2xl">
+      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-N50 shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
           <div className="flex items-center gap-2">
-            <Upload className="h-4 w-4 text-gray-300" />
-            <h3 className="text-sm font-bold text-white">Upload your own storyboard</h3>
+            <Upload className="h-4 w-4 text-text-secondary" />
+            <h3 className="text-sm font-bold text-N900">Upload your own storyboard</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+            className="rounded-lg p-1 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary disabled:opacity-40"
           >
             <X className="h-4 w-4" />
           </button>
@@ -2538,7 +2538,7 @@ function ImportStoryboardModal({
           {/* File picker / preview */}
           <label
             className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-6 text-center transition-colors ${
-              previewUrl ? "border-white/15 bg-black/30" : "border-white/20 hover:border-white/30"
+              previewUrl ? "border-white/15 bg-N0/30" : "border-white/20 hover:border-white/30"
             } ${busy ? "pointer-events-none opacity-60" : ""}`}
           >
             {previewUrl ? (
@@ -2550,9 +2550,9 @@ function ImportStoryboardModal({
               />
             ) : (
               <>
-                <Upload className="h-6 w-6 text-gray-400" />
-                <span className="text-sm text-gray-300">Click to choose an image</span>
-                <span className="text-sm text-gray-500">JPG / PNG / WebP · up to 100 MB</span>
+                <Upload className="h-6 w-6 text-text-secondary" />
+                <span className="text-sm text-text-secondary">Click to choose an image</span>
+                <span className="text-sm text-text-disabled">JPG / PNG / WebP · up to 100 MB</span>
               </>
             )}
             <input
@@ -2563,17 +2563,17 @@ function ImportStoryboardModal({
               onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             />
             {previewUrl && (
-              <span className="text-sm font-semibold text-gray-300">Change image</span>
+              <span className="text-sm font-semibold text-text-secondary">Change image</span>
             )}
           </label>
 
           {/* Optional description */}
           <div>
-            <label className="mb-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
-              Description <span className="text-gray-600">(optional)</span>
+            <label className="mb-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-secondary">
+              Description <span className="text-text-disabled">(optional)</span>
               <Tooltip label="Briefly describe what should happen in the video. Helps the AI analyze your storyboard image.">
                 <Info
-                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  className="h-3.5 w-3.5 text-text-disabled transition-colors hover:text-text-secondary"
                   aria-label="What the description is for"
                 />
               </Tooltip>
@@ -2584,7 +2584,7 @@ function ImportStoryboardModal({
               rows={2}
               disabled={busy}
               placeholder="What should happen in the video? Helps steer the analysis."
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white placeholder:text-gray-600 focus:border-white/25 focus:outline-none"
+              className="w-full resize-none rounded-xl border border-white/10 bg-N0/30 p-3 text-sm text-text-primary placeholder:text-text-disabled focus:border-white/25 focus:outline-none"
             />
           </div>
 
@@ -2637,14 +2637,14 @@ function ImportStoryboardModal({
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+            <div className="flex items-start gap-2 rounded-xl border border-error/20 bg-error/10 p-3 text-sm text-error">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
           {restoreNotice && (
-            <div className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-200">
+            <div className="flex items-start gap-2 rounded-xl border border-warning/20 bg-warning/10 p-3 text-sm text-warning">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{restoreNotice}</span>
             </div>
@@ -2652,7 +2652,7 @@ function ImportStoryboardModal({
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
-          <p className="mr-auto hidden text-sm text-gray-500 sm:block">
+          <p className="mr-auto hidden text-sm text-text-disabled sm:block">
             We analyze the image to write the video prompt — you can edit it before rendering.
           </p>
           <GenerationCancelButton
@@ -2669,7 +2669,7 @@ function ImportStoryboardModal({
             ready={!!file}
             loading={busy}
             label="Analyze"
-            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-[4px] bg-gradient-to-r from-orange-500 to-[#f45906] px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-radius-sm bg-gradient-to-r from-brand-primary-light to-brand-primary px-5 text-sm font-bold uppercase tracking-wide text-text-on-solid shadow-lg shadow-brand-primary/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>
       </div>
@@ -2985,17 +2985,17 @@ function StoryboardToVideoComposer({
           </div>
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm sm:p-5">
+        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
-            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-400">
-              <span className="text-gray-300">
+            <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-secondary">
+              <span className="text-text-secondary">
                 <ImageIcon className="h-3.5 w-3.5" />
               </span>
               Choose a storyboard
               <Tooltip label="Pick a storyboard from Photo Studio or upload your own image. The AI turns it into a 15s video with dialogue.">
                 <Info
-                  className="h-3.5 w-3.5 text-gray-500 transition-colors hover:text-gray-300"
+                  className="h-3.5 w-3.5 text-text-disabled transition-colors hover:text-text-secondary"
                   aria-label="How storyboard selection works"
                 />
               </Tooltip>
@@ -3010,16 +3010,16 @@ function StoryboardToVideoComposer({
               label="Loading your storyboards"
             />
           ) : listState === "error" ? (
-            <div className="flex h-24 items-center gap-2 text-sm text-red-300">
+            <div className="flex h-24 items-center gap-2 text-sm text-error">
               <AlertCircle className="h-4 w-4" /> Couldn&apos;t load your storyboards.
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1 text-sm text-gray-500">
+              <div className="flex flex-col gap-1 text-sm text-text-disabled">
                 <span>You don&apos;t have any storyboards yet.</span>
                 <a
                   href="/tools/photo-v2?type=storyboard"
-                  className="font-semibold text-gray-300 hover:text-gray-200"
+                  className="font-semibold text-text-secondary hover:text-N700"
                 >
                   Create one in Photo → Storyboard →
                 </a>
@@ -3028,7 +3028,7 @@ function StoryboardToVideoComposer({
                 type="button"
                 disabled={loading}
                 onClick={() => setShowUpload(true)}
-                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
+                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-3 text-sm font-semibold text-text-secondary transition-colors hover:border-white/30 hover:text-text-primary disabled:opacity-40"
               >
                 <Upload className="h-4 w-4" />
                 Upload your own storyboard
@@ -3040,7 +3040,7 @@ function StoryboardToVideoComposer({
                 type="button"
                 disabled={loading}
                 onClick={() => setShowUpload(true)}
-                className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-gray-400 transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
+                className="flex h-full min-h-[108px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/20 bg-white/[0.02] text-text-secondary transition-colors hover:border-white/30 hover:text-text-primary disabled:opacity-40"
               >
                 <Upload className="h-5 w-5" />
                 <span className="text-sm font-semibold">Upload your own</span>
@@ -3069,26 +3069,26 @@ function StoryboardToVideoComposer({
                         className="object-cover"
                       />
                     </div>
-                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-300">
+                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-text-secondary">
                       {s.aspectRatio && (
-                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-xs font-semibold text-gray-200">
+                        <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-xs font-semibold text-N700">
                           {s.aspectRatio}
                         </span>
                       )}
                       <span className="truncate">{s.theme}</span>
                     </span>
                     {s.hasVideo && (
-                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                      <span className="absolute left-1.5 top-1.5 rounded-full bg-N0/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-success">
                         Has video
                       </span>
                     )}
                     {s.source === "uploaded" && (
-                      <span className="absolute left-1.5 bottom-9 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-gray-300">
+                      <span className="absolute left-1.5 bottom-9 rounded-full bg-N0/70 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Uploaded
                       </span>
                     )}
                     {active && (
-                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-gray-900">
+                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-N900 text-N0">
                         <Check className="h-3 w-3" />
                       </span>
                     )}
@@ -3177,15 +3177,15 @@ function StoryboardToVideoComposer({
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((o) => !o)}
-                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:text-gray-200 sm:text-sm"
+                className="flex w-full items-center gap-2 text-left text-xs font-semibold uppercase tracking-wider text-text-secondary transition-colors hover:text-N700 sm:text-sm"
               >
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
                 />
-                <Pencil className="h-3.5 w-3.5 text-gray-300" />
+                <Pencil className="h-3.5 w-3.5 text-text-secondary" />
                 Advanced — edit prompt
                 {promptDirty && (
-                  <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-bold text-gray-200">
+                  <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-xs font-bold text-N700">
                     Edited
                   </span>
                 )}
@@ -3198,9 +3198,9 @@ function StoryboardToVideoComposer({
                     rows={6}
                     disabled={loading}
                     placeholder="The video prompt Seedance will follow…"
-                    className="w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 text-sm leading-relaxed text-gray-200 placeholder:text-gray-600 focus:border-white/25 focus:outline-none"
+                    className="w-full resize-y rounded-xl border border-white/10 bg-N0/30 p-3 text-sm leading-relaxed text-N700 placeholder:text-text-disabled focus:border-white/25 focus:outline-none"
                   />
-                  <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-gray-500">
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-text-disabled">
                     <span>
                       Style, orientation &amp; language are re-applied automatically on render.
                     </span>
@@ -3208,8 +3208,8 @@ function StoryboardToVideoComposer({
                       <span
                         className={
                           promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS
-                            ? "font-semibold text-amber-300"
-                            : "text-gray-500"
+                            ? "font-semibold text-warning"
+                            : "text-text-disabled"
                         }
                         title={`Keep the prompt under ~${SEEDANCE_PROMPT_BODY_BUDGET_CHARS} characters so style, orientation & language can be added without the video model truncating it.`}
                       >
@@ -3219,7 +3219,7 @@ function StoryboardToVideoComposer({
                         <button
                           type="button"
                           onClick={() => setPromptDraft(storedPrompt)}
-                          className="font-semibold text-gray-400 hover:text-gray-200"
+                          className="font-semibold text-text-secondary hover:text-N700"
                         >
                           Reset
                         </button>
@@ -3227,7 +3227,7 @@ function StoryboardToVideoComposer({
                     </div>
                   </div>
                   {promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS && (
-                    <p className="mt-1 text-sm text-amber-300/80">
+                    <p className="mt-1 text-sm text-warning/80">
                       This prompt is long — it may be trimmed at a sentence boundary on render so the style, orientation &amp; language directives still fit. Shorten it for full fidelity.
                     </p>
                   )}
@@ -3237,7 +3237,7 @@ function StoryboardToVideoComposer({
           ) : null}
 
           {!selectedId && listState === "loaded" && items.length > 0 ? (
-            <p className="mt-3 pl-1 text-sm text-amber-300/80">
+            <p className="mt-3 pl-1 text-sm text-warning/80">
               Pick a storyboard to turn into a video.
             </p>
           ) : null}
@@ -3246,7 +3246,7 @@ function StoryboardToVideoComposer({
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-gray-500">Model</span>
+            <span className="text-sm font-medium text-text-disabled">Model</span>
             <ChipDropdown
               sheetTitle="Select model"
               bare
@@ -3291,7 +3291,7 @@ function StoryboardToVideoComposer({
       )}
 
       {error && !recoverableJobId && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
@@ -3306,8 +3306,8 @@ function StoryboardToVideoComposer({
       )}
 
       {loading && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
           Rendering your storyboard into a 15s clip — it will appear below when ready.
         </div>
       )}
@@ -3318,20 +3318,20 @@ function StoryboardToVideoComposer({
             src={resultUrl}
             controls
             playsInline
-            className={`shrink-0 rounded-2xl border border-white/10 bg-black ${
+            className={`shrink-0 rounded-2xl border border-white/10 bg-N0 ${
               aspect === "9:16" ? "w-full max-w-[260px]" : "w-full max-w-md"
             }`}
           />
           <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
               <Check className="h-3 w-3" />
               Saved to your library
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-text-secondary">
               {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
               {selected ? ` · ${selected.theme}` : ""}
             </p>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-text-disabled">
               Find it in your history below, or render another resolution.
             </p>
           </div>
@@ -3470,7 +3470,7 @@ function ThemedSelect({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-black/30 p-2.5 text-left text-sm text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-N0/30 p-2.5 text-left text-sm text-text-primary transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
           open ? "border-white/30 bg-white/10" : "border-white/10 hover:border-white/25"
         }`}
       >
@@ -3478,11 +3478,11 @@ function ThemedSelect({
           {value}
         </span>
         <ChevronDown
-          className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-4 w-4 shrink-0 text-text-secondary transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50">
           {options.map((opt) => {
             const active = opt === value;
             return (
@@ -3494,12 +3494,12 @@ function ThemedSelect({
                   setOpen(false);
                 }}
                 className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                  active ? "bg-white/15 text-white" : "text-gray-300 hover:bg-white/5"
+                  active ? "bg-white/15 text-text-primary" : "text-text-secondary hover:bg-white/5"
                 }`}
                 style={previewFont ? { fontFamily: `"${opt}", sans-serif` } : undefined}
               >
                 {opt}
-                {active && <Check className="h-4 w-4 shrink-0 text-gray-300" />}
+                {active && <Check className="h-4 w-4 shrink-0 text-text-secondary" />}
               </button>
             );
           })}
@@ -3531,13 +3531,13 @@ function NumberStepper({
     if (!Number.isNaN(n)) onChange(clamp(n));
   };
   return (
-    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-black/30 transition-colors focus-within:border-white/25">
+    <div className="flex items-stretch overflow-hidden rounded-xl border border-white/10 bg-N0/30 transition-colors focus-within:border-white/25">
       <button
         type="button"
         disabled={disabled || value <= min}
         onClick={() => set(value - step)}
         aria-label="Decrease"
-        className="flex w-10 shrink-0 items-center justify-center text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-10 shrink-0 items-center justify-center text-text-secondary transition-colors hover:bg-white/5 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30"
       >
         <Minus className="h-4 w-4" />
       </button>
@@ -3549,14 +3549,14 @@ function NumberStepper({
         step={step}
         disabled={disabled}
         onChange={(e) => set(Number(e.target.value))}
-        className="w-full min-w-0 border-x border-white/10 bg-transparent p-2.5 text-center text-sm font-semibold text-white focus:outline-none disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-full min-w-0 border-x border-white/10 bg-transparent p-2.5 text-center text-sm font-semibold text-text-primary focus:outline-none disabled:opacity-40 [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
       />
       <button
         type="button"
         disabled={disabled || value >= max}
         onClick={() => set(value + step)}
         aria-label="Increase"
-        className="flex w-10 shrink-0 items-center justify-center text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex w-10 shrink-0 items-center justify-center text-text-secondary transition-colors hover:bg-white/5 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30"
       >
         <Plus className="h-4 w-4" />
       </button>
@@ -3849,7 +3849,7 @@ function ReelsCreatorComposer({
           )}
         </div>
 
-        <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
           {/* Theme */}
           <textarea
             value={theme}
@@ -3857,7 +3857,7 @@ function ReelsCreatorComposer({
             placeholder="Describe your reel — e.g., The history of space exploration in 60 seconds. Our AI writes the script, scenes, narration, and captions."
             rows={3}
             disabled={loading}
-            className="min-h-[64px] w-full resize-none bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+            className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
           />
 
           {/* Controls row */}
@@ -4053,7 +4053,7 @@ function ReelsCreatorComposer({
         {/* Engine — attached under the form card on mobile only */}
         <StudioModelPanel>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-gray-500">Engine</span>
+            <span className="text-sm font-medium text-text-disabled">Engine</span>
             <ChipDropdown
               sheetTitle="Select engine"
               bare
@@ -4088,14 +4088,14 @@ function ReelsCreatorComposer({
         {/* Caption styler + live preview */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-gray-400 sm:text-sm">
-              <Type className="h-3.5 w-3.5 text-gray-300" />
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-text-secondary sm:text-sm">
+              <Type className="h-3.5 w-3.5 text-text-secondary" />
               Caption style
             </div>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                     Font family
                   </label>
                   <ThemedSelect
@@ -4107,7 +4107,7 @@ function ReelsCreatorComposer({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                     Font size
                   </label>
                   <NumberStepper
@@ -4121,10 +4121,10 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                       Text color
                     </label>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
+                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-N0/30 p-1.5">
                       <input
                         type="color"
                         value={captionStyle.highlightColor}
@@ -4134,16 +4134,16 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-sm text-gray-300">
+                      <span className="font-mono text-sm text-text-secondary">
                         {captionStyle.highlightColor}
                       </span>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                       Outline
                     </label>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
+                    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-N0/30 p-1.5">
                       <input
                         type="color"
                         value={captionStyle.outlineColor}
@@ -4153,7 +4153,7 @@ function ReelsCreatorComposer({
                         disabled={loading}
                         className="h-8 w-8 cursor-pointer rounded-lg border-none bg-transparent"
                       />
-                      <span className="font-mono text-sm text-gray-300">
+                      <span className="font-mono text-sm text-text-secondary">
                         {captionStyle.outlineColor}
                       </span>
                     </div>
@@ -4163,7 +4163,7 @@ function ReelsCreatorComposer({
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                  <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                     Outline thickness
                   </label>
                   <NumberStepper
@@ -4179,10 +4179,10 @@ function ReelsCreatorComposer({
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-gray-500">
+                    <label className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-disabled">
                       Vertical position
                     </label>
-                    <span className="text-sm font-bold text-gray-300">
+                    <span className="text-sm font-bold text-text-secondary">
                       {captionStyle.marginV}%
                     </span>
                   </div>
@@ -4206,9 +4206,9 @@ function ReelsCreatorComposer({
                       setCaptionStyle({ ...captionStyle, highlightOnly: e.target.checked })
                     }
                     disabled={loading}
-                    className="h-4 w-4 cursor-pointer rounded border-white/10 bg-black/30 accent-white"
+                    className="h-4 w-4 cursor-pointer rounded border-white/10 bg-N0/30 accent-white"
                   />
-                  <span className="text-sm font-semibold text-gray-300">
+                  <span className="text-sm font-semibold text-text-secondary">
                     Highlight only mode
                   </span>
                 </label>
@@ -4217,12 +4217,12 @@ function ReelsCreatorComposer({
           </div>
 
           {/* Live Caption Preview — 480x854 math mirrors the server ASS MarginV. */}
-          <div className="rounded-3xl border border-white/10 bg-black/40 p-4 sm:p-5">
-            <div className="mb-3 text-center text-xs font-bold uppercase tracking-[0.3em] text-gray-500 sm:text-sm">
+          <div className="rounded-3xl border border-white/10 bg-N0/40 p-4 sm:p-5">
+            <div className="mb-3 text-center text-xs font-bold uppercase tracking-[0.3em] text-text-disabled sm:text-sm">
               Live caption preview
             </div>
             {engine === "veo" && (
-              <p className="mx-auto mb-3 max-w-[240px] text-center text-sm leading-relaxed text-amber-400/80">
+              <p className="mx-auto mb-3 max-w-[240px] text-center text-sm leading-relaxed text-warning/80">
                 Preview uses 480×854 math; Veo outputs 720p/1080p so vertical caption
                 position may differ slightly.
               </p>
@@ -4249,8 +4249,8 @@ function ReelsCreatorComposer({
               const metricScale = FONT_METRIC_SCALES[captionStyle.fontname] || 0.85;
               const offsetScale = DESCENDER_OFFSET_SCALES[captionStyle.fontname] || 0.08;
               return (
-                <div className="relative mx-auto aspect-[9/16] w-[220px] overflow-hidden rounded-[2rem] border-[6px] border-white/10 bg-slate-900 shadow-inner">
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60" />
+                <div className="relative mx-auto aspect-[9/16] w-[220px] overflow-hidden rounded-[2rem] border-[6px] border-white/10 bg-N50 shadow-inner">
+                  <div className="absolute inset-0 bg-gradient-to-t from-N0 via-transparent to-transparent opacity-60" />
                   <div
                     className="pointer-events-none absolute left-0 flex w-full justify-center px-4 transition-all duration-300"
                     style={{
@@ -4286,16 +4286,16 @@ function ReelsCreatorComposer({
       </form>
 
       {recoverableJobId && (
-        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <span>{error ?? "Editing failed. You can try again without an extra charge."}</span>
           </div>
           <button
             type="button"
             onClick={() => handleResumeRecoverable()}
             disabled={loading}
-            className="rounded-xl bg-amber-500 px-4 py-2 font-medium text-black transition hover:bg-amber-400 disabled:opacity-50"
+            className="rounded-xl bg-warning px-4 py-2 font-medium text-static-black transition hover:brightness-110 disabled:opacity-50"
           >
             Try again
           </button>
@@ -4303,15 +4303,15 @@ function ReelsCreatorComposer({
       )}
 
       {error && !recoverableJobId && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {loading && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
           Writing the script, generating scenes, narration &amp; captions — this can take a
           few minutes. It will appear below when ready.
         </div>
@@ -4323,14 +4323,14 @@ function ReelsCreatorComposer({
             src={resultUrl}
             controls
             playsInline
-            className="w-full max-w-[260px] shrink-0 rounded-2xl border border-white/10 bg-black"
+            className="w-full max-w-[260px] shrink-0 rounded-2xl border border-white/10 bg-N0"
           />
           <div className="min-w-0 flex-1">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
               <Check className="h-3 w-3" />
               Saved to your library
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-text-secondary">
               {engine === "veo"
                 ? `${reelsEngineLabel("veo")} · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
                 : `${reelsEngineLabel("seedance")} · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
@@ -4339,14 +4339,14 @@ function ReelsCreatorComposer({
               <a
                 href={resultUrl}
                 download
-                className="inline-flex items-center gap-2 rounded-[4px] border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-radius-sm border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-white/10"
               >
                 <Download className="h-4 w-4" />
                 Download
               </a>
               <a
                 href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}`}
-                className="inline-flex items-center gap-2 rounded-[4px] bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-500"
+                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
               >
                 <CalendarClock className="h-4 w-4" />
                 Schedule to YouTube

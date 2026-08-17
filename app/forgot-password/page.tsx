@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { AuthLayout } from "@/components/auth/AuthLayout";
+import { Button } from "@/components/ui/Button";
 
 // Standalone fallback route — the primary flow is now the in-place
 // ForgotPasswordForm view inside SignInModal (opened via "Forgot password?"
@@ -45,9 +46,9 @@ function ForgotPasswordForm() {
     return (
       <AuthLayout>
         <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/20">
             <svg
-              className="h-6 w-6 text-green-400"
+              className="h-6 w-6 text-success"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -61,12 +62,12 @@ function ForgotPasswordForm() {
               />
             </svg>
           </div>
-          <h2 className="font-display text-lg font-semibold text-white">Check your email!</h2>
-          <p className="text-sm text-gray-400">
-            If <strong className="text-white">{email}</strong> is registered, we&apos;ve
+          <h2 className="font-display text-lg font-semibold text-text-primary">Check your email!</h2>
+          <p className="text-body-3 text-text-secondary">
+            If <strong className="text-text-primary">{email}</strong> is registered, we&apos;ve
             sent a password reset link to that address.
           </p>
-          <Link href="/login" className="block text-sm text-[#F26522] hover:text-[#e05a1a]">
+          <Link href="/login" className="block text-body-3 text-brand-primary hover:text-brand-primary-hover">
             Back to login
           </Link>
         </div>
@@ -78,14 +79,14 @@ function ForgotPasswordForm() {
     <AuthLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-xl font-bold text-white">Forgot password?</h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <h1 className="font-display text-xl font-bold text-text-primary">Forgot password?</h1>
+          <p className="mt-1 text-body-3 text-text-secondary">
             Enter your email and we&apos;ll send you a link to reset your password.
           </p>
         </div>
 
         {expired && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-400">
+          <div className="rounded-radius-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-small text-warning">
             This password reset link has expired or was already used. Request a new one
             below.
           </div>
@@ -93,7 +94,7 @@ function ForgotPasswordForm() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-400">
+            <label className="mb-1 block text-small font-medium text-text-secondary">
               Email
             </label>
             <input
@@ -102,21 +103,17 @@ function ForgotPasswordForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-[#F26522]"
+              className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-[#F26522] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#e05a1a] disabled:opacity-50"
-          >
-            {loading ? "Sending…" : "Send reset link"}
-          </button>
+          <Button type="submit" variant="primary" size="md" loading={loading} className="w-full">
+            Send reset link
+          </Button>
         </form>
 
-        <p className="text-center text-sm text-gray-400">
-          <Link href="/login" className="text-[#F26522] hover:text-[#e05a1a]">
+        <p className="text-center text-body-3 text-text-secondary">
+          <Link href="/login" className="text-brand-primary hover:text-brand-primary-hover">
             Back to login
           </Link>
         </p>
