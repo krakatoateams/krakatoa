@@ -214,7 +214,7 @@ function Navbar() {
       ) : (
         <button
           type="button"
-          onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` } })}
+          onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`, queryParams: { prompt: "select_account" } } })}
           className="flex cursor-pointer items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:border-red-500/60 hover:bg-red-500/20"
         >
           <YoutubeIcon className="h-4 w-4" />

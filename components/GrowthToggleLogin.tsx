@@ -128,7 +128,7 @@ export function GrowthToggleLogin() {
 
             <button
               type="button"
-              onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` } })}
+              onClick={() => getSupabaseAuthBrowser().auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`, queryParams: { prompt: "select_account" } } })}
               className="mt-8 flex w-full cursor-pointer items-center justify-center gap-3 rounded-full bg-neutral-950 px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-neutral-800"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden>

@@ -65,6 +65,9 @@ export default function SignupPage() {
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+        // Forces Google's account chooser every time — see SignInForm.tsx's
+        // handleGoogleSignIn for why this is needed.
+        queryParams: { prompt: "select_account" },
       },
     });
   }
