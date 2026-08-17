@@ -52,7 +52,7 @@ export function AuthModalShell({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-spacing-lg top-spacing-lg rounded-radius-md p-spacing-sm text-icon-low-emphasis transition-colors hover:bg-bg-surface-2 hover:text-text-primary"
+          className="absolute right-spacing-lg top-spacing-lg rounded-radius-xl p-spacing-sm text-icon-low-emphasis transition-colors hover:bg-bg-surface-2 hover:text-text-primary"
         >
           <X className="h-4 w-4" />
         </button>

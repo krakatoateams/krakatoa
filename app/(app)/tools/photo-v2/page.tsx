@@ -332,7 +332,7 @@ function StoryboardComposer({
           <UploadTile label="Theme" upload={themeReference} disabled={loading} fluid />
         </div>
 
-        <div className="rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+        <div className="rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
           <div className="flex items-start gap-3">
             <MentionTextarea
               value={theme}
@@ -434,49 +434,49 @@ function StoryboardComposer({
             onCancel={() => cancelSubmit()}
           />
         </div>
-        <p className="mt-2 pl-1 text-xs text-gray-500">
+        <p className="mt-2 pl-1 text-xs text-text-disabled">
           Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
         </p>
       </form>
 
       {error && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {loading && (
-        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+        <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
           Drafting your six-panel storyboard — it will appear below when ready.
         </div>
       )}
 
       {result && result.url && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-[16px] border border-white/10 bg-white/5 p-4 sm:flex-row">
+        <div className="mt-6 flex flex-col gap-4 rounded-radius-xl border border-white/10 bg-white/5 p-4 sm:flex-row">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={result.url}
             alt="Storyboard sheet"
-            className="w-full max-w-md shrink-0 rounded-2xl border border-white/10 bg-black object-contain"
+            className="w-full max-w-md shrink-0 rounded-2xl border border-white/10 bg-N0 object-contain"
           />
           <div className="flex min-w-0 flex-col">
-            <div className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+            <div className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
               <Check className="h-3 w-3" />
               Saved to your library
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-text-secondary">
               {STORYBOARD_STYLE_LABELS[style]} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)} · six panels
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-text-disabled">
               Happy with it? Turn this storyboard into a video.
             </p>
             <button
               type="button"
               onClick={() => goToVideo(result.id)}
               disabled={!result.id}
-              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-[#f45906] px-5 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-5 text-sm font-bold uppercase tracking-wide text-text-on-solid shadow-lg shadow-brand-primary/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Clapperboard className="h-4 w-4" />
               <span>Create video</span>
@@ -1059,11 +1059,11 @@ function PhotoOmniPage() {
   };
 
   return (
-    <div className="min-h-screen text-white selection:bg-white/20">
+    <div className="min-h-screen text-text-primary selection:bg-white/20">
 
       <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
         <div className="mb-8">
-          <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+          <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Photo studio
           </h1>
         </div>
@@ -1158,18 +1158,18 @@ function PhotoOmniPage() {
             </div>
           )}
 
-          <div className="relative z-10 rounded-[16px] border border-white/10 bg-neutral-800 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+          <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
             {/* Character name (Character creation only) */}
             {isCharacterMode && (
               <div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-3">
-                <User className="h-4 w-4 shrink-0 text-gray-300" />
+                <User className="h-4 w-4 shrink-0 text-text-secondary" />
                 <input
                   type="text"
                   value={characterName}
                   onChange={(e) => setCharacterName(e.target.value)}
                   placeholder="Name your character (optional)"
                   maxLength={80}
-                  className="w-full bg-transparent text-sm font-semibold text-white placeholder:font-normal placeholder:text-gray-500 focus:outline-none"
+                  className="w-full bg-transparent text-sm font-semibold text-text-primary placeholder:font-normal placeholder:text-text-disabled focus:outline-none"
                 />
               </div>
             )}
@@ -1384,9 +1384,9 @@ function PhotoOmniPage() {
           </div>
 
           {/* Model selector — attached under the form card on mobile only */}
-          <div className="-mt-3 mb-6 rounded-b-[16px] bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden">
+          <div className="-mt-3 mb-6 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium text-gray-500">Model</span>
+              <span className="text-sm font-medium text-text-disabled">Model</span>
               <ChipDropdown
                 sheetTitle="Select model"
                 bare
@@ -1425,7 +1425,7 @@ function PhotoOmniPage() {
           </div>
 
           {!creationSupported ? (
-            <p className="mt-2 pl-1 text-xs text-amber-300/80">
+            <p className="mt-2 pl-1 text-xs text-warning/80">
               {selectedCreation?.label} is coming soon — switch to Generate any image or Product
               try-on.
             </p>
@@ -1433,22 +1433,22 @@ function PhotoOmniPage() {
         </form>
 
         {warning && (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
+          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{warning}</span>
           </div>
         )}
 
         {error && (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+          <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+            <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
             {isCharacterMode
               ? `Creating your character turnaround with ${tier.label} — it will appear below when ready.`
               : isSocialMode
@@ -1461,7 +1461,7 @@ function PhotoOmniPage() {
 
         {resultUrl && !loading && (
           <div
-            className={`mt-6 flex flex-col gap-4 rounded-[16px] border border-white/10 bg-white/5 p-4 sm:flex-row ${
+            className={`mt-6 flex flex-col gap-4 rounded-radius-xl border border-white/10 bg-white/5 p-4 sm:flex-row ${
               isSocialMode ? "" : "sm:items-center"
             }`}
           >
@@ -1500,11 +1500,11 @@ function PhotoOmniPage() {
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
                 <Check className="h-3 w-3" />
                 Saved to your library
               </div>
-              <p className="text-sm text-gray-300">
+              <p className="text-sm text-text-secondary">
                 {isCharacterMode
                   ? `Character${characterName.trim() ? ` · ${characterName.trim()}` : ""} · ${tier.label}`
                   : isImageMode
@@ -1517,32 +1517,32 @@ function PhotoOmniPage() {
               </p>
               {isSocialMode ? (
                 <>
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-text-disabled">
                     {resultBatch.length > 1
                       ? "Pick the image you like, write a caption, then send the post to your scheduler."
                       : "Write a caption, then send the post to your scheduler."}
                   </p>
 
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-N0/20 p-3">
                     <textarea
                       value={caption}
                       onChange={(e) => setCaption(e.target.value)}
                       rows={4}
                       maxLength={2200}
                       placeholder="Your caption — write it yourself, or let AI draft one."
-                      className="w-full resize-none bg-transparent text-sm text-white placeholder:text-gray-500 focus:outline-none"
+                      className="w-full resize-none bg-transparent text-sm text-text-primary placeholder:text-text-disabled focus:outline-none"
                     />
                     <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2">
                       <button
                         type="button"
                         onClick={handleGenerateCaption}
                         disabled={captionLoading}
-                        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-gray-200 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-text-primary transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {captionLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Sparkles className="h-3.5 w-3.5 text-gray-300" />
+                          <Sparkles className="h-3.5 w-3.5 text-text-secondary" />
                         )}
                         {captionLoading
                           ? "Writing…"
@@ -1554,28 +1554,28 @@ function PhotoOmniPage() {
                         <button
                           type="button"
                           onClick={handleCopyCaption}
-                          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-gray-200 transition-colors hover:bg-white/10"
+                          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-text-primary transition-colors hover:bg-white/10"
                         >
                           {captionCopied ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-300" />
+                            <Check className="h-3.5 w-3.5 text-success" />
                           ) : (
                             <Copy className="h-3.5 w-3.5" />
                           )}
                           {captionCopied ? "Copied" : "Copy"}
                         </button>
                       )}
-                      <span className="ml-auto text-[11px] text-gray-500">Free</span>
+                      <span className="ml-auto text-[11px] text-text-disabled">Free</span>
                     </div>
                   </div>
 
                   {captionError && (
-                    <p className="mt-2 text-xs text-red-300">{captionError}</p>
+                    <p className="mt-2 text-xs text-error">{captionError}</p>
                   )}
 
                   <button
                     type="button"
                     onClick={handleSchedulePost}
-                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-full bg-gradient-to-r from-orange-500 to-[#f45906] px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
                   >
                     <CalendarClock className="h-4 w-4" />
                     <span>Schedule this post</span>
@@ -1583,7 +1583,7 @@ function PhotoOmniPage() {
                   </button>
                 </>
               ) : (
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-text-disabled">
                   Click the thumbnail to view full size, or generate another below.
                 </p>
               )}
@@ -1592,7 +1592,7 @@ function PhotoOmniPage() {
                 <button
                   type="button"
                   onClick={handleAnimate}
-                  className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+                  className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
                 >
                   <Clapperboard className="h-4 w-4" />
                   <span>Animate this photo</span>
@@ -1626,7 +1626,7 @@ function PhotoOmniPage() {
 
       {characterPickerOpen && (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-N0/80 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-label="Choose a saved character"
@@ -1634,18 +1634,18 @@ function PhotoOmniPage() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-950"
+            className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-N50"
           >
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-                <Users className="h-4 w-4 text-gray-300" />
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-N900">
+                <Users className="h-4 w-4 text-text-secondary" />
                 Choose a character
               </h3>
               <button
                 type="button"
                 onClick={() => setCharacterPickerOpen(false)}
                 aria-label="Close"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-N900/70 transition-colors hover:bg-white/10 hover:text-white"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1660,9 +1660,9 @@ function PhotoOmniPage() {
                 />
               ) : savedCharacters.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] py-16 text-center">
-                  <Users className="mx-auto mb-3 h-10 w-10 text-gray-600" />
-                  <p className="text-sm text-gray-400">No saved characters yet.</p>
-                  <p className="mt-1 text-xs text-gray-600">
+                  <Users className="mx-auto mb-3 h-10 w-10 text-text-disabled" />
+                  <p className="text-sm text-text-secondary">No saved characters yet.</p>
+                  <p className="mt-1 text-xs text-text-disabled">
                     Create one with the “Character creation” type, then reuse it here.
                   </p>
                 </div>
@@ -1686,7 +1686,7 @@ function PhotoOmniPage() {
                             : "border-white/10 hover:border-white/30"
                         }`}
                       >
-                        <div className="relative aspect-square w-full bg-black/40">
+                        <div className="relative aspect-square w-full bg-N0/40">
                           <Image
                             src={item.mediaUrl}
                             alt={name}
@@ -1695,7 +1695,7 @@ function PhotoOmniPage() {
                             className="object-cover"
                           />
                         </div>
-                        <p className="truncate px-2 py-1.5 text-[11px] font-medium text-white">
+                        <p className="truncate px-2 py-1.5 text-[11px] font-medium text-text-primary">
                           {name}
                         </p>
                       </button>
@@ -1710,13 +1710,13 @@ function PhotoOmniPage() {
 
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-N0/85 p-4"
           role="presentation"
           onClick={() => setLightboxUrl(null)}
         >
           <button
             type="button"
-            className="absolute right-6 top-6 z-[201] cursor-pointer rounded-full border-0 bg-white/10 p-2 text-white hover:bg-white/20"
+            className="absolute right-6 top-6 z-[201] cursor-pointer rounded-full border-0 bg-white/10 p-2 text-N900 hover:bg-white/20"
             onClick={(e) => {
               e.stopPropagation();
               setLightboxUrl(null);

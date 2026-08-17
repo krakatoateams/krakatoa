@@ -32,7 +32,7 @@ export default function TrendingTemplates() {
   return (
     <section className="mb-10">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-text-disabled">
           Try-on templates
         </h2>
         <div className="flex items-center gap-1.5">
@@ -40,7 +40,7 @@ export default function TrendingTemplates() {
             type="button"
             onClick={() => scrollBy(-1)}
             aria-label="Scroll left"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-text-secondary transition-colors hover:bg-white/[0.08] hover:text-N900"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -48,7 +48,7 @@ export default function TrendingTemplates() {
             type="button"
             onClick={() => scrollBy(1)}
             aria-label="Scroll right"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] text-text-secondary transition-colors hover:bg-white/[0.08] hover:text-N900"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -92,11 +92,11 @@ function TemplateCard({
       />
 
       {/* Hover overlay with the Use template CTA, anchored to the bottom */}
-      <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/70 via-black/10 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+      <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-N0/70 via-N0/10 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
         <button
           type="button"
           onClick={onUse}
-          className="flex h-10 w-full items-center justify-center rounded-xl bg-white px-3 text-sm font-bold capitalize tracking-normal text-gray-900 shadow-lg shadow-black/20 transition-all hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-full items-center justify-center rounded-xl bg-bg-static-white px-3 text-sm font-bold capitalize tracking-normal text-text-static-black shadow-lg shadow-N0/20 transition-all hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Use template
         </button>

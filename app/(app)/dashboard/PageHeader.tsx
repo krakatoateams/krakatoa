@@ -23,11 +23,11 @@ export default function PageHeader({
       } ${className}`}
     >
       <div>
-        <h1 className="mb-3 bg-gradient-to-b from-white to-gray-400 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+        <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
           {title}
         </h1>
         {description ? (
-          <p className="text-sm text-gray-500">{description}</p>
+          <p className="text-body-3 text-text-secondary">{description}</p>
         ) : null}
       </div>
       {actions ?? null}

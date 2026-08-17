@@ -106,23 +106,23 @@ export function ActiveGenerationTiles({
               {live && <div className="absolute inset-0 animate-pulse bg-white/[0.04]" />}
               <Loader2
                 className={`relative h-7 w-7 ${
-                  live ? "animate-spin text-brand-primary" : "text-amber-400/80"
+                  live ? "animate-spin text-brand-primary" : "text-warning/80"
                 }`}
               />
-              <p className="relative mt-3 px-3 text-center text-xs font-medium text-white">
+              <p className="relative mt-3 px-3 text-center text-xs font-medium text-N900">
                 {item.label}
               </p>
-              <p className="relative mt-1 max-w-[90%] truncate px-3 text-center text-[11px] text-gray-400">
+              <p className="relative mt-1 max-w-[90%] truncate px-3 text-center text-[11px] text-text-secondary">
                 {statusCopy}
               </p>
               {actionError && (
-                <p className="relative mt-1 max-w-[90%] px-3 text-center text-[11px] text-amber-300">
+                <p className="relative mt-1 max-w-[90%] px-3 text-center text-[11px] text-warning">
                   {actionError}
                 </p>
               )}
             </div>
             <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-              <Link href={item.href} className="text-xs text-gray-400 hover:text-white">
+              <Link href={item.href} className="text-xs text-text-secondary hover:text-N900">
                 Open tool
               </Link>
               {live && item.idempotencyKey && item.cancelAllowed && (
@@ -130,7 +130,7 @@ export function ActiveGenerationTiles({
                   type="button"
                   onClick={() => void cancelJob(item)}
                   disabled={busy}
-                  className="text-xs text-gray-400 hover:text-white disabled:opacity-50"
+                  className="text-xs text-text-secondary hover:text-N900 disabled:opacity-50"
                 >
                   {busy ? "Cancelling" : "Cancel"}
                 </button>
@@ -140,7 +140,7 @@ export function ActiveGenerationTiles({
                   type="button"
                   onClick={() => void resumeJob(item)}
                   disabled={busy}
-                  className="text-xs text-brand-primary hover:text-white disabled:opacity-50"
+                  className="text-xs text-brand-primary hover:text-N900 disabled:opacity-50"
                 >
                   {busy ? "Retrying" : "Try again"}
                 </button>

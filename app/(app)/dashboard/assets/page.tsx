@@ -17,7 +17,7 @@ export default function AssetsPage() {
           <button
             type="button"
             onClick={() => setRefreshKey((k) => k + 1)}
-            className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 transition-colors hover:border-white/20 hover:text-white"
+            className="flex shrink-0 items-center gap-2 rounded-radius-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
           >
             <RefreshCw className="h-4 w-4" />
             Refresh

@@ -123,7 +123,7 @@ function ResetPasswordModalInner() {
                 required
                 minLength={6}
                 autoComplete="new-password"
-                className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+                className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
               />
             </div>
             <div>
@@ -137,7 +137,7 @@ function ResetPasswordModalInner() {
                 required
                 minLength={6}
                 autoComplete="new-password"
-                className="w-full rounded-radius-md border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+                className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
               />
             </div>
 

@@ -58,9 +58,9 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
   }
   if (connected) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
-        <Icon className="h-3.5 w-3.5 text-green-400" />
-        <span className="text-xs font-medium text-green-400">{label} Connected</span>
+      <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-1.5">
+        <Icon className="h-3.5 w-3.5 text-success" />
+        <span className="text-xs font-medium text-success">{label} Connected</span>
       </div>
     );
   }
@@ -74,8 +74,8 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
       href="/dashboard/settings?tab=connections"
       className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 transition-colors hover:border-white/20 hover:bg-white/10"
     >
-      <Icon className="h-3.5 w-3.5 text-gray-400" />
-      <span className="text-xs font-medium text-gray-400">Connect {label}</span>
+      <Icon className="h-3.5 w-3.5 text-text-secondary" />
+      <span className="text-xs font-medium text-text-secondary">Connect {label}</span>
     </Link>
   );
 }

@@ -125,17 +125,17 @@ export function CreationPreviewModal({
       aria-modal="true"
       aria-label="Asset preview"
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-N0/80 p-4 backdrop-blur-sm"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-950"
+        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-N0"
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Close preview"
-          className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+          className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
         >
           <X className="h-5 w-5" />
         </button>
@@ -145,7 +145,7 @@ export function CreationPreviewModal({
             type="button"
             onClick={onPrev}
             aria-label="Previous asset"
-            className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+            className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -155,7 +155,7 @@ export function CreationPreviewModal({
             type="button"
             onClick={onNext}
             aria-label="Next asset"
-            className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/70 hover:text-white"
+            className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -166,7 +166,7 @@ export function CreationPreviewModal({
               opens as a bare description strip and the picture pops in later.
               onError clears it too, so a broken asset can't pulse forever. */}
           <div
-            className={`relative flex items-center justify-center bg-black ${
+            className={`relative flex items-center justify-center bg-N0 ${
               mediaReady ? "" : "min-h-[45vh]"
             }`}
           >
@@ -205,7 +205,7 @@ export function CreationPreviewModal({
 
           {richUI && isCharacterItem(item) && (
             <div className="border-b border-white/10 px-4 py-4">
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
                 Character name
               </label>
               <div className="flex items-center gap-2">
@@ -215,7 +215,7 @@ export function CreationPreviewModal({
                   onChange={(e) => setNameDraft(e.target.value)}
                   maxLength={80}
                   placeholder="Name this character"
-                  className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-purple-400/40 focus:outline-none"
+                  className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus:border-purple-400/40 focus:outline-none"
                 />
                 <button
                   type="button"
@@ -226,7 +226,7 @@ export function CreationPreviewModal({
                   {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
                 </button>
               </div>
-              {nameError && <p className="mt-1.5 text-xs text-red-400">{nameError}</p>}
+              {nameError && <p className="mt-1.5 text-xs text-error">{nameError}</p>}
             </div>
           )}
 
@@ -234,10 +234,10 @@ export function CreationPreviewModal({
             <div className="space-y-4 px-4 py-4">
               {prompt && (
                 <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
                     Prompt
                   </p>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
                     {prompt}
                   </p>
                 </div>
@@ -245,16 +245,16 @@ export function CreationPreviewModal({
 
               {scenePrompts.length > 0 && (
                 <div>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
                     Scene prompts
                   </p>
                   <ol className="space-y-1.5">
                     {scenePrompts.map((scenePrompt, i) => (
                       <li
                         key={i}
-                        className="flex gap-2 text-sm leading-relaxed text-gray-300"
+                        className="flex gap-2 text-sm leading-relaxed text-text-secondary"
                       >
-                        <span className="shrink-0 text-gray-600 tabular-nums">
+                        <span className="shrink-0 text-text-disabled tabular-nums">
                           {String(i + 1).padStart(2, "0")}
                         </span>
                         <span className="whitespace-pre-wrap">{scenePrompt}</span>
@@ -266,10 +266,10 @@ export function CreationPreviewModal({
 
               {narration && (
                 <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-500 sm:text-sm">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
                     Narration
                   </p>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
                     {narration}
                   </p>
                 </div>
@@ -279,7 +279,7 @@ export function CreationPreviewModal({
         </div>
 
         <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-secondary">
             {new Date(item.createdAt).toLocaleDateString()}
             {modelLabel ? ` · ${modelLabel}` : ""}
           </p>
@@ -291,8 +291,8 @@ export function CreationPreviewModal({
                 aria-pressed={isFavorite}
                 className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
                   isFavorite
-                    ? "bg-amber-400/20 text-amber-300"
-                    : "bg-white/5 text-gray-300 hover:text-white"
+                    ? "bg-warning/20 text-warning"
+                    : "bg-white/5 text-text-secondary hover:text-N900"
                 }`}
               >
                 <Star
@@ -318,7 +318,7 @@ export function CreationPreviewModal({
               type="button"
               onClick={() => onDownload(item)}
               disabled={isDownloading}
-              className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
+              className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-text-secondary transition-colors hover:text-N900 disabled:opacity-60"
             >
               {isDownloading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -334,7 +334,7 @@ export function CreationPreviewModal({
                     type="button"
                     onClick={() => onRestore(item)}
                     disabled={isMutating}
-                    className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-gray-300 transition-colors hover:text-white disabled:opacity-60"
+                    className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-text-secondary transition-colors hover:text-N900 disabled:opacity-60"
                   >
                     {isMutating ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -347,7 +347,7 @@ export function CreationPreviewModal({
                     type="button"
                     onClick={() => onDeleteForever(item)}
                     disabled={isMutating}
-                    className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
+                    className="flex h-8 items-center gap-1.5 rounded-full bg-error/15 px-3 text-xs text-error transition-colors hover:bg-error/25 hover:text-error disabled:opacity-60"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     Delete permanently
@@ -358,7 +358,7 @@ export function CreationPreviewModal({
                   type="button"
                   onClick={() => onTrash(item)}
                   disabled={isMutating}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs text-red-300 transition-colors hover:bg-red-500/25 hover:text-red-200 disabled:opacity-60"
+                  className="flex h-8 items-center gap-1.5 rounded-full bg-error/15 px-3 text-xs text-error transition-colors hover:bg-error/25 hover:text-error disabled:opacity-60"
                 >
                   {isMutating ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -32,30 +32,30 @@ const TOOLS: ToolDef[] = [
   {
     name: "Video",
     href: "/tools/video?type=reels-creator",
-    icon: <Video className="h-5 w-5 text-[#F26522]" />,
-    accent: "bg-[#F26522]/10",
+    icon: <Video className="h-5 w-5 text-brand-primary" />,
+    accent: "bg-brand-primary/10",
     thumbMediaType: "video" as const,
     thumbOutlined: true,
   },
   {
     name: "Photo",
     href: "/tools/photo-v2",
-    icon: <Camera className="h-5 w-5 text-[#F26522]" />,
-    accent: "bg-[#F26522]/10",
+    icon: <Camera className="h-5 w-5 text-brand-primary" />,
+    accent: "bg-brand-primary/10",
     thumbMediaType: "image" as const,
     thumbOutlined: true,
   },
   {
     name: "Schedule",
     href: "/tools/scheduler",
-    icon: <CalendarClock className="h-5 w-5 text-emerald-400" />,
-    accent: "bg-emerald-500/10",
+    icon: <CalendarClock className="h-5 w-5 text-icon-positive" />,
+    accent: "bg-G500/10",
   },
   {
     name: "Calendar",
     href: "/tools/scheduler/calendar",
-    icon: <CalendarDays className="h-5 w-5 text-sky-400" />,
-    accent: "bg-sky-500/10",
+    icon: <CalendarDays className="h-5 w-5 text-info" />,
+    accent: "bg-info/10",
   },
 ];
 
@@ -154,7 +154,7 @@ export default function DashboardPage() {
           all-zero/empty state to a logged-out visitor. */}
       {isAuthenticated && (
         <section className="mb-10">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
             Scheduler activity
           </h2>
           <StatsRow />
@@ -163,7 +163,7 @@ export default function DashboardPage() {
 
       {/* Tools */}
       <section className="mb-10">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
           Your tools
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">

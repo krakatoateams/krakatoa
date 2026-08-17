@@ -49,7 +49,7 @@ export default function DashboardHero() {
         animated
         colors={["#c084fc", "#f472b6", "#818cf8"]}
       >
-      <div className="relative overflow-hidden rounded-[inherit] bg-gradient-to-b from-white/10 via-gray-900 to-gray-950">
+      <div className="relative overflow-hidden rounded-[inherit] bg-gradient-to-b from-white/10 via-N50 to-N0">
         {/* Animated Grainient background */}
         <div aria-hidden className="pointer-events-none absolute inset-0">
           <Grainient
@@ -99,10 +99,10 @@ export default function DashboardHero() {
         {/* Centered content */}
         <div className="relative z-10 flex min-h-[250px] flex-col items-center justify-end gap-6 px-6 pb-10 pt-20 text-center">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
-            <h2 className="text-balance text-4xl font-bold tracking-tight text-white sm:text-5xl">
+            <h2 className="font-display text-balance text-4xl font-bold tracking-tight text-N900 sm:text-5xl">
               Create without limits
             </h2>
-            <p className="mx-auto max-w-xl text-sm text-gray-300 sm:text-base">
+            <p className="mx-auto max-w-xl text-body-3 text-N700 sm:text-base">
               Generate faceless reels, studio product photos, and scroll-stopping
               content — powered by AI. Start creating in seconds.
             </p>
@@ -110,13 +110,13 @@ export default function DashboardHero() {
         </div>
 
         {/* Infinite feature ticker */}
-        <div className="relative flex h-12 items-center overflow-hidden border-t border-white/10 bg-gray-950/50 backdrop-blur-md">
-          <div className="hero-marquee flex w-max shrink-0 items-center gap-10 whitespace-nowrap pr-10 text-xs text-white">
+        <div className="relative flex h-12 items-center overflow-hidden border-t border-white/10 bg-N0/50 backdrop-blur-md">
+          <div className="hero-marquee flex w-max shrink-0 items-center gap-10 whitespace-nowrap pr-10 text-xs text-N900">
             {[...TICKER, ...TICKER].map((item, i) => {
               const Icon = item.icon;
               return (
                 <span key={i} className="flex items-center gap-2">
-                  <Icon className="h-3.5 w-3.5 text-gray-300" />
+                  <Icon className="h-3.5 w-3.5 text-N700" />
                   {item.text}
                 </span>
               );

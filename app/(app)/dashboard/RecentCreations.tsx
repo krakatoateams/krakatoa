@@ -5,7 +5,7 @@ import CreationsHistory from "@/components/CreationsHistory";
 export default function RecentCreations() {
   return (
     <section className="mb-10">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
         Recent creations
       </h2>
       <CreationsHistory

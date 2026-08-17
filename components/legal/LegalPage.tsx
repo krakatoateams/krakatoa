@@ -29,20 +29,20 @@ function renderBlock(block: Block, idx: number) {
       return (
         <h3
           key={idx}
-          className="font-display mt-5 text-base font-semibold text-gray-900"
+          className="font-display mt-5 text-base font-semibold text-N900"
         >
           {block.text}
         </h3>
       );
     case "p":
       return (
-        <p key={idx} className="mt-3 text-gray-700 leading-relaxed">
+        <p key={idx} className="mt-3 text-text-secondary leading-relaxed">
           {block.text}
         </p>
       );
     case "ul":
       return (
-        <ul key={idx} className="mt-3 list-disc space-y-1.5 pl-5 text-gray-700">
+        <ul key={idx} className="mt-3 list-disc space-y-1.5 pl-5 text-text-secondary">
           {block.items.map((item, i) => (
             <li key={i} className="leading-relaxed">
               {item}
@@ -52,7 +52,7 @@ function renderBlock(block: Block, idx: number) {
       );
     case "ol":
       return (
-        <ol key={idx} className="mt-3 list-decimal space-y-1.5 pl-5 text-gray-700">
+        <ol key={idx} className="mt-3 list-decimal space-y-1.5 pl-5 text-text-secondary">
           {block.items.map((item, i) => (
             <li key={i} className="leading-relaxed">
               {item}
@@ -66,17 +66,17 @@ function renderBlock(block: Block, idx: number) {
 function LangSection({ content }: { content: LangContent }) {
   return (
     <div>
-      <h1 className="font-display text-3xl font-bold text-gray-900">{content.pageTitle}</h1>
+      <h1 className="font-display text-3xl font-bold text-N900">{content.pageTitle}</h1>
       {content.effectiveDate && (
-        <p className="mt-1.5 text-sm text-gray-500">{content.effectiveDate}</p>
+        <p className="mt-1.5 text-sm text-text-disabled">{content.effectiveDate}</p>
       )}
       {content.intro && (
-        <p className="mt-4 text-gray-700 leading-relaxed">{content.intro}</p>
+        <p className="mt-4 text-text-secondary leading-relaxed">{content.intro}</p>
       )}
       <div className="mt-8 space-y-8">
         {content.sections.map((section, sIdx) => (
           <section key={sIdx}>
-            <h2 className="font-display text-lg font-semibold text-gray-900">
+            <h2 className="font-display text-lg font-semibold text-N900">
               {section.heading}
             </h2>
             <div>{section.blocks.map((block, bIdx) => renderBlock(block, bIdx))}</div>
@@ -89,13 +89,13 @@ function LangSection({ content }: { content: LangContent }) {
 
 export function LegalPage({ content }: { content: LegalContent }) {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-N0">
       {/* Minimal top bar */}
-      <header className="border-b border-gray-100 bg-white">
+      <header className="border-b border-white/10 bg-N0">
         <div className="mx-auto max-w-3xl px-6 py-4">
           <Link
             href="/"
-            className="font-display text-base font-black tracking-[-1.5px] text-gray-900"
+            className="font-display text-base font-black tracking-[-1.5px] text-N900"
           >
             KELOLAKO.
           </Link>
@@ -104,7 +104,7 @@ export function LegalPage({ content }: { content: LegalContent }) {
 
       <main className="mx-auto max-w-3xl px-6 py-12">
         {/* Draft notice banner */}
-        <div className="mb-10 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-10 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           <p>
             <strong>Catatan:</strong> Dokumen ini masih dalam tahap penyusunan. Detail badan
             hukum sedang dalam proses pendaftaran usaha OSS Indonesia.
@@ -120,18 +120,18 @@ export function LegalPage({ content }: { content: LegalContent }) {
 
         {/* Language divider */}
         <div className="my-14 flex items-center gap-4">
-          <div className="h-px flex-1 bg-gray-200" />
-          <span className="font-display text-xs font-semibold tracking-widest text-gray-400">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="font-display text-xs font-semibold tracking-widest text-text-disabled">
             ENGLISH
           </span>
-          <div className="h-px flex-1 bg-gray-200" />
+          <div className="h-px flex-1 bg-white/10" />
         </div>
 
         {/* English content */}
         <LangSection content={content.english} />
 
         {/* Footer */}
-        <div className="mt-16 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">
+        <div className="mt-16 border-t border-white/10 pt-6 text-center text-xs text-text-disabled">
           © {new Date().getFullYear()} Kelolako. All rights reserved.
         </div>
       </main>

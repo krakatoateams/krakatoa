@@ -85,10 +85,10 @@ function formatExpiry(iso: string): string {
 function StatCard({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-text-disabled">
         {label}
       </p>
-      <p className="mt-1 text-2xl font-bold text-white">
+      <p className="mt-1 text-2xl font-bold text-N900">
         {value === null ? "—" : value.toLocaleString()}
       </p>
     </div>
@@ -267,8 +267,8 @@ export default function CreditsTab() {
   return (
     <div className="space-y-6">
       <header>
-        <h2 className="text-lg font-semibold text-white">Credits</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <h2 className="text-lg font-semibold text-N900">Credits</h2>
+        <p className="mt-1 text-sm text-text-disabled">
           Your balance, lifetime usage, and transaction history.
         </p>
       </header>
@@ -283,8 +283,8 @@ export default function CreditsTab() {
       {lotSummary && lotSummary.buckets.length > 0 ? (
         <div className="rounded-xl border border-white/10 bg-white/[0.04]">
           <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
-            <h3 className="text-sm font-semibold text-white">Credit breakdown</h3>
-            <span className="text-[11px] text-gray-500">
+            <h3 className="text-sm font-semibold text-N900">Credit breakdown</h3>
+            <span className="text-[11px] text-text-disabled">
               Earliest-expiring credits are used first
             </span>
           </div>
@@ -298,12 +298,12 @@ export default function CreditsTab() {
                   className="flex items-center justify-between gap-4 px-5 py-3"
                 >
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-sm font-medium text-N900">
                       {SOURCE_LABELS[b.source] ?? b.source}
                     </p>
                     <p
                       className={`flex items-center gap-1 text-[11px] ${
-                        soon ? "text-amber-400" : "text-gray-500"
+                        soon ? "text-warning" : "text-text-disabled"
                       }`}
                     >
                       {b.expiresAt === null ? (
@@ -316,7 +316,7 @@ export default function CreditsTab() {
                       )}
                     </p>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold text-white">
+                  <span className="shrink-0 text-sm font-semibold text-N900">
                     {b.amount.toLocaleString()}
                   </span>
                 </li>
@@ -331,10 +331,10 @@ export default function CreditsTab() {
         <div
           className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${
             banner.kind === "success"
-              ? "border-green-500/30 bg-green-500/10 text-green-300"
+              ? "border-success/30 bg-success/10 text-success"
               : banner.kind === "failed"
-                ? "border-red-500/30 bg-red-500/10 text-red-300"
-                : "border-white/20 bg-white/10 text-gray-200"
+                ? "border-error/30 bg-error/10 text-error"
+                : "border-white/20 bg-white/10 text-N700"
           }`}
         >
           {banner.kind === "success" ? (
@@ -352,11 +352,11 @@ export default function CreditsTab() {
       <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
-            <Sparkles className="h-5 w-5 text-gray-200" />
+            <Sparkles className="h-5 w-5 text-N700" />
           </div>
           <div>
-            <p className="text-sm font-medium text-white">Buy credits</p>
-            <p className="text-xs text-gray-500">
+            <p className="text-sm font-medium text-N900">Buy credits</p>
+            <p className="text-xs text-text-disabled">
               Top up your balance to keep generating. Pay securely with DOKU.
             </p>
           </div>
@@ -376,33 +376,33 @@ export default function CreditsTab() {
                 }`}
               >
                 {pack.popular ? (
-                  <span className="absolute -top-2 right-3 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-900">
+                  <span className="absolute -top-2 right-3 rounded-full bg-bg-static-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-static-black">
                     Popular
                   </span>
                 ) : null}
-                <p className="flex items-baseline gap-1.5 text-2xl font-bold text-white">
+                <p className="flex items-baseline gap-1.5 text-2xl font-bold text-N900">
                   {pack.credits.toLocaleString()}
                   {pack.bonusCredits ? (
-                    <span className="text-sm font-semibold text-emerald-400">
+                    <span className="text-sm font-semibold text-success">
                       +{pack.bonusCredits.toLocaleString()}
                     </span>
                   ) : null}
                 </p>
-                <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-text-disabled">
                   credits · {pack.label}
                 </p>
                 <div className="mt-auto pt-3">
-                  <p className="text-sm font-semibold text-gray-200">
+                  <p className="text-sm font-semibold text-N700">
                     {formatIdr(pack.priceIdr)}
                   </p>
                   <button
                     type="button"
                     onClick={() => handleBuy(pack.id)}
                     disabled={anyBusy}
-                    className={`mt-4 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                    className={`mt-4 flex w-full items-center justify-center gap-2 rounded-radius-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
                       pack.popular
-                        ? "bg-[#F26522] text-white hover:bg-[#e05a1a]"
-                        : "border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                        ? "bg-brand-primary text-text-on-solid hover:bg-brand-primary-hover"
+                        : "border border-white/10 bg-white/10 text-N900 hover:bg-white/20"
                     }`}
                   >
                     {isBusy ? (
@@ -421,26 +421,26 @@ export default function CreditsTab() {
         </div>
 
         {buyError ? (
-          <p className="mt-3 text-sm text-red-400">{buyError}</p>
+          <p className="mt-3 text-sm text-error">{buyError}</p>
         ) : null}
       </div>
 
       {/* Transaction history */}
       <div className="rounded-xl border border-white/10 bg-white/[0.04]">
         <div className="border-b border-white/10 px-5 py-3">
-          <h3 className="text-sm font-semibold text-white">Transaction history</h3>
+          <h3 className="text-sm font-semibold text-N900">Transaction history</h3>
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-gray-500">
+          <div className="flex items-center justify-center py-12 text-text-disabled">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
         ) : error ? (
-          <p className="px-5 py-8 text-center text-sm text-amber-400/90">{error}</p>
+          <p className="px-5 py-8 text-center text-sm text-warning/90">{error}</p>
         ) : items.length === 0 ? (
           <div className="px-5 py-12 text-center">
-            <Coins className="mx-auto mb-3 h-8 w-8 text-gray-600" />
-            <p className="text-sm text-gray-500">No transactions yet.</p>
+            <Coins className="mx-auto mb-3 h-8 w-8 text-text-disabled" />
+            <p className="text-sm text-text-disabled">No transactions yet.</p>
           </div>
         ) : (
           <ul className="divide-y divide-white/10">
@@ -452,22 +452,22 @@ export default function CreditsTab() {
                   className="flex items-center justify-between gap-4 px-5 py-3"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">
+                    <p className="truncate text-sm font-medium text-N900">
                       {TYPE_LABELS[tx.type] ?? tx.type}
                       {tx.description ? (
-                        <span className="font-normal text-gray-500">
+                        <span className="font-normal text-text-disabled">
                           {" "}
                           · {tx.description}
                         </span>
                       ) : null}
                     </p>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-[11px] text-text-disabled">
                       {new Date(tx.created_at).toLocaleString()}
                     </p>
                   </div>
                   <span
                     className={`shrink-0 text-sm font-semibold ${
-                      isCredit ? "text-green-400" : "text-gray-300"
+                      isCredit ? "text-success" : "text-text-secondary"
                     }`}
                   >
                     {isCredit ? "+" : "−"}

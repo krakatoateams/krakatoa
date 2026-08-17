@@ -20,7 +20,7 @@ export default function CreditBadge() {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-gray-200">
+    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-N700">
       <Coins className="h-3 w-3" />
       {balance} credits
     </span>

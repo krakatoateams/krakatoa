@@ -24,7 +24,7 @@ export default function ToolCard({ name, href, icon, accent, comingSoon, thumbna
       {thumbnail}
 
       {comingSoon && (
-        <span className="absolute right-4 top-4 rounded-full bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-amber-400">
+        <span className="absolute right-4 top-4 rounded-full bg-warning/10 border border-warning/30 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-warning">
           Coming Soon
         </span>
       )}
@@ -33,11 +33,11 @@ export default function ToolCard({ name, href, icon, accent, comingSoon, thumbna
         {icon}
       </div>
 
-      <h3 className="flex-1 text-base font-semibold text-white">{name}</h3>
+      <h3 className="flex-1 text-base font-semibold text-N900">{name}</h3>
 
       <div
         className={`mt-4 inline-flex items-center gap-1.5 text-sm font-medium ${
-          comingSoon ? "text-gray-600" : "text-gray-300 group-hover:gap-2.5 transition-all"
+          comingSoon ? "text-text-disabled" : "text-text-secondary group-hover:gap-2.5 transition-all"
         }`}
       >
         {comingSoon ? "Coming soon" : "Open Tool"}

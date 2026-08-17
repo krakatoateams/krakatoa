@@ -27,7 +27,7 @@ export function StudioForm({
 export function StudioFormCard({ children, className = "" }: DivProps) {
   return (
     <div
-      className={`rounded-[16px] border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5 ${className}`}
+      className={`rounded-radius-xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5 ${className}`}
     >
       {children}
     </div>
@@ -49,7 +49,7 @@ export function StudioChipRow({ children, className = "" }: DivProps) {
 export function StudioModelPanel({ children, className = "" }: DivProps) {
   return (
     <div
-      className={`-mt-3 mb-6 rounded-b-[16px] bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden ${className}`}
+      className={`-mt-3 mb-6 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden ${className}`}
     >
       {children}
     </div>
@@ -60,7 +60,7 @@ export function StudioModelPanel({ children, className = "" }: DivProps) {
 export function StudioResultCard({ children, className = "" }: DivProps) {
   return (
     <div
-      className={`mt-6 flex flex-col gap-4 rounded-[16px] border border-white/10 bg-white/5 p-4 sm:flex-row ${className}`}
+      className={`mt-6 flex flex-col gap-4 rounded-radius-xl border border-white/10 bg-white/5 p-4 sm:flex-row ${className}`}
     >
       {children}
     </div>
@@ -70,9 +70,9 @@ export function StudioResultCard({ children, className = "" }: DivProps) {
 type BannerTone = "info" | "error" | "warning";
 
 const BANNER_TONE: Record<BannerTone, string> = {
-  info: "border-white/10 bg-white/5 text-gray-300",
-  error: "border-red-500/20 bg-red-500/10 text-red-300",
-  warning: "border-amber-500/20 bg-amber-500/10 text-amber-200",
+  info: "border-white/10 bg-white/5 text-text-secondary",
+  error: "border-error/20 bg-error/10 text-error",
+  warning: "border-warning/20 bg-warning/10 text-warning",
 };
 
 // Info / error / warning notice box. Caller controls top margin + alignment via

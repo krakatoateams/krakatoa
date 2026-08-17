@@ -23,9 +23,9 @@ function StatsCard({ label, value, icon, accent, loading }: StatsCardProps) {
         <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent}`}>
           {icon}
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-gray-500">{label}</p>
-        <p className="ml-auto text-3xl font-bold leading-none text-white">
-          {loading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-white/10" /> : value}
+        <p className="text-xs font-medium uppercase tracking-wider text-text-disabled">{label}</p>
+        <p className="ml-auto text-3xl font-bold leading-none text-N900">
+          {loading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-N900/10" /> : value}
         </p>
       </div>
     </div>
@@ -55,22 +55,22 @@ export default function StatsRow() {
       <StatsCard
         label="Scheduled Posts"
         value={counts.scheduled}
-        icon={<CalendarClock className="h-4 w-4 text-blue-400" />}
-        accent="bg-blue-500/10"
+        icon={<CalendarClock className="h-4 w-4 text-info" />}
+        accent="bg-info/10"
         loading={loading}
       />
       <StatsCard
         label="Published Posts"
         value={counts.published}
-        icon={<CheckCircle2 className="h-4 w-4 text-green-400" />}
-        accent="bg-green-500/10"
+        icon={<CheckCircle2 className="h-4 w-4 text-success" />}
+        accent="bg-success/10"
         loading={loading}
       />
       <StatsCard
         label="Failed Posts"
         value={counts.failed}
-        icon={<AlertCircle className="h-4 w-4 text-red-400" />}
-        accent="bg-red-500/10"
+        icon={<AlertCircle className="h-4 w-4 text-error" />}
+        accent="bg-error/10"
         loading={loading}
       />
     </div>

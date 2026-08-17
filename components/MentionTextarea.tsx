@@ -24,7 +24,7 @@ function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.Re
     nodes.push(
       <span
         key={key++}
-        className="rounded bg-white/20 text-white shadow-[0_0_0_2px_rgba(255,255,255,0.25)]"
+        className="rounded bg-white/20 text-N900 shadow-[0_0_0_2px_rgba(255,255,255,0.25)]"
       >
         {m[0]}
       </span>
@@ -38,7 +38,7 @@ function renderMentionBackdrop(text: string, mentions: MentionAsset[]): React.Re
 
 function KindBadge({ kind }: { kind: MentionAsset["kind"] }) {
   return (
-    <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs uppercase tracking-wide text-gray-400">
+    <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs uppercase tracking-wide text-text-secondary">
       {kind === "character" ? (
         <User className="h-3 w-3" />
       ) : kind === "storyboard" ? (
@@ -195,7 +195,7 @@ export default function MentionTextarea({
         ref={bdRef}
         aria-hidden
         style={{ maskImage: fadeMask, WebkitMaskImage: fadeMask }}
-        className="pointer-events-none absolute inset-0 min-h-[48px] w-full overflow-hidden whitespace-pre-wrap break-words text-base text-white"
+        className="pointer-events-none absolute inset-0 min-h-[48px] w-full overflow-hidden whitespace-pre-wrap break-words text-base text-N900"
       >
         {renderMentionBackdrop(value, mentions)}
       </div>
@@ -213,11 +213,11 @@ export default function MentionTextarea({
         rows={rows}
         maxLength={maxLength}
         disabled={disabled}
-        className="relative min-h-[48px] w-full resize-none whitespace-pre-wrap break-words bg-transparent text-base text-transparent caret-white placeholder:text-gray-500 focus:outline-none"
+        className="relative min-h-[48px] w-full resize-none whitespace-pre-wrap break-words bg-transparent text-base text-transparent caret-white placeholder:text-text-disabled focus:outline-none"
       />
 
       {query !== null && matches.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#171717] p-1.5 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50">
           {matches.map((asset, i) => (
             <button
               key={asset.id}
@@ -233,7 +233,7 @@ export default function MentionTextarea({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={asset.url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-N900">
                 {asset.name}
               </span>
               <KindBadge kind={asset.kind} />
@@ -242,7 +242,7 @@ export default function MentionTextarea({
         </div>
       )}
       {query !== null && matches.length === 0 && (
-        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-[#171717] px-3 py-2 text-sm text-gray-400 shadow-2xl shadow-black/50">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-white/10 bg-N50 px-3 py-2 text-sm text-text-secondary shadow-2xl shadow-N0/50">
           No matching library images.
         </div>
       )}
