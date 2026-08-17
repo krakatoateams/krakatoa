@@ -104,6 +104,12 @@ export function SignInForm({
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        // Without this, Google silently reuses the browser's single active
+        // session + prior consent and skips the chooser entirely — fine with
+        // multiple Google accounts signed in (Google disambiguates on its
+        // own), but with just one it auto-logs in with no way to pick a
+        // different account.
+        queryParams: { prompt: "select_account" },
       },
     });
   }
