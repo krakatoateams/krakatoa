@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type HTMLAttributes } from "react";
 
 // Glassy floating tooltip bubble shown above its anchor. The anchor's wrapper
 // must be position:relative. Always rendered (so it can fade) but inert when
@@ -21,6 +21,41 @@ export function TooltipBubble({ label, show }: { label: string; show: boolean })
   );
 }
 
+// Hover + keyboard-focus tooltip gate. Mouse click must not leave the bubble
+// stuck: clicking focuses the chip, the dropdown portal then steals/restores
+// that focus, and a raw onFocusCapture would re-show the tooltip with the
+// cursor already gone (mouseleave already fired, so it never fires again).
+export function useTooltipGate(): {
+  on: boolean;
+  bind: Pick<
+    HTMLAttributes<HTMLElement>,
+    "onMouseEnter" | "onMouseLeave" | "onPointerDown" | "onFocusCapture" | "onBlurCapture"
+  >;
+} {
+  const [on, setOn] = useState(false);
+  const suppressFocus = useRef(false);
+
+  return {
+    on,
+    bind: {
+      onMouseEnter: () => {
+        suppressFocus.current = false;
+        setOn(true);
+      },
+      onMouseLeave: () => setOn(false),
+      onPointerDown: () => {
+        suppressFocus.current = true;
+        setOn(false);
+      },
+      onFocusCapture: (e: FocusEvent) => {
+        if (suppressFocus.current) return;
+        if ((e.target as HTMLElement).matches(":focus-visible")) setOn(true);
+      },
+      onBlurCapture: () => setOn(false),
+    },
+  };
+}
+
 // Wraps any element with a hover/focus tooltip. Use for plain buttons; the
 // ChipDropdown has its own built-in tooltip support via the `tooltip` prop.
 export function Tooltip({
@@ -33,7 +68,7 @@ export function Tooltip({
   /** Extra classes for the wrapper (e.g. to let the anchor grow: "flex-1"). */
   className?: string;
 }) {
-  const [show, setShow] = useState(false);
+  const { on, bind } = useTooltipGate();
   const [isMobile, setIsMobile] = useState(false);
 
   // Tooltips are hover/focus-based, so skip rendering them on mobile/touch.
@@ -46,15 +81,9 @@ export function Tooltip({
   }, []);
 
   return (
-    <div
-      className={`relative inline-flex ${className}`}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onFocusCapture={() => setShow(true)}
-      onBlurCapture={() => setShow(false)}
-    >
+    <div className={`relative inline-flex ${className}`} {...bind}>
       {children}
-      {!isMobile && <TooltipBubble label={label} show={show} />}
+      {!isMobile && <TooltipBubble label={label} show={on} />}
     </div>
   );
 }

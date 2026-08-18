@@ -227,15 +227,6 @@ export default function Sidebar({
 
   return (
     <>
-      <style>{`
-        @keyframes creditNudge {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-3px); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          [style*="creditNudge"] { animation: none !important; }
-        }
-      `}</style>
       <aside
         className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-N50 md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
@@ -304,8 +295,7 @@ export default function Sidebar({
               <Link
                 href="/dashboard/settings?tab=credits"
                 aria-label="Top up credits"
-                className="absolute inset-x-0 bottom-full z-10 mb-2 flex items-center gap-2 rounded-xl border border-info/40 bg-B100 px-3 py-2 text-left transition-colors hover:border-info/60 hover:bg-B200"
-                style={{ animation: "creditNudge 2.4s ease-in-out infinite" }}
+                className="absolute inset-x-0 bottom-full z-10 mb-2 flex items-center gap-2 rounded-xl border border-info/40 bg-B100 px-3 py-2 text-left transition-colors hover:border-info/60 hover:bg-B200 motion-reduce:animate-none animate-credit-nudge"
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-info/15">
                   <Coins className="h-4 w-4 text-info" />

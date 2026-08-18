@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import type { ChipOption } from "./types";
-import { TooltipBubble } from "./Tooltip";
+import { TooltipBubble, useTooltipGate } from "./Tooltip";
 
 // Unified studio chip selector. The menu is rendered in a portal (fixed
 // coordinates) so it can never be clipped by a horizontally-scrolling chip row,
@@ -68,7 +68,7 @@ export function ChipDropdown({
   sheetTitle?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [hover, setHover] = useState(false);
+  const { on: hover, bind: tooltipBind } = useTooltipGate();
   const [isMobile, setIsMobile] = useState(false);
   const [sheetShown, setSheetShown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -175,10 +175,7 @@ export function ChipDropdown({
     <div
       ref={ref}
       className={`relative shrink-0 ${fluid ? "w-full sm:w-auto" : ""}`}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onFocusCapture={() => setHover(true)}
-      onBlurCapture={() => setHover(false)}
+      {...tooltipBind}
     >
       {tooltip && !isMobile && (
         <TooltipBubble label={tooltip} show={hover && !open && !disabled} />

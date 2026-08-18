@@ -2737,13 +2737,16 @@ function StoryboardToVideoComposer({
   // blip can never spawn a second Replicate run for the same storyboard.
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
-  // "Upload your own storyboard" modal. Starts open if there's a pending
-  // draft for it — i.e. a gated Analyze click sent the visitor through
-  // sign-in while this modal was open; without this it would restore
-  // ImportStoryboardModal's fields into a modal nobody can see.
-  const [showUpload, setShowUpload] = useState(
-    () => typeof window !== "undefined" && hasPendingDraft(IMPORT_STORYBOARD_DRAFT_KEY()),
-  );
+  // "Upload your own storyboard" modal. Opens after mount if there's a pending
+  // draft — i.e. a gated Analyze click sent the visitor through sign-in while
+  // this modal was open; without this it would restore ImportStoryboardModal's
+  // fields into a modal nobody can see. Don't read sessionStorage during
+  // useState init: server HTML would be closed, the client would open, and
+  // React hydrates with "Text content does not match server-rendered HTML".
+  const [showUpload, setShowUpload] = useState(false);
+  useEffect(() => {
+    if (hasPendingDraft(IMPORT_STORYBOARD_DRAFT_KEY())) setShowUpload(true);
+  }, []);
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
   // to the selected storyboard; only sent (and persisted) when actually changed.
   const [advancedOpen, setAdvancedOpen] = useState(false);
