@@ -28,6 +28,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
+import { useToolAvailability } from "@/lib/use-tool-availability";
 import MentionTextarea from "@/components/MentionTextarea";
 import {
   parseMentionAssetsFromHistory,
@@ -552,6 +553,9 @@ function PhotoOmniPage() {
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
+  // "Schedule this post" is hidden while Schedule is coming-soon/disabled in
+  // /admin/config-v2 — no point handing off into an unfinished flow.
+  const scheduleAvailable = useToolAvailability("schedule");
   // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
   // so we open the storyboard sub-tool preselected.
   const initialCreationType: CreationTypeId =
@@ -1572,15 +1576,17 @@ function PhotoOmniPage() {
                     <p className="mt-2 text-xs text-error">{captionError}</p>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={handleSchedulePost}
-                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
-                  >
-                    <CalendarClock className="h-4 w-4" />
-                    <span>Schedule this post</span>
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
+                  {scheduleAvailable.enabled && !scheduleAvailable.comingSoon && (
+                    <button
+                      type="button"
+                      onClick={handleSchedulePost}
+                      className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
+                    >
+                      <CalendarClock className="h-4 w-4" />
+                      <span>Schedule this post</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
                 </>
               ) : (
                 <p className="mt-1 text-xs text-text-disabled">

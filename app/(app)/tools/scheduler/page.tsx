@@ -2621,7 +2621,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
 // ─── Deep-link intake ─────────────────────────────────────────────────────────
 
 // Reads a `?assetUrl=&title=&mediaType=&caption=` hand-off and applies it exactly
-// once. Sources: ReelsGen's "Schedule to YouTube" (a video, no mediaType) and Photo
+// once. Sources: ReelsGen's "Schedule this post" (a video, no mediaType) and Photo
 // Studio's "Schedule this post" (`mediaType=image` plus a caption). Isolated in its
 // own component so the `useSearchParams()` call can sit under a <Suspense> boundary
 // as App Router requires. The useRef guard makes it StrictMode-safe (effects
@@ -3015,7 +3015,7 @@ export default function SchedulerDashboardPage() {
     [items, today, updateItem],
   );
 
-  // Deep-link hand-off: Reels Creator → "Schedule to YouTube" (a video) and Photo
+  // Deep-link hand-off: Reels Creator → "Schedule this post" (a video) and Photo
   // Studio → "Schedule this post" (a photo, with a caption). Reuses the asset intake
   // above, then pre-fills title/caption on the card that now holds the asset (the
   // prior setItems updates are already queued, so this functional update sees the

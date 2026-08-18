@@ -27,6 +27,7 @@ export async function POST(
       display_name: def.display_name,
       enabled: def.enabled,
       visible_in_sidebar: def.visible_in_sidebar,
+      coming_soon: def.coming_soon,
       sort_order: def.sort_order,
     });
     if (!result.ok) {

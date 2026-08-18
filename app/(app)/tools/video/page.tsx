@@ -43,6 +43,7 @@ import PhotoLibraryPicker, {
 } from "@/components/PhotoLibraryPicker";
 import type { CreationHistoryItem } from "@/lib/creations";
 import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
+import { useToolAvailability } from "@/lib/use-tool-availability";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
@@ -3582,6 +3583,9 @@ function ReelsCreatorComposer({
   const { openSignInModal } = useAuthModal();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
+  // "Schedule this post" is hidden while Schedule is coming-soon/disabled in
+  // /admin/config-v2 — no point handing off into an unfinished flow.
+  const scheduleAvailable = useToolAvailability("schedule");
 
   // Engine + (Veo-only) mode.
   const [engine, setEngine] = useState<ReelsEngine>("seedance");
@@ -4344,13 +4348,15 @@ function ReelsCreatorComposer({
                 <Download className="h-4 w-4" />
                 Download
               </a>
-              <a
-                href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}`}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              >
-                <CalendarClock className="h-4 w-4" />
-                Schedule to YouTube
-              </a>
+              {scheduleAvailable.enabled && !scheduleAvailable.comingSoon && (
+                <a
+                  href={`/tools/scheduler?assetUrl=${encodeURIComponent(resultPath ?? resultUrl ?? "")}`}
+                  className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Schedule this post
+                </a>
+              )}
             </div>
           </div>
         </div>

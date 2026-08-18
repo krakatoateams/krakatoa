@@ -17,13 +17,17 @@ import PageContainer from "./PageContainer";
 import PageHeader from "./PageHeader";
 import PromoOfferModal from "@/components/PromoOfferModal";
 import { PROMO_DEADLINE, isPromoLive } from "@/lib/promo-offer";
+import { useToolAvailabilityMap } from "@/lib/use-tool-availability";
 
 type ToolDef = {
   name: string;
   href: string;
   icon: ReactNode;
   accent: string;
-  comingSoon?: boolean;
+  // Maps to tool_configs.tool_key — resolves the live comingSoon flag from
+  // /admin/config-v2 at render time (see TOOLS.map below). Not a static
+  // per-tool default; every entry currently reads from the same DB source.
+  toolKey: string;
   thumbMediaType?: "image" | "video";
   thumbOutlined?: boolean;
 };
@@ -34,6 +38,7 @@ const TOOLS: ToolDef[] = [
     href: "/tools/video?type=reels-creator",
     icon: <Video className="h-5 w-5 text-brand-primary" />,
     accent: "bg-brand-primary/10",
+    toolKey: "reels",
     thumbMediaType: "video" as const,
     thumbOutlined: true,
   },
@@ -42,6 +47,7 @@ const TOOLS: ToolDef[] = [
     href: "/tools/photo-v2",
     icon: <Camera className="h-5 w-5 text-brand-primary" />,
     accent: "bg-brand-primary/10",
+    toolKey: "photo",
     thumbMediaType: "image" as const,
     thumbOutlined: true,
   },
@@ -50,12 +56,14 @@ const TOOLS: ToolDef[] = [
     href: "/tools/scheduler",
     icon: <CalendarClock className="h-5 w-5 text-icon-positive" />,
     accent: "bg-G500/10",
+    toolKey: "schedule",
   },
   {
     name: "Calendar",
     href: "/tools/scheduler/calendar",
     icon: <CalendarDays className="h-5 w-5 text-info" />,
     accent: "bg-info/10",
+    toolKey: "calendar",
   },
 ];
 
@@ -93,6 +101,13 @@ export default function DashboardPage() {
   const isAuthenticated = status === "authenticated";
   const firstName = name?.split(" ")[0];
   const [promoOpen, setPromoOpen] = useState(false);
+  const { map: toolAvailability } = useToolAvailabilityMap();
+  // "Scheduler activity" (StatsRow: scheduled/published/failed post counts)
+  // reads on both Schedule and Calendar being finished — showing live stats
+  // for a feature area that's still being built reads as misleading, not
+  // reassuring.
+  const schedulerActivityReady =
+    !toolAvailability.schedule?.comingSoon && !toolAvailability.calendar?.comingSoon;
 
   // Gate to signed-in users: the Claim CTA starts checkout, which requires
   // auth. The code-level deadline (isPromoLive) is a fast pre-check; the admin
@@ -152,7 +167,7 @@ export default function DashboardPage() {
 
       {/* Stats + recent creations need a real account — no point showing an
           all-zero/empty state to a logged-out visitor. */}
-      {isAuthenticated && (
+      {isAuthenticated && schedulerActivityReady && (
         <section className="mb-10">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
             Scheduler activity
@@ -167,10 +182,11 @@ export default function DashboardPage() {
           Your tools
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {TOOLS.map(({ thumbMediaType, thumbOutlined, ...tool }) => (
+          {TOOLS.map(({ thumbMediaType, thumbOutlined, toolKey, ...tool }) => (
             <ToolCard
               key={tool.name}
               {...tool}
+              comingSoon={toolAvailability[toolKey]?.comingSoon ?? false}
               thumbnail={
                 thumbMediaType ? (
                   <ToolCardThumbnail

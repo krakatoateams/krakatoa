@@ -79,7 +79,7 @@ function PricingNumberInput({
 const TH =
   "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
 
-type ToolCommitFields = { enabled?: boolean; visibleInSidebar?: boolean };
+type ToolCommitFields = { enabled?: boolean; visibleInSidebar?: boolean; comingSoon?: boolean };
 
 function featureFilterOptions(
   toolKey: string,
@@ -856,6 +856,21 @@ function ToolSection({
           />
           Sidebar
         </label>
+        <label
+          className="inline-flex items-center gap-1.5 text-xs text-gray-400"
+          title="Shows a 'Coming soon' badge next to this tool in the sidebar. Purely cosmetic — the tool stays fully usable."
+        >
+          <input
+            type="checkbox"
+            checked={tool.comingSoon}
+            onChange={(e) => {
+              const comingSoon = e.target.checked;
+              onChange({ comingSoon });
+              onCommitTool({ comingSoon });
+            }}
+          />
+          Coming soon
+        </label>
       </div>
 
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
@@ -1122,6 +1137,7 @@ export default function AdminConfigV2Page() {
         await patchApi(`/api/admin/config/tools/${toolKey}`, {
           enabled: overrides.enabled ?? tool.enabled,
           visible_in_sidebar: overrides.visibleInSidebar ?? tool.visibleInSidebar,
+          coming_soon: overrides.comingSoon ?? tool.comingSoon,
           sort_order: tool.sortOrder,
         });
         if (typeof window !== "undefined") {
