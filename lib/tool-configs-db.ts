@@ -15,6 +15,7 @@ export type ToolConfig = {
   display_name: string;
   enabled: boolean;
   visible_in_sidebar: boolean;
+  coming_soon: boolean;
   sort_order: number;
   metadata: Record<string, unknown>;
   updated_by_profile_id: string | null;
@@ -54,7 +55,7 @@ export async function listToolConfigs(): Promise<ToolConfig[]> {
 /** Sidebar visibility slice (server layout + client Sidebar). */
 export type ToolSidebarVisibility = Pick<
   ToolConfig,
-  "tool_key" | "enabled" | "visible_in_sidebar"
+  "tool_key" | "enabled" | "visible_in_sidebar" | "coming_soon"
 >;
 
 export function toToolSidebarVisibilityMap(
@@ -67,6 +68,7 @@ export function toToolSidebarVisibilityMap(
         tool_key: t.tool_key,
         enabled: t.enabled,
         visible_in_sidebar: t.visible_in_sidebar,
+        coming_soon: t.coming_soon,
       },
     ])
   );
@@ -76,6 +78,7 @@ export type ToolConfigPatch = {
   display_name?: string;
   enabled?: boolean;
   visible_in_sidebar?: boolean;
+  coming_soon?: boolean;
   sort_order?: number;
   metadata?: Record<string, unknown>;
 };
@@ -91,6 +94,7 @@ export async function updateToolConfig(
   if (patch.enabled !== undefined) update.enabled = patch.enabled;
   if (patch.visible_in_sidebar !== undefined)
     update.visible_in_sidebar = patch.visible_in_sidebar;
+  if (patch.coming_soon !== undefined) update.coming_soon = patch.coming_soon;
   if (patch.sort_order !== undefined) update.sort_order = patch.sort_order;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
 

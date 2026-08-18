@@ -288,6 +288,13 @@ export function validateToolPatch(
     patch.visible_in_sidebar = body.visible_in_sidebar;
   }
 
+  if (body.coming_soon !== undefined) {
+    if (typeof body.coming_soon !== "boolean") {
+      return { ok: false, error: "coming_soon must be a boolean." };
+    }
+    patch.coming_soon = body.coming_soon;
+  }
+
   if (body.sort_order !== undefined) {
     if (
       typeof body.sort_order !== "number" ||

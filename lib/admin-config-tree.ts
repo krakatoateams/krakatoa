@@ -99,6 +99,7 @@ export type AdminToolNode = {
   label: string;
   enabled: boolean;
   visibleInSidebar: boolean;
+  comingSoon: boolean;
   sortOrder: number;
   models: AdminModelNode[];
   pipelines: AdminPipelineGroup[];
@@ -113,6 +114,7 @@ export type ToolConfigInput = {
   display_name: string;
   enabled: boolean;
   visible_in_sidebar: boolean;
+  coming_soon: boolean;
   sort_order: number;
 };
 
@@ -530,6 +532,7 @@ export function buildAdminConfigTree(params: {
         label: tool.display_name,
         enabled: tool.enabled,
         visibleInSidebar: tool.visible_in_sidebar,
+        comingSoon: tool.coming_soon,
         sortOrder: tool.sort_order,
         models,
         pipelines,

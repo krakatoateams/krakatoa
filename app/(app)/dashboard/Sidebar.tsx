@@ -20,6 +20,7 @@ import {
   Coins,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
+import { Tooltip } from "@/components/studio/Tooltip";
 import { Button } from "@/components/ui/Button";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -39,6 +40,10 @@ interface NavItem {
   // sense with an account (e.g. Settings), as opposed to toolKey items
   // (which stay visible logged-out; see isItemVisible).
   authOnly?: boolean;
+  // Hover tooltip explaining the feature — shown on every item that has one,
+  // most useful on items also carrying a "Coming soon" badge so a curious
+  // hover doesn't just meet a dead end.
+  description?: string;
 }
 
 const SECTIONS: { title: string; items: NavItem[] }[] = [
@@ -64,8 +69,20 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Publish",
     items: [
-      { label: "Schedule", href: "/tools/scheduler", icon: <CalendarClock className="h-4 w-4" />, toolKey: "schedule" },
-      { label: "Calendar", href: "/tools/scheduler/calendar", icon: <CalendarDays className="h-4 w-4" />, toolKey: "calendar" },
+      {
+        label: "Schedule",
+        href: "/tools/scheduler",
+        icon: <CalendarClock className="h-4 w-4" />,
+        toolKey: "schedule",
+        description: "Plan and auto-publish your posts to YouTube and TikTok.",
+      },
+      {
+        label: "Calendar",
+        href: "/tools/scheduler/calendar",
+        icon: <CalendarDays className="h-4 w-4" />,
+        toolKey: "calendar",
+        description: "See all your scheduled and published posts in one calendar view.",
+      },
     ],
   },
   {
@@ -176,7 +193,7 @@ export default function Sidebar({
         {
           title: "Admin",
           items: [
-            { label: "Admin Panel", href: "/admin", icon: <Shield className="h-4 w-4" /> },
+            { label: "Admin Panel", href: "/admin", icon: <Shield className="h-4 w-4" /> } as NavItem,
           ],
         },
       ]
@@ -258,8 +275,8 @@ export default function Sidebar({
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const active = isActive(item.href);
-                return (
-                  <li key={item.href}>
+                const comingSoon = item.toolKey ? toolVisibility?.[item.toolKey]?.coming_soon : false;
+                const linkEl = (
                     <Link
                       href={item.href}
                       className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-body-3 transition-colors ${
@@ -272,13 +289,32 @@ export default function Sidebar({
                         {item.icon}
                       </span>
                       {item.label}
-                      {generatingNav.has(item.href) && (
-                        <span
-                          className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-brand-primary"
-                          aria-label="Generation in progress"
-                        />
+                      {(comingSoon || generatingNav.has(item.href)) && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                          {comingSoon && (
+                            <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning">
+                              Soon
+                            </span>
+                          )}
+                          {generatingNav.has(item.href) && (
+                            <span
+                              className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-primary"
+                              aria-label="Generation in progress"
+                            />
+                          )}
+                        </span>
                       )}
                     </Link>
+                );
+                return (
+                  <li key={item.href}>
+                    {item.description ? (
+                      <Tooltip label={item.description} className="w-full">
+                        {linkEl}
+                      </Tooltip>
+                    ) : (
+                      linkEl
+                    )}
                   </li>
                 );
               })}

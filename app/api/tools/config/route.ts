@@ -21,6 +21,7 @@ export async function GET() {
         display_name: t.display_name,
         enabled: t.enabled,
         visible_in_sidebar: t.visible_in_sidebar,
+        coming_soon: t.coming_soon,
         sort_order: t.sort_order,
       })),
     });
