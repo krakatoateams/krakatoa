@@ -108,6 +108,7 @@ import {
   type MotionControlModelId,
   type MotionControlMode,
 } from "@/lib/motion-control-models";
+import { MOTION_CONTROL_MAX_RUNTIME_MS } from "@/lib/generation-workflows/motion-control-workflow-types";
 import {
   resolveStoryboardAspectRatio,
   storyboardOrientationLabel,
@@ -201,7 +202,8 @@ async function pollMotionControlResult(idempotencyKey: string): Promise<{
   historyItem?: { storagePath?: string } | null;
 }> {
   const pollMs = 3000;
-  const maxAttempts = 200;
+  // The composer must never give up before the durable run itself does.
+  const maxAttempts = Math.ceil(MOTION_CONTROL_MAX_RUNTIME_MS / pollMs);
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, pollMs));
     const res = await fetch("/api/generate-motion-control/status", {

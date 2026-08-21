@@ -11,6 +11,7 @@ import {
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { assertTrustedReplicateOutputUrl } from "@/lib/replicate-output-url";
 import {
   finishGenerationRequestFailure,
   finishGenerationRequestSuccess,
@@ -85,6 +86,7 @@ export async function finalizeMotionControlSuccess(
     pricingKey: ctx.pricingKey,
   };
 
+  assertTrustedReplicateOutputUrl(generatedVideoUrl);
   const videoResponse = await fetch(generatedVideoUrl);
   if (!videoResponse.ok) {
     throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
@@ -168,6 +170,7 @@ export async function finalizeMotionControlSuccess(
     await safe("idemSuccess", () =>
       finishGenerationRequestSuccess({
         id: ctx.generationRequestId!,
+        profileId: ctx.profileId,
         jobId: ctx.jobId ?? null,
         assetId: ctx.videoAssetId ?? null,
         responseJson: successResponse,
@@ -220,6 +223,7 @@ export async function failMotionControlAttempt(
     await safe("idemFailure", () =>
       finishGenerationRequestFailure({
         id: ctx.generationRequestId!,
+        profileId: ctx.profileId,
         jobId: ctx.jobId ?? null,
         errorJson: errJson,
       }),

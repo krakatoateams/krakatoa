@@ -19,12 +19,16 @@ type JobRow = {
   input: Record<string, unknown> | null;
   error: Record<string, unknown> | null;
   created_at: string;
+  updated_at: string;
+  execution_backend: string | null;
+  heartbeat_at: string | null;
 };
 
 type RequestRow = {
   job_id: string | null;
   idempotency_key: string;
   cancel_allowed: boolean | null;
+  provider_committed_at: string | null;
 };
 
 type StepRow = {
@@ -39,16 +43,22 @@ export async function listActiveGenerations(profileId: string): Promise<ActiveGe
   const [liveRes, failedRes] = await Promise.all([
     supabaseServer
       .from("jobs")
-      .select("id, job_type, status, input, error, created_at")
+      .select(
+        "id, job_type, status, input, error, created_at, updated_at, execution_backend, heartbeat_at",
+      )
       .eq("profile_id", profileId)
+      .is("dismissed_at", null)
       .in("status", [...LIVE_JOB_STATUSES])
       .order("created_at", { ascending: false })
       .limit(JOBS_LIMIT),
     supabaseServer
       .from("jobs")
-      .select("id, job_type, status, input, error, created_at")
+      .select(
+        "id, job_type, status, input, error, created_at, updated_at, execution_backend, heartbeat_at",
+      )
       .eq("profile_id", profileId)
-      .eq("status", "failed")
+      .is("dismissed_at", null)
+      .in("status", ["failed", "cancelled"])
       .gte("updated_at", failedSince)
       .order("updated_at", { ascending: false })
       .limit(FAILED_LIMIT),
@@ -71,7 +81,7 @@ export async function listActiveGenerations(profileId: string): Promise<ActiveGe
   const [linkedRes, stepRes] = await Promise.all([
     supabaseServer
       .from("generation_requests")
-      .select("job_id, idempotency_key, cancel_allowed")
+      .select("job_id, idempotency_key, cancel_allowed, provider_committed_at")
       .eq("profile_id", profileId)
       .in("job_id", jobIds),
     supabaseServer
@@ -94,6 +104,7 @@ export async function listActiveGenerations(profileId: string): Promise<ActiveGe
     jobId: row.job_id,
     idempotencyKey: row.idempotency_key,
     cancelAllowed: row.cancel_allowed !== false,
+    providerCommittedAt: row.provider_committed_at ?? null,
   }));
   const matched = matchRequestsToJobs(
     jobs.map((j) => ({ id: j.id })),
@@ -113,11 +124,15 @@ export async function listActiveGenerations(profileId: string): Promise<ActiveGe
       jobType: job.job_type,
       status: job.status,
       createdAt: job.created_at,
+      updatedAt: job.updated_at,
       input: job.input,
       error: job.error,
       phase: humanizePhase(phaseByJob.get(job.id) ?? null),
       idempotencyKey: link?.idempotencyKey ?? null,
       cancelAllowed: link?.cancelAllowed ?? false,
+      providerCommittedAt: link?.providerCommittedAt ?? null,
+      executionBackend: job.execution_backend === "workflow" ? "workflow" : "legacy",
+      heartbeatAt: job.heartbeat_at,
     });
     if (described) out.push(described);
   }

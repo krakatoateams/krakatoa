@@ -487,7 +487,11 @@ export async function POST(req: Request) {
       await safe("startJob", () => startJob(profileId!, jobId!));
       if (generationRequestId) {
         await safe("attachJob", () =>
-          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
+          attachGenerationRequestJob({
+            id: generationRequestId!,
+            profileId: profileId!,
+            jobId: job.id,
+          }),
         );
       }
       pipelineRecovery =
@@ -545,6 +549,7 @@ export async function POST(req: Request) {
           await safe("idemFailInsufficient", () =>
             finishGenerationRequestFailure({
               id: generationRequestId!,
+              profileId: profileId!,
               jobId: jobId ?? null,
               errorJson: {
                 code: "INSUFFICIENT_CREDITS",
@@ -785,6 +790,7 @@ export async function POST(req: Request) {
       await safe("idemSuccess", () =>
         finishGenerationRequestSuccess({
           id: generationRequestId!,
+          profileId: profileId!,
           jobId: jobId ?? null,
           assetId: videoAssetId ?? null,
           responseJson: successResponse,
@@ -873,6 +879,7 @@ export async function POST(req: Request) {
         await safe("idemRecoverable", () =>
           finishGenerationRequestRecoverable({
             id: generationRequestId!,
+            profileId: profileId!,
             jobId: jobId!,
             errorJson: errJson,
           })
@@ -881,6 +888,7 @@ export async function POST(req: Request) {
         await safe("idemFailure", () =>
           finishGenerationRequestFailure({
             id: generationRequestId!,
+            profileId: profileId!,
             jobId: jobId ?? null,
             errorJson: errJson,
           })

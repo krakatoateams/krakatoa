@@ -2,6 +2,7 @@ import {
   shouldRefundRecoverableTerminal,
   type RecoverableTerminalReason,
 } from "./pipeline-recovery/refund-policy-pure";
+import { isRefundEligible } from "./generation-workflows/control-policy-pure";
 
 /**
  * Anomaly classification for the admin monitoring panel.
@@ -50,6 +51,9 @@ const PRE_SPEND_CODES = new Set([
   "GENERATION_IN_PROGRESS",
 ]);
 
+/** Terminal failures where provider billing may have occurred — never auto-refund. */
+const CONSERVATIVE_NO_REFUND_CODES = new Set(["PROVIDER_SUBMISSION_STATE_UNKNOWN"]);
+
 export type JobFlagInput = {
   /** jobs.status */
   status: string;
@@ -57,6 +61,9 @@ export type JobFlagInput = {
   errorCode?: string | null;
   /** jobs.updated_at as epoch ms. */
   updatedAtMs: number;
+  /** Workflow jobs use an explicit executor heartbeat instead of request activity. */
+  executionBackend?: "legacy" | "workflow";
+  heartbeatAtMs?: number | null;
   nowMs: number;
   /** generation_requests.cancel_requested */
   cancelRequested: boolean;
@@ -64,6 +71,7 @@ export type JobFlagInput = {
   cancelRequestedAtMs?: number | null;
   /** generation_requests.cancel_allowed — false once provider output is committed. */
   cancelAllowed: boolean;
+  providerCommittedAt?: string | null;
   /** Σ credit_transactions where type='spend' */
   spentCredits: number;
   /** Σ credit_transactions where type='refund' */
@@ -82,10 +90,18 @@ export function isRefundMissing(j: JobFlagInput): boolean {
 
   const code = j.errorCode ?? null;
   if (code && PRE_SPEND_CODES.has(code)) return false;
+  if (code && CONSERVATIVE_NO_REFUND_CODES.has(code)) return false;
 
   // User cancelled after the provider already delivered — provider cost is
   // committed, so keeping the credits is the intended behavior.
-  if (!j.cancelAllowed) return false;
+  if (
+    !isRefundEligible({
+      providerCommittedAt: j.providerCommittedAt,
+      cancelAllowed: j.cancelAllowed,
+    })
+  ) {
+    return false;
+  }
 
   const recoverableReason = code ? RECOVERABLE_TERMINAL_CODES[code] : undefined;
   if (recoverableReason) {
@@ -103,8 +119,12 @@ export function isRefundMissing(j: JobFlagInput): boolean {
 export function classifyJobFlags(j: JobFlagInput): JobFlag[] {
   const flags: JobFlag[] = [];
   const active = ACTIVE_STATUSES.has(j.status);
+  const activityAtMs =
+    j.executionBackend === "workflow" && j.heartbeatAtMs
+      ? j.heartbeatAtMs
+      : j.updatedAtMs;
 
-  if (active && j.nowMs - j.updatedAtMs > STUCK_AFTER_MS) {
+  if (active && j.nowMs - activityAtMs > STUCK_AFTER_MS) {
     flags.push("stuck");
   }
 
@@ -164,6 +184,18 @@ export function adminMonitoringFlagsSelfCheck(): void {
       "stuck"
     ),
     "running job idle 3min must not be stuck"
+  );
+  assert(
+    !classifyJobFlags(
+      base({
+        status: "running",
+        executionBackend: "workflow",
+        updatedAtMs: t,
+        heartbeatAtMs: t + 19 * MIN,
+        nowMs: t + 20 * MIN,
+      }),
+    ).includes("stuck"),
+    "fresh workflow heartbeat must override stale job updated_at",
   );
   assert(
     !classifyJobFlags(base({ status: "recoverable", updatedAtMs: t, nowMs: t + 60 * MIN })).includes(
@@ -244,6 +276,18 @@ export function adminMonitoringFlagsSelfCheck(): void {
   );
   assert(
     !isRefundMissing(
+      base({
+        status: "cancelled",
+        spentCredits: 30,
+        cancelAllowed: true,
+        providerCommittedAt: "2026-08-21T00:00:00.000Z",
+        errorCode: "GENERATION_CANCELLED",
+      }),
+    ),
+    "workflow provider commit keeps credits even if legacy flag drifted",
+  );
+  assert(
+    !isRefundMissing(
       base({ status: "cancelled", spentCredits: 30, errorCode: "GENERATION_ABANDONED" })
     ),
     "user_abandon must not flag"
@@ -279,6 +323,29 @@ export function adminMonitoringFlagsSelfCheck(): void {
   assert(
     isRefundMissing(base({ status: "failed", spentCredits: 30, errorCode: "DELIVERY_FAILED" })),
     "terminal_delivery_failure must flag"
+  );
+
+  assert(
+    !isRefundMissing(
+      base({
+        status: "failed",
+        spentCredits: 30,
+        errorCode: "PROVIDER_SUBMISSION_STATE_UNKNOWN",
+        cancelAllowed: true,
+      })
+    ),
+    "unknown provider submission state must not flag refund_missing"
+  );
+  assert(
+    !isRefundMissing(
+      base({
+        status: "failed",
+        spentCredits: 30,
+        errorCode: "PROVIDER_SUBMISSION_STATE_UNKNOWN",
+        cancelAllowed: false,
+      })
+    ),
+    "unknown submission with post-commit lock must not flag"
   );
 
   // stacking
