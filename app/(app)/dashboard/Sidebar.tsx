@@ -20,7 +20,6 @@ import {
   Coins,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
-import { Tooltip } from "@/components/studio/Tooltip";
 import { Button } from "@/components/ui/Button";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -306,17 +305,7 @@ export default function Sidebar({
                       )}
                     </Link>
                 );
-                return (
-                  <li key={item.href}>
-                    {item.description ? (
-                      <Tooltip label={item.description} className="w-full">
-                        {linkEl}
-                      </Tooltip>
-                    ) : (
-                      linkEl
-                    )}
-                  </li>
-                );
+                return <li key={item.href}>{linkEl}</li>;
               })}
             </ul>
           </div>

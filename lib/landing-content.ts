@@ -357,7 +357,7 @@ export const TESTIMONIALS: Testimonial[] = [
 export const FOOTER = {
   heading: "All eyes on your next post.",
   body: "Sign up free and start creating reels, product photos, and posts with Kelolako's AI suite.",
-  copyright: "\u00a9 2025 Kelolako. Built for the future of content.",
+  copyright: "\u00a9 2026 Kelolako. Built for the future of content.",
   supportEmail: "support@kelolako.com",
   supportLabel: "Need support? We are here",
 };

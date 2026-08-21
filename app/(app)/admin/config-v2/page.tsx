@@ -713,7 +713,7 @@ function ToolSection({
   onCommitCatalog: (modelId: string, enabled: boolean) => void;
   onCommitPipelineRole: (role: AdminPipelineRole) => void;
 }) {
-  const [open, setOpen] = useState(tool.toolKey === "reels" || tool.toolKey === "photo");
+  const [open, setOpen] = useState(false);
   const [featureFilter, setFeatureFilter] = useState("all");
   const [overridePrompt, setOverridePrompt] = useState<DefaultOverridePrompt | null>(null);
 

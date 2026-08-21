@@ -6,9 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useCurrentUser } from "@/lib/auth-context";
+import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
 import {
   isLiveStatus,
@@ -33,6 +35,7 @@ const BOOST_MS = 30_000;
 
 export function ActiveGenerationsProvider({ children }: { children: React.ReactNode }) {
   const { status } = useCurrentUser();
+  const { refetch: refetchCredits } = useCreditBalance();
   const [items, setItems] = useState<ActiveGeneration[]>([]);
   const [loading, setLoading] = useState(false);
   const [boost, setBoost] = useState(false);
@@ -64,6 +67,23 @@ export function ActiveGenerationsProvider({ children }: { children: React.ReactN
   }, [status, refetch]);
 
   const live = items.some((i) => isLiveStatus(i.status));
+
+  // Keep the sidebar credit badge honest: a spend happens the moment a job is
+  // created (a new active generation appears) and a refund can happen when one
+  // ends (it flips to `failed`). Any change to the set/status of generations is
+  // a signal that the balance may have moved, so refetch it — this makes the
+  // badge auto-update even while the user is parked on another page.
+  const genSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = items
+      .map((i) => `${i.jobId}:${i.status}`)
+      .sort()
+      .join("|");
+    if (genSignatureRef.current !== null && genSignatureRef.current !== signature) {
+      refetchCredits();
+    }
+    genSignatureRef.current = signature;
+  }, [items, refetchCredits]);
 
   useEffect(() => {
     if (status !== "authenticated") return;
