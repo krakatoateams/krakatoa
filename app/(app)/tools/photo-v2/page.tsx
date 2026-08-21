@@ -1348,7 +1348,7 @@ function PhotoOmniPage() {
                     />
                   </>
                 )}
-                {tier.hasResolution && (
+                {tier.hasResolution ? (
                   <ChipDropdown
                     sheetTitle="Select resolution"
                     square
@@ -1364,7 +1364,18 @@ function PhotoOmniPage() {
                     onSelect={(id) => setResolution(id as ProductPhotoResolution)}
                     disabled={loading}
                   />
-                )}
+                ) : tier.fixedResolutionLabel ? (
+                  // Read-only info: this model outputs a fixed resolution the
+                  // user can't change, but we still surface it so the output
+                  // size is never a mystery.
+                  <div
+                    title="Output resolution (fixed for this model)"
+                    className="flex h-10 shrink-0 cursor-default items-center gap-2 rounded-radius-sm bg-white/5 px-3 text-sm text-text-secondary"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                    {tier.fixedResolutionLabel}
+                  </div>
+                ) : null}
               </div>
 
               {/* Generate (desktop — inside the form card) */}

@@ -156,6 +156,12 @@ export type ProductPhotoTier = {
   /** Provider model id (display/metadata only; resolved via model_configs). */
   providerModel: string;
   hasResolution: boolean;
+  /**
+   * Fixed output resolution for tiers that don't expose a resolution picker
+   * (`hasResolution: false`). Shown as a read-only info chip in the omni-form so
+   * the user always sees the output size, even when it can't be changed.
+   */
+  fixedResolutionLabel?: string;
   /** Single pricing key for a no-resolution tier (basic + extended models). */
   basicPricingKey?: string;
   basicFallbackCredits?: number;
@@ -182,6 +188,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_basic",
     providerModel: "google/nano-banana",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_nano_banana_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -236,6 +243,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_seedream4",
     providerModel: "bytedance/seedream-4",
     hasResolution: false,
+    fixedResolutionLabel: "2K",
     basicPricingKey: "product_photo_seedream_4_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -252,6 +260,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_kontext",
     providerModel: "black-forest-labs/flux-kontext-pro",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_kontext_pro_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -267,6 +276,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_1_1_pro",
     providerModel: "black-forest-labs/flux-1.1-pro",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_1_1_pro_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -281,6 +291,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_imagen_4",
     providerModel: "google/imagen-4",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_imagen_4_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -296,6 +307,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_ideogram_v3_turbo",
     providerModel: "ideogram-ai/ideogram-v3-turbo",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_ideogram_v3_turbo_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -311,6 +323,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_seedream3",
     providerModel: "bytedance/seedream-3",
     hasResolution: false,
+    fixedResolutionLabel: "2K",
     basicPricingKey: "product_photo_seedream_3_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -326,6 +339,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_schnell",
     providerModel: "black-forest-labs/flux-schnell",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_schnell_per_image",
     basicFallbackCredits: 1,
     resolutions: [],
