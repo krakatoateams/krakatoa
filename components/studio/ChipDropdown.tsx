@@ -163,7 +163,13 @@ export function ChipDropdown({
         <span className="flex items-center gap-2">
           {withMinorWordCase(opt.label)}
           {opt.hint && (
-            <span className="text-xs font-medium text-text-secondary sm:text-sm">{opt.hint}</span>
+            <span
+              className={`text-xs font-medium sm:text-sm ${
+                opt.hint === "Soon" ? "text-warning" : "text-text-secondary"
+              }`}
+            >
+              {opt.hint}
+            </span>
           )}
         </span>
         {active && <Check className="h-4 w-4 shrink-0 text-text-secondary" />}

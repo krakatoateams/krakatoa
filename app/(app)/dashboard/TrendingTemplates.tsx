@@ -34,7 +34,7 @@ export default function TrendingTemplates() {
         }
       />
       <TemplateCarousel
-        title="Video try-on"
+        title="Motion control"
         templates={TRENDING_TEMPLATES}
         hrefFor={(t) => tryOnTemplateHref(t.videoUrl ?? "")}
       />

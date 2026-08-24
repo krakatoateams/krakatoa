@@ -35,7 +35,7 @@ type ToolDef = {
 const TOOLS: ToolDef[] = [
   {
     name: "Video",
-    href: "/tools/video?type=reels-creator",
+    href: "/tools/video?type=text2video",
     icon: <Video className="h-5 w-5 text-brand-primary" />,
     accent: "bg-brand-primary/10",
     toolKey: "reels",
