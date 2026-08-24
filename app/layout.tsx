@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { PwaRegister } from "@/components/PwaRegister";
+import { Analytics } from "@vercel/analytics/next";
 import "@/app/globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -74,6 +75,7 @@ export default function RootLayout({
       <body className="font-body">
         <PwaRegister />
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
