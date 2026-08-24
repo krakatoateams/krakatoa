@@ -13,6 +13,7 @@
  */
 
 export const STORYBOARD_STYLE_KEYS = [
+  "any",
   "cinematic_sketch",
   "painterly_color",
   "comic_book",
@@ -22,10 +23,11 @@ export const STORYBOARD_STYLE_KEYS = [
 
 export type StoryboardStyleKey = (typeof STORYBOARD_STYLE_KEYS)[number];
 
-export const DEFAULT_STORYBOARD_STYLE: StoryboardStyleKey = "cinematic_sketch";
+export const DEFAULT_STORYBOARD_STYLE: StoryboardStyleKey = "any";
 
 /** Human labels for the storyboard style chip (shared by Photo + Video UIs). */
 export const STORYBOARD_STYLE_LABELS: Record<StoryboardStyleKey, string> = {
+  any: "Any",
   cinematic_sketch: "Cinematic Sketch",
   painterly_color: "Painterly Color",
   comic_book: "Comic Book",
@@ -35,6 +37,7 @@ export const STORYBOARD_STYLE_LABELS: Record<StoryboardStyleKey, string> = {
 
 /** Instruction injected into the storyboard IMAGE prompt (GPT Image). */
 export const STORYBOARD_STYLE_INSTRUCTIONS: Record<StoryboardStyleKey, string> = {
+  any: "",
   cinematic_sketch:
     "Style: cinematic storyboard sketch — pencil/ink linework, light shading, optional camera arrows, readable at a glance.",
   painterly_color:
@@ -54,6 +57,7 @@ export const STORYBOARD_STYLE_INSTRUCTIONS: Record<StoryboardStyleKey, string> =
  * "storyboard sheet" wording, which would confuse the video model).
  */
 export const STORYBOARD_VIDEO_STYLE_DIRECTIVES: Record<StoryboardStyleKey, string> = {
+  any: "",
   cinematic_sketch:
     "Visual style: animated cinematic storyboard sketch — hand-drawn pencil/ink linework with light shading, a moving animatic look. Keep this drawn sketch aesthetic consistently across the entire clip.",
   painterly_color:
@@ -66,7 +70,7 @@ export const STORYBOARD_VIDEO_STYLE_DIRECTIVES: Record<StoryboardStyleKey, strin
     "Visual style: anime/manga animation — Japanese cel-animation linework, expressive faces, clean ink, vibrant flat shading throughout the entire clip.",
 };
 
-/** Normalize an untrusted style value to a known key (default cinematic_sketch). */
+/** Normalize an untrusted style value to a known key (default any). */
 export function resolveStoryboardStyle(raw: unknown): StoryboardStyleKey {
   const s = typeof raw === "string" ? raw.trim() : "";
   return (STORYBOARD_STYLE_KEYS as readonly string[]).includes(s)

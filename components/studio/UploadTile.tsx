@@ -11,6 +11,7 @@ export type ImageUpload = {
   open: () => void;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   clear: () => void;
+  setFile: (next: File | null) => void;
 };
 
 // Encapsulates one optional image slot: file state, object-URL preview lifecycle,
@@ -48,6 +49,7 @@ export function useImageUpload(): ImageUpload {
       set(null);
       if (inputRef.current) inputRef.current.value = "";
     },
+    setFile: set,
   };
 }
 

@@ -96,6 +96,7 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { consumePendingDraft } from "@/lib/pending-form-draft";
 import { animateVideoHref } from "@/lib/animate-handoff";
+import { isViralTemplateAssetPath } from "@/lib/trending-templates";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
@@ -556,10 +557,15 @@ function PhotoOmniPage() {
   // "Schedule this post" is hidden while Schedule is coming-soon/disabled in
   // /admin/config-v2 — no point handing off into an unfinished flow.
   const scheduleAvailable = useToolAvailability("schedule");
-  // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
-  // so we open the storyboard sub-tool preselected.
+  // Deep-link: Video empty state uses ?type=storyboard; dashboard product
+  // try-on templates use ?type=product-tryon&product=…&character=…&prompt=….
+  const typeParam = searchParams.get("type");
   const initialCreationType: CreationTypeId =
-    searchParams.get("type") === "storyboard" ? "storyboard" : "generate-any-image";
+    typeParam === "storyboard"
+      ? "storyboard"
+      : typeParam === "product-tryon"
+        ? "product-tryon"
+        : "generate-any-image";
 
   const product = useImageUpload();
   const character = useImageUpload();
@@ -573,7 +579,7 @@ function PhotoOmniPage() {
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false);
   const [savedCharacters, setSavedCharacters] = useState<CreationHistoryItem[]>([]);
   const [charactersLoading, setCharactersLoading] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(searchParams.get("prompt") ?? "");
   const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
   const [poseId, setPoseId] = useState<ModelPoseId>(DEFAULT_MODEL_POSE);
@@ -638,6 +644,28 @@ function PhotoOmniPage() {
     // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
     // leaving the visitor to notice a silently-empty upload tile.
     setWarning("Signed in — your settings were saved. Please re-attach any photos you'd uploaded.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Dashboard "Photo try-on" deep-link: fetch the public product
+  // (and optional character) into the upload slots so Generate is ready.
+  useEffect(() => {
+    const productPath = searchParams.get("product");
+    const characterPath = searchParams.get("character");
+    let cancelled = false;
+    async function hydrate(path: string | null, setFile: (next: File | null) => void) {
+      if (!path || !isViralTemplateAssetPath(path)) return;
+      const res = await fetch(path);
+      if (!res.ok || cancelled) return;
+      const blob = await res.blob();
+      const name = path.split("/").pop() || "image";
+      setFile(new File([blob], name, { type: blob.type || "image/png" }));
+    }
+    void hydrate(productPath, product.setFile);
+    void hydrate(characterPath, character.setFile);
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);

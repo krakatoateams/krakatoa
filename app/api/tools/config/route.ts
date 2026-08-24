@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
-import { getCurrentProfile } from "@/lib/profiles-db";
 import { listToolConfigs } from "@/lib/tool-configs-db";
 
-// Tool visibility for the authenticated sidebar/dashboard. Any signed-in user
-// may read this. It returns only what the UI needs to decide visibility — it is
-// NOT an access-control boundary (hiding is cosmetic in Phase Admin 1).
+// Presentational tool flags (enabled / coming_soon / sidebar visibility).
+// Public — the landing page and logged-out dashboard both need them. This is
+// NOT an access-control boundary; generation routes still enforce tool_access
+// server-side.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const profile = await getCurrentProfile();
-    if (!profile) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-    }
-
     const tools = await listToolConfigs();
     return NextResponse.json({
       tools: tools.map((t) => ({

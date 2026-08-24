@@ -464,6 +464,7 @@ export const TOOL_DEFAULTS: Record<string, ToolDefault> = {
   ig: { display_name: "IG Automation", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 3 },
   schedule: { display_name: "Schedule", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 4 },
   calendar: { display_name: "Calendar", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 5 },
+  virtual_creator: { display_name: "Virtual Creator", enabled: true, visible_in_sidebar: false, coming_soon: true, sort_order: 6 },
 };
 
 export function getPricingDefault(pricingKey: string): PricingDefault | null {

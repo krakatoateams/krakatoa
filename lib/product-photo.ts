@@ -514,6 +514,7 @@ export const SOCIAL_POST_CREATION_KIND = "social_post";
 // --- Character creation options (omni-form "Character creation" mode) ---------
 
 export type CharacterStyleId =
+  | "any"
   | "realistic"
   | "3d"
   | "anime"
@@ -521,6 +522,7 @@ export type CharacterStyleId =
   | "cartoon"
   | "digital-art";
 export const CHARACTER_STYLES: { id: CharacterStyleId; label: string; prompt: string }[] = [
+  { id: "any", label: "Any", prompt: "" },
   { id: "realistic", label: "Realistic", prompt: "photorealistic, lifelike detail, natural lighting" },
   { id: "3d", label: "3D", prompt: "stylized 3D render, soft global illumination, Pixar-like" },
   { id: "anime", label: "Anime", prompt: "anime illustration, clean linework, cel shading" },
@@ -528,7 +530,7 @@ export const CHARACTER_STYLES: { id: CharacterStyleId; label: string; prompt: st
   { id: "cartoon", label: "Cartoon", prompt: "flat cartoon illustration, bold outlines, vibrant colors" },
   { id: "digital-art", label: "Digital art", prompt: "painterly digital concept art, high detail" },
 ];
-export const DEFAULT_CHARACTER_STYLE: CharacterStyleId = "realistic";
+export const DEFAULT_CHARACTER_STYLE: CharacterStyleId = "any";
 export function isValidCharacterStyle(id: string): id is CharacterStyleId {
   return CHARACTER_STYLES.some((s) => s.id === id);
 }
@@ -548,6 +550,7 @@ export function isValidCharacterGender(id: string): id is CharacterGenderId {
 // Age expressed as life-stage words (never numbers) so the model gets a clear,
 // safe descriptor rather than an exact age.
 export type CharacterAgeId =
+  | "any"
   | "baby"
   | "child"
   | "teen"
@@ -556,6 +559,7 @@ export type CharacterAgeId =
   | "middle-aged"
   | "senior";
 export const CHARACTER_AGES: { id: CharacterAgeId; label: string; prompt: string }[] = [
+  { id: "any", label: "Any", prompt: "" },
   { id: "baby", label: "Baby", prompt: "baby" },
   { id: "child", label: "Child", prompt: "young child" },
   { id: "teen", label: "Teen", prompt: "teenage" },
@@ -564,7 +568,7 @@ export const CHARACTER_AGES: { id: CharacterAgeId; label: string; prompt: string
   { id: "middle-aged", label: "Middle-aged", prompt: "middle-aged" },
   { id: "senior", label: "Senior", prompt: "elderly" },
 ];
-export const DEFAULT_CHARACTER_AGE: CharacterAgeId = "young-adult";
+export const DEFAULT_CHARACTER_AGE: CharacterAgeId = "any";
 export function isValidCharacterAge(id: string): id is CharacterAgeId {
   return CHARACTER_AGES.some((a) => a.id === id);
 }
@@ -598,7 +602,7 @@ export function buildCharacterSheetPrompt(params: {
   return [
     `Character reference turnaround sheet of ${subject}.`,
     who ? `The character is a ${who}.` : "",
-    style ? `Art style: ${style.prompt}.` : "",
+    style?.prompt ? `Art style: ${style.prompt}.` : "",
     "Show the SAME character from four angles in one image, evenly spaced left to right: front view, three-quarter view, side profile, and back view.",
     "Keep identical face, hair, outfit, colors, proportions, and art style across every angle.",
     "Full body, consistent soft studio lighting, clean neutral background, no text, no labels, no watermark.",

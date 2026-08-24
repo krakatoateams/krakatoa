@@ -131,6 +131,8 @@ export type FeatureItem = {
   description: string;
   video: string;
   badge?: string;
+  /** Maps to tool_configs.tool_key so the landing "Soon" badge tracks admin. */
+  toolKey?: string;
 };
 
 export const FEATURES_HEADING =
@@ -158,6 +160,7 @@ export const FEATURES: FeatureItem[] = [
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_074625_a81f018a-956b-43fb-9aee-4d1508e30e6a.mp4",
     badge: "New",
+    toolKey: "virtual_creator",
   },
   {
     id: "scheduler",
@@ -165,6 +168,7 @@ export const FEATURES: FeatureItem[] = [
     description: "Plan posts when your audience is most active.",
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260510_060007_60275ce7-030c-4668-a160-8f364ec537d3.mp4",
+    toolKey: "schedule",
   },
 ];
 
