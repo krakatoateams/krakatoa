@@ -622,6 +622,7 @@ function PhotoOmniPage() {
       modelTier?: ProductPhotoModelTier;
       resolution?: ProductPhotoResolution;
       aspectRatio?: PhotoAspectRatio;
+      hadMedia?: boolean;
     }>(window.location.pathname);
     if (!draft) return;
     if (draft.prompt) setPrompt(draft.prompt);
@@ -635,9 +636,13 @@ function PhotoOmniPage() {
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Uploaded images (product/character/reference) can't survive the round
-    // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
-    // leaving the visitor to notice a silently-empty upload tile.
-    setWarning("Signed in — your settings were saved. Please re-attach any photos you'd uploaded.");
+    // trip (see lib/pending-form-draft.ts) — only warn about it when the
+    // visitor actually had one attached (hadMedia), not on every restore.
+    setWarning(
+      draft.hadMedia
+        ? "Signed in — your settings were saved. Please re-attach any photos you'd uploaded."
+        : "Signed in — your settings were saved."
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -857,6 +862,10 @@ function PhotoOmniPage() {
         modelTier,
         resolution,
         aspectRatio,
+        // So the post-restore banner can be contextual — only warn about
+        // re-attaching a photo when one was actually attached (see the
+        // matching consume effect above).
+        hadMedia: !!(product.file || character.file || reference.file),
       });
       return;
     }
@@ -1021,7 +1030,11 @@ function PhotoOmniPage() {
       const response = await fetch("/api/generate-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "instagram", title: resultPrompt }),
+        body: JSON.stringify({
+          platform: "instagram",
+          title: resultPrompt,
+          storage_path: resultPath ?? undefined,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not write a caption");

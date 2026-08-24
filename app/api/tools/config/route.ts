@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
-import { getCurrentProfile } from "@/lib/profiles-db";
 import { listToolConfigs } from "@/lib/tool-configs-db";
 
-// Tool visibility for the authenticated sidebar/dashboard. Any signed-in user
-// may read this. It returns only what the UI needs to decide visibility — it is
-// NOT an access-control boundary (hiding is cosmetic in Phase Admin 1).
+// Tool visibility for the sidebar/dashboard, logged in or not — a logged-out
+// visitor browsing the public dashboard (kelolako-dashboard-nonlogin-plan)
+// needs to see the same coming-soon badge a signed-in user would. Returns
+// only what the UI needs to decide visibility (no user data) — it is NOT an
+// access-control boundary; that lives in app/(app)/tools/scheduler/layout.tsx
+// (coming_soon) and lib/tool-access.ts (enabled), both server-side.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const profile = await getCurrentProfile();
-    if (!profile) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-    }
-
     const tools = await listToolConfigs();
     return NextResponse.json({
       tools: tools.map((t) => ({

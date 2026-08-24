@@ -155,7 +155,12 @@ const FALLBACKS = {
     rendi: { provider: "rendi", model: "default", parameters: {} },
   },
   schedule: {
-    llm: { provider: REPLICATE, model: "google/gemini-2.5-flash", parameters: {} },
+    // openai/gpt-5, not Gemini: confirmed by direct testing that Gemini
+    // 2.5 Flash unreliably truncates this kind of structured "caption +
+    // hashtags" creative-writing task (worse still when an image is
+    // attached), while GPT-5 completes it reliably every time. See
+    // app/api/generate-caption/route.ts.
+    llm: { provider: REPLICATE, model: "openai/gpt-5", parameters: {} },
     whisper: { provider: REPLICATE, model: WHISPER_PINNED, parameters: {} },
   },
 } as const;

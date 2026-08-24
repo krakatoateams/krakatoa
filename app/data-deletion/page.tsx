@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Instruksi Penghapusan Data",
-    effectiveDate: "Terakhir diperbarui: 27 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
     intro: "Halaman ini menjelaskan cara meminta penghapusan data pribadi Anda dari Kelolako, termasuk data yang terhubung melalui platform yang Anda hubungkan, seperti YouTube dan TikTok.",
     sections: [
       {
@@ -48,7 +48,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Data Deletion Instructions",
-    effectiveDate: "Last updated: July 27, 2026",
+    effectiveDate: "Last updated: August 24, 2026",
     intro: "This page explains how to request deletion of your personal data from Kelolako, including data connected via platforms you've linked, such as YouTube and TikTok.",
     sections: [
       {
