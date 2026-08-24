@@ -72,6 +72,7 @@ import {
   uploadRefFile,
   STUDIO_CHIP_ROW_CLASS,
   StudioModelPanel,
+  type ChipOption,
   type RefGroupApi,
 } from "@/components/studio";
 import {
@@ -236,10 +237,27 @@ const CREATION_TYPES = [
   { id: "image2video", label: "Image to video", available: true },
   { id: "motion_control", label: "Motion control", available: true },
   { id: "storyboard", label: "Storyboard to video", available: true },
-  { id: "reels-creator", label: "Reels Creator", available: true },
+  { id: "reels-creator", label: "Reels Creator", available: false },
 ] as const;
 
 type VideoCreationTypeOption = (typeof CREATION_TYPES)[number];
+
+/** Reels Creator is admin-only until public launch; other types use `available`. */
+function isVideoCreationUsable(c: VideoCreationTypeOption, isAdmin: boolean): boolean {
+  if (c.id === "reels-creator") return isAdmin;
+  return c.available;
+}
+
+function creationTypeChipOptions(
+  types: readonly VideoCreationTypeOption[],
+  isAdmin: boolean
+): ChipOption[] {
+  return types.map((c) => ({
+    id: c.id,
+    label: c.label,
+    hint: isVideoCreationUsable(c, isAdmin) ? undefined : "Soon",
+  }));
+}
 
 type VideoCreationType =
   | "text2video"
@@ -305,10 +323,36 @@ function VideoOmniPage() {
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminResolved, setAdminResolved] = useState(false);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      setIsAdmin(false);
+      setAdminResolved(true);
+      return;
+    }
+    let active = true;
+    fetch("/api/admin/me")
+      .then((res) => (res.ok ? res.json() : { isAdmin: false }))
+      .then((d: { isAdmin?: boolean }) => {
+        if (!active) return;
+        setIsAdmin(Boolean(d.isAdmin));
+        setAdminResolved(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsAdmin(false);
+        setAdminResolved(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [status]);
 
   // Deep-link support: the Photo → Storyboard "Create video" CTA navigates here
-  // with ?type=storyboard&storyboardId=...; the dashboard reels links use
-  // ?type=reels-creator. Any known subtool can be preselected via ?type=.
+  // with ?type=storyboard&storyboardId=...; the dashboard Video card uses
+  // ?type=text2video. Any known subtool can be preselected via ?type=.
   const typeParam = searchParams.get("type");
   const initialType: VideoCreationType =
     typeParam === "storyboard"
@@ -386,6 +430,7 @@ function VideoOmniPage() {
   }, [historyRefreshKey]);
 
   const handleCreationType = (id: string) => {
+    if (id === "reels-creator" && !isAdmin) return;
     if (
       id === "text2video" ||
       id === "image2video" ||
@@ -396,6 +441,13 @@ function VideoOmniPage() {
       setCreationType(id);
     }
   };
+
+  useEffect(() => {
+    if (!adminResolved) return;
+    if (!isAdmin && creationType === "reels-creator") {
+      setCreationType("text2video");
+    }
+  }, [adminResolved, isAdmin, creationType]);
 
   const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
   const model = getVideoModel(modelId);
@@ -728,11 +780,7 @@ function VideoOmniPage() {
               icon={<Layers className="h-3.5 w-3.5" />}
               value={selectedCreation?.label ?? "Creation"}
               activeId="text2video"
-                options={availableCreationTypes.map((c) => ({
-                id: c.id,
-                label: c.label,
-                hint: c.available ? undefined : "Open",
-              }))}
+                options={creationTypeChipOptions(availableCreationTypes, isAdmin)}
               onSelect={handleCreationType}
               disabled={loading}
             />
@@ -1105,6 +1153,7 @@ function VideoOmniPage() {
             initialPrompt={initialPrompt}
             mentionAssets={mentionAssets}
             creationTypes={availableCreationTypes}
+            isAdmin={isAdmin}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
@@ -1118,6 +1167,7 @@ function VideoOmniPage() {
           <MotionControlComposer
             initialTemplateVideo={initialTemplateVideo}
             creationTypes={availableCreationTypes}
+            isAdmin={isAdmin}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
@@ -1131,6 +1181,7 @@ function VideoOmniPage() {
           <StoryboardToVideoComposer
             initialStoryboardId={initialStoryboardId}
             creationTypes={availableCreationTypes}
+            isAdmin={isAdmin}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
@@ -1140,9 +1191,10 @@ function VideoOmniPage() {
           />
         )}
 
-        {creationType === "reels-creator" && (
+        {creationType === "reels-creator" && isAdmin && (
           <ReelsCreatorComposer
             creationTypes={availableCreationTypes}
+            isAdmin={isAdmin}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
@@ -1201,6 +1253,7 @@ function ImageToVideoComposer({
   initialPrompt,
   mentionAssets,
   creationTypes,
+  isAdmin,
   composerEnablement,
   onSelectCreation,
   onGenerated,
@@ -1211,6 +1264,7 @@ function ImageToVideoComposer({
   initialPrompt: string | null;
   mentionAssets: MentionAsset[];
   creationTypes: VideoCreationTypeOption[];
+  isAdmin: boolean;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
@@ -1505,11 +1559,7 @@ function ImageToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Image to video"
             activeId="image2video"
-                options={creationTypes.map((c) => ({
-              id: c.id,
-              label: c.label,
-              hint: c.available ? undefined : "Open",
-            }))}
+            options={creationTypeChipOptions(creationTypes, isAdmin)}
             onSelect={onSelectCreation}
             disabled={loading}
           />
@@ -1808,12 +1858,14 @@ function ImageToVideoComposer({
 function MotionControlComposer({
   initialTemplateVideo,
   creationTypes,
+  isAdmin,
   composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   initialTemplateVideo?: string | null;
   creationTypes: VideoCreationTypeOption[];
+  isAdmin: boolean;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
@@ -2051,11 +2103,7 @@ function MotionControlComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Motion control"
             activeId="motion_control"
-                options={creationTypes.map((c) => ({
-              id: c.id,
-              label: c.label,
-              hint: c.available ? undefined : "Open",
-            }))}
+            options={creationTypeChipOptions(creationTypes, isAdmin)}
             onSelect={onSelectCreation}
             disabled={loading}
           />
@@ -2688,12 +2736,14 @@ function ImportStoryboardModal({
 function StoryboardToVideoComposer({
   initialStoryboardId,
   creationTypes,
+  isAdmin,
   composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   initialStoryboardId: string | null;
   creationTypes: VideoCreationTypeOption[];
+  isAdmin: boolean;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
@@ -2970,11 +3020,7 @@ function StoryboardToVideoComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Storyboard to video"
             activeId="storyboard"
-                options={creationTypes.map((c) => ({
-              id: c.id,
-              label: c.label,
-              hint: c.available ? undefined : "Open",
-            }))}
+            options={creationTypeChipOptions(creationTypes, isAdmin)}
             onSelect={onSelectCreation}
             disabled={loading}
           />
@@ -3577,11 +3623,13 @@ function NumberStepper({
 
 function ReelsCreatorComposer({
   creationTypes,
+  isAdmin,
   composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   creationTypes: VideoCreationTypeOption[];
+  isAdmin: boolean;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
@@ -3831,7 +3879,7 @@ function ReelsCreatorComposer({
             icon={<Layers className="h-3.5 w-3.5" />}
             value="Reels Creator"
             activeId="reels-creator"
-                options={creationTypes.map((c) => ({ id: c.id, label: c.label }))}
+            options={creationTypeChipOptions(creationTypes, isAdmin)}
             onSelect={onSelectCreation}
             disabled={loading}
           />
