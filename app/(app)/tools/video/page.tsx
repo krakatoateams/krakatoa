@@ -327,6 +327,9 @@ function VideoOmniPage() {
   // Dashboard "Trending templates" deep-link: ?type=motion_control&templateVideo=<public url>
   // preloads the clip as the Motion Control driving video.
   const initialTemplateVideo = searchParams.get("templateVideo") || null;
+  // Dashboard "Viral templates" deep-link: ?type=image2video&prompt=...
+  // prefills Image to video so the user remakes the scene with their own photo.
+  const initialPrompt = searchParams.get("prompt") || null;
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -1099,6 +1102,7 @@ function VideoOmniPage() {
         {creationType === "image2video" && (
           <ImageToVideoComposer
             initialStartImageCreationId={initialStartImageCreationId}
+            initialPrompt={initialPrompt}
             mentionAssets={mentionAssets}
             creationTypes={availableCreationTypes}
             composerEnablement={composerEnablement}
@@ -1194,6 +1198,7 @@ const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 // Image to Video — models that require a reference image (Kling v1.5 family).
 function ImageToVideoComposer({
   initialStartImageCreationId,
+  initialPrompt,
   mentionAssets,
   creationTypes,
   composerEnablement,
@@ -1202,6 +1207,8 @@ function ImageToVideoComposer({
 }: {
   /** Library photo to preselect as the start frame (Photo → video "Animate"). */
   initialStartImageCreationId: string | null;
+  /** Prefill from a viral-template deep-link (`?prompt=`). */
+  initialPrompt: string | null;
   mentionAssets: MentionAsset[];
   creationTypes: VideoCreationTypeOption[];
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
@@ -1228,7 +1235,7 @@ function ImageToVideoComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [image2videoModels.map((m) => m.id).join(","), composerEnablement]);
 
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   const [imageSource, setImageSource] = useState<PhotoLibrarySource>(
     initialStartImageCreationId ? "library" : "upload"
