@@ -84,7 +84,7 @@ export function useToolAvailabilityMap(): {
     ...(rows ?? []).map((t) => t.tool_key),
   ]);
   const map = Object.fromEntries(
-    [...keys].map((key) => [key, availabilityOf(key, rows, ready)])
+    Array.from(keys).map((key) => [key, availabilityOf(key, rows, ready)])
   );
   return { map, ready };
 }
