@@ -84,14 +84,17 @@ export const HERO_HEADLINE_LINES = HERO_HEADLINE.map((line) =>
     .join(" ")
 );
 
-export const HERO_CTA = { label: "See how", href: "#features" };
+export const HERO_CTA = {
+  label: "See how",
+  youtubeVideoId: "6kZpxHJd6P0",
+};
 
 /**
  * Supporting statement rendered beneath the hero showreel. Kept as plain copy
  * here; the /hello variant reveals it word-by-word on scroll.
  */
 export const HERO_SUBCOPY =
-  "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes — all from a single prompt.";
+  "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes, all from a single prompt.";
 
 export const AI_MODELS_LABEL = "Powered by leading AI models";
 export const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
@@ -110,14 +113,14 @@ export const ABOUT_PHOTOS = [
 export const ABOUT = {
   /** Rendered one per line on desktop, joined with spaces on mobile. */
   headingLines: ["AI video and images,", "from prompt to", "post in minutes."],
-  body: "Generate faceless reels, cinematic clips, and studio-grade product photos with one AI suite — scripted, generated, captioned, and ready to publish.",
+  body: "Generate faceless reels, cinematic clips, and studio-grade product photos with one AI suite, scripted, generated, captioned, and ready to publish.",
   cta: { label: "Explore our tools", href: "#features" },
   manifesto:
-    "We don't just generate content — we help brands realize their voice at scale.",
+    "We don't just generate content, we help brands realize their voice at scale.",
   byline: "Kelolako team · est. 2026",
   stat: {
     value: "Free to start",
-    label: "Register now — no commitment, no card required",
+    label: "Register now, no commitment, no card required",
   },
 };
 

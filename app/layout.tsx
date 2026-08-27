@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { PwaRegister } from "@/components/PwaRegister";
+import { resolveSiteOrigin } from "@/lib/http";
 import "@/app/globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -22,10 +23,8 @@ const inter = Inter({
 
 function metadataBaseUrl(): URL {
   const fallback = "https://www.kelolako.com";
-  const raw = process.env.NEXTAUTH_URL?.trim();
-  if (!raw) return new URL(fallback);
   try {
-    return new URL(raw);
+    return new URL(resolveSiteOrigin());
   } catch {
     return new URL(fallback);
   }
@@ -70,8 +69,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable}`}>
-      <body className="font-body">
+    <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable} bg-N0`}>
+      <body className="font-body bg-N0">
         <PwaRegister />
         <Providers>{children}</Providers>
       </body>

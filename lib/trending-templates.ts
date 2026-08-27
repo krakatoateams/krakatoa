@@ -35,23 +35,41 @@ export type TrendingTemplate = {
   /** Product try-on: optional character/model file. */
   characterImageUrl?: string;
   /**
-   * Generation prompt that produced the clip. Viral templates deep-link this
-   * into Image to video so the user remakes the scene with their own photo.
+   * Generation prompt baked into the Viral Template composer (not shown to the user).
    */
   prompt?: string;
 };
 
-/** Motion-control handoff for try-on templates (driving video). */
+/** Text-to-video handoff for dashboard template cards. */
+export function textToVideoTemplateHref(prompt?: string): string {
+  const trimmed = prompt?.trim();
+  if (!trimmed) return "/tools/video?type=text2video";
+  return `/tools/video?type=text2video&prompt=${encodeURIComponent(trimmed)}`;
+}
+
+/** Motion-control handoff for dashboard motion-control carousel clips. */
 export function tryOnTemplateHref(videoUrl: string): string {
   return `/tools/video?type=motion_control&templateVideo=${encodeURIComponent(videoUrl)}`;
 }
 
 /**
- * Viral-template handoff: Image to video with the template's prompt prefilled.
- * The user attaches their own photo as the start frame — we do not copy pose
- * from the showcase clip.
+ * Viral-template handoff: dedicated Viral Template composer with the showcase
+ * clip locked and the generation prompt baked in — user only supplies a character.
  */
-export function viralTemplateHref(prompt: string): string {
+export function viralTemplateHref(templateId: string): string {
+  return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(templateId)}`;
+}
+
+export function getViralTemplate(templateId: string): TrendingTemplate | undefined {
+  return VIRAL_TEMPLATES.find((t) => t.id === templateId);
+}
+
+export function isViralTemplateId(templateId: string): boolean {
+  return VIRAL_TEMPLATES.some((t) => t.id === templateId);
+}
+
+/** @deprecated Use viralTemplateHref(templateId) — image2video prompt links are retired. */
+export function viralTemplateImage2VideoHref(prompt: string): string {
   const trimmed = prompt.trim();
   if (!trimmed) return "/tools/video?type=image2video";
   return `/tools/video?type=image2video&prompt=${encodeURIComponent(trimmed)}`;
@@ -139,9 +157,8 @@ export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON
  * Dashboard "Viral templates" carousel.
  *
  * Add a new card here — one object per clip. Put the mp4 (and optional webm)
- * in `public/viral-templates/` and write the Image-to-video prompt that should
- * prefill when the user clicks Use template. Describe the scene and motion,
- * not the person in the showcase still; their start photo supplies identity.
+ * in `public/viral-templates/` and append one object to VIRAL_CATALOG. The
+ * generation prompt is applied automatically in the Viral Template composer.
  */
 const VIRAL_DIR = "/viral-templates";
 const VIRAL_REFERENCE = `${VIRAL_DIR}/reference.png`;
