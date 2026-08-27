@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { TextRollButton } from "@/components/landing/TextRollButton";
+import { HeroSeeHowCta } from "@/components/landing/HeroSeeHowCta";
 import { VideoBackdrop } from "@/components/landing/HeroSectionVideo";
 import { LANDING_SHOWREEL } from "@/lib/landing-media";
 import {
   AI_MODELS_LABEL,
-  HERO_CTA,
   HERO_HEADLINE_LINES,
 } from "@/lib/landing-content";
 import { HelloNav } from "./HelloNav";
@@ -94,17 +94,14 @@ export function HelloHero() {
             {HERO_PRIMARY_CTA.label}
           </TextRollButton>
 
-          <TextRollButton
-            href={HERO_CTA.href}
+          <HeroSeeHowCta
             className={ctaGhost}
             icon={ArrowDown}
             iconHoverClassName="group-hover:translate-y-1"
             iconVariant="invert"
             iconWrapperClassName="w-6 h-6"
             iconClassName="w-3.5 h-3.5"
-          >
-            {HERO_CTA.label}
-          </TextRollButton>
+          />
         </div>
 
         {/* Showreel panel: the clips, plus the models that power them. */}

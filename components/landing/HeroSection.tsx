@@ -3,13 +3,12 @@
 import type { ReactNode } from "react";
 import { ArrowDown } from "lucide-react";
 import { LandingNav } from "./LandingNav";
-import { TextRollButton } from "./TextRollButton";
+import { HeroSeeHowCta } from "./HeroSeeHowCta";
 import { HeroCollageHeadline } from "./HeroCollageHeadline";
 import { HeroFloatingSocialIcons } from "./HeroFloatingSocialIcons";
 import {
   AI_MODELS,
   AI_MODELS_LABEL,
-  HERO_CTA,
 } from "@/lib/landing-content";
 
 /**
@@ -65,8 +64,7 @@ export function HeroLayout({
             <HeroCollageHeadline tone={tone} />
 
             <div className="mt-8 sm:mt-12 flex justify-center">
-              <TextRollButton
-                href={HERO_CTA.href}
+              <HeroSeeHowCta
                 className="inline-flex items-center gap-2 bg-[#F26522] hover:bg-[#e05a1a] text-white text-base sm:text-lg font-medium rounded-full pl-7 sm:pl-8 pr-3 py-3 transition-colors"
                 textClassName="h-6 sm:h-7"
                 iconWrapperClassName="w-10 h-10 sm:w-11 sm:h-11"
@@ -74,9 +72,7 @@ export function HeroLayout({
                 iconVariant="orange"
                 icon={ArrowDown}
                 iconHoverClassName="group-hover:translate-y-1"
-              >
-                {HERO_CTA.label}
-              </TextRollButton>
+              />
             </div>
           </div>
         </HeroFloatingSocialIcons>

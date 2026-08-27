@@ -14,10 +14,9 @@ import {
 } from "@/lib/trending-templates";
 
 /**
- * Dashboard template carousels. Photo try-on deep-links into Product try-on.
- * Video try-on cards deep-link into Motion Control (the clip is the driving
- * pose). Viral cards deep-link into Image to video with the clip's generation
- * prompt prefilled — the user supplies their own start photo.
+ * Dashboard template carousels. Photo try-on → Product try-on. Motion control
+ * clips → Motion control with the template video preloaded. Viral clips →
+ * Viral Template composer (character upload only).
  */
 export default function TrendingTemplates() {
   return (
@@ -48,7 +47,7 @@ export function ViralTemplates() {
       <TemplateCarousel
         title="Viral templates"
         templates={VIRAL_TEMPLATES}
-        hrefFor={(t) => viralTemplateHref(t.prompt ?? "")}
+        hrefFor={(t) => viralTemplateHref(t.id)}
       />
     </section>
   );
