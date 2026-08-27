@@ -19,7 +19,7 @@ export const LANDING_VIDEO_BASE = (
   process.env.NEXT_PUBLIC_LANDING_VIDEO_BASE || DEFAULT_VIDEO_BASE
 ).replace(/\/+$/, "");
 
-/** Kelolako barista clip — bundled under /public for the /hello showreel. */
+/** Kelolako barista clip — bundled under /public for the homepage showreel. */
 export const LANDING_BARISTA_SRC = "/landing/kelolako-barista-optimized.mp4";
 
 function landingVideoSrc(file: string): string {
@@ -42,13 +42,13 @@ export const LANDING_VIDEO_FILES = [
 export const LANDING_VIDEO_SRCS = LANDING_VIDEO_FILES.map(landingVideoSrc);
 
 /**
- * Showreel for the /hello hero: one clip per model, so the model strip doubles
- * as the playlist selector.
+ * Showreel for the homepage hero: one clip per model, so the model strip
+ * doubles as the playlist selector.
  *
  * Kling and Seedance map to the clips actually generated with them. The Kelolako
  * barista clip stands in for Nano Banana 2 in the showreel. The fourth CDN file
  * ("Car Racing 2") is a second Seedance racing clip and is left out here; it
- * still plays in the full rotation on `/` and the auth screens.
+ * still plays in the full rotation on auth screens.
  */
 export const LANDING_SHOWREEL: { model: string; src: string }[] = [
   { model: "Nano Banana 2", src: LANDING_BARISTA_SRC },

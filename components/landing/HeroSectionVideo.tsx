@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HeroLayout } from "./HeroSection";
-import { LANDING_VIDEO_SRCS as VIDEO_SRCS } from "@/lib/landing-media";
 
 /**
  * Plays a playlist of background clips one after another with a soft
@@ -65,11 +63,5 @@ export function VideoBackdrop({
       {/* Darkening overlay for contrast — sits above the clips, below content */}
       <div className={`absolute inset-0 ${overlayClassName}`} aria-hidden />
     </div>
-  );
-}
-
-export function HeroSectionVideoA() {
-  return (
-    <HeroLayout tone="light" background={<VideoBackdrop srcs={VIDEO_SRCS} />} />
   );
 }

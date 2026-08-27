@@ -1,12 +1,12 @@
 /**
- * Design tokens for the /hello landing variant, originally derived from
- * arqe.ai's live stylesheet as a self-contained monochrome system. Now
- * retired onto the app-wide DS v2 tokens (tailwind.config.mjs's N-scale +
- * brand-primary) instead of hardcoded hex, so this surface matches the rest
- * of the app (dashboard, tools, auth) — see kelolako-design-system-v2-rollout.
- * Kept as named exports (rather than inlining the classes in every
- * component) purely so the monochrome "voice" — weights, tracking, which
- * N-step plays which role — stays centralized and easy to tune in one place.
+ * Design tokens for the homepage landing, originally derived from arqe.ai's
+ * live stylesheet as a self-contained monochrome system. Now retired onto the
+ * app-wide DS v2 tokens (tailwind.config.mjs's N-scale + brand-primary) instead
+ * of hardcoded hex, so this surface matches the rest of the app (dashboard,
+ * tools, auth) — see kelolako-design-system-v2-rollout. Kept as named exports
+ * (rather than inlining the classes in every component) purely so the
+ * monochrome "voice" — weights, tracking, which N-step plays which role —
+ * stays centralized and easy to tune in one place.
  */
 
 export const HELLO_COLORS = {
