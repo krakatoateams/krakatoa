@@ -277,7 +277,13 @@ export async function POST(req: Request) {
     // render in the picked aesthetic. The storyboard image stays the primary
     // composition reference; this directive sets the rendering style.
     const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
-    const promptPrefix = `${storyboardVideoStyleDirective(storyboardStyle)}\n${storyboardVideoAspectDirective(aspectRatio)}\n${storyboardLanguageDirective(language)}`;
+    const promptPrefix = [
+      storyboardVideoStyleDirective(storyboardStyle),
+      storyboardVideoAspectDirective(aspectRatio),
+      storyboardLanguageDirective(language),
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     // Seedance 2.0 hard-truncates prompts over 2000 chars FROM THE END, which
     // would silently drop the closing scene beats + dialogue. Build the prompt

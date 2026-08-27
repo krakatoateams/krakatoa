@@ -2,7 +2,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 
 /**
  * Per-email login lockout data access (service-role) — see
- * supabase/migrations/064_login_attempts.sql and app/api/auth/signin/route.ts.
+ * supabase/migrations/065_login_attempts.sql and app/api/auth/signin/route.ts.
  * Keyed by lowercased, trimmed email so casing differences at signup/login
  * never split one account across two tracked rows.
  */

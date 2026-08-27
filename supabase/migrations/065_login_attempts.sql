@@ -1,4 +1,4 @@
--- 064_login_attempts.sql
+-- 065_login_attempts.sql
 -- Per-email login lockout: after 5 failed password attempts, block further
 -- attempts against that email for 5 minutes (app/api/auth/signin/route.ts).
 --

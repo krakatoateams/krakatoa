@@ -13,7 +13,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
  * attempt counter would be trivially bypassed by clearing storage or opening
  * a private window; the lock has to live on the server, tied to the email
  * being attacked. See lib/login-attempts-db.ts and
- * supabase/migrations/064_login_attempts.sql.
+ * supabase/migrations/065_login_attempts.sql.
  *
  * createSupabaseAuthServer() uses the next/headers cookie adapter, so a
  * successful signInWithPassword here sets the same session cookies the

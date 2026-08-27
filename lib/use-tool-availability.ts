@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { TOOL_DEFAULTS } from "@/lib/admin-config-defaults";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 
 export type ToolAvailability = {
@@ -50,15 +51,26 @@ function useToolConfigRows(): { rows: ToolConfigRow[] | null; ready: boolean } {
   return { rows, ready };
 }
 
+function availabilityOf(
+  toolKey: string,
+  rows: ToolConfigRow[] | null,
+  ready: boolean
+): ToolAvailability {
+  const tool = rows?.find((t) => t.tool_key === toolKey);
+  const def = TOOL_DEFAULTS[toolKey];
+  return {
+    enabled: tool ? tool.enabled : (def?.enabled ?? true),
+    // Missing row: honour the code default (e.g. virtual_creator is Soon)
+    // instead of failing open as "not coming soon".
+    comingSoon: tool ? tool.coming_soon : (def?.coming_soon ?? false),
+    ready,
+  };
+}
+
 /** Single tool's enabled/coming_soon state — e.g. Photo/Video's "Schedule this post" CTA. */
 export function useToolAvailability(toolKey: string): ToolAvailability {
   const { rows, ready } = useToolConfigRows();
-  const tool = rows?.find((t) => t.tool_key === toolKey);
-  return {
-    enabled: tool ? tool.enabled : true,
-    comingSoon: tool ? tool.coming_soon : false,
-    ready,
-  };
+  return availabilityOf(toolKey, rows, ready);
 }
 
 /** Several tools at once, keyed by tool_key — e.g. the dashboard's tool grid. */
@@ -67,11 +79,12 @@ export function useToolAvailabilityMap(): {
   ready: boolean;
 } {
   const { rows, ready } = useToolConfigRows();
+  const keys = new Set([
+    ...Object.keys(TOOL_DEFAULTS),
+    ...(rows ?? []).map((t) => t.tool_key),
+  ]);
   const map = Object.fromEntries(
-    (rows ?? []).map((t) => [
-      t.tool_key,
-      { enabled: t.enabled, comingSoon: t.coming_soon, ready },
-    ])
+    Array.from(keys).map((key) => [key, availabilityOf(key, rows, ready)])
   );
   return { map, ready };
 }

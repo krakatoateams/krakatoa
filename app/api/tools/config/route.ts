@@ -5,8 +5,9 @@ import { listToolConfigs } from "@/lib/tool-configs-db";
 // visitor browsing the public dashboard (kelolako-dashboard-nonlogin-plan)
 // needs to see the same coming-soon badge a signed-in user would. Returns
 // only what the UI needs to decide visibility (no user data) — it is NOT an
-// access-control boundary; that lives in app/(app)/tools/scheduler/layout.tsx
-// (coming_soon) and lib/tool-access.ts (enabled), both server-side.
+// access-control boundary; that lives in app/(app)/tools/scheduler/page.tsx
+// and .../calendar/page.tsx (coming_soon) and lib/tool-access.ts (enabled +
+// generation routes), both server-side.
 export const dynamic = "force-dynamic";
 
 export async function GET() {

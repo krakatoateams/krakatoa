@@ -4,16 +4,9 @@ import { packTotalCredits } from "@/lib/credit-packs";
 import { getActiveCreditPack } from "@/lib/credit-packs-db";
 import { createOrder, setOrderToken } from "@/lib/credit-orders-db";
 import { createCheckoutPayment, DokuConfigError, DokuApiError } from "@/lib/doku";
+import { resolveSiteOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
-
-/** Absolute site origin for DOKU redirect/callback URLs. */
-function siteOrigin(): string {
-  const explicit = process.env.NEXTAUTH_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
 
 /**
  * Start a credit-pack purchase via DOKU Checkout.
@@ -71,7 +64,7 @@ export async function POST(req: Request) {
       },
     });
 
-    const origin = siteOrigin();
+    const origin = resolveSiteOrigin();
     const successUrl = `${origin}/dashboard/settings?tab=credits&status=success&order=${encodeURIComponent(invoiceNumber)}`;
 
     const customerEmail = email || `user-${profileId}@kelolako.com`;
