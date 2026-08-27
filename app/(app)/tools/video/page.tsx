@@ -1857,6 +1857,7 @@ function ImageToVideoComposer({
       duration?: number;
       resolution?: VideoResolution;
       aspectRatio?: VideoAspectRatio;
+      hadMedia?: boolean;
     }>(window.location.pathname);
     if (!draft) return;
     if (draft.prompt) setPrompt(draft.prompt);
@@ -1864,8 +1865,13 @@ function ImageToVideoComposer({
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Any uploaded start/end frame image can't survive the round trip (see
-    // lib/pending-form-draft.ts) — say so explicitly.
-    setRestoreNotice("Signed in — your settings were saved. Please re-attach your start/end image if you'd uploaded one.");
+    // lib/pending-form-draft.ts) — only warn about it if one was actually
+    // attached (hadMedia), not on every restore.
+    setRestoreNotice(
+      draft.hadMedia
+        ? "Signed in — your settings were saved. Please re-attach your start/end image if you'd uploaded one."
+        : "Signed in — your settings were saved."
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2000,7 +2006,15 @@ function ImageToVideoComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { prompt, duration, resolution, aspectRatio });
+      openSignInModal(undefined, {
+        prompt,
+        duration,
+        resolution,
+        aspectRatio,
+        // So the post-restore banner can be contextual — only warn about
+        // re-attaching a frame image when one was actually attached.
+        hadMedia: startReady || endReady,
+      });
       return;
     }
 
@@ -2475,7 +2489,7 @@ function MotionControlComposer({
     if (typeof draft.keepOriginalSound === "boolean") setKeepOriginalSound(draft.keepOriginalSound);
     // The character image and motion-reference video can't survive the round
     // trip (see lib/pending-form-draft.ts) — say so explicitly.
-    setRestoreNotice("Signed in — your settings were saved. Please re-attach your character image and motion video.");
+    setRestoreNotice("Signed in — your settings were saved. Please re-attach your character image and motion video if you'd uploaded them.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

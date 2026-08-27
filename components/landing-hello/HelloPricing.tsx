@@ -283,7 +283,9 @@ export function HelloPricing() {
                     key={pack.id}
                     pack={pack}
                     authed={isAuthed}
-                    onGuestClick={() => openSignInModal()}
+                    // Landing-page exception: land signed-in visitors on the
+                    // dashboard, not back on the landing page they came from.
+                    onGuestClick={() => openSignInModal("/dashboard")}
                   />
                 ))}
               </div>

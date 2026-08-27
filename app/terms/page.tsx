@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Syarat dan Ketentuan Layanan",
-    effectiveDate: "Terakhir diperbarui: 27 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
     intro: "Dengan mengakses atau menggunakan Kelolako (\"Layanan\", \"kami\", \"Kelolako\"), Anda menyetujui untuk terikat oleh Syarat dan Ketentuan (\"Syarat\") ini. Jika Anda tidak menyetujui Syarat ini, mohon untuk tidak menggunakan Layanan kami. Layanan ini dioperasikan oleh Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta, selanjutnya disebut \"Kelolako\".",
     sections: [
       {
@@ -78,7 +78,7 @@ const content: LegalContent = {
           { type: "p", text: "Sebagian fitur Layanan menggunakan sistem kredit virtual (\"Kredit\") yang dapat dibeli menggunakan uang sungguhan melalui penyedia gerbang pembayaran pihak ketiga (saat ini DOKU, dan dapat bertambah dengan penyedia lain di masa mendatang). Dengan melakukan pembelian, Anda menyetujui:" },
           { type: "ul", items: [
             "Harga Kredit dapat berubah sewaktu-waktu dengan pemberitahuan yang wajar;",
-            "Kredit yang telah dibeli bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali diwajibkan oleh hukum yang berlaku atau sebagaimana diatur dalam ketentuan ini. Kredit hasil pembelian tidak memiliki masa berlaku (tidak pernah kedaluwarsa). Kredit bonus (seperti bonus pendaftaran atau bonus pembelian) memiliki masa berlaku terbatas sebagaimana tercantum pada halaman akun Anda, dan akan hangus secara otomatis setelah masa berlaku tersebut berakhir tanpa kompensasi apapun. Kredit dengan masa berlaku yang lebih dekat akan digunakan terlebih dahulu sebelum Kredit yang tidak memiliki masa berlaku.",
+            "Kredit yang telah dibeli bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali diwajibkan oleh hukum yang berlaku atau sebagaimana diatur dalam ketentuan ini. Baik Kredit reguler (hasil pembelian) maupun Kredit bonus (seperti bonus pendaftaran atau bonus pembelian) memiliki masa berlaku sebagaimana tercantum pada halaman akun Anda, dan akan hangus secara otomatis setelah masa berlaku tersebut berakhir tanpa kompensasi apapun. Kredit dengan masa berlaku yang lebih dekat akan digunakan terlebih dahulu.",
             "Jika proses pembuatan konten AI gagal karena kesalahan sistem kami, Kredit yang terpakai untuk proses tersebut akan dikembalikan secara otomatis ke akun Anda.",
             "Kelolako tidak menyimpan detail kartu pembayaran Anda — seluruh pemrosesan pembayaran ditangani oleh penyedia gerbang pembayaran kami (saat ini DOKU) sesuai kebijakan privasi masing-masing.",
           ]},
@@ -134,7 +134,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Terms of Service",
-    effectiveDate: "Last updated: July 27, 2026",
+    effectiveDate: "Last updated: August 24, 2026",
     intro: "By accessing or using Kelolako (\"Service\", \"we\", \"Kelolako\"), you agree to be bound by these Terms of Service (\"Terms\"). If you do not agree to these Terms, please do not use our Service. The Service is operated by an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta, hereinafter referred to as \"Kelolako\".",
     sections: [
       {
@@ -203,7 +203,7 @@ const content: LegalContent = {
           { type: "p", text: "Certain Service features use a virtual credit system (\"Credits\") that can be purchased with real money through third-party payment gateway provider(s) (currently DOKU, with additional providers possibly added in the future). By making a purchase, you agree that:" },
           { type: "ul", items: [
             "Credit pricing may change from time to time with reasonable notice;",
-            "Purchased Credits are final and non-refundable, except where required by applicable law or as otherwise stated in these Terms. Purchased Credits do not expire. Bonus Credits (such as welcome bonuses or purchase bonuses) have a limited validity period as shown on your account page, and will automatically forfeit upon expiration with no compensation. Credits with an earlier expiration date will be used before Credits that do not expire.",
+            "Purchased Credits are final and non-refundable, except where required by applicable law or as otherwise stated in these Terms. Both regular (purchased) Credits and Bonus Credits (such as welcome bonuses or purchase bonuses) have a validity period as shown on your account page, and will automatically forfeit upon expiration with no compensation. Credits with an earlier expiration date will be used first.",
             "If an AI content generation process fails due to an error on our part, the Credit consumed for that process will be automatically refunded to your account.",
             "Kelolako does not store your payment card details — all payment processing is handled by our payment gateway provider(s) (currently DOKU) under their respective privacy policies.",
           ]},

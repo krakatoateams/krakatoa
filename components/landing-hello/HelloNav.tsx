@@ -87,7 +87,9 @@ export function HelloNav() {
             {!isAuthed && (
               <button
                 type="button"
-                onClick={() => openSignInModal()}
+                // Landing-page exception: land signed-in visitors on the
+                // dashboard, not back on the landing page they came from.
+                onClick={() => openSignInModal("/dashboard")}
                 className="text-sm text-text-secondary transition-colors hover:text-N900"
               >
                 {NAV_LOGIN.label}
@@ -171,7 +173,8 @@ export function HelloNav() {
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  openSignInModal();
+                  // Landing-page exception — see the desktop button above.
+                  openSignInModal("/dashboard");
                 }}
                 className="inline-flex w-full items-center justify-center rounded-radius-xl border border-white/10 px-5 py-3 text-[15px] font-medium text-N700 transition-colors hover:bg-white/[0.06] hover:text-N900"
               >
