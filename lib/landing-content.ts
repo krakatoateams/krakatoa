@@ -1,10 +1,6 @@
 /**
- * Single source of truth for public marketing copy.
- *
- * Both landing designs render from these values — the default light/orange page
- * (`components/landing/`) and the near-black `/hello` variant
- * (`components/landing-hello/`) — so the two can never drift on content. Copy
- * only: no JSX, no styling, no layout decisions.
+ * Single source of truth for public marketing copy on `/`
+ * (`components/landing-hello/`). Copy only: no JSX, no styling, no layout.
  */
 
 export const NAV_LINKS = [
@@ -38,9 +34,9 @@ export const PRIMARY_CTA = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The headline is stored as tokens rather than a string because the two designs
- * treat it differently: the default page interleaves emoji ornaments between
- * the words, the /hello variant renders it as plain Swiss typography.
+ * Headline tokens (text + optional ornaments). The live homepage uses the
+ * plain string derived below; the token form is kept so ornaments can return
+ * without rewriting copy.
  */
 export type HeadlineToken =
   | { kind: "text"; value: string }
@@ -91,7 +87,7 @@ export const HERO_CTA = {
 
 /**
  * Supporting statement rendered beneath the hero showreel. Kept as plain copy
- * here; the /hello variant reveals it word-by-word on scroll.
+ * here; the homepage reveals it word-by-word on scroll.
  */
 export const HERO_SUBCOPY =
   "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes, all from a single prompt.";
