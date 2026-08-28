@@ -42,3 +42,35 @@ export function resolveSiteOrigin(): string {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";
 }
+
+function isLoopbackHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h.endsWith(".local");
+}
+
+/**
+ * Site origin external providers (Replicate) can fetch. Never localhost — bundled
+ * `/public` assets must use the deployed host when developing locally.
+ */
+export function resolveProviderFetchableOrigin(): string {
+  const tryOrigin = (origin: string): string | null => {
+    try {
+      if (!isLoopbackHostname(new URL(origin).hostname)) return origin;
+    } catch {
+      /* invalid */
+    }
+    return null;
+  };
+
+  const fromSite = tryOrigin(resolveSiteOrigin());
+  if (fromSite) return fromSite;
+
+  const fromAuth = normalizeSiteUrl(process.env.NEXTAUTH_URL);
+  if (fromAuth) {
+    const ok = tryOrigin(fromAuth);
+    if (ok) return ok;
+  }
+
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "https://kelolako.com";
+}

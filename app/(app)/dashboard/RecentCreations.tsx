@@ -13,7 +13,6 @@ export default function RecentCreations() {
         description="Every successful generation appears here."
         className="!mt-0 !border-t-0 !pt-0"
         enableTabs
-        showTrashTab={false}
         showMeta={false}
         showRefresh={false}
         limit={10}

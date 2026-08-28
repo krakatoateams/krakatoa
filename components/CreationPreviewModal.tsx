@@ -22,6 +22,14 @@ import {
 } from "@/lib/creations";
 import { animateVideoHref, canAnimateCreation } from "@/lib/animate-handoff";
 import { getCreationModelLabel } from "@/lib/creation-model-label";
+import { getCreationUserPrompt } from "@/lib/creation-user-prompt";
+import { GenerationScheduleButton } from "@/components/GenerationScheduleButton";
+import { Tooltip } from "@/components/studio/Tooltip";
+
+const ICON_BTN =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors disabled:pointer-events-none disabled:opacity-40";
+const GHOST_BTN =
+  "flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40";
 
 type Props = {
   item: CreationHistoryItem;
@@ -107,7 +115,7 @@ export function CreationPreviewModal({
   }, [item.id, nameDraft, onItemUpdated]);
 
   const meta = item.metadata ?? {};
-  const prompt = typeof meta.prompt === "string" ? meta.prompt.trim() : "";
+  const prompt = getCreationUserPrompt(item);
   const scenePrompts = Array.isArray(meta.scenePrompts)
     ? (meta.scenePrompts as unknown[]).filter(
         (s): s is string => typeof s === "string" && s.trim().length > 0
@@ -278,96 +286,139 @@ export function CreationPreviewModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-4 border-t border-white/10 px-4 py-3">
-          <p className="text-xs text-text-secondary">
-            {new Date(item.createdAt).toLocaleDateString()}
-            {modelLabel ? ` · ${modelLabel}` : ""}
-          </p>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex items-center gap-3 border-t border-white/10 bg-gradient-to-t from-white/[0.04] to-transparent px-4 py-3.5">
+          <div className="min-w-0 flex-1 leading-tight">
+            <time
+              className="block text-sm font-medium text-text-primary"
+              dateTime={item.createdAt}
+            >
+              {new Date(item.createdAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </time>
+            {modelLabel ? (
+              <span className="mt-0.5 block truncate text-xs text-text-disabled">
+                {modelLabel}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
             {richUI && !trashed && (
-              <button
-                type="button"
-                onClick={() => onToggleFavorite(item.id)}
-                aria-pressed={isFavorite}
-                className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-xs transition-colors ${
-                  isFavorite
-                    ? "bg-warning/20 text-warning"
-                    : "bg-white/5 text-text-secondary hover:text-N900"
-                }`}
-              >
-                <Star
-                  className="h-3.5 w-3.5"
-                  fill={isFavorite ? "currentColor" : "none"}
-                />
-                {isFavorite ? "Favorited" : "Favorite"}
-              </button>
+              <Tooltip label={isFavorite ? "Remove favorite" : "Add to favorites"}>
+                <button
+                  type="button"
+                  onClick={() => onToggleFavorite(item.id)}
+                  aria-pressed={isFavorite}
+                  aria-label={isFavorite ? "Remove favorite" : "Add to favorites"}
+                  className={`${ICON_BTN} ${
+                    isFavorite
+                      ? "bg-warning/15 text-warning hover:bg-warning/25"
+                      : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  }`}
+                >
+                  <Star
+                    className="h-4 w-4"
+                    fill={isFavorite ? "currentColor" : "none"}
+                  />
+                </button>
+              </Tooltip>
             )}
-            {/* Hand-off to the Video studio. A link (not a router push) so the
-                photo can be animated in a new tab. Hidden on picker surfaces
-                (no richUI) where leaving the page would drop the selection. */}
+
             {richUI && canAnimateCreation(item) && (
               <Link
                 href={animateVideoHref(item.id)}
-                className="flex h-8 items-center gap-1.5 rounded-full border border-purple-400/30 bg-purple-500/15 px-3 text-xs font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+                className={`${GHOST_BTN} border border-purple-400/25 bg-purple-500/10 font-semibold text-purple-100 hover:bg-purple-500/20`}
               >
                 <Clapperboard className="h-3.5 w-3.5" />
                 Animate
               </Link>
             )}
-            <button
-              type="button"
-              onClick={() => onDownload(item)}
-              disabled={isDownloading}
-              className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-text-secondary transition-colors hover:text-N900 disabled:opacity-60"
-            >
-              {isDownloading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              Download
-            </button>
-            {richUI &&
-              (trashed ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => onRestore(item)}
-                    disabled={isMutating}
-                    className="flex h-8 items-center gap-1.5 rounded-full bg-white/5 px-3 text-xs text-text-secondary transition-colors hover:text-N900 disabled:opacity-60"
-                  >
-                    {isMutating ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    )}
-                    Restore
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteForever(item)}
-                    disabled={isMutating}
-                    className="flex h-8 items-center gap-1.5 rounded-full bg-error/15 px-3 text-xs text-error transition-colors hover:bg-error/25 hover:text-error disabled:opacity-60"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete permanently
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onTrash(item)}
-                  disabled={isMutating}
-                  className="flex h-8 items-center gap-1.5 rounded-full bg-error/15 px-3 text-xs text-error transition-colors hover:bg-error/25 hover:text-error disabled:opacity-60"
-                >
-                  {isMutating ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  Delete
-                </button>
-              ))}
+
+            {richUI && !trashed && (
+              <GenerationScheduleButton
+                assetUrl={item.storagePath || item.mediaUrl}
+                mediaType={item.mediaType}
+                title={item.title}
+                caption={prompt || undefined}
+                label="Schedule"
+                className={`${GHOST_BTN} border border-brand-primary/25 bg-brand-primary/10 font-semibold text-brand-primary-light hover:bg-brand-primary/20`}
+              />
+            )}
+
+            <Tooltip label="Download" align="end">
+              <button
+                type="button"
+                onClick={() => onDownload(item)}
+                disabled={isDownloading}
+                aria-label="Download"
+                className={`${ICON_BTN} bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary`}
+              >
+                {isDownloading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+              </button>
+            </Tooltip>
+
+            {richUI && (
+              <>
+                <span className="mx-0.5 h-5 w-px shrink-0 bg-white/10" aria-hidden />
+                {trashed ? (
+                  <>
+                    <Tooltip label="Restore" align="end">
+                      <button
+                        type="button"
+                        onClick={() => onRestore(item)}
+                        disabled={isMutating}
+                        aria-label="Restore"
+                        className={`${ICON_BTN} bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary`}
+                      >
+                        {isMutating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RotateCcw className="h-4 w-4" />
+                        )}
+                      </button>
+                    </Tooltip>
+                    <Tooltip label="Delete permanently" align="end">
+                      <button
+                        type="button"
+                        onClick={() => onDeleteForever(item)}
+                        disabled={isMutating}
+                        aria-label="Delete permanently"
+                        className={`${ICON_BTN} text-error hover:bg-error/15`}
+                      >
+                        {isMutating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </Tooltip>
+                  </>
+                ) : (
+                  <Tooltip label="Move to trash" align="end">
+                    <button
+                      type="button"
+                      onClick={() => onTrash(item)}
+                      disabled={isMutating}
+                      aria-label="Move to trash"
+                      className={`${ICON_BTN} text-error hover:bg-error/15`}
+                    >
+                      {isMutating ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>

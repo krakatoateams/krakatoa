@@ -3,6 +3,7 @@ import {
   isTextToVideoModel,
   isImageToVideoModel,
   isStoryboardVideoModelId,
+  supportsViralTemplateGeneration,
   DEFAULT_VIDEO_MODEL_ID,
   DEFAULT_IMAGE_TO_VIDEO_MODEL_ID,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
@@ -28,6 +29,7 @@ import type { ReelsEngine } from "@/lib/reels-pipeline/types";
 export const VIDEO_COMPOSER_KEYS = [
   "text2video",
   "image2video",
+  "viral_template",
   "motion_control",
   "storyboard",
   "reels-creator",
@@ -44,6 +46,7 @@ export type VideoComposerFeature = {
 export const VIDEO_COMPOSER_FEATURES: VideoComposerFeature[] = [
   { key: "text2video", toolKey: "reels", label: "Text to video" },
   { key: "image2video", toolKey: "reels", label: "Image to video" },
+  { key: "viral_template", toolKey: "reels", label: "Viral template" },
   { key: "motion_control", toolKey: "reels", label: "Motion control" },
   { key: "storyboard", toolKey: "reels", label: "Storyboard to video" },
   { key: "reels-creator", toolKey: "reels", label: "Reels Creator" },
@@ -91,6 +94,8 @@ export function modelEligibleForComposer(
       return isTextToVideoModel(model);
     case "image2video":
       return isImageToVideoModel(model);
+    case "viral_template":
+      return supportsViralTemplateGeneration(model);
     case "motion_control":
       return false;
     case "storyboard":
@@ -122,11 +127,13 @@ export function defaultModelForComposer(composerKey: VideoComposerKey): string {
       ? DEFAULT_VIDEO_MODEL_ID
       : composerKey === "image2video"
         ? DEFAULT_IMAGE_TO_VIDEO_MODEL_ID
-        : composerKey === "motion_control"
-          ? MOTION_CONTROL_MODELS[0]?.id
-          : composerKey === "storyboard"
-            ? DEFAULT_STORYBOARD_VIDEO_MODEL_ID
-            : "seedance2_fast";
+        : composerKey === "viral_template"
+          ? "seedance2_fast"
+          : composerKey === "motion_control"
+            ? MOTION_CONTROL_MODELS[0]?.id
+            : composerKey === "storyboard"
+              ? DEFAULT_STORYBOARD_VIDEO_MODEL_ID
+              : "seedance2_fast";
 
   if (preferred && eligible.includes(preferred)) return preferred;
   return eligible[0] ?? preferred;
@@ -238,7 +245,7 @@ if (require.main === module) {
   const perComposer = Object.fromEntries(
     VIDEO_COMPOSER_KEYS.map((k) => [k, eligibleModelsForComposer(k).length])
   );
-  console.assert(rows.length === 29, `expected 29 rows, got ${rows.length}`);
+  console.assert(rows.length === 38, `expected 38 rows, got ${rows.length}`);
   for (const [key, modelId] of defaults) {
     console.assert(
       modelEligibleForComposer(modelId, key),

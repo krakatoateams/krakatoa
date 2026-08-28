@@ -4,6 +4,17 @@ import {
   CreationHistoryItem,
   CreationTool,
 } from "@/lib/creations";
+import type { CreationLibraryQuery } from "@/lib/creation-library-filters";
+import {
+  PHOTO_LIBRARY_FEATURE_IDS,
+  VIDEO_LIBRARY_FEATURE_IDS,
+  libraryQueryFromFeature,
+  type LibraryFeatureCounts,
+  type PhotoLibraryFeatureId,
+  type VideoLibraryFeatureId,
+} from "@/lib/creation-library-filters";
+import type { PhotoStudioMode } from "@/lib/product-photo";
+import { VIDEO_STUDIO_TOOLS } from "@/lib/studio-product-tools";
 import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
 
@@ -251,13 +262,94 @@ export type CreationPageFilters = {
   kind?: string;
   /** Restrict to specific creation ids (used by the client-side Favorites view). */
   ids?: string[];
+  /** Photo studio output folder under `photos/generated/{mode}/`. */
+  photoMode?: PhotoStudioMode;
+  /** Viral-template runs are stored as image-to-video with `viralTemplateId` metadata. */
+  viralTemplate?: "only" | "exclude";
   /**
    * Trash filter (soft delete lives in metadata.deletedAt):
    *   - true  → only trashed items (the Trash view)
    *   - false / undefined → only non-trashed items (every normal view)
    */
   trashed?: boolean;
+  /** Photo studio “All” — generate-photo rows + storyboard sheets (legacy `storyboard` tool too). */
+  photoStudioAll?: boolean;
+  /** Video studio “All” — every video composer output. */
+  videoStudioAll?: boolean;
 };
+
+function intersectTools(
+  outer?: CreationTool[],
+  inner?: CreationTool[]
+): CreationTool[] | undefined {
+  if (!inner?.length) return outer;
+  if (!outer?.length) return inner;
+  const tools = inner.filter((t) => outer.includes(t));
+  return tools.length ? tools : undefined;
+}
+
+function applyCreationPageFilters<T extends { not: Function; or: Function; eq: Function; in: Function; like: Function; is: Function }>(
+  query: T,
+  options: CreationPageFilters & { tools?: CreationTool[] }
+): T {
+  let q = query;
+  if (options.photoStudioAll) {
+    q = q.or("tool.eq.product_photo,tool.eq.storyboard") as T;
+  } else if (options.videoStudioAll) {
+    q = q.in("tool", VIDEO_STUDIO_TOOLS) as T;
+  } else if (options.tools?.length) {
+    q = q.in("tool", options.tools) as T;
+  }
+  if (options.mediaType) q = q.eq("media_type", options.mediaType) as T;
+  if (options.kind) q = q.eq("metadata->>creationKind", options.kind) as T;
+  if (options.ids) q = q.in("id", options.ids) as T;
+  if (options.photoMode) {
+    q = q.like("storage_path", `%/photos/generated/${options.photoMode}/%`) as T;
+  }
+  if (options.viralTemplate === "only") {
+    q = q.not("metadata->>viralTemplateId", "is", null).neq(
+      "metadata->>viralTemplateId",
+      ""
+    ) as T;
+  } else if (options.viralTemplate === "exclude") {
+    q = q.or("metadata->>viralTemplateId.is.null,metadata->>viralTemplateId.eq.") as T;
+  }
+  q = options.trashed
+    ? (q.not("metadata->>deletedAt", "is", null) as T)
+    : (q.is("metadata->>deletedAt", null) as T);
+  return q;
+}
+
+function mergeLibraryQuery(
+  outerTools: CreationTool[] | undefined,
+  query: CreationLibraryQuery
+): CreationPageFilters {
+  if (query.photoStudioAll || query.videoStudioAll) {
+    return {
+      mediaType: query.mediaType,
+      kind: query.kind,
+      photoMode: query.photoMode,
+      viralTemplate: query.viralTemplate,
+      trashed: query.trashed,
+      photoStudioAll: query.photoStudioAll,
+      videoStudioAll: query.videoStudioAll,
+    };
+  }
+
+  const tools =
+    query.photoMode && !query.tools?.length
+      ? undefined
+      : intersectTools(outerTools, query.tools);
+
+  return {
+    tools,
+    mediaType: query.mediaType,
+    kind: query.kind,
+    photoMode: query.photoMode,
+    viralTemplate: query.viralTemplate,
+    trashed: query.trashed,
+  };
+}
 
 /**
  * Paginated listing for the library/history UI. Returns the requested window of
@@ -278,13 +370,11 @@ export async function listUserCreationsPage(
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (options.tools?.length) query = query.in("tool", options.tools);
-  if (options.mediaType) query = query.eq("media_type", options.mediaType);
-  if (options.kind) query = query.eq("metadata->>creationKind", options.kind);
-  if (options.ids) query = query.in("id", options.ids);
-  query = options.trashed
-    ? query.not("metadata->>deletedAt", "is", null)
-    : query.is("metadata->>deletedAt", null);
+  if (options.tools && options.tools.length === 0) {
+    return { items: [], total: 0 };
+  }
+
+  query = applyCreationPageFilters(query, options);
 
   const { data, error, count } = await query;
 
@@ -303,24 +393,16 @@ export async function listUserCreationsPage(
 /** Head-count helper for one filter set (no rows returned). */
 async function countCreations(
   userId: string,
-  filters: {
-    tools?: CreationTool[];
-    mediaType?: "image" | "video";
-    kind?: string;
-    trashed?: boolean;
-  }
+  filters: CreationPageFilters
 ): Promise<number> {
+  if (filters.tools && filters.tools.length === 0) return 0;
+
   let query = supabaseServer
     .from(USER_CREATIONS_TABLE)
     .select("*", { count: "exact", head: true })
     .eq("user_id", userId);
 
-  if (filters.tools?.length) query = query.in("tool", filters.tools);
-  if (filters.mediaType) query = query.eq("media_type", filters.mediaType);
-  if (filters.kind) query = query.eq("metadata->>creationKind", filters.kind);
-  query = filters.trashed
-    ? query.not("metadata->>deletedAt", "is", null)
-    : query.is("metadata->>deletedAt", null);
+  query = applyCreationPageFilters(query, filters);
 
   const { error, count } = await query;
   if (error) {
@@ -330,7 +412,48 @@ async function countCreations(
   return count ?? 0;
 }
 
-/** Per-tab totals for the library pills (favorites are client-side, excluded). */
+/** Per-product feature totals for the library filter chips (favorites excluded). */
+export async function countLibraryFeatureCounts(
+  userId: string,
+  options?: { tools?: CreationTool[] }
+): Promise<LibraryFeatureCounts> {
+  const outerTools = options?.tools;
+  const countFeature = async (
+    scope: "photo" | "video",
+    featureId: PhotoLibraryFeatureId | VideoLibraryFeatureId
+  ) => {
+    const base = libraryQueryFromFeature(scope, featureId);
+    if (!base) return 0;
+    const filters = mergeLibraryQuery(outerTools, base);
+    if (
+      filters.tools === undefined &&
+      base.tools?.length &&
+      !base.photoStudioAll &&
+      !base.videoStudioAll
+    ) {
+      return 0;
+    }
+    return countCreations(userId, filters);
+  };
+
+  const [photoEntries, videoEntries, trash] = await Promise.all([
+    Promise.all(
+      PHOTO_LIBRARY_FEATURE_IDS.map(async (id) => [id, await countFeature("photo", id)] as const)
+    ),
+    Promise.all(
+      VIDEO_LIBRARY_FEATURE_IDS.map(async (id) => [id, await countFeature("video", id)] as const)
+    ),
+    countCreations(userId, mergeLibraryQuery(outerTools, { trashed: true })),
+  ]);
+
+  return {
+    photo: Object.fromEntries(photoEntries) as Record<PhotoLibraryFeatureId, number>,
+    video: Object.fromEntries(videoEntries) as Record<VideoLibraryFeatureId, number>,
+    trash,
+  };
+}
+
+/** @deprecated Legacy tab counts — prefer countLibraryFeatureCounts for the assets library. */
 export async function countUserCreationsByTab(
   userId: string,
   options?: { tools?: CreationTool[] }
@@ -340,6 +463,7 @@ export async function countUserCreationsByTab(
   video: number;
   character: number;
   storyboard: number;
+  storyboardVideo: number;
   trash: number;
 }> {
   const tools = options?.tools;
@@ -348,7 +472,11 @@ export async function countUserCreationsByTab(
   const storyboardTools: CreationTool[] = tools?.length
     ? tools.filter((t) => t === "storyboard")
     : ["storyboard"];
-  const [all, image, video, character, storyboard, trash] = await Promise.all([
+  const storyboardVideoTools: CreationTool[] = tools?.length
+    ? tools.filter((t) => t === "storyboard_video")
+    : ["storyboard_video"];
+  const [all, image, video, character, storyboard, storyboardVideo, trash] =
+    await Promise.all([
     countCreations(userId, { tools }),
     countCreations(userId, { tools, mediaType: "image" }),
     countCreations(userId, { tools, mediaType: "video" }),
@@ -356,9 +484,12 @@ export async function countUserCreationsByTab(
     storyboardTools.length
       ? countCreations(userId, { tools: storyboardTools })
       : Promise.resolve(0),
+    storyboardVideoTools.length
+      ? countCreations(userId, { tools: storyboardVideoTools })
+      : Promise.resolve(0),
     countCreations(userId, { tools, trashed: true }),
   ]);
-  return { all, image, video, character, storyboard, trash };
+  return { all, image, video, character, storyboard, storyboardVideo, trash };
 }
 
 /** Move a creation to Trash (soft delete) by stamping metadata.deletedAt. */

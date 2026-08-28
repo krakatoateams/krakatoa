@@ -9,6 +9,7 @@ export function GenerationScheduleButton({
   mediaType,
   title,
   caption,
+  label = "Schedule this post",
   className = "inline-flex h-10 items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90",
   showArrow = false,
 }: {
@@ -16,6 +17,7 @@ export function GenerationScheduleButton({
   mediaType?: "image" | "video";
   title?: string;
   caption?: string;
+  label?: string;
   className?: string;
   showArrow?: boolean;
 }) {
@@ -28,7 +30,7 @@ export function GenerationScheduleButton({
       className={className}
     >
       <CalendarClock className="h-4 w-4" />
-      <span>Schedule this post</span>
+      <span>{label}</span>
       {showArrow ? <ArrowRight className="h-4 w-4" /> : null}
     </Link>
   );

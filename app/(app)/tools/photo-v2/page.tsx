@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   Loader2,
   AlertCircle,
@@ -21,10 +21,7 @@ import {
   VenusAndMars,
   Cake,
   Clapperboard,
-  ArrowRight,
   Languages,
-  Sparkles,
-  Copy,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -81,11 +78,14 @@ import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import {
   ChipDropdown,
   CreditActionButton,
+  DevBlankTestToggle,
   GENERATE_BTN_CLASS,
   GenerationCancelButton,
+  StudioGenerationPreviewProvider,
   UploadTile,
   CharacterTile,
   useImageUpload,
+  useStudioGenerationPreview,
   STUDIO_CHIP_ROW_CLASS,
 } from "@/components/studio";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -93,10 +93,8 @@ import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { consumePendingDraft } from "@/lib/pending-form-draft";
-import { animateVideoHref } from "@/lib/animate-handoff";
-import { GenerationScheduleButton } from "@/components/GenerationScheduleButton";
 import { isViralTemplateAssetPath } from "@/lib/trending-templates";
-import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
+import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 
@@ -119,8 +117,8 @@ function describeIdempotencyError(
   return null;
 }
 
-// Creation types surfaced in the top-left chip. Every type is wired to a backend:
-// storyboard has its own composer + route, the rest map to a generate-photo `mode`.
+// Creation types surfaced in the top-left chip. Every type posts to
+// /api/generate-photo with a distinct `mode` (storyboard included).
 // An `available: false` entry renders a "Soon" hint and disables Generate.
 const CREATION_TYPES = [
   { id: "generate-any-image", label: "Generate any image", available: true },
@@ -136,8 +134,7 @@ type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
 const BATCH_COUNTS = [1, 2, 3, 4] as const;
 
 /**
- * One image of the last generation, ready to be signed for preview. `id` is the
- * `user_creations` id, which the Animate hand-off passes to the Video studio.
+ * One image of the last generation batch (used while parsing the API response).
  */
 type BatchResult = { path: string; seed: string | null; id: string | null };
 
@@ -151,11 +148,20 @@ const FIRST_REFERENCE_TIER =
 // turn it into a clip. Self-contained so it doesn't tangle with the product /
 // image / character form's interdependent state.
 function StoryboardComposer({
+  isAdmin,
+  devBlank,
+  onDevBlankChange,
   onSelectCreation,
+  historyRefreshKey,
+  onHistoryRefresh,
 }: {
+  isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   onSelectCreation: (id: string) => void;
+  historyRefreshKey: number;
+  onHistoryRefresh: () => void;
 }) {
-  const router = useRouter();
   const { imageCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { status } = useCurrentUser();
@@ -169,10 +175,9 @@ function StoryboardComposer({
   // Spoken language for the dialogue/narration — default English. Stored on the
   // storyboard and re-used as the default when generating the video.
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ url: string; id: string } | null>(null);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   // @-mentions: tag saved characters / storyboards in the theme; their images are
   // passed to the storyboard image model as references.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
@@ -221,13 +226,8 @@ function StoryboardComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const cost = imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
+  const cost = devBlank ? 0 : imageCredits("storyboard_gpt_image_2_auto_per_image", 1);
   const canGenerate = !loading && theme.trim().length > 0;
-
-  const goToVideo = (id: string) => {
-    if (!id) return;
-    router.push(`/tools/video?type=storyboard&storyboardId=${encodeURIComponent(id)}`);
-  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -247,6 +247,7 @@ function StoryboardComposer({
       language,
       fileSig(themeReference.file),
       mentions.map((m) => m.id).join(","),
+      devBlank ? "blank" : "live",
     ].join("|");
     const attempt = beginSubmit(signature);
     if (!attempt) return;
@@ -255,6 +256,7 @@ function StoryboardComposer({
     setError(null);
     try {
       const formData = new FormData();
+      formData.append("mode", "storyboard");
       formData.append("theme", theme.trim());
       formData.append("storyboardStyle", style);
       formData.append("aspectRatio", aspect);
@@ -265,8 +267,11 @@ function StoryboardComposer({
       if (mentions.length) {
         formData.append("referenceCreationIds", mentions.map((m) => m.id).join(","));
       }
+      if (devBlank) {
+        formData.append("devBlank", "true");
+      }
 
-      const response = await fetch("/api/generate-storyboard", {
+      const response = await fetch("/api/generate-photo", {
         method: "POST",
         headers: { "Idempotency-Key": attempt.key },
         body: formData,
@@ -288,11 +293,8 @@ function StoryboardComposer({
         throw new Error(data.error || "Failed to generate storyboard");
       }
       attempt.settle(true);
-      setResult({
-        url: typeof data.storyboardUrl === "string" ? data.storyboardUrl : "",
-        id: typeof data.storyboardId === "string" ? data.storyboardId : "",
-      });
-      setHistoryRefreshKey((k) => k + 1);
+      onHistoryRefresh();
+      void openPreviewFromResponse(data);
       refetchCredits();
     } catch (err: unknown) {
       attempt.settle(false);
@@ -401,6 +403,12 @@ function StoryboardComposer({
               />
             </div>
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -419,21 +427,29 @@ function StoryboardComposer({
         </div>
 
         {/* Generate (mobile — full-width, below the form card) */}
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Generate"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
         <p className="mt-2 pl-1 text-xs text-text-disabled">
           Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
@@ -454,57 +470,16 @@ function StoryboardComposer({
         </div>
       )}
 
-      {result && result.url && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-radius-xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={result.url}
-            alt="Storyboard sheet"
-            className="w-full max-w-md shrink-0 rounded-2xl border border-white/10 bg-N0 object-contain"
-          />
-          <div className="flex min-w-0 flex-col">
-            <div className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              {STORYBOARD_STYLE_LABELS[style]} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)} · six panels
-            </p>
-            <p className="mt-1 text-xs text-text-disabled">
-              Happy with it? Turn this storyboard into a video.
-            </p>
-            <button
-              type="button"
-              onClick={() => goToVideo(result.id)}
-              disabled={!result.id}
-              className="mt-4 flex h-10 w-fit items-center justify-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-5 text-sm font-bold uppercase tracking-wide text-text-on-solid shadow-lg shadow-brand-primary/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Clapperboard className="h-4 w-4" />
-              <span>Create video</span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
-            <GenerationScheduleButton
-              assetUrl={result.url}
-              mediaType="image"
-              title={theme.trim()}
-              className="mt-3 flex h-10 w-fit items-center gap-2 rounded-radius-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-text-primary transition-colors hover:bg-white/10"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Storyboard generation history — matches the other photo subtools:
-          the tool's own outputs, action-rich, no tab bar. Hidden logged-out:
-          CreationsHistory surfaces a dev-facing error banner on a 401,
-          which reads as broken rather than "sign in to see your history." */}
+      {/* Storyboard generation history — same CreationsHistory as the main Photo
+          studio (feature chips + preview actions), defaulting to Storyboard. */}
       {status === "authenticated" && (
         <div className="mt-0 lg:mt-[150px]">
           <CreationsHistory
             className="!mt-0"
             title="Generation history"
-            description="Every storyboard you create appears here. Click any sheet to view it full size."
-            tools={["storyboard"]}
-            mediaType="image"
+            tools={["product_photo"]}
+            productFeatureTabs="photo"
+            initialLibraryFeature="storyboard"
             refreshKey={historyRefreshKey}
             showActions
             showMeta={false}
@@ -516,49 +491,41 @@ function StoryboardComposer({
   );
 }
 
-/**
- * One picker thumbnail of a batch. Signs its own URL so the strip can render an
- * arbitrary number of images without hooks in a loop.
- */
-function BatchThumb({
-  result,
-  selected,
-  index,
-  onSelect,
+function PhotoOmniPage({
+  historyRefreshKey,
+  onHistoryRefresh,
 }: {
-  result: BatchResult;
-  selected: boolean;
-  index: number;
-  onSelect: () => void;
+  historyRefreshKey: number;
+  onHistoryRefresh: () => void;
 }) {
-  const url = useSignedMediaUrl(result.path, result.seed);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-label={`Show image ${index + 1}`}
-      aria-pressed={selected}
-      className={`relative cursor-pointer overflow-hidden rounded-lg border transition-opacity ${
-        selected
-          ? "border-white/40 ring-1 ring-white/30"
-          : "border-white/10 opacity-60 hover:opacity-100"
-      }`}
-    >
-      {url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt="" className="block h-auto w-full" />
-      ) : (
-        <span className="block aspect-square w-full bg-white/5" />
-      )}
-    </button>
-  );
-}
-
-function PhotoOmniPage() {
-  const router = useRouter();
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [devBlank, setDevBlank] = useState(false);
+
+  useEffect(() => {
+    if (status !== "authenticated") {
+      setIsAdmin(false);
+      return;
+    }
+    let active = true;
+    fetch("/api/admin/me")
+      .then((res) => (res.ok ? res.json() : { isAdmin: false }))
+      .then((d: { isAdmin?: boolean }) => {
+        if (!active) return;
+        setIsAdmin(Boolean(d.isAdmin));
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsAdmin(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
   // Deep-link: Video empty state uses ?type=storyboard; dashboard product
   // try-on templates use ?type=product-tryon&product=…&character=…&prompt=….
   const typeParam = searchParams.get("type");
@@ -584,6 +551,7 @@ function PhotoOmniPage() {
   const [prompt, setPrompt] = useState(searchParams.get("prompt") ?? "");
   const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
+
   const [poseId, setPoseId] = useState<ModelPoseId>(DEFAULT_MODEL_POSE);
   const [styleId, setStyleId] = useState<PhotoStyleId>(DEFAULT_PHOTO_STYLE);
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(DEFAULT_PRODUCT_PHOTO_TIER);
@@ -603,17 +571,8 @@ function PhotoOmniPage() {
   // other mode always produces a single image.
   const [batchCount, setBatchCount] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
-  // Every image of the last batch. `resultPath` is whichever one is selected, so
-  // the preview, caption and scheduler hand-off all follow the selection.
-  const [resultBatch, setResultBatch] = useState<BatchResult[]>([]);
-  // Creation id of the selected image, or null when the result can't be animated.
-  const resultCreationId = resultBatch.find((b) => b.path === resultPath)?.id ?? null;
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   // Restore what was filled in before a gated Generate click sent the
   // visitor through sign-in — see the matching note in StoryboardComposer
@@ -630,7 +589,6 @@ function PhotoOmniPage() {
       modelTier?: ProductPhotoModelTier;
       resolution?: ProductPhotoResolution;
       aspectRatio?: PhotoAspectRatio;
-      hadMedia?: boolean;
     }>(window.location.pathname);
     if (!draft) return;
     if (draft.prompt) setPrompt(draft.prompt);
@@ -644,13 +602,9 @@ function PhotoOmniPage() {
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Uploaded images (product/character/reference) can't survive the round
-    // trip (see lib/pending-form-draft.ts) — only warn about it when the
-    // visitor actually had one attached (hadMedia), not on every restore.
-    setWarning(
-      draft.hadMedia
-        ? "Signed in — your settings were saved. Please re-attach any photos you'd uploaded."
-        : "Signed in — your settings were saved."
-    );
+    // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
+    // leaving the visitor to notice a silently-empty upload tile.
+    setWarning("Signed in — your settings were saved. Please re-attach any photos you'd uploaded.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -675,15 +629,6 @@ function PhotoOmniPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  // Social media post: the caption is written after the image, on the result card.
-  const [caption, setCaption] = useState("");
-  const [captionLoading, setCaptionLoading] = useState(false);
-  const [captionError, setCaptionError] = useState<string | null>(null);
-  const [captionCopied, setCaptionCopied] = useState(false);
-  // The idea that produced the current result — captions and the scheduler
-  // hand-off describe the generated image, not whatever is in the box right now.
-  const [resultPrompt, setResultPrompt] = useState("");
   // @-mentions: tag saved characters / storyboards in the prompt; their images are
   // sent as references and their names are woven into the prompt.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
@@ -712,7 +657,7 @@ function PhotoOmniPage() {
   const isSocialMode = creationType === "social-post";
   // Only social posts expose the batch chip, so every other mode costs one image.
   const requestedImageCount = isSocialMode ? batchCount : 1;
-  const totalCost = photoCost * requestedImageCount;
+  const totalCost = devBlank ? 0 : photoCost * requestedImageCount;
   const requiresProduct = creationSupported && creationType === "product-tryon";
   // Reference image upload is only meaningful for reference-capable models, and only
   // in the no-product modes (Generate any image / Character creation / Social post).
@@ -813,15 +758,6 @@ function PhotoOmniPage() {
     );
   }, [isSocialMode]);
 
-  useEffect(() => {
-    if (!lightboxUrl) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightboxUrl(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxUrl]);
-
   const loadSavedCharacters = useCallback(async () => {
     setCharactersLoading(true);
     try {
@@ -892,10 +828,6 @@ function PhotoOmniPage() {
         modelTier,
         resolution,
         aspectRatio,
-        // So the post-restore banner can be contextual — only warn about
-        // re-attaching a photo when one was actually attached (see the
-        // matching consume effect above).
-        hadMedia: !!(product.file || character.file || reference.file),
       });
       return;
     }
@@ -931,6 +863,7 @@ function PhotoOmniPage() {
       mentions.map((m) => m.id).join(","),
       tier.hasResolution ? resolution : "",
       String(requestedImageCount),
+      devBlank ? "blank" : "live",
     ].join("|");
     const attempt = beginSubmit(signature);
     if (!attempt) return;
@@ -938,9 +871,6 @@ function PhotoOmniPage() {
     setLoading(true);
     setError(null);
     setWarning(null);
-    setCaption("");
-    setCaptionError(null);
-    setCaptionCopied(false);
 
     try {
       const formData = new FormData();
@@ -972,6 +902,9 @@ function PhotoOmniPage() {
       }
       if (tier.hasResolution) {
         formData.append("resolution", resolution);
+      }
+      if (devBlank) {
+        formData.append("devBlank", "true");
       }
 
       const response = await fetch("/api/generate-photo", {
@@ -1025,12 +958,6 @@ function PhotoOmniPage() {
           id: data.historyItem?.id ?? null,
         });
       }
-      // Dropping the ids on a character turnaround hides the Animate CTA for it:
-      // it is a multi-pose grid, not a single source frame (see canAnimateCreation).
-      setResultBatch(isCharacterMode ? batch.map((b) => ({ ...b, id: null })) : batch);
-      setResultPath(primaryPath);
-      setResultSeed(batch[0]?.seed ?? data.imageUrl ?? null);
-      setResultPrompt(prompt.trim());
       if (data.warning) setWarning(data.warning);
       // Partial batch: the missing images were refunded server-side.
       if (typeof data.failedImageCount === "number" && data.failedImageCount > 0) {
@@ -1038,7 +965,8 @@ function PhotoOmniPage() {
           `${data.failedImageCount} of ${data.requestedImageCount} images couldn't be generated — you were only charged for the ${batch.length} that worked.`
         );
       }
-      setHistoryRefreshKey((k) => k + 1);
+      onHistoryRefresh();
+      void openPreviewFromResponse(data);
       refetchCredits();
     } catch (err: unknown) {
       attempt.settle(false);
@@ -1047,51 +975,6 @@ function PhotoOmniPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Write (or re-roll) an Instagram caption for the post we just generated. Free —
-  // no credits are spent, so the user can keep rolling until one lands.
-  const handleGenerateCaption = async () => {
-    if (captionLoading) return;
-    setCaptionLoading(true);
-    setCaptionError(null);
-    setCaptionCopied(false);
-    try {
-      const response = await fetch("/api/generate-caption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: "instagram",
-          title: resultPrompt,
-          storage_path: resultPath ?? undefined,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not write a caption");
-      setCaption(String(data.caption ?? "").trim());
-    } catch (err: unknown) {
-      setCaptionError(err instanceof Error ? err.message : "Could not write a caption");
-    } finally {
-      setCaptionLoading(false);
-    }
-  };
-
-  const handleCopyCaption = async () => {
-    if (!caption) return;
-    try {
-      await navigator.clipboard.writeText(caption);
-      setCaptionCopied(true);
-      window.setTimeout(() => setCaptionCopied(false), 2000);
-    } catch {
-      setCaptionError("Couldn't copy — select the caption and copy it manually.");
-    }
-  };
-
-  // Hand the photo to the Video studio: Image to video opens with this image
-  // already selected from the library, so the user only writes the motion prompt.
-  const handleAnimate = () => {
-    if (!resultCreationId) return;
-    router.push(animateVideoHref(resultCreationId));
   };
 
   return (
@@ -1106,7 +989,12 @@ function PhotoOmniPage() {
 
         {creationType === "storyboard" ? (
           <StoryboardComposer
+            isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             onSelectCreation={(id) => setCreationType(id as CreationTypeId)}
+            historyRefreshKey={historyRefreshKey}
+            onHistoryRefresh={onHistoryRefresh}
           />
         ) : (
           <>
@@ -1412,6 +1300,14 @@ function PhotoOmniPage() {
 
               {/* Generate (desktop — inside the form card) */}
               <div className="hidden items-center gap-3 lg:flex">
+                {isAdmin ? (
+                  <DevBlankTestToggle
+                    isAdmin={isAdmin}
+                    enabled={devBlank}
+                    onChange={setDevBlank}
+                    disabled={loading}
+                  />
+                ) : null}
                 <CreditActionButton
                   balance={balance}
                   cost={totalCost}
@@ -1454,21 +1350,31 @@ function PhotoOmniPage() {
           </div>
 
           {/* Generate (mobile — full-width, below the form card) */}
-          <div className="mt-3 flex items-center gap-3 lg:hidden">
-            <CreditActionButton
-              balance={balance}
-              cost={totalCost}
-              ready={canGenerate}
-              loading={loading}
-              label="Generate"
-              className={`${GENERATE_BTN_CLASS} flex-1`}
-            />
-            <GenerationCancelButton
-              visible={loading}
-              cancelling={cancelling}
-              cancelAllowed={cancelAllowed}
-              onCancel={() => cancelSubmit()}
-            />
+          <div className="mt-3 flex flex-col gap-3 lg:hidden">
+            {isAdmin ? (
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={setDevBlank}
+                disabled={loading}
+              />
+            ) : null}
+            <div className="flex items-center gap-3">
+              <CreditActionButton
+                balance={balance}
+                cost={totalCost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+                className={`${GENERATE_BTN_CLASS} flex-1`}
+              />
+              <GenerationCancelButton
+                visible={loading}
+                cancelling={cancelling}
+                cancelAllowed={cancelAllowed}
+                onCancel={() => cancelSubmit()}
+              />
+            </div>
           </div>
 
           {!creationSupported ? (
@@ -1506,160 +1412,6 @@ function PhotoOmniPage() {
           </div>
         )}
 
-        {resultUrl && !loading && (
-          <div
-            className={`mt-6 flex flex-col gap-4 rounded-radius-xl border border-white/10 bg-white/5 p-4 sm:flex-row ${
-              isSocialMode ? "" : "sm:items-center"
-            }`}
-          >
-            <div className="flex w-32 shrink-0 flex-col gap-2">
-              {/* No fixed height: the image's own ratio sets the box, so square,
-                  portrait and landscape results all show uncropped. */}
-              <button
-                type="button"
-                onClick={() => setLightboxUrl(resultUrl)}
-                className="group relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={resultUrl}
-                  alt="Latest generation"
-                  className="block h-auto w-full transition-transform group-hover:scale-105"
-                />
-              </button>
-              {/* Batch alternatives — picking one swaps the preview, and with it
-                  the caption target and the scheduler hand-off. */}
-              {resultBatch.length > 1 && (
-                <div className="grid grid-cols-4 gap-1.5">
-                  {resultBatch.map((item, index) => (
-                    <BatchThumb
-                      key={item.path}
-                      result={item}
-                      index={index}
-                      selected={item.path === resultPath}
-                      onSelect={() => {
-                        setResultPath(item.path);
-                        setResultSeed(item.seed);
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-                <Check className="h-3 w-3" />
-                Saved to your library
-              </div>
-              <p className="text-sm text-text-secondary">
-                {isCharacterMode
-                  ? `Character${characterName.trim() ? ` · ${characterName.trim()}` : ""} · ${tier.label}`
-                  : isImageMode
-                    ? `Generated image · ${tier.label}`
-                    : isSocialMode
-                      ? `Social media post · ${socialPostAspectLabel(aspectRatio)}${
-                          resultBatch.length > 1 ? ` · ${resultBatch.length} options` : ""
-                        } · ${tier.label}`
-                      : `${selectedPose?.label} · ${selectedStyle?.label} · ${tier.label}`}
-              </p>
-              {isSocialMode ? (
-                <>
-                  <p className="mt-1 text-xs text-text-disabled">
-                    {resultBatch.length > 1
-                      ? "Pick the image you like, write a caption, then send the post to your scheduler."
-                      : "Write a caption, then send the post to your scheduler."}
-                  </p>
-
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-N0/20 p-3">
-                    <textarea
-                      value={caption}
-                      onChange={(e) => setCaption(e.target.value)}
-                      rows={4}
-                      maxLength={2200}
-                      placeholder="Your caption — write it yourself, or let AI draft one."
-                      className="w-full resize-none bg-transparent text-sm text-text-primary placeholder:text-text-disabled focus:outline-none"
-                    />
-                    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-white/10 pt-2">
-                      <button
-                        type="button"
-                        onClick={handleGenerateCaption}
-                        disabled={captionLoading}
-                        className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-text-primary transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {captionLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3.5 w-3.5 text-text-secondary" />
-                        )}
-                        {captionLoading
-                          ? "Writing…"
-                          : caption
-                            ? "Rewrite caption"
-                            : "Generate caption"}
-                      </button>
-                      {caption && (
-                        <button
-                          type="button"
-                          onClick={handleCopyCaption}
-                          className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-medium text-text-primary transition-colors hover:bg-white/10"
-                        >
-                          {captionCopied ? (
-                            <Check className="h-3.5 w-3.5 text-success" />
-                          ) : (
-                            <Copy className="h-3.5 w-3.5" />
-                          )}
-                          {captionCopied ? "Copied" : "Copy"}
-                        </button>
-                      )}
-                      <span className="ml-auto text-[11px] text-text-disabled">Free</span>
-                    </div>
-                  </div>
-
-                  {captionError && (
-                    <p className="mt-2 text-xs text-error">{captionError}</p>
-                  )}
-
-                  <GenerationScheduleButton
-                    assetUrl={resultPath ?? resultUrl}
-                    mediaType="image"
-                    title={resultPrompt.slice(0, 100)}
-                    caption={caption}
-                    showArrow
-                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
-                  />
-                </>
-              ) : (
-                <>
-                <p className="mt-1 text-xs text-text-disabled">
-                  Click the thumbnail to view full size, or generate another below.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <GenerationScheduleButton
-                    assetUrl={resultPath ?? resultUrl}
-                    mediaType="image"
-                    title={resultPrompt.slice(0, 100)}
-                    showArrow
-                    className="flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
-                  />
-                  {resultCreationId && (
-                    <button
-                      type="button"
-                      onClick={handleAnimate}
-                      className="flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
-                    >
-                      <Clapperboard className="h-4 w-4" />
-                      <span>Animate this photo</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                </>
-              )}
-
-            </div>
-          </div>
-        )}
-
         {/* Image generation history — hidden logged-out, see the storyboard
             composer's identical CreationsHistory note above. */}
         {status === "authenticated" && (
@@ -1667,9 +1419,8 @@ function PhotoOmniPage() {
             <CreationsHistory
               className="!mt-0"
               title="Generation history"
-              description="Every product photo you create appears here. Click any photo to view it full size."
               tools={["product_photo"]}
-              mediaType="image"
+              productFeatureTabs="photo"
               refreshKey={historyRefreshKey}
               showActions
               showMeta={false}
@@ -1765,42 +1516,30 @@ function PhotoOmniPage() {
         </div>
       )}
 
-      {lightboxUrl && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-N0/85 p-4"
-          role="presentation"
-          onClick={() => setLightboxUrl(null)}
-        >
-          <button
-            type="button"
-            className="absolute right-6 top-6 z-[201] cursor-pointer rounded-full border-0 bg-white/10 p-2 text-N900 hover:bg-white/20"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightboxUrl(null);
-            }}
-            aria-label="Close"
-          >
-            <X className="h-6 w-6" />
-          </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightboxUrl}
-            alt="Product photo full size"
-            className="max-h-[90vh] max-w-full rounded-lg object-contain shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
     </div>
   );
 }
 
 // useSearchParams() requires a Suspense boundary in the App Router. Wrap the page
 // so the storyboard deep-link (?type=storyboard) reads cleanly.
+function PhotoStudioPage() {
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const onHistoryRefresh = useCallback(() => setHistoryRefreshKey((k) => k + 1), []);
+
+  return (
+    <StudioGenerationPreviewProvider onHistoryChange={onHistoryRefresh}>
+      <PhotoOmniPage
+        historyRefreshKey={historyRefreshKey}
+        onHistoryRefresh={onHistoryRefresh}
+      />
+    </StudioGenerationPreviewProvider>
+  );
+}
+
 export default function PhotoOmniPageWrapper() {
   return (
     <Suspense fallback={null}>
-      <PhotoOmniPage />
+      <PhotoStudioPage />
     </Suspense>
   );
 }

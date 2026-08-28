@@ -66,9 +66,24 @@ import {
 } from "@/lib/reels-pipeline";
 import type {
   ReelsModelSet,
+  ReelsModelRefs,
   ReelsPipelineContext,
   ReelsPipelineResult,
 } from "@/lib/reels-pipeline/types";
+import { supabaseServer } from "@/lib/supabase-server";
+import {
+  MEDIA_CACHE_CONTROL,
+  STORAGE_BUCKET,
+  videosGeneratedVideoPath,
+} from "@/lib/storage-buckets";
+import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import {
+  DevBlankForbiddenError,
+  devBlankJobTag,
+  isDevBlankRequested,
+  readBlankVideoBytes,
+  requireDevBlankAccess,
+} from "@/lib/dev-blank-generation";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s).
 export const maxDuration = 300;
@@ -174,6 +189,17 @@ export async function POST(req: Request) {
 
     // ---- Validate + normalize the request (single source of truth) ----
     const body = await req.json();
+    const devBlank = isDevBlankRequested(body);
+    if (devBlank) {
+      try {
+        await requireDevBlankAccess();
+      } catch (e) {
+        if (e instanceof DevBlankForbiddenError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+        }
+        throw e;
+      }
+    }
     const validated = validateReelsRequest(body);
     if (!validated.ok) {
       return NextResponse.json({ error: validated.error }, { status: validated.status });
@@ -188,23 +214,28 @@ export async function POST(req: Request) {
     }
 
     // ---- Fail fast on misconfig BEFORE any credit spend ----
-    const replicate = createReplicateClient(); // throws if REPLICATE_API_TOKEN missing
-    const rendiApiKey = process.env.RENDI_API_KEY;
-    if (!rendiApiKey) {
-      return NextResponse.json({ error: "RENDI_API_KEY is not set." }, { status: 500 });
-    }
+    let models: ReelsModelSet | undefined;
+    let refs: ReelsModelRefs | undefined;
+    if (!devBlank) {
+      const replicate = createReplicateClient(); // throws if REPLICATE_API_TOKEN missing
+      const rendiApiKey = process.env.RENDI_API_KEY;
+      if (!rendiApiKey) {
+        return NextResponse.json({ error: "RENDI_API_KEY is not set." }, { status: 500 });
+      }
 
-    // ---- Resolve runtime models (Admin Phase 2) ----
-    // Seedance resolves the 'reels' tool config; Veo resolves the 'veo' tool
-    // config — preserving the existing model_configs layout (no DB migration).
-    const models: ReelsModelSet =
-      reqv.engine === "veo" ? await getVeoModels() : await getReelsModels();
-    const refs = {
-      llmRef: replicateRef(models.llm),
-      videoRef: replicateRef(models.video),
-      ttsRef: replicateRef(models.tts),
-      whisperRef: replicateRef(models.whisper),
-    };
+      // ---- Resolve runtime models (Admin Phase 2) ----
+      // Seedance resolves the 'reels' tool config; Veo resolves the 'veo' tool
+      // config — preserving the existing model_configs layout (no DB migration).
+      models = reqv.engine === "veo" ? await getVeoModels() : await getReelsModels();
+      refs = {
+        llmRef: replicateRef(models.llm),
+        videoRef: replicateRef(models.video),
+        ttsRef: replicateRef(models.tts),
+        whisperRef: replicateRef(models.whisper),
+      };
+      void replicate;
+      void rendiApiKey;
+    }
 
     // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
     // MUST run before createJob, spendCredits, or any provider call. The hash is
@@ -314,9 +345,12 @@ export async function POST(req: Request) {
         profileId: profileId!,
         tool: reqv.jobTool,
         jobType: reqv.jobType,
-        provider: models.video.provider,
-        model: models.video.model,
-        input: jobInput,
+        provider: devBlank ? "dev_blank" : models!.video.provider,
+        model: devBlank ? "dev_blank" : models!.video.model,
+        input: {
+          ...jobInput,
+          ...(devBlank ? devBlankJobTag() : {}),
+        },
       })
     );
     if (job) {
@@ -338,12 +372,14 @@ export async function POST(req: Request) {
     // call. PricingConfigError (unknown key) throws here, before the spend, and
     // bubbles to the outer catch as a 500 with no charge. jobId-based idempotency
     // prevents double-charges on in-flight retries within this request.
-    const requiredCredits =
-      reqv.engine === "veo"
+    const requiredCredits = devBlank
+      ? 0
+      : reqv.engine === "veo"
         ? await getVeoCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration })
         : await getSeedanceCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration });
-    try {
-      await spendCredits({
+    if (!devBlank) {
+      try {
+        await spendCredits({
         profileId: profileId!,
         amount: requiredCredits,
         idempotencyKey: jobId
@@ -370,8 +406,8 @@ export async function POST(req: Request) {
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
+      } catch (e) {
+        if (e instanceof InsufficientCreditsError) {
         const wallet = await getWallet(profileId!).catch(() => null);
         const currentBalance = wallet?.balance ?? 0;
         if (jobId) {
@@ -407,6 +443,7 @@ export async function POST(req: Request) {
       // Non-balance infra failure: bubble to the outer catch as a 500.
       // creditsSpent stays false so no refund is attempted.
       throw e;
+      }
     }
 
     // ---- Processing asset (created AFTER spend succeeds) ----
@@ -417,16 +454,119 @@ export async function POST(req: Request) {
         tool: reqv.jobTool,
         assetType: "video",
         role: "final_video",
-        provider: models.video.provider,
-        model: models.video.model,
+        provider: devBlank ? "dev_blank" : models!.video.provider,
+        model: devBlank ? "dev_blank" : models!.video.model,
         metadata: {
           theme: reqv.theme.slice(0, 200),
           engine: reqv.engine,
           ...(reqv.engine === "veo" ? { mode: reqv.mode } : {}),
+          ...(devBlank ? devBlankJobTag() : {}),
         },
       })
     );
     if (asset) finalAssetId = asset.id;
+
+    if (devBlank) {
+      await beginStep("dev_blank", "Deliver blank placeholder video (admin test)");
+      const videoBuffer = await readBlankVideoBytes("9:16");
+      const storagePath = videosGeneratedVideoPath(
+        userId!,
+        "reelscreator",
+        `video_${Date.now()}.mp4`,
+      );
+      const { error: uploadError } = await supabaseServer.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, videoBuffer, {
+          contentType: "video/mp4",
+          cacheControl: MEDIA_CACHE_CONTROL,
+          upsert: false,
+        });
+      if (uploadError) {
+        throw new Error(`Failed to save blank video to storage: ${uploadError.message}`);
+      }
+      const { url: videoUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
+      await endStep({ storagePath, publicUrl: videoUrl });
+
+      const blankResult = {
+        videoUrl,
+        storagePath,
+        durationSec: reqv.totalDuration,
+        width: 480,
+        height: 854,
+        scenePrompts: [] as string[],
+        narration: "",
+      };
+
+      if (finalAssetId && profileId) {
+        await safe("markAssetReady", () =>
+          markAssetReady(profileId!, finalAssetId!, {
+            storagePath,
+            mimeType: "video/mp4",
+            durationSec: blankResult.durationSec,
+            width: blankResult.width,
+            height: blankResult.height,
+            costCredits: creditsAmount,
+            metadata: {
+              engine: reqv.engine,
+              ...(devBlank ? devBlankJobTag() : {}),
+            },
+          }),
+        );
+      }
+
+      let historyItem;
+      try {
+        historyItem = await insertUserCreation({
+          userId: userId as string,
+          tool: reqv.creationTool,
+          mediaType: "video",
+          mediaUrl: storagePath,
+          storagePath,
+          title: reqv.theme.slice(0, 200),
+          metadata: {
+            engine: reqv.engine,
+            modelLabel: "Dev blank",
+            prompt: reqv.theme,
+            ...(devBlank ? devBlankJobTag() : {}),
+          },
+        });
+      } catch (historyErr) {
+        console.warn("[reels] History log failed (video still saved):", historyErr);
+      }
+
+      if (jobId && profileId) {
+        await safe("finishJob", () =>
+          finishJob(profileId!, jobId!, {
+            output: {
+              videoUrl,
+              storagePath,
+              assetId: finalAssetId,
+            },
+            costCredits: creditsAmount,
+          }),
+        );
+      }
+
+      const successResponse = {
+        videoUrl: blankResult.videoUrl,
+        storagePath: blankResult.storagePath,
+        historyItem,
+      };
+      if (generationRequestId) {
+        await safe("idemSuccess", () =>
+          finishGenerationRequestSuccess({
+            id: generationRequestId!,
+            jobId: jobId ?? null,
+            assetId: finalAssetId ?? null,
+            responseJson: successResponse,
+          }),
+        );
+      }
+      return NextResponse.json(successResponse);
+    }
+
+    const pipelineModels = models!;
+    const pipelineRefs = refs!;
 
     const recovery =
       jobId && profileId && userId
@@ -441,11 +581,11 @@ export async function POST(req: Request) {
 
     // ---- Build the pipeline context + dispatch ----
     const ctx: ReelsPipelineContext = {
-      replicate,
+      replicate: createReplicateClient(),
       userId: userId!,
-      rendiApiKey,
-      models,
-      refs,
+      rendiApiKey: process.env.RENDI_API_KEY!,
+      models: pipelineModels,
+      refs: pipelineRefs,
       log: { beginStep, endStep },
       isCancelled: async () =>
         generationRequestId && profileId
@@ -529,7 +669,7 @@ export async function POST(req: Request) {
                   resolution: reqv.resolution,
                   voiceId: reqv.voiceId,
                   emotion: reqv.emotion,
-                  llmModel: models.llm.model,
+                  llmModel: pipelineModels.llm.model,
                 }
               : {
                   engine: "veo",
@@ -610,8 +750,8 @@ export async function POST(req: Request) {
         jobId: jobId ?? null,
         assetId: finalAssetId ?? null,
         tool: reqv.jobTool,
-        provider: models.video.provider,
-        model: models.video.model,
+        provider: pipelineModels.video.provider,
+        model: pipelineModels.video.model,
         unitType: "video_seconds",
         units: reqv.totalDuration,
         creditsCharged: creditsAmount,

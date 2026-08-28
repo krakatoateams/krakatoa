@@ -10,7 +10,8 @@ import { listToolConfigs, type ToolConfig } from "@/lib/tool-configs-db";
  *
  * Route -> tool_key mapping (coarse; veo/storyboard are engines inside the Reels
  * tool, which is the only seeded tool_config that covers them):
- *   generate-reels, generate-storyboard, generate-storyboard-video -> reels
+ *   generate-reels, generate-storyboard-video -> reels
+ *   generate-storyboard -> deprecated proxy; use generate-photo mode=storyboard
  *   generate-photo -> photo
  *   generate-caption -> schedule
  */

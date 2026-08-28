@@ -18,7 +18,6 @@ import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
-import { ConnectionStatusBadge } from "@/components/ConnectionStatusBadge";
 import {
   Upload,
   Zap,
@@ -249,22 +248,6 @@ async function signAndUploadFile(
   const resolvedPath = storagePath ?? path;
   const signed = await fetchSignedUrl({ path: resolvedPath });
   return { url: signed.url, storagePath: resolvedPath };
-}
-
-/**
- * Upload a staged (not-yet-uploaded) file on demand — used when Generate
- * Caption is clicked before "Schedule Post" would normally trigger the
- * deferred upload (see handleFilesAdded), since captioning needs a
- * server-reachable path just as much as scheduling does.
- */
-async function uploadStagedFile(
-  file: File,
-  contentType: "video" | "photo",
-): Promise<{ videoUrl: string | null; storagePath: string }> {
-  const uploaded = await signAndUploadFile(file, contentType === "photo" ? "image" : "video");
-  return contentType === "photo"
-    ? { videoUrl: null, storagePath: uploaded.storagePath }
-    : { videoUrl: uploaded.url, storagePath: uploaded.storagePath };
 }
 
 /** Preview a scheduler photo ref (storage path or legacy signed URL). */
@@ -1034,65 +1017,24 @@ interface DescriptionCardProps {
   tags: string;
   videoUrl: string | null;
   storagePath: string | null;
-  photoUrls: string[];
   format: VideoFormat;
-  // Staged-but-not-yet-uploaded media (upload is normally deferred until
-  // "Schedule Post" — see handleFilesAdded) — Generate needs it uploaded
-  // early since captioning requires a server-reachable path.
-  file: File | null;
-  contentType: "video" | "photo";
-  onMediaUploaded: (patch: Partial<VideoItem>) => void;
-  onToast: (toast: ToastState) => void;
 }
 
-function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, storagePath, photoUrls, format, file, contentType, onMediaUploaded, onToast }: DescriptionCardProps) {
+function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, storagePath, format }: DescriptionCardProps) {
   // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
   // removing the duplicated fetch logic. Behavior is preserved: Generate requires
-  // a video (Whisper) or a photo (vision), Polish appears once there's content,
-  // and the two-branch usedTranscript warning is rendered by CaptionControls.
+  // a video (Whisper), Polish appears once there's content, and the two-branch
+  // usedTranscript warning is rendered by CaptionControls.
   const ai = useCaptionAI();
-  const coverPhoto = photoUrls[0] ?? null;
-  const [preparing, setPreparing] = useState(false);
 
-  // Clear the transcript warning whenever the video/photo changes (removed or replaced)
+  // Clear the transcript warning whenever the video changes (removed or replaced)
   useEffect(() => {
     ai.resetWarning();
-  }, [videoUrl, storagePath, coverPhoto, ai.resetWarning]);
+  }, [videoUrl, storagePath, ai.resetWarning]);
 
   const handleGenerate = async () => {
-    let effectiveVideoUrl = videoUrl;
-    let effectiveStoragePath = storagePath;
-    let effectivePhotoPath = coverPhoto;
-
-    if (!effectiveStoragePath && !effectivePhotoPath && file) {
-      setPreparing(true);
-      try {
-        const uploaded = await uploadStagedFile(file, contentType);
-        if (contentType === "photo") {
-          effectivePhotoPath = uploaded.storagePath;
-          onMediaUploaded({ photoUrls: [uploaded.storagePath, ...photoUrls], file: null, uploadStatus: "done" });
-        } else {
-          effectiveVideoUrl = uploaded.videoUrl;
-          effectiveStoragePath = uploaded.storagePath;
-          onMediaUploaded({ videoUrl: uploaded.videoUrl, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
-        }
-      } catch (err) {
-        onToast({ type: "error", message: err instanceof Error ? err.message : "Upload failed. Please try again." });
-        setPreparing(false);
-        return;
-      }
-      setPreparing(false);
-    }
-
     try {
-      const next = await ai.generate({
-        title,
-        tags,
-        videoUrl: effectiveVideoUrl,
-        storagePath: effectiveStoragePath,
-        photoStoragePath: effectivePhotoPath,
-        format,
-      });
+      const next = await ai.generate({ title, tags, videoUrl, storagePath, format });
       onCaptionChange(next);
     } catch {
       // error surfaced by the hook
@@ -1132,13 +1074,12 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, stor
 
         <CaptionControls
           ai={ai}
-          hasMedia={!!(storagePath || videoUrl || coverPhoto || file)}
+          hasVideo={!!(storagePath || videoUrl)}
           hasContent={!!caption.trim()}
           hasTitle={!!title.trim()}
           generateLabel="Generate Caption"
           onGenerate={handleGenerate}
           onPolish={handlePolish}
-          preparing={preparing}
         />
       </div>
     </Card>
@@ -1961,7 +1902,6 @@ function useCaptionAI() {
       tags: string;
       videoUrl: string | null;
       storagePath?: string | null;
-      photoStoragePath?: string | null;
       format?: VideoFormat;
     }): Promise<string> => {
       setBusy("generate");
@@ -1978,7 +1918,6 @@ function useCaptionAI() {
             tags: input.tags,
             videoUrl: input.videoUrl ?? undefined,
             storage_path: input.storagePath ?? undefined,
-            photo_storage_path: input.photoStoragePath ?? undefined,
             format: input.format ?? "short",
           }),
         });
@@ -2060,8 +1999,7 @@ function useCaptionAI() {
 // The textarea lives in the parent (per-card or shared box).
 interface CaptionControlsProps {
   ai: ReturnType<typeof useCaptionAI>;
-  // Video (Whisper transcript) or photo (vision) — either unlocks Generate.
-  hasMedia: boolean;
+  hasVideo: boolean;
   hasContent: boolean;
   hasTitle: boolean;
   generateLabel: string;
@@ -2070,23 +2008,19 @@ interface CaptionControlsProps {
   // Hint shown when there's nothing to generate from yet. `null` hides it
   // (e.g. the shared box renders its own helper text instead).
   emptyHint?: string | null;
-  // True while a staged (not-yet-uploaded) file is being uploaded on demand
-  // so Generate has a server-reachable path — see uploadStagedFile.
-  preparing?: boolean;
 }
 
 function CaptionControls({
   ai,
-  hasMedia,
+  hasVideo,
   hasContent,
   hasTitle,
   generateLabel,
   onGenerate,
   onPolish,
-  emptyHint = "Upload a video or photo first to generate an AI caption",
-  preparing = false,
+  emptyHint = "Upload a video first to generate an AI caption",
 }: CaptionControlsProps) {
-  const isBusy = ai.busy !== null || preparing;
+  const isBusy = ai.busy !== null;
 
   return (
     <div className="space-y-2">
@@ -2114,7 +2048,7 @@ function CaptionControls({
         <button
           type="button"
           onClick={onGenerate}
-          disabled={isBusy || !hasMedia}
+          disabled={isBusy || !hasVideo}
           className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-2.5 text-sm font-medium text-text-static-black transition-all duration-200 hover:bg-N800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {ai.busy === "generate" ? (
@@ -2149,17 +2083,13 @@ function CaptionControls({
         )}
       </div>
 
-      {(preparing || ai.busy) && (
+      {ai.busy && (
         <p className="text-center text-xs text-text-disabled">
-          {preparing
-            ? "📤 Uploading your file…"
-            : ai.busy === "generate"
-              ? "🎙️ Reading your content & writing…"
-              : "✍️ Polishing your caption…"}
+          {ai.busy === "generate" ? "🎙️ Transcribing & writing…" : "✍️ Polishing your caption…"}
         </p>
       )}
 
-      {!ai.busy && !hasContent && !hasMedia && emptyHint && (
+      {!ai.busy && !hasContent && !hasVideo && emptyHint && (
         <p className="text-center text-xs text-text-disabled">{emptyHint}</p>
       )}
 
@@ -2197,10 +2127,9 @@ interface BulkVideoCardProps {
   onRemove: () => void;
   tiktokConnected: boolean;
   tiktokPrivacyOptions: string[];
-  onToast: (toast: ToastState) => void;
 }
 
-function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokPrivacyOptions, onToast }: BulkVideoCardProps) {
+function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokPrivacyOptions }: BulkVideoCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -2279,40 +2208,13 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
     onUpdate(patch);
   };
 
-  const [preparing, setPreparing] = useState(false);
-
   const handleGenerate = async () => {
-    let effectiveVideoUrl = item.videoUrl;
-    let effectiveStoragePath = item.storagePath;
-    let effectivePhotoPath = item.photoUrls[0] ?? null;
-
-    if (!effectiveStoragePath && !effectivePhotoPath && item.file) {
-      setPreparing(true);
-      try {
-        const uploaded = await uploadStagedFile(item.file, item.contentType);
-        if (item.contentType === "photo") {
-          effectivePhotoPath = uploaded.storagePath;
-          onUpdate({ photoUrls: [uploaded.storagePath, ...item.photoUrls], file: null, uploadStatus: "done" });
-        } else {
-          effectiveVideoUrl = uploaded.videoUrl;
-          effectiveStoragePath = uploaded.storagePath;
-          onUpdate({ videoUrl: uploaded.videoUrl, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
-        }
-      } catch (err) {
-        onToast({ type: "error", message: err instanceof Error ? err.message : "Upload failed. Please try again." });
-        setPreparing(false);
-        return;
-      }
-      setPreparing(false);
-    }
-
     try {
       const caption = await ai.generate({
         title: item.title,
         tags: item.tags,
-        videoUrl: effectiveVideoUrl,
-        storagePath: effectiveStoragePath,
-        photoStoragePath: effectivePhotoPath,
+        videoUrl: item.videoUrl,
+        storagePath: item.storagePath,
         format: item.format,
       });
       onUpdate({ caption });
@@ -2701,13 +2603,12 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           {captionMode === "individual" && (
             <CaptionControls
               ai={ai}
-              hasMedia={!!(item.storagePath || item.videoUrl || item.photoUrls[0] || item.file)}
+              hasVideo={!!(item.storagePath || item.videoUrl)}
               hasContent={!!item.caption.trim()}
               hasTitle={!!item.title.trim()}
               generateLabel="Generate Caption"
               onGenerate={handleGenerate}
               onPolish={handlePolish}
-              preparing={preparing}
             />
           )}
         </div>
@@ -3378,22 +3279,7 @@ export default function SchedulerDashboardPage() {
         <DeepLinkIntake onAsset={handleDeepLinkAsset} />
       </Suspense>
       <PageContainer>
-        <PageHeader
-          title="Create & Schedule"
-          actions={
-            // Connection status is meaningless without an account — nothing
-            // to be "connected" yet — and the badges' CTA points at
-            // /dashboard/settings, which just bounces a logged-out visitor
-            // into the sign-in modal anyway. Skip the whole row.
-            status === "authenticated" ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <ConnectionStatusBadge platform="youtube" />
-                <ConnectionStatusBadge platform="tiktok" />
-                <ConnectionStatusBadge platform="instagram" />
-              </div>
-            ) : undefined
-          }
-        />
+        <PageHeader title="Create & Schedule" />
 
         {single ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
@@ -3420,12 +3306,7 @@ export default function SchedulerDashboardPage() {
                 tags={item0.tags}
                 videoUrl={item0.videoUrl}
                 storagePath={item0.storagePath}
-                photoUrls={item0.photoUrls}
                 format={item0.format}
-                file={item0.file}
-                contentType={item0.contentType}
-                onMediaUploaded={handleItem0PlatformPatch}
-                onToast={setToast}
               />
             </div>
 
@@ -3523,7 +3404,7 @@ export default function SchedulerDashboardPage() {
 
                   <CaptionControls
                     ai={sharedAi}
-                    hasMedia={hasCaptionContext}
+                    hasVideo={hasCaptionContext}
                     hasContent={!!sharedCaption.trim()}
                     hasTitle
                     generateLabel="✨ Generate General Caption"
@@ -3563,7 +3444,6 @@ export default function SchedulerDashboardPage() {
                   onRemove={() => removeItem(it.id)}
                   tiktokConnected={tiktokConnected}
                   tiktokPrivacyOptions={tiktokPrivacyOptions}
-                  onToast={setToast}
                 />
               ))}
             </div>

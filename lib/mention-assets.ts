@@ -11,6 +11,12 @@ export type MentionAsset = {
 
 export type MentionRef = { name: string; kind: MentionAssetKind };
 
+export function isStoryboardPhotoCreation(
+  item: Pick<CreationHistoryItem, "tool" | "metadata">
+): boolean {
+  return item.tool === "storyboard" || item.metadata?.mode === "storyboard";
+}
+
 export function mentionAssetFromCreation(it: CreationHistoryItem): MentionAsset | null {
   if (!it.mediaUrl) return null;
   if (it.metadata?.creationKind === "character") {
@@ -20,7 +26,7 @@ export function mentionAssetFromCreation(it: CreationHistoryItem): MentionAsset 
       "Character";
     return { id: it.id, name, url: it.mediaUrl, kind: "character" };
   }
-  if (it.tool === "storyboard") {
+  if (isStoryboardPhotoCreation(it)) {
     return { id: it.id, name: it.title || "Storyboard", url: it.mediaUrl, kind: "storyboard" };
   }
   if (it.tool === "product_photo") {

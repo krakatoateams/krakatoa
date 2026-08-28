@@ -64,6 +64,15 @@ import {
   makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import {
+  DevBlankForbiddenError,
+  DEV_BLANK_REQUEST_KEY,
+  devBlankJobTag,
+  isDevBlankFormValue,
+  readBlankImageBytes,
+  requireDevBlankAccess,
+} from "@/lib/dev-blank-generation";
+import { handlePhotoStoryboardGeneration } from "@/lib/photo-storyboard-generation";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -190,6 +199,22 @@ export async function POST(req: Request) {
     }
 
     const formData = await req.formData();
+    const modeRaw = String(formData.get("mode") || "product").trim();
+    if (modeRaw === "storyboard") {
+      return handlePhotoStoryboardGeneration(req, { formData });
+    }
+
+    const devBlank = isDevBlankFormValue(formData.get(DEV_BLANK_REQUEST_KEY));
+    if (devBlank) {
+      try {
+        await requireDevBlankAccess();
+      } catch (e) {
+        if (e instanceof DevBlankForbiddenError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+        }
+        throw e;
+      }
+    }
     const file = formData.get("image");
     // Optional extra reference images (omni-form /tools/photo-v2):
     //   - Product Try-on: `character` — an optional model/person image alongside
@@ -231,7 +256,7 @@ export async function POST(req: Request) {
     //                  prompt or reference required; optional character name.
     //   - "social"    : text-to-image Instagram feed post; prompt required, wrapped
     //                  in social-composition scaffolding; 1:1 or 4:5.
-    const modeRaw = String(formData.get("mode") || "product").trim();
+    //   - "storyboard": handled above via handlePhotoStoryboardGeneration.
     const mode: "product" | "image" | "character" | "social" =
       modeRaw === "image" || modeRaw === "character" || modeRaw === "social"
         ? modeRaw
@@ -465,6 +490,7 @@ export async function POST(req: Request) {
       extraRefCount: extraReferenceFiles.length + directReferenceUrls.length,
       characterRef: characterCreationId,
       mentionRefs: referenceCreationIds.join(","),
+      devBlank,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -515,6 +541,7 @@ export async function POST(req: Request) {
         mode,
         imageCount,
         ...(userPrompt ? { prompt: userPrompt } : {}),
+        ...(devBlank ? devBlankJobTag() : {}),
       },
     }));
     if (job) {
@@ -546,8 +573,9 @@ export async function POST(req: Request) {
     // dummy phase (future fix: client/request-level idempotency key).
     // Batches are charged per image: N provider calls, N credit units, one ledger
     // row. Images that fail are refunded below rather than silently absorbed.
-    const perImageCredits = await getProductPhotoCredits({ modelTier, resolution });
+    const perImageCredits = devBlank ? 0 : await getProductPhotoCredits({ modelTier, resolution });
     const requiredCredits = perImageCredits * imageCount;
+    if (!devBlank) {
     try {
       await spendCredits({
         profileId: profileId!,
@@ -605,11 +633,20 @@ export async function POST(req: Request) {
       // Non-balance infra failure: bubble up to the outer catch as a 500.
       throw e;
     }
+    }
 
     // ---- Processing assets (created AFTER spend succeeds) ----
     // A batch gets one asset row per image so every generated file keeps its own
     // record; single generations behave exactly as before.
-    const assetMetadata = { poseId, styleId, modelTier, resolution, pricingKey, providerResolution };
+    const assetMetadata = {
+      poseId,
+      styleId,
+      modelTier,
+      resolution,
+      pricingKey,
+      providerResolution,
+      ...(devBlank ? devBlankJobTag() : {}),
+    };
     for (let index = 0; index < imageCount; index += 1) {
       const asset = await safe("createAsset", () => createProcessingAsset({
         profileId: profileId!,
@@ -618,8 +655,8 @@ export async function POST(req: Request) {
         assetType: "image",
         role: "product_photo",
         bucket: PRODUCT_PHOTO_BUCKET,
-        provider: photoModel.provider,
-        model: photoModel.model,
+        provider: devBlank ? "dev_blank" : photoModel.provider,
+        model: devBlank ? "dev_blank" : photoModel.model,
         metadata: imageCount > 1 ? { ...assetMetadata, batchIndex: index, imageCount } : assetMetadata,
       }));
       if (asset) photoAssetIds.push(asset.id);
@@ -636,31 +673,6 @@ export async function POST(req: Request) {
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
     }
-
-    // Provider client is created only after the spend has succeeded.
-    const replicate = createReplicateClient();
-
-    // Upload all reference images. Product mode leads with the required product
-    // image, then any optional character image. Image mode uploads only an optional
-    // reference (for reference-capable models). The first URL is the primary
-    // reference; models that take a single reference image use it.
-    const filesToUpload: File[] = requiresProductImage
-      ? [file as File, ...extraReferenceFiles]
-      : extraReferenceFiles;
-    const referenceUrls: string[] = [];
-    if (filesToUpload.length > 0) {
-      await beginStep(
-        "reference_upload",
-        `Upload ${filesToUpload.length} reference image(s) to Replicate`
-      );
-      console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
-      for (const f of filesToUpload) {
-        referenceUrls.push(await uploadProductImageToReplicate(replicate, f));
-      }
-      await endStep({ referenceUrls });
-    }
-    // Existing-image references (e.g. a saved character) need no upload.
-    referenceUrls.push(...directReferenceUrls);
 
     // Product mode wraps the prompt in product-photography scaffolding; character
     // mode builds a multi-angle turnaround sheet; social mode adds feed-native
@@ -685,19 +697,6 @@ export async function POST(req: Request) {
       ? `${basePrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim()
       : basePrompt;
 
-    // Aspect ratio comes from the chip (validated above). The builder sends only the
-    // params each model family supports (reference param name + resolution vary by
-    // model), passes multiple reference images where supported, and clamps the
-    // aspect ratio to what the provider accepts.
-    const imageInput = referenceUrls.length > 0 ? referenceUrls : undefined;
-    const providerInput = buildPhotoProviderInput({
-      tier,
-      prompt,
-      aspectRatio,
-      imageInput,
-      providerResolution,
-    });
-
     // Non-product items aren't pose/style shots, so give the library a meaningful
     // title instead of the misleading "Standing · Minimalist Studio". Product
     // shots with both pose + style on "auto" would otherwise read "Auto · Auto",
@@ -711,6 +710,54 @@ export async function POST(req: Request) {
           : poseId === "auto" && styleId === "auto"
             ? userPrompt.slice(0, 60) || "Product photo"
             : undefined;
+
+    let blankImageBuffer: Buffer | null = null;
+    let providerInput: Record<string, unknown> | null = null;
+    let replicate: ReturnType<typeof createReplicateClient> | null = null;
+
+    if (devBlank) {
+      await beginStep("dev_blank", "Deliver blank placeholder image (admin test)");
+      blankImageBuffer = await readBlankImageBytes();
+      await endStep({ devBlank: true });
+    } else {
+      // Provider client is created only after the spend has succeeded.
+      replicate = createReplicateClient();
+
+      // Upload all reference images. Product mode leads with the required product
+      // image, then any optional character image. Image mode uploads only an optional
+      // reference (for reference-capable models). The first URL is the primary
+      // reference; models that take a single reference image use it.
+      const filesToUpload: File[] = requiresProductImage
+        ? [file as File, ...extraReferenceFiles]
+        : extraReferenceFiles;
+      const referenceUrls: string[] = [];
+      if (filesToUpload.length > 0) {
+        await beginStep(
+          "reference_upload",
+          `Upload ${filesToUpload.length} reference image(s) to Replicate`
+        );
+        console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
+        for (const f of filesToUpload) {
+          referenceUrls.push(await uploadProductImageToReplicate(replicate, f));
+        }
+        await endStep({ referenceUrls });
+      }
+      // Existing-image references (e.g. a saved character) need no upload.
+      referenceUrls.push(...directReferenceUrls);
+
+      // Aspect ratio comes from the chip (validated above). The builder sends only the
+      // params each model family supports (reference param name + resolution vary by
+      // model), passes multiple reference images where supported, and clamps the
+      // aspect ratio to what the provider accepts.
+      const imageInput = referenceUrls.length > 0 ? referenceUrls : undefined;
+      providerInput = buildPhotoProviderInput({
+        tier,
+        prompt,
+        aspectRatio,
+        imageInput,
+        providerResolution,
+      });
+    }
 
     // One provider call + download + Supabase save per batch image. Distinct
     // timestamps keep filenames (and the unique storage_path index) from
@@ -734,30 +781,41 @@ export async function POST(req: Request) {
     };
 
     const generateOne = async (index: number) => {
-      const output = await runWithRetry(
-        replicate,
-        photoModelRef,
-        { input: providerInput },
-        10,
-        replicateHooks,
-      );
+      let imageBuffer: ArrayBuffer;
+      let mimeType = "image/png";
 
-      const generatedImageUrl = extractMediaUrl(output);
-      if (!generatedImageUrl.startsWith("http")) {
-        throw new Error("Nano Banana did not return a valid image URL");
+      if (devBlank && blankImageBuffer) {
+        imageBuffer = blankImageBuffer.buffer.slice(
+          blankImageBuffer.byteOffset,
+          blankImageBuffer.byteOffset + blankImageBuffer.byteLength
+        ) as ArrayBuffer;
+      } else {
+        const output = await runWithRetry(
+          replicate!,
+          photoModelRef,
+          { input: providerInput! },
+          10,
+          replicateHooks,
+        );
+
+        const generatedImageUrl = extractMediaUrl(output);
+        if (!generatedImageUrl.startsWith("http")) {
+          throw new Error("Nano Banana did not return a valid image URL");
+        }
+        await commitProviderOnce();
+
+        const imageResponse = await fetch(generatedImageUrl);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
+        }
+        const fetchedContentType = imageResponse.headers.get("content-type");
+        mimeType = fetchedContentType && fetchedContentType.startsWith("image/")
+          ? fetchedContentType
+          : "image/png";
+
+        imageBuffer = await imageResponse.arrayBuffer();
       }
-      await commitProviderOnce();
 
-      const imageResponse = await fetch(generatedImageUrl);
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
-      }
-      const fetchedContentType = imageResponse.headers.get("content-type");
-      const mimeType = fetchedContentType && fetchedContentType.startsWith("image/")
-        ? fetchedContentType
-        : "image/png";
-
-      const imageBuffer = await imageResponse.arrayBuffer();
       const filename = buildGeneratedFilename(poseId, styleId, batchTimestamp + index);
 
       const saved = await saveGeneratedProductPhoto({
@@ -768,7 +826,7 @@ export async function POST(req: Request) {
         poseId,
         styleId,
         contentType: "image/png",
-        prompt,
+        prompt: userPrompt || undefined,
         title: savedTitle,
         // Tag character creations so the library can group/badge them.
         creationKind: isCharacterMode
@@ -791,7 +849,11 @@ export async function POST(req: Request) {
         : "Nano Banana product photo generation",
       { prompt, ...(imageCount > 1 ? { imageCount } : {}) }
     );
-    console.log(`[Product Photo] Running ${photoModelRef} ×${imageCount} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`);
+    console.log(
+      devBlank
+        ? `[Product Photo] Dev blank placeholder ×${imageCount}`
+        : `[Product Photo] Running ${photoModelRef} ×${imageCount} (tier=${modelTier}, resolution=${providerResolution ?? "n/a"})...`
+    );
     // Settled, not all-or-nothing: one bad image in a batch must not discard the
     // ones that worked. Failed images are refunded below. A user cancel aborts
     // every in-flight prediction, so all of them reject and the throw below

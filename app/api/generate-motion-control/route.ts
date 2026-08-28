@@ -30,7 +30,21 @@ import {
   type MotionControlMode,
 } from "@/lib/motion-control-models";
 import type { MotionControlJobInput } from "@/lib/motion-control-context";
-import { cleanupMotionControlTempRefs } from "@/lib/motion-control-finalize";
+import {
+  buildMotionControlFinalizeContext,
+} from "@/lib/motion-control-context";
+import {
+  cleanupMotionControlTempRefs,
+  finalizeMotionControlSuccess,
+  endMotionControlStep,
+} from "@/lib/motion-control-finalize";
+import {
+  DevBlankForbiddenError,
+  isDevBlankRequested,
+  readBlankVideoBytes,
+  requireDevBlankAccess,
+  devBlankJobTag,
+} from "@/lib/dev-blank-generation";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
@@ -135,6 +149,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
     const b = body as Record<string, unknown>;
+    const devBlank = isDevBlankRequested(b);
+    if (devBlank) {
+      try {
+        await requireDevBlankAccess();
+      } catch (e) {
+        if (e instanceof DevBlankForbiddenError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+        }
+        throw e;
+      }
+    }
 
     const promptRaw = String(b.prompt ?? "").trim();
     const modelId = String(b.modelId ?? "").trim();
@@ -330,9 +355,12 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
-    const requiredCredits = await getVideoCredits({ pricingKey, durationSec: billedDuration });
-    try {
-      await spendCredits({
+    const requiredCredits = devBlank
+      ? 0
+      : await getVideoCredits({ pricingKey, durationSec: billedDuration });
+    if (!devBlank) {
+      try {
+        await spendCredits({
         profileId: profileId!,
         amount: requiredCredits,
         idempotencyKey: jobId
@@ -354,8 +382,8 @@ export async function POST(req: Request) {
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
+      } catch (e) {
+        if (e instanceof InsufficientCreditsError) {
         const wallet = await getWallet(profileId!).catch(() => null);
         const currentBalance = wallet?.balance ?? 0;
         if (jobId) {
@@ -389,6 +417,7 @@ export async function POST(req: Request) {
         );
       }
       throw e;
+      }
     }
 
     // ---- Processing asset (created AFTER spend succeeds) ----
@@ -399,9 +428,17 @@ export async function POST(req: Request) {
         tool: "reels",
         assetType: "video",
         role: "video_motion_control",
-        provider: resolvedModel.provider,
-        model: resolvedModel.model,
-        metadata: { modelId, mode, characterOrientation, keepOriginalSound, billedDuration, pricingKey },
+        provider: devBlank ? "dev_blank" : resolvedModel.provider,
+        model: devBlank ? "dev_blank" : resolvedModel.model,
+        metadata: {
+          modelId,
+          mode,
+          characterOrientation,
+          keepOriginalSound,
+          billedDuration,
+          pricingKey,
+          ...(devBlank ? devBlankJobTag() : {}),
+        },
       })
     );
     if (asset) videoAssetId = asset.id;
@@ -440,6 +477,41 @@ export async function POST(req: Request) {
           assetId: videoAssetId,
         })
       );
+    }
+
+    if (devBlank) {
+      await beginStep("dev_blank", "Deliver blank placeholder video (admin test)");
+      const ctx = buildMotionControlFinalizeContext({
+        profileId: profileId!,
+        userId: userId!,
+        jobId,
+        videoAssetId,
+        generationRequestId,
+        creditsAmount,
+        prompt,
+        jobInput: {
+          modelId,
+          mode: mode as MotionControlMode,
+          characterOrientation,
+          keepOriginalSound,
+          billedDuration,
+          pricingKey,
+          prompt,
+          provider: "dev_blank",
+          providerModel: "dev_blank",
+          creditsAmount,
+          tempRefPaths: [...tempRefPaths],
+          generationRequestId: generationRequestId ?? undefined,
+          videoAssetId: videoAssetId ?? undefined,
+        },
+      });
+      const blankBuffer = await readBlankVideoBytes("9:16");
+      const successResponse = await finalizeMotionControlSuccess(ctx, blankBuffer, {
+        devBlank: true,
+      });
+      await endMotionControlStep(profileId!, currentStepId, { devBlank: true });
+      currentStepId = null;
+      return NextResponse.json(successResponse);
     }
 
     // ---- Start provider prediction (non-blocking — finalize via /status) ----
