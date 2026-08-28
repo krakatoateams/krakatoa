@@ -138,7 +138,9 @@ Tools hand work to each other with **URL query params** — there is no shared c
 | Photo result + library preview | Image to video | `/tools/video?type=image2video&startImageCreationId=…` |
 | Photo social post result | Scheduler | `/tools/scheduler?assetUrl=…&mediaType=image&title=…&caption=…` |
 | Video empty state | Photo storyboard | `/tools/photo-v2?type=storyboard` |
-| Dashboard trending template | Motion control | `/tools/video?type=motion_control&templateVideo=…` |
+| Dashboard try-on template | Motion control | `/tools/video?type=motion_control&templateVideo=…` |
+| Dashboard viral template | Image to video | `/tools/video?type=image2video&prompt=…` |
+| Dashboard product try-on template | Product try-on | `/tools/photo-v2?type=product-tryon&product=…` |
 
 `?type=` preselects a composer in `app/(app)/tools/video/page.tsx`; every param is read **once on mount** (see `initialType`), so switching modes in the UI never rewrites the URL.
 

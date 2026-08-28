@@ -156,6 +156,12 @@ export type ProductPhotoTier = {
   /** Provider model id (display/metadata only; resolved via model_configs). */
   providerModel: string;
   hasResolution: boolean;
+  /**
+   * Fixed output resolution for tiers that don't expose a resolution picker
+   * (`hasResolution: false`). Shown as a read-only info chip in the omni-form so
+   * the user always sees the output size, even when it can't be changed.
+   */
+  fixedResolutionLabel?: string;
   /** Single pricing key for a no-resolution tier (basic + extended models). */
   basicPricingKey?: string;
   basicFallbackCredits?: number;
@@ -182,6 +188,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_basic",
     providerModel: "google/nano-banana",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_nano_banana_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -236,6 +243,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_seedream4",
     providerModel: "bytedance/seedream-4",
     hasResolution: false,
+    fixedResolutionLabel: "2K",
     basicPricingKey: "product_photo_seedream_4_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -252,6 +260,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_kontext",
     providerModel: "black-forest-labs/flux-kontext-pro",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_kontext_pro_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -267,6 +276,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_1_1_pro",
     providerModel: "black-forest-labs/flux-1.1-pro",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_1_1_pro_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -281,6 +291,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_imagen_4",
     providerModel: "google/imagen-4",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_imagen_4_per_image",
     basicFallbackCredits: 4,
     resolutions: [],
@@ -296,6 +307,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_ideogram_v3_turbo",
     providerModel: "ideogram-ai/ideogram-v3-turbo",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_ideogram_v3_turbo_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -311,6 +323,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_seedream3",
     providerModel: "bytedance/seedream-3",
     hasResolution: false,
+    fixedResolutionLabel: "2K",
     basicPricingKey: "product_photo_seedream_3_per_image",
     basicFallbackCredits: 3,
     resolutions: [],
@@ -326,6 +339,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     modelRole: "image_flux_schnell",
     providerModel: "black-forest-labs/flux-schnell",
     hasResolution: false,
+    fixedResolutionLabel: "1K",
     basicPricingKey: "product_photo_flux_schnell_per_image",
     basicFallbackCredits: 1,
     resolutions: [],
@@ -500,6 +514,7 @@ export const SOCIAL_POST_CREATION_KIND = "social_post";
 // --- Character creation options (omni-form "Character creation" mode) ---------
 
 export type CharacterStyleId =
+  | "any"
   | "realistic"
   | "3d"
   | "anime"
@@ -507,6 +522,7 @@ export type CharacterStyleId =
   | "cartoon"
   | "digital-art";
 export const CHARACTER_STYLES: { id: CharacterStyleId; label: string; prompt: string }[] = [
+  { id: "any", label: "Any", prompt: "" },
   { id: "realistic", label: "Realistic", prompt: "photorealistic, lifelike detail, natural lighting" },
   { id: "3d", label: "3D", prompt: "stylized 3D render, soft global illumination, Pixar-like" },
   { id: "anime", label: "Anime", prompt: "anime illustration, clean linework, cel shading" },
@@ -514,7 +530,7 @@ export const CHARACTER_STYLES: { id: CharacterStyleId; label: string; prompt: st
   { id: "cartoon", label: "Cartoon", prompt: "flat cartoon illustration, bold outlines, vibrant colors" },
   { id: "digital-art", label: "Digital art", prompt: "painterly digital concept art, high detail" },
 ];
-export const DEFAULT_CHARACTER_STYLE: CharacterStyleId = "realistic";
+export const DEFAULT_CHARACTER_STYLE: CharacterStyleId = "any";
 export function isValidCharacterStyle(id: string): id is CharacterStyleId {
   return CHARACTER_STYLES.some((s) => s.id === id);
 }
@@ -534,6 +550,7 @@ export function isValidCharacterGender(id: string): id is CharacterGenderId {
 // Age expressed as life-stage words (never numbers) so the model gets a clear,
 // safe descriptor rather than an exact age.
 export type CharacterAgeId =
+  | "any"
   | "baby"
   | "child"
   | "teen"
@@ -542,6 +559,7 @@ export type CharacterAgeId =
   | "middle-aged"
   | "senior";
 export const CHARACTER_AGES: { id: CharacterAgeId; label: string; prompt: string }[] = [
+  { id: "any", label: "Any", prompt: "" },
   { id: "baby", label: "Baby", prompt: "baby" },
   { id: "child", label: "Child", prompt: "young child" },
   { id: "teen", label: "Teen", prompt: "teenage" },
@@ -550,7 +568,7 @@ export const CHARACTER_AGES: { id: CharacterAgeId; label: string; prompt: string
   { id: "middle-aged", label: "Middle-aged", prompt: "middle-aged" },
   { id: "senior", label: "Senior", prompt: "elderly" },
 ];
-export const DEFAULT_CHARACTER_AGE: CharacterAgeId = "young-adult";
+export const DEFAULT_CHARACTER_AGE: CharacterAgeId = "any";
 export function isValidCharacterAge(id: string): id is CharacterAgeId {
   return CHARACTER_AGES.some((a) => a.id === id);
 }
@@ -584,7 +602,7 @@ export function buildCharacterSheetPrompt(params: {
   return [
     `Character reference turnaround sheet of ${subject}.`,
     who ? `The character is a ${who}.` : "",
-    style ? `Art style: ${style.prompt}.` : "",
+    style?.prompt ? `Art style: ${style.prompt}.` : "",
     "Show the SAME character from four angles in one image, evenly spaced left to right: front view, three-quarter view, side profile, and back view.",
     "Keep identical face, hair, outfit, colors, proportions, and art style across every angle.",
     "Full body, consistent soft studio lighting, clean neutral background, no text, no labels, no watermark.",

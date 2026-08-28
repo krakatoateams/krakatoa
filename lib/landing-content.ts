@@ -1,10 +1,6 @@
 /**
- * Single source of truth for public marketing copy.
- *
- * Both landing designs render from these values — the default light/orange page
- * (`components/landing/`) and the near-black `/hello` variant
- * (`components/landing-hello/`) — so the two can never drift on content. Copy
- * only: no JSX, no styling, no layout decisions.
+ * Single source of truth for public marketing copy on `/`
+ * (`components/landing-hello/`). Copy only: no JSX, no styling, no layout.
  */
 
 export const NAV_LINKS = [
@@ -38,9 +34,9 @@ export const PRIMARY_CTA = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The headline is stored as tokens rather than a string because the two designs
- * treat it differently: the default page interleaves emoji ornaments between
- * the words, the /hello variant renders it as plain Swiss typography.
+ * Headline tokens (text + optional ornaments). The live homepage uses the
+ * plain string derived below; the token form is kept so ornaments can return
+ * without rewriting copy.
  */
 export type HeadlineToken =
   | { kind: "text"; value: string }
@@ -84,14 +80,17 @@ export const HERO_HEADLINE_LINES = HERO_HEADLINE.map((line) =>
     .join(" ")
 );
 
-export const HERO_CTA = { label: "See how", href: "#features" };
+export const HERO_CTA = {
+  label: "See how",
+  youtubeVideoId: "6kZpxHJd6P0",
+};
 
 /**
  * Supporting statement rendered beneath the hero showreel. Kept as plain copy
- * here; the /hello variant reveals it word-by-word on scroll.
+ * here; the homepage reveals it word-by-word on scroll.
  */
 export const HERO_SUBCOPY =
-  "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes — all from a single prompt.";
+  "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes, all from a single prompt.";
 
 export const AI_MODELS_LABEL = "Powered by leading AI models";
 export const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
@@ -110,14 +109,14 @@ export const ABOUT_PHOTOS = [
 export const ABOUT = {
   /** Rendered one per line on desktop, joined with spaces on mobile. */
   headingLines: ["AI video and images,", "from prompt to", "post in minutes."],
-  body: "Generate faceless reels, cinematic clips, and studio-grade product photos with one AI suite — scripted, generated, captioned, and ready to publish.",
+  body: "Generate faceless reels, cinematic clips, and studio-grade product photos with one AI suite, scripted, generated, captioned, and ready to publish.",
   cta: { label: "Explore our tools", href: "#features" },
   manifesto:
-    "We don't just generate content — we help brands realize their voice at scale.",
+    "We don't just generate content, we help brands realize their voice at scale.",
   byline: "Kelolako team · est. 2026",
   stat: {
     value: "Free to start",
-    label: "Register now — no commitment, no card required",
+    label: "Register now, no commitment, no card required",
   },
 };
 
@@ -131,6 +130,8 @@ export type FeatureItem = {
   description: string;
   video: string;
   badge?: string;
+  /** Maps to tool_configs.tool_key so the landing "Soon" badge tracks admin. */
+  toolKey?: string;
 };
 
 export const FEATURES_HEADING =
@@ -158,6 +159,7 @@ export const FEATURES: FeatureItem[] = [
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_074625_a81f018a-956b-43fb-9aee-4d1508e30e6a.mp4",
     badge: "New",
+    toolKey: "virtual_creator",
   },
   {
     id: "scheduler",
@@ -165,6 +167,7 @@ export const FEATURES: FeatureItem[] = [
     description: "Plan posts when your audience is most active.",
     video:
       "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260510_060007_60275ce7-030c-4668-a160-8f364ec537d3.mp4",
+    toolKey: "schedule",
   },
 ];
 
@@ -357,7 +360,7 @@ export const TESTIMONIALS: Testimonial[] = [
 export const FOOTER = {
   heading: "All eyes on your next post.",
   body: "Sign up free and start creating reels, product photos, and posts with Kelolako's AI suite.",
-  copyright: "\u00a9 2025 Kelolako. Built for the future of content.",
+  copyright: "\u00a9 2026 Kelolako. Built for the future of content.",
   supportEmail: "support@kelolako.com",
   supportLabel: "Need support? We are here",
 };

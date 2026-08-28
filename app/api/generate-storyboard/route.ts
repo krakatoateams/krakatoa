@@ -262,8 +262,7 @@ Layout requirements:
 - Exactly SIX panels in a clear grid (e.g. 2×3 or 3×2) on one canvas.
 - ${aspectDirective}
 - Each panel labeled with scene number, its timestamp range, visual description, and dialogue as on-set storyboard annotations.
-- ${styleInstruction}
-- Keep characters and setting consistent across panels where the story continues.
+${styleInstruction ? `- ${styleInstruction}\n` : ""}- Keep characters and setting consistent across panels where the story continues.
 - One image only; do not output multiple files.`;
 }
 
@@ -592,7 +591,11 @@ export async function POST(req: Request) {
         {
           input: {
             system_prompt: buildSceneSystemPrompt(aspectRatio, languageLabel),
-            prompt: `Video theme: ${theme}${themeRefSceneNote}\n\nThe finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\nProduce the JSON with scenes and seedance_prompt as specified.`,
+            prompt: `Video theme: ${theme}${themeRefSceneNote}\n\n${
+              videoStyleDirective
+                ? `The finished video must be rendered in this visual style — bake it into the "seedance_prompt" (state the style explicitly so the video model honors it): ${videoStyleDirective}\nKeep each scene's "visual_description" focused on action and content; the storyboard style is applied separately.\n\n`
+                : ""
+            }Produce the JSON with scenes and seedance_prompt as specified.`,
             reasoning_effort: "low",
             verbosity: "high",
             max_completion_tokens: 8192,

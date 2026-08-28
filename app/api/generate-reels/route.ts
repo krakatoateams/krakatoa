@@ -19,6 +19,7 @@
  * =============================================================================
  */
 import { NextResponse } from "next/server";
+import { getCurrentAdmin } from "@/lib/admin-auth";
 import { insertUserCreation } from "@/lib/creations-db";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob, cancelJob, markJobRecoverable } from "@/lib/jobs-db";
@@ -144,6 +145,15 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
+      );
+    }
+
+    // Reels Creator is admin-only until public launch — gate the API, not just the UI.
+    const admin = await getCurrentAdmin();
+    if (!admin) {
+      return NextResponse.json(
+        { error: "Reels Creator is coming soon.", code: "FEATURE_NOT_AVAILABLE" },
+        { status: 403 }
       );
     }
 

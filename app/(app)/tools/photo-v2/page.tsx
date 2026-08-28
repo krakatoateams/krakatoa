@@ -25,10 +25,8 @@ import {
   Languages,
   Sparkles,
   Copy,
-  CalendarClock,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
-import { useToolAvailability } from "@/lib/use-tool-availability";
 import MentionTextarea from "@/components/MentionTextarea";
 import {
   parseMentionAssetsFromHistory,
@@ -96,6 +94,8 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { consumePendingDraft } from "@/lib/pending-form-draft";
 import { animateVideoHref } from "@/lib/animate-handoff";
+import { GenerationScheduleButton } from "@/components/GenerationScheduleButton";
+import { isViralTemplateAssetPath } from "@/lib/trending-templates";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
@@ -483,6 +483,12 @@ function StoryboardComposer({
               <span>Create video</span>
               <ArrowRight className="h-4 w-4" />
             </button>
+            <GenerationScheduleButton
+              assetUrl={result.url}
+              mediaType="image"
+              title={theme.trim()}
+              className="mt-3 flex h-10 w-fit items-center gap-2 rounded-radius-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-text-primary transition-colors hover:bg-white/10"
+            />
           </div>
         </div>
       )}
@@ -553,13 +559,15 @@ function PhotoOmniPage() {
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
-  // "Schedule this post" is hidden while Schedule is coming-soon/disabled in
-  // /admin/config-v2 — no point handing off into an unfinished flow.
-  const scheduleAvailable = useToolAvailability("schedule");
-  // Deep-link: the Video → Storyboard empty state links here with ?type=storyboard
-  // so we open the storyboard sub-tool preselected.
+  // Deep-link: Video empty state uses ?type=storyboard; dashboard product
+  // try-on templates use ?type=product-tryon&product=…&character=…&prompt=….
+  const typeParam = searchParams.get("type");
   const initialCreationType: CreationTypeId =
-    searchParams.get("type") === "storyboard" ? "storyboard" : "generate-any-image";
+    typeParam === "storyboard"
+      ? "storyboard"
+      : typeParam === "product-tryon"
+        ? "product-tryon"
+        : "generate-any-image";
 
   const product = useImageUpload();
   const character = useImageUpload();
@@ -573,7 +581,7 @@ function PhotoOmniPage() {
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false);
   const [savedCharacters, setSavedCharacters] = useState<CreationHistoryItem[]>([]);
   const [charactersLoading, setCharactersLoading] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(searchParams.get("prompt") ?? "");
   const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
   const [poseId, setPoseId] = useState<ModelPoseId>(DEFAULT_MODEL_POSE);
@@ -622,6 +630,7 @@ function PhotoOmniPage() {
       modelTier?: ProductPhotoModelTier;
       resolution?: ProductPhotoResolution;
       aspectRatio?: PhotoAspectRatio;
+      hadMedia?: boolean;
     }>(window.location.pathname);
     if (!draft) return;
     if (draft.prompt) setPrompt(draft.prompt);
@@ -635,9 +644,35 @@ function PhotoOmniPage() {
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Uploaded images (product/character/reference) can't survive the round
-    // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
-    // leaving the visitor to notice a silently-empty upload tile.
-    setWarning("Signed in — your settings were saved. Please re-attach any photos you'd uploaded.");
+    // trip (see lib/pending-form-draft.ts) — only warn about it when the
+    // visitor actually had one attached (hadMedia), not on every restore.
+    setWarning(
+      draft.hadMedia
+        ? "Signed in — your settings were saved. Please re-attach any photos you'd uploaded."
+        : "Signed in — your settings were saved."
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Dashboard "Photo try-on" deep-link: fetch the public product
+  // (and optional character) into the upload slots so Generate is ready.
+  useEffect(() => {
+    const productPath = searchParams.get("product");
+    const characterPath = searchParams.get("character");
+    let cancelled = false;
+    async function hydrate(path: string | null, setFile: (next: File | null) => void) {
+      if (!path || !isViralTemplateAssetPath(path)) return;
+      const res = await fetch(path);
+      if (!res.ok || cancelled) return;
+      const blob = await res.blob();
+      const name = path.split("/").pop() || "image";
+      setFile(new File([blob], name, { type: blob.type || "image/png" }));
+    }
+    void hydrate(productPath, product.setFile);
+    void hydrate(characterPath, character.setFile);
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -857,6 +892,10 @@ function PhotoOmniPage() {
         modelTier,
         resolution,
         aspectRatio,
+        // So the post-restore banner can be contextual — only warn about
+        // re-attaching a photo when one was actually attached (see the
+        // matching consume effect above).
+        hadMedia: !!(product.file || character.file || reference.file),
       });
       return;
     }
@@ -1021,7 +1060,11 @@ function PhotoOmniPage() {
       const response = await fetch("/api/generate-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: "instagram", title: resultPrompt }),
+        body: JSON.stringify({
+          platform: "instagram",
+          title: resultPrompt,
+          storage_path: resultPath ?? undefined,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not write a caption");
@@ -1042,17 +1085,6 @@ function PhotoOmniPage() {
     } catch {
       setCaptionError("Couldn't copy — select the caption and copy it manually.");
     }
-  };
-
-  // Hand the post to the Scheduler: the storage path becomes the photo, the idea
-  // becomes the title, and the caption is pre-filled. No platform is preselected.
-  const handleSchedulePost = () => {
-    if (!resultPath) return;
-    const params = new URLSearchParams({ assetUrl: resultPath, mediaType: "image" });
-    const title = resultPrompt.slice(0, 100);
-    if (title) params.set("title", title);
-    if (caption.trim()) params.set("caption", caption.trim());
-    router.push(`/tools/scheduler?${params.toString()}`);
   };
 
   // Hand the photo to the Video studio: Image to video opens with this image
@@ -1348,7 +1380,7 @@ function PhotoOmniPage() {
                     />
                   </>
                 )}
-                {tier.hasResolution && (
+                {tier.hasResolution ? (
                   <ChipDropdown
                     sheetTitle="Select resolution"
                     square
@@ -1364,7 +1396,18 @@ function PhotoOmniPage() {
                     onSelect={(id) => setResolution(id as ProductPhotoResolution)}
                     disabled={loading}
                   />
-                )}
+                ) : tier.fixedResolutionLabel ? (
+                  // Read-only info: this model outputs a fixed resolution the
+                  // user can't change, but we still surface it so the output
+                  // size is never a mystery.
+                  <div
+                    title="Output resolution (fixed for this model)"
+                    className="flex h-10 shrink-0 cursor-default items-center gap-2 rounded-radius-sm bg-white/5 px-3 text-sm text-text-secondary"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                    {tier.fixedResolutionLabel}
+                  </div>
+                ) : null}
               </div>
 
               {/* Generate (desktop — inside the form card) */}
@@ -1576,35 +1619,43 @@ function PhotoOmniPage() {
                     <p className="mt-2 text-xs text-error">{captionError}</p>
                   )}
 
-                  {scheduleAvailable.enabled && !scheduleAvailable.comingSoon && (
-                    <button
-                      type="button"
-                      onClick={handleSchedulePost}
-                      className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
-                    >
-                      <CalendarClock className="h-4 w-4" />
-                      <span>Schedule this post</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </button>
-                  )}
+                  <GenerationScheduleButton
+                    assetUrl={resultPath ?? resultUrl}
+                    mediaType="image"
+                    title={resultPrompt.slice(0, 100)}
+                    caption={caption}
+                    showArrow
+                    className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
+                  />
                 </>
               ) : (
+                <>
                 <p className="mt-1 text-xs text-text-disabled">
                   Click the thumbnail to view full size, or generate another below.
                 </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <GenerationScheduleButton
+                    assetUrl={resultPath ?? resultUrl}
+                    mediaType="image"
+                    title={resultPrompt.slice(0, 100)}
+                    showArrow
+                    className="flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl bg-gradient-to-br from-brand-primary-light to-brand-primary px-4 text-sm font-semibold text-text-on-solid transition-opacity hover:opacity-90"
+                  />
+                  {resultCreationId && (
+                    <button
+                      type="button"
+                      onClick={handleAnimate}
+                      className="flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
+                    >
+                      <Clapperboard className="h-4 w-4" />
+                      <span>Animate this photo</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                </>
               )}
 
-              {resultCreationId && (
-                <button
-                  type="button"
-                  onClick={handleAnimate}
-                  className="mt-4 flex h-10 w-fit cursor-pointer items-center gap-2 rounded-radius-xl border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/25"
-                >
-                  <Clapperboard className="h-4 w-4" />
-                  <span>Animate this photo</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              )}
             </div>
           </div>
         )}

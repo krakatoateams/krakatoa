@@ -132,7 +132,13 @@ export function LegalPage({ content }: { content: LegalContent }) {
 
         {/* Footer */}
         <div className="mt-16 border-t border-white/10 pt-6 text-center text-xs text-text-disabled">
-          © {new Date().getFullYear()} Kelolako. All rights reserved.
+          <p>
+            Informasi pada halaman ini dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya.
+          </p>
+          <p className="mt-1">
+            Information on this page is subject to change at any time without prior notice.
+          </p>
+          <p className="mt-4">© {new Date().getFullYear()} Kelolako. All rights reserved.</p>
         </div>
       </main>
     </div>

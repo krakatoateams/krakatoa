@@ -8,18 +8,42 @@ import {
   type FeatureItem,
 } from "@/lib/landing-content";
 import { usePinnedScrollIndex } from "@/lib/use-pinned-scroll";
+import { useToolAvailabilityMap } from "@/lib/use-tool-availability";
+
+function FeatureBadge({
+  label,
+  active,
+}: {
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <span
+      className={`ml-2 rounded px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-[0.1em] ${
+        active
+          ? "bg-bg-static-black/10 text-text-static-black/70"
+          : "bg-white/10 text-text-secondary"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
 
 function FeatureMenuItem({
   feature,
   index,
   active,
+  comingSoon,
   onSelect,
 }: {
   feature: FeatureItem;
   index: number;
   active: boolean;
+  comingSoon: boolean;
   onSelect: () => void;
 }) {
+  const badge = comingSoon ? "Soon" : feature.badge;
   return (
     <button
       type="button"
@@ -41,17 +65,7 @@ function FeatureMenuItem({
       <span className="min-w-0">
         <span className="block text-[14px] font-medium tracking-tight sm:text-[15px]">
           {feature.label}
-          {feature.badge ? (
-            <span
-              className={`ml-2 rounded px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-[0.1em] ${
-                active
-                  ? "bg-bg-static-black/10 text-text-static-black/70"
-                  : "bg-white/10 text-text-secondary"
-              }`}
-            >
-              {feature.badge}
-            </span>
-          ) : null}
+          {badge ? <FeatureBadge label={badge} active={active} /> : null}
         </span>
         <span
           className={`mt-1 block text-[12px] leading-relaxed sm:text-[13px] ${
@@ -69,8 +83,12 @@ export function HelloFeatures() {
   const { outerRef, activeIndex, scrollToIndex } = usePinnedScrollIndex(
     FEATURES.length
   );
+  const { map: toolAvailability } = useToolAvailabilityMap();
+  const isComingSoon = (feature: FeatureItem) =>
+    Boolean(feature.toolKey && toolAvailability[feature.toolKey]?.comingSoon);
   const activeFeature = FEATURES[activeIndex];
   const activeId = activeFeature.id;
+  const activeComingSoon = isComingSoon(activeFeature);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -136,6 +154,7 @@ export function HelloFeatures() {
                   feature={feature}
                   index={index}
                   active={activeIndex === index}
+                  comingSoon={isComingSoon(feature)}
                   onSelect={() => scrollToIndex(index)}
                 />
               ))}
@@ -166,6 +185,12 @@ export function HelloFeatures() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-medium tracking-tight text-N900">
                 {activeFeature.label}
+                {(activeComingSoon ? "Soon" : activeFeature.badge) ? (
+                  <FeatureBadge
+                    label={activeComingSoon ? "Soon" : activeFeature.badge!}
+                    active={false}
+                  />
+                ) : null}
               </p>
               <p className="mt-0.5 text-[12.5px] leading-relaxed text-text-disabled">
                 {activeFeature.description}

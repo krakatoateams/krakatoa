@@ -17,6 +17,8 @@ type AuthModalContextValue = {
    * against the same page `next` resolves to.
    */
   openSignInModal: (next?: string, draft?: Record<string, unknown>) => void;
+  /** Same as openSignInModal, but opens straight to the "signup" view. */
+  openSignUpModal: (next?: string, draft?: Record<string, unknown>) => void;
   closeSignInModal: () => void;
 };
 
@@ -31,24 +33,37 @@ const AuthModalContext = createContext<AuthModalContextValue | null>(null);
 export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const { status } = useCurrentUser();
   const [isOpen, setIsOpen] = useState(false);
+  const [initialView, setInitialView] = useState<"signin" | "signup">("signin");
   const [next, setNext] = useState<string | undefined>(undefined);
   const [showSignedInToast, setShowSignedInToast] = useState(false);
 
-  const openSignInModal = useCallback((nextPath?: string, draft?: Record<string, unknown>) => {
-    const resolvedNext =
-      nextPath ?? (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/dashboard");
-    if (draft && typeof window !== "undefined") {
-      // Keyed by pathname only (not the full next, which can carry query
-      // params) — a draft only ever needs to survive a same-page round trip,
-      // and matching on the bare path is more robust than an exact
-      // path+query string match, which a redirect chain (our own callback
-      // route, Supabase, or the browser) isn't guaranteed to reproduce
-      // byte-for-byte.
-      savePendingDraft(window.location.pathname, draft);
-    }
-    setNext(resolvedNext);
-    setIsOpen(true);
-  }, []);
+  const openModal = useCallback(
+    (view: "signin" | "signup", nextPath?: string, draft?: Record<string, unknown>) => {
+      const resolvedNext =
+        nextPath ?? (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/dashboard");
+      if (draft && typeof window !== "undefined") {
+        // Keyed by pathname only (not the full next, which can carry query
+        // params) — a draft only ever needs to survive a same-page round trip,
+        // and matching on the bare path is more robust than an exact
+        // path+query string match, which a redirect chain (our own callback
+        // route, Supabase, or the browser) isn't guaranteed to reproduce
+        // byte-for-byte.
+        savePendingDraft(window.location.pathname, draft);
+      }
+      setInitialView(view);
+      setNext(resolvedNext);
+      setIsOpen(true);
+    },
+    [],
+  );
+  const openSignInModal = useCallback(
+    (nextPath?: string, draft?: Record<string, unknown>) => openModal("signin", nextPath, draft),
+    [openModal],
+  );
+  const openSignUpModal = useCallback(
+    (nextPath?: string, draft?: Record<string, unknown>) => openModal("signup", nextPath, draft),
+    [openModal],
+  );
   const closeSignInModal = useCallback(() => setIsOpen(false), []);
 
   // Fires once per real sign-in, whether it came back via the Google
@@ -69,22 +84,26 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(t);
   }, [status]);
 
-  const value = useMemo(() => ({ openSignInModal, closeSignInModal }), [openSignInModal, closeSignInModal]);
+  const value = useMemo(
+    () => ({ openSignInModal, openSignUpModal, closeSignInModal }),
+    [openSignInModal, openSignUpModal, closeSignInModal],
+  );
 
   return (
     <AuthModalContext.Provider value={value}>
       {children}
-      <SignInModal open={isOpen} next={next} onClose={closeSignInModal} />
+      <SignInModal open={isOpen} initialView={initialView} next={next} onClose={closeSignInModal} />
       {showSignedInToast && (
         <div
           role="status"
           aria-live="polite"
-          // Top, not bottom — several pages (Scheduler, Calendar) already
-          // mount their own local toast fixed to bottom-6/left-1/2; sharing
-          // that spot would stack this one directly on top of a page-specific
-          // message (e.g. Scheduler's "please re-attach your video" after a
-          // restored draft) rather than showing both.
-          className="fixed left-1/2 top-6 z-[110] flex -translate-x-1/2 items-center gap-2.5 rounded-radius-lg border border-success/30 bg-success/10 px-spacing-lg py-spacing-md text-body-3 font-medium text-success shadow-elevation-02"
+          // bottom-20, not bottom-6 — several pages (Scheduler, Calendar)
+          // already mount their own local toast fixed to bottom-6/left-1/2
+          // (e.g. Scheduler's "please re-attach your video" after a restored
+          // draft, which can genuinely coincide with this one right after
+          // sign-in); stacking one row higher keeps both visible instead of
+          // overlapping.
+          className="fixed bottom-20 left-1/2 z-[110] flex -translate-x-1/2 items-center gap-2.5 rounded-radius-lg border border-success/30 bg-success/10 px-spacing-lg py-spacing-md text-body-3 font-medium text-success shadow-elevation-02"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           Successfully signed in

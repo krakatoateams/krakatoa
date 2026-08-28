@@ -3,6 +3,10 @@ import { withWorkflow } from "workflow/next";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["shaders"],
+  // Former design-variant route; homepage is only `/` now.
+  async redirects() {
+    return [{ source: "/hello", destination: "/", permanent: true }];
+  },
   images: {
     remotePatterns: [
       {

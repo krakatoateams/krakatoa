@@ -9,6 +9,7 @@ const PUBLIC_APP_ROUTES = new Set([
   "/dashboard",
   "/tools/photo-v2",
   "/tools/scheduler",
+  "/tools/scheduler/calendar",
   "/tools/video",
 ]);
 

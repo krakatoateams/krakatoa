@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
 import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
-import TrendingTemplates from "./TrendingTemplates";
+import TrendingTemplates, { ViralTemplates } from "./TrendingTemplates";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
 import ToolCardThumbnail from "./ToolCardThumbnail";
@@ -35,7 +35,7 @@ type ToolDef = {
 const TOOLS: ToolDef[] = [
   {
     name: "Video",
-    href: "/tools/video?type=reels-creator",
+    href: "/tools/video?type=text2video",
     icon: <Video className="h-5 w-5 text-brand-primary" />,
     accent: "bg-brand-primary/10",
     toolKey: "reels",
@@ -201,6 +201,7 @@ export default function DashboardPage() {
       </section>
 
       <TrendingTemplates />
+      <ViralTemplates />
 
       {isAuthenticated && <RecentCreations />}
 

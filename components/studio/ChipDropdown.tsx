@@ -163,7 +163,13 @@ export function ChipDropdown({
         <span className="flex items-center gap-2">
           {withMinorWordCase(opt.label)}
           {opt.hint && (
-            <span className="text-xs font-medium text-text-secondary sm:text-sm">{opt.hint}</span>
+            <span
+              className={`text-xs font-medium sm:text-sm ${
+                opt.hint === "Soon" ? "text-warning" : "text-text-secondary"
+              }`}
+            >
+              {opt.hint}
+            </span>
           )}
         </span>
         {active && <Check className="h-4 w-4 shrink-0 text-text-secondary" />}
@@ -225,7 +231,7 @@ export function ChipDropdown({
           <div
             ref={menuRef}
             style={{ position: "fixed", top: coords.top, left: coords.left }}
-            className="z-[80] w-max min-w-[14rem] max-w-[18rem] overflow-hidden rounded-2xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50"
+            className="z-[80] max-h-[60vh] w-max min-w-[14rem] max-w-[18rem] overflow-y-auto overflow-x-hidden rounded-2xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50"
           >
             {options.map((opt) => renderOption(opt, false))}
           </div>,

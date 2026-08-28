@@ -9,8 +9,8 @@ import { HelloTestimonials } from "./HelloTestimonials";
 import { HelloFooter } from "./HelloFooter";
 
 /**
- * Design variant of the landing page. Same sections, same copy (both pages read
- * from lib/landing-content) — restyled into arqe.ai's monochrome language.
+ * Canonical marketing homepage for `/`. Copy from lib/landing-content;
+ * monochrome layout from this folder's section components.
  */
 export function HelloLanding() {
   return (

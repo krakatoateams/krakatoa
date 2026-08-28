@@ -499,7 +499,7 @@ const MODEL_BUILDERS: Record<
 };
 
 /** Tools shown in config v2 (dashboard omitted — toggle-only elsewhere if needed). */
-const CONFIG_TOOL_ORDER = ["reels", "photo", "ig", "schedule", "calendar"];
+const CONFIG_TOOL_ORDER = ["reels", "photo", "schedule", "calendar", "virtual_creator"];
 
 export function buildAdminConfigTree(params: {
   tools: ToolConfigInput[];

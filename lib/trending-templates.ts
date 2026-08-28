@@ -25,10 +25,185 @@ const FILES = [
 
 export type TrendingTemplate = {
   id: string;
-  videoUrl: string;
+  videoUrl?: string;
+  /** Still preview when the template is a photo (product try-on). */
+  imageUrl?: string;
+  /** Optional source still shown on hover — the image this clip was made from. */
+  referenceImageUrl?: string;
+  /** Product try-on: jacket/product file preloaded into Photo studio. */
+  productImageUrl?: string;
+  /** Product try-on: optional character/model file. */
+  characterImageUrl?: string;
+  /**
+   * Generation prompt baked into the Viral Template composer (not shown to the user).
+   */
+  prompt?: string;
 };
+
+/** Text-to-video handoff for dashboard template cards. */
+export function textToVideoTemplateHref(prompt?: string): string {
+  const trimmed = prompt?.trim();
+  if (!trimmed) return "/tools/video?type=text2video";
+  return `/tools/video?type=text2video&prompt=${encodeURIComponent(trimmed)}`;
+}
+
+/** Motion-control handoff for dashboard motion-control carousel clips. */
+export function tryOnTemplateHref(videoUrl: string): string {
+  return `/tools/video?type=motion_control&templateVideo=${encodeURIComponent(videoUrl)}`;
+}
+
+/**
+ * Viral-template handoff: dedicated Viral Template composer with the showcase
+ * clip locked and the generation prompt baked in — user only supplies a character.
+ */
+export function viralTemplateHref(templateId: string): string {
+  return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(templateId)}`;
+}
+
+export function getViralTemplate(templateId: string): TrendingTemplate | undefined {
+  return VIRAL_TEMPLATES.find((t) => t.id === templateId);
+}
+
+export function isViralTemplateId(templateId: string): boolean {
+  return VIRAL_TEMPLATES.some((t) => t.id === templateId);
+}
+
+/** @deprecated Use viralTemplateHref(templateId) — image2video prompt links are retired. */
+export function viralTemplateImage2VideoHref(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (!trimmed) return "/tools/video?type=image2video";
+  return `/tools/video?type=image2video&prompt=${encodeURIComponent(trimmed)}`;
+}
+
+/** Public assets under /viral-templates/ only — never fetch arbitrary URLs. */
+export function isViralTemplateAssetPath(path: string): boolean {
+  return path.startsWith("/viral-templates/") && !path.includes("..");
+}
+
+/**
+ * Product try-on handoff: Photo studio with the template's product (and
+ * optional character) preloaded. The user can swap the person and generate.
+ */
+export function productTryOnHref(opts: {
+  productUrl: string;
+  characterUrl?: string;
+  prompt?: string;
+}): string {
+  const q = new URLSearchParams({ type: "product-tryon", product: opts.productUrl });
+  if (opts.characterUrl) q.set("character", opts.characterUrl);
+  if (opts.prompt?.trim()) q.set("prompt", opts.prompt.trim());
+  return `/tools/photo-v2?${q.toString()}`;
+}
 
 export const TRENDING_TEMPLATES: TrendingTemplate[] = FILES.map((file) => ({
   id: file,
   videoUrl: `${BASE}/${file}`,
+}));
+
+/**
+ * Dashboard "Photo try-on" carousel (left column next to Video try-on).
+ * Add a folder under `public/viral-templates/` with product / character /
+ * result stills, then append one object here.
+ */
+const PRODUCT_TRYON_CATALOG: Array<{
+  id: string;
+  dir: string;
+  product: string;
+  character: string;
+  result: string;
+  prompt: string;
+}> = [
+  {
+    id: "jacket-00001",
+    dir: "/viral-templates/Jacket",
+    product: "product.webp",
+    character: "character.png",
+    result: "result.png",
+    prompt:
+      "Studio full-body photo of the person wearing this cream bomber jacket with the black corduroy collar and red chest emblem, jacket unzipped over a light shirt, dark brown trousers, beige seamless backdrop, even studio light.",
+  },
+  {
+    id: "shoes-00001",
+    dir: "/viral-templates/Shoes",
+    product: "product.png",
+    character: "character.png",
+    result: "result.png",
+    prompt:
+      "Full-body photo of the person walking on white marble wearing these pale grey square-toe ankle boots with a center-front zipper, white tank top, blue denim midi skirt, luxury marble interior, even fashion-studio light.",
+  },
+  {
+    id: "watch-00001",
+    dir: "/viral-templates/Watch",
+    product: "product.webp",
+    character: "character.png",
+    result: "result.png",
+    prompt:
+      "Studio photo of the person leaning against a beige pillar wearing this oval crystal-bezel watch with a burgundy leather strap on the left wrist, white tank top, olive trousers, brown belt, minimalist interior, even fashion-studio light.",
+  },
+];
+
+export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON_CATALOG.map(
+  (item) => ({
+    id: item.id,
+    imageUrl: `${item.dir}/${item.result}`,
+    referenceImageUrl: `${item.dir}/${item.product}`,
+    productImageUrl: `${item.dir}/${item.product}`,
+    characterImageUrl: `${item.dir}/${item.character}`,
+    prompt: item.prompt,
+  })
+);
+
+/**
+ * Dashboard "Viral templates" carousel.
+ *
+ * Add a new card here — one object per clip. Put the mp4 (and optional webm)
+ * in `public/viral-templates/` and append one object to VIRAL_CATALOG. The
+ * generation prompt is applied automatically in the Viral Template composer.
+ */
+const VIRAL_DIR = "/viral-templates";
+const VIRAL_REFERENCE = `${VIRAL_DIR}/reference.png`;
+
+const VIRAL_CATALOG: Array<{
+  file: string;
+  prompt: string;
+  /** Override if this clip was made from a different still. */
+  referenceImageUrl?: string;
+}> = [
+  {
+    file: "kelolako_viral_videos_00001.mp4",
+    prompt:
+      "Cinematic vertical shot of the person from the start frame sitting in a helicopter cockpit at golden hour, smiling as they look out the side window toward the horizon, one hand on the cyclic stick, black harness across their chest, warm sunset light on their face, airfield and hills outside the windows, slow natural movement, 9:16.",
+  },
+  {
+    file: "kelolako_viral_videos_00002.mp4",
+    prompt:
+      "Vertical shot of the person from the start frame bouldering on an outdoor climbing wall, athletic side profile leaning back from the wall and reaching for colorful holds, crash pad below, sunny park and blue sky behind them, natural climbing motion, 9:16.",
+  },
+  {
+    file: "kelolako_viral_videos_00003.mp4",
+    prompt:
+      "Cinematic vertical shot of the person from the start frame driving a red convertible with the top down through a modern city at golden hour, both hands on the steering wheel, tan leather seats, dense skyscraper skyline behind them, wind in their hair, 9:16.",
+  },
+  {
+    file: "kelolako_viral_videos_00004.mp4",
+    prompt:
+      "Vertical travel montage of the person from the start frame walking toward camera through a grand glass-and-steel arched transit hall with a backpack, then standing at a neon-lit Tokyo crossing at night leaning on a metal railing, then looking up at a vermilion torii gate in a sunlit shrine forest, cinematic, 9:16.",
+  },
+  {
+    file: "kelolako_viral_videos_00005.mp4",
+    prompt:
+      "Cinematic vertical shot pulling from Earth in space down into a dense night city, camera diving along a glowing multi-lane highway packed with light trails, skyscrapers lining both sides, photorealistic, 9:16.",
+  },
+  {
+    file: "kelolako_viral_videos_00006.mp4",
+    prompt:
+      "Vertical shot of the person from the start frame walking through a modern city at golden hour, looking up at a curved glass skyscraper reflecting the skyline, sidewalk in the foreground, warm late-afternoon light, cinematic, 9:16.",
+  },
+];
+
+export const VIRAL_TEMPLATES: TrendingTemplate[] = VIRAL_CATALOG.map((item) => ({
+  id: item.file,
+  videoUrl: `${VIRAL_DIR}/${item.file}`,
+  referenceImageUrl: item.referenceImageUrl ?? VIRAL_REFERENCE,
+  prompt: item.prompt,
 }));

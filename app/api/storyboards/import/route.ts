@@ -617,8 +617,11 @@ function buildImportUserPrompt(description: string, videoStyleDirective: string)
   return `Analyze the uploaded storyboard [Image1] and produce the JSON described in the system prompt.
 
 ${intent}
-
-The finished video must be rendered in this visual style — bake it explicitly into the "seedance_prompt" so the video model honors it: ${videoStyleDirective}`;
+${
+  videoStyleDirective
+    ? `\nThe finished video must be rendered in this visual style — bake it explicitly into the "seedance_prompt" so the video model honors it: ${videoStyleDirective}`
+    : ""
+}`;
 }
 
 function extractJson(raw: string): unknown {
