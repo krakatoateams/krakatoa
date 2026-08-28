@@ -556,6 +556,7 @@ export async function POST(req: Request) {
         await safe("idemSuccess", () =>
           finishGenerationRequestSuccess({
             id: generationRequestId!,
+            profileId: profileId!,
             jobId: jobId ?? null,
             assetId: finalAssetId ?? null,
             responseJson: successResponse,
