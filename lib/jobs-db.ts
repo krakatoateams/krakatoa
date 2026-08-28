@@ -1,5 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 
+import type { ExecutionBackend } from "@/lib/generation-workflows/types";
+
 export type JobStatus =
   | "queued"
   | "running"
@@ -25,6 +27,10 @@ export type Job = {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  execution_backend?: ExecutionBackend;
+  workflow_run_id?: string | null;
+  heartbeat_at?: string | null;
+  dismissed_at?: string | null;
 };
 
 const JOBS_TABLE = "jobs";
@@ -133,6 +139,7 @@ export async function createJob(params: {
   input?: Record<string, unknown>;
   provider?: string;
   model?: string;
+  executionBackend?: ExecutionBackend;
 }): Promise<Job> {
   const { data, error } = await supabaseServer
     .from(JOBS_TABLE)
@@ -145,6 +152,7 @@ export async function createJob(params: {
       input: params.input ?? {},
       provider: params.provider ?? null,
       model: params.model ?? null,
+      execution_backend: params.executionBackend ?? "legacy",
     })
     .select("*")
     .single();

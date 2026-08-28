@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await runGenerationReconcile();
     console.log(
-      `[generation-reconcile] staleJobs=${result.staleJobs} refunded=${result.refundedJobs} staleRequests=${result.staleRequests} expiredRecoverable=${result.expiredRecoverable} swept=${result.sweptResumableFolders}`
+      `[generation-reconcile] staleJobs=${result.staleJobs} refunded=${result.refundedJobs} settledWorkflow=${result.settledWorkflowJobs} liveWorkflow=${result.liveWorkflowJobs} staleRequests=${result.staleRequests} expiredRecoverable=${result.expiredRecoverable} swept=${result.sweptResumableFolders}`
     );
     return NextResponse.json(result);
   } catch (err) {

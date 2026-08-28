@@ -40,6 +40,11 @@ import {
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
+import { start } from "workflow/api";
+import { resolveExecutionBackendForJobType } from "@/lib/generation-workflows/feature-flags";
+import { attachWorkflowRun } from "@/lib/generation-workflows/workflow-db";
+import { motionControlGenerationWorkflow } from "@/lib/generation-workflows/motion-control-workflow";
+import type { MotionControlWorkflowParams } from "@/lib/generation-workflows/motion-control-workflow-types";
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
 export const maxDuration = 300;
@@ -57,18 +62,6 @@ function parseRefAttachment(raw: unknown): RefAttachment | null {
   return { url, path };
 }
 
-async function attachGenerationRequestLinks(params: {
-  generationRequestId: string;
-  jobId?: string | null;
-  assetId?: string | null;
-}): Promise<void> {
-  const patch: Record<string, string> = {};
-  if (params.jobId) patch.job_id = params.jobId;
-  if (params.assetId) patch.asset_id = params.assetId;
-  if (Object.keys(patch).length === 0) return;
-  await supabaseServer.from("generation_requests").update(patch).eq("id", params.generationRequestId);
-}
-
 export async function POST(req: Request) {
   let profileId: string | null = null;
   let jobId: string | null = null;
@@ -78,6 +71,7 @@ export async function POST(req: Request) {
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
   let predictionStarted = false;
+  let workflowStarted = false;
   const tempRefPaths: string[] = [];
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
@@ -259,12 +253,16 @@ export async function POST(req: Request) {
     }
     generationRequestId = begin.id;
 
-    // ---- Platform job (best-effort observability) ----
-    const job = await safe("createJob", () =>
-      createJob({
+    const executionBackend = resolveExecutionBackendForJobType("video_motion_control");
+    const isWorkflowBackend = executionBackend === "workflow";
+
+    // ---- Platform job (workflow requires persisted job+request before spend) ----
+    if (isWorkflowBackend) {
+      const job = await createJob({
         profileId: profileId!,
         tool: "reels",
         jobType: "video_motion_control",
+        executionBackend,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
         input: {
@@ -280,16 +278,55 @@ export async function POST(req: Request) {
           tempRefPaths: [...tempRefPaths],
           generationRequestId: generationRequestId ?? undefined,
         } satisfies MotionControlJobInput,
-      })
-    );
-    if (job) {
+      });
       jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
-        );
+      await startJob(profileId!, jobId);
+      await attachGenerationRequestJob({
+        id: generationRequestId!,
+        profileId: profileId!,
+        jobId: job.id,
+      });
+    } else {
+      const job = await safe("createJob", () =>
+        createJob({
+          profileId: profileId!,
+          tool: "reels",
+          jobType: "video_motion_control",
+          executionBackend,
+          provider: resolvedModel.provider,
+          model: resolvedModel.model,
+          input: {
+            modelId,
+            mode,
+            characterOrientation,
+            keepOriginalSound,
+            billedDuration,
+            pricingKey,
+            prompt,
+            provider: resolvedModel.provider,
+            providerModel: resolvedModel.model,
+            tempRefPaths: [...tempRefPaths],
+            generationRequestId: generationRequestId ?? undefined,
+          } satisfies MotionControlJobInput,
+        }),
+      );
+      if (job) {
+        jobId = job.id;
+        await safe("startJob", () => startJob(profileId!, jobId!));
+        if (generationRequestId) {
+          await safe("attachJob", () =>
+            attachGenerationRequestJob({
+              id: generationRequestId!,
+              profileId: profileId!,
+              jobId: job.id,
+            }),
+          );
+        }
       }
+    }
+
+    if (isWorkflowBackend && (!jobId || !generationRequestId)) {
+      throw new Error("Workflow motion control requires a persisted job and generation request.");
     }
 
     // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
@@ -335,6 +372,7 @@ export async function POST(req: Request) {
           await safe("idemFailInsufficient", () =>
             finishGenerationRequestFailure({
               id: generationRequestId!,
+              profileId: profileId!,
               jobId: jobId ?? null,
               errorJson: {
                 code: "INSUFFICIENT_CREDITS",
@@ -395,8 +433,9 @@ export async function POST(req: Request) {
     }
     if (generationRequestId) {
       await safe("attachGenerationRequest", () =>
-        attachGenerationRequestLinks({
-          generationRequestId: generationRequestId!,
+        attachGenerationRequestJob({
+          id: generationRequestId!,
+          profileId: profileId!,
           jobId,
           assetId: videoAssetId,
         })
@@ -410,7 +449,6 @@ export async function POST(req: Request) {
       throw new Error("Reference attachments could not be resolved.");
     }
 
-    const replicate = createReplicateClient();
     const providerInput = buildMotionControlProviderInput({
       prompt,
       mode: mode as MotionControlMode,
@@ -420,6 +458,55 @@ export async function POST(req: Request) {
       videoUrl: pipelineVideoUrl,
     });
 
+    if (executionBackend === "workflow") {
+      const workflowParams: MotionControlWorkflowParams = {
+        profileId: profileId!,
+        userId: userId!,
+        jobId: jobId!,
+        generationRequestId: generationRequestId!,
+        videoAssetId,
+        creditsAmount,
+        modelRef: modelRef,
+        providerInput,
+        modelId,
+        mode: mode as MotionControlMode,
+        characterOrientation,
+        keepOriginalSound,
+        billedDuration,
+        pricingKey,
+        prompt,
+        provider: resolvedModel.provider,
+        providerModel: resolvedModel.model,
+        tempRefPaths: [...tempRefPaths],
+        stepLabel: `${model.modelLabel} motion control generation`,
+      };
+
+      console.log(
+        `[Motion Control] Starting durable workflow (mode=${mode}, orientation=${characterOrientation})...`,
+      );
+
+      const run = await start(motionControlGenerationWorkflow, [workflowParams]);
+      workflowStarted = true;
+      try {
+        await attachWorkflowRun({
+          profileId: profileId!,
+          jobId: jobId!,
+          workflowRunId: run.runId,
+        });
+      } catch (attachError) {
+        console.warn(
+          "[motion-control] attachWorkflowRun failed after workflow start (run already executing):",
+          attachError,
+        );
+      }
+
+      return NextResponse.json(
+        { status: "processing", jobId, runId: run.runId },
+        { status: 202 },
+      );
+    }
+
+    const replicate = createReplicateClient();
     await beginStep("motion_control_generation", `${model.modelLabel} motion control generation`, {
       mode,
       characterOrientation,
@@ -500,6 +587,7 @@ export async function POST(req: Request) {
       await safe("idemFailure", () =>
         finishGenerationRequestFailure({
           id: generationRequestId!,
+          profileId: profileId!,
           jobId: jobId ?? null,
           errorJson: errJson,
         })
@@ -513,11 +601,13 @@ export async function POST(req: Request) {
       );
     }
     return NextResponse.json(
-      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      pricingMissing
+        ? { error: message, code: "PRICING_CONFIG_MISSING" }
+        : { error: "Motion control generation failed." },
       { status: 500 }
     );
   } finally {
-    if (tempRefPaths.length > 0 && !predictionStarted) {
+    if (tempRefPaths.length > 0 && !predictionStarted && !workflowStarted) {
       await cleanupMotionControlTempRefs(tempRefPaths);
     }
   }

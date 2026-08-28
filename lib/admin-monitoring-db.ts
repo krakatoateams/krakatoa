@@ -49,6 +49,8 @@ export type MonitoringRow = {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
+  execution_backend: string | null;
+  heartbeat_at: string | null;
   error: Record<string, unknown> | null;
   errorCode: string | null;
   currentStep: MonitoringStep | null;
@@ -101,6 +103,8 @@ type JobRow = {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
+  execution_backend: string | null;
+  heartbeat_at: string | null;
   profiles?: ProfileEmbed;
 };
 
@@ -164,7 +168,7 @@ export async function getAdminMonitoring(options?: {
   let query = supabaseServer
     .from("jobs")
     .select(
-      "id, profile_id, tool, job_type, status, provider, model, cost_credits, input, output, error, created_at, started_at, finished_at, updated_at, profiles(email)"
+      "id, profile_id, tool, job_type, status, provider, model, cost_credits, input, output, error, created_at, started_at, finished_at, updated_at, execution_backend, heartbeat_at, profiles(email)"
     )
     .or(`status.in.(${ACTIVE_STATUSES.join(",")}),created_at.gte.${since}`)
     .order("created_at", { ascending: false })
@@ -204,10 +208,11 @@ export async function getAdminMonitoring(options?: {
       status: string;
       cancel_requested: boolean;
       cancel_allowed: boolean;
+      provider_committed_at: string | null;
       updated_at: string;
     }>(
       "generation_requests",
-      "job_id, status, cancel_requested, cancel_allowed, updated_at",
+      "job_id, status, cancel_requested, cancel_allowed, provider_committed_at, updated_at",
       ids
     ),
     fetchByJobIds<{ job_id: string }>("generation_predictions", "job_id", ids),
@@ -253,10 +258,13 @@ export async function getAdminMonitoring(options?: {
       status: j.status,
       errorCode,
       updatedAtMs: ms(j.updated_at),
+      executionBackend: j.execution_backend === "workflow" ? "workflow" : "legacy",
+      heartbeatAtMs: ms(j.heartbeat_at) || null,
       nowMs,
       cancelRequested: req?.cancel_requested ?? false,
       cancelRequestedAtMs: req ? ms(req.updated_at) : null,
       cancelAllowed: req?.cancel_allowed ?? true,
+      providerCommittedAt: req?.provider_committed_at ?? null,
       spentCredits: credit.spent,
       refundedCredits: credit.refunded,
       resumeAttempts: recovery?.resumeAttempts,
@@ -277,6 +285,8 @@ export async function getAdminMonitoring(options?: {
       started_at: j.started_at,
       finished_at: j.finished_at,
       updated_at: j.updated_at,
+      execution_backend: j.execution_backend,
+      heartbeat_at: j.heartbeat_at,
       error: j.error,
       errorCode,
       currentStep: lastStep.get(j.id) ?? null,
@@ -337,6 +347,7 @@ export type MonitoringDetail = {
     status: string;
     cancel_requested: boolean;
     cancel_allowed: boolean;
+    provider_committed_at: string | null;
     error_json: Record<string, unknown> | null;
     created_at: string;
     updated_at: string;
@@ -364,7 +375,7 @@ export async function getAdminJobDetail(jobId: string): Promise<MonitoringDetail
   const { data, error } = await supabaseServer
     .from("jobs")
     .select(
-      "id, profile_id, tool, job_type, status, provider, model, cost_credits, input, output, error, created_at, started_at, finished_at, updated_at, profiles(email)"
+      "id, profile_id, tool, job_type, status, provider, model, cost_credits, input, output, error, created_at, started_at, finished_at, updated_at, execution_backend, heartbeat_at, profiles(email)"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -386,7 +397,7 @@ export async function getAdminJobDetail(jobId: string): Promise<MonitoringDetail
     ),
     fetchByJobIds<NonNullable<MonitoringDetail["request"]> & { job_id: string }>(
       "generation_requests",
-      "id, job_id, idempotency_key, tool_key, route_key, status, cancel_requested, cancel_allowed, error_json, created_at, updated_at",
+      "id, job_id, idempotency_key, tool_key, route_key, status, cancel_requested, cancel_allowed, provider_committed_at, error_json, created_at, updated_at",
       ids
     ),
     fetchByJobIds<MonitoringDetail["predictions"][number] & { job_id: string }>(
@@ -426,10 +437,13 @@ export async function getAdminJobDetail(jobId: string): Promise<MonitoringDetail
       status: job.status,
       errorCode,
       updatedAtMs: ms(job.updated_at),
+      executionBackend: job.execution_backend === "workflow" ? "workflow" : "legacy",
+      heartbeatAtMs: ms(job.heartbeat_at) || null,
       nowMs: Date.now(),
       cancelRequested: request?.cancel_requested ?? false,
       cancelRequestedAtMs: request ? ms(request.updated_at) : null,
       cancelAllowed: request?.cancel_allowed ?? true,
+      providerCommittedAt: request?.provider_committed_at ?? null,
       spentCredits: spent,
       refundedCredits: refunded,
       resumeAttempts: recovery?.resumeAttempts,
