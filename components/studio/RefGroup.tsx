@@ -41,13 +41,13 @@ export async function uploadRefFile(file: File): Promise<{ url: string; path: st
     token: string;
     storagePath?: string;
   };
+  const objectPath = storagePath?.trim() || path;
   const { error } = await getSupabaseBrowser()
     .storage.from(bucket)
-    .uploadToSignedUrl(path, token, file, { contentType: file.type });
+    .uploadToSignedUrl(objectPath, token, file, { contentType: file.type });
   if (error) throw new Error(error.message || "Upload failed.");
-  const resolvedPath = storagePath || path;
-  const signed = await fetchSignedUrl({ path: resolvedPath });
-  return { url: signed.url, path: resolvedPath };
+  const signed = await fetchSignedUrl({ path: objectPath });
+  return { url: signed.url, path: objectPath };
 }
 
 export type RefGroupApi = {

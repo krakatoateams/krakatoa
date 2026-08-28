@@ -18,19 +18,19 @@ export default function PageHeader({
     <div
       className={`mb-8 ${
         actions
-          ? "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+          ? "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
           : ""
       } ${className}`}
     >
-      <div>
-        <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+      <div className={actions ? "min-w-0 flex-1" : undefined}>
+        <h1 className="mb-0 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-[clamp(1.625rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-transparent sm:mb-0">
           {title}
         </h1>
         {description ? (
-          <p className="text-body-3 text-text-secondary">{description}</p>
+          <p className="mt-3 text-body-3 text-text-secondary">{description}</p>
         ) : null}
       </div>
-      {actions ?? null}
+      {actions ? <div className="min-w-0 shrink-0">{actions}</div> : null}
     </div>
   );
 }

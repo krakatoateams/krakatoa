@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -33,6 +33,26 @@ import {
   filterActiveGenerations,
   isLiveStatus,
 } from "@/lib/active-generations-pure";
+import {
+  expandVideoStudioHistoryTools,
+  isProductMediaScope,
+  libraryFeaturesForScope,
+  libraryFeaturesForScopeAndTools,
+  libraryQueryFromFeature,
+  type LibraryFeatureCounts,
+  type MediaScope,
+  type PhotoLibraryFeatureId,
+  type ProductMediaScope,
+  type VideoLibraryFeatureId,
+} from "@/lib/creation-library-filters";
+import {
+  LIBRARY_FAVORITES_KEY,
+  loadLibraryFavorites,
+} from "@/lib/library-favorites";
+
+export type LibrarySection = "browse" | "favorite" | "trash";
+
+type ProductFeatureId = PhotoLibraryFeatureId | VideoLibraryFeatureId;
 
 type Props = {
   title?: string;
@@ -53,10 +73,18 @@ type Props = {
   className?: string;
   /** Increment to refetch after a new generation completes */
   refreshKey?: number;
-  /** Show the All / Videos / Photos / Favorites tab bar and per-card favorite toggle */
+  /** Show the Photo/Video product filter bar and per-card favorite toggle. */
   enableTabs?: boolean;
-  /** When false, the Trash tab (and its empty-trash controls) is hidden. Defaults to true. */
-  showTrashTab?: boolean;
+  /** Top-level library page: assets browse, favorites, or trash (set by the page shell). */
+  librarySection?: LibrarySection;
+  /**
+   * Tool-embedded history (Video / Photo studio): feature-type chips for one
+   * product only — no All/Photo/Video switcher. Uses the same server filters as
+   * the assets library.
+   */
+  productFeatureTabs?: ProductMediaScope;
+  /** Default feature chip when the section mounts (user can switch chips). */
+  initialLibraryFeature?: PhotoLibraryFeatureId | VideoLibraryFeatureId;
   /** Enable library-style hover actions + rich preview modal (favorite, download, delete, prev/next) WITHOUT the tab bar. */
   showActions?: boolean;
   /** When false, only the created date is shown on each card (no title / tool label) */
@@ -92,28 +120,10 @@ function pageWindow(current: number, total: number): (number | "ellipsis")[] {
   return out;
 }
 
-type LibraryTab =
-  | "all"
-  | "video"
-  | "image"
-  | "character"
-  | "storyboard"
-  | "favorite"
-  | "trash";
-
-type TabCounts = {
-  all: number;
-  image: number;
-  video: number;
-  character: number;
-  storyboard: number;
-  trash: number;
-};
-
 type CachedHistory = {
   items: CreationHistoryItem[];
   total: number;
-  counts: TabCounts | null;
+  libraryCounts: LibraryFeatureCounts | null;
 };
 
 // Stale-while-revalidate cache for the library/history views, keyed by the full
@@ -125,21 +135,11 @@ type CachedHistory = {
 // tiny LRU.
 const historyCache = new Map<string, CachedHistory>();
 
-const FAVORITES_KEY = "krakatoa:library:favorites";
-
 const DEFAULT_GRID_CLASS =
   "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4";
 
 function loadFavorites(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(FAVORITES_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    return new Set(Array.isArray(parsed) ? (parsed as string[]) : []);
-  } catch {
-    return new Set();
-  }
+  return loadLibraryFavorites();
 }
 
 function downloadFilename(item: CreationHistoryItem, mimeType?: string): string {
@@ -171,6 +171,96 @@ function metadataDurationSec(item: CreationHistoryItem): number | undefined {
 function formatDuration(totalSeconds: number): string {
   const rounded = Math.max(0, Math.round(totalSeconds));
   return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+type MediaScopeTab = {
+  id: MediaScope;
+  label: string;
+  icon: LucideIcon;
+  count: number;
+};
+
+function MediaScopeTabList({
+  tabs,
+  activeId,
+  onChange,
+}: {
+  tabs: readonly MediaScopeTab[];
+  activeId: MediaScope;
+  onChange: (id: MediaScope) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Partial<Record<MediaScope, HTMLButtonElement | null>>>({});
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+
+  const updateIndicator = useCallback(() => {
+    const container = containerRef.current;
+    const active = tabRefs.current[activeId];
+    if (!container || !active) return;
+    setIndicator({
+      left: active.offsetLeft,
+      width: active.offsetWidth,
+      ready: true,
+    });
+  }, [activeId]);
+
+  useLayoutEffect(() => {
+    updateIndicator();
+  }, [updateIndicator, tabs.map((tab) => `${tab.id}:${tab.count}`).join("|")]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateIndicator());
+    observer.observe(container);
+    for (const tab of tabs) {
+      const el = tabRefs.current[tab.id];
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [tabs, updateIndicator]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1"
+      role="tablist"
+      aria-label="Media type"
+    >
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute bottom-1 top-1 rounded-lg bg-white/10 shadow-sm transition-[left,width] duration-200 ease-out motion-reduce:transition-none ${
+          indicator.ready ? "opacity-100" : "opacity-0"
+        }`}
+        style={{ left: indicator.left, width: indicator.width }}
+      />
+      {tabs.map((scope) => {
+        const active = activeId === scope.id;
+        const Icon = scope.icon;
+        return (
+          <button
+            key={scope.id}
+            ref={(el) => {
+              tabRefs.current[scope.id] = el;
+            }}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(scope.id)}
+            className={`relative z-10 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+              active ? "text-text-primary" : "text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {scope.label}
+            <span className={active ? "text-text-secondary" : "text-text-disabled"}>
+              ({scope.count})
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // First-frame snapshots for video cards. Mobile browsers cap how many videos can
@@ -312,7 +402,7 @@ function HoverPlayVideo({
 
 export default function CreationsHistory({
   title = "Your generations",
-  description = "Every successful generation appears here.",
+  description,
   tools,
   mediaType,
   limit = 100,
@@ -323,7 +413,9 @@ export default function CreationsHistory({
   className = "",
   refreshKey = 0,
   enableTabs = false,
-  showTrashTab = true,
+  librarySection = "browse",
+  productFeatureTabs,
+  initialLibraryFeature,
   showActions = false,
   showMeta = true,
   showRefresh = true,
@@ -334,19 +426,24 @@ export default function CreationsHistory({
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
   // history) opt into the same UI without rendering the chips.
-  const richUI = enableTabs || showActions;
+  const richUI = enableTabs || showActions || Boolean(productFeatureTabs);
+  const libraryFiltering = enableTabs || Boolean(productFeatureTabs);
   // `limit` doubles as the page size; pages are fetched from the server.
   const pageSize = limit;
   const [items, setItems] = useState<CreationHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [serverCounts, setServerCounts] = useState<TabCounts | null>(null);
+  const [serverLibraryCounts, setServerLibraryCounts] =
+    useState<LibraryFeatureCounts | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Guards for the SWR cache: ignore responses for a chip the user already left,
   // and detect a real parent refresh (vs. the initial mount) to drop stale cache.
   const latestKeyRef = useRef<string>("");
   const prevRefreshKeyRef = useRef(refreshKey);
-  const [activeTab, setActiveTab] = useState<LibraryTab>("all");
+  const [mediaScope, setMediaScope] = useState<MediaScope>("all");
+  const [featureTab, setFeatureTab] = useState<ProductFeatureId>(
+    initialLibraryFeature ?? "all"
+  );
   const [page, setPage] = useState(1);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<CreationHistoryItem | null>(null);
@@ -423,7 +520,7 @@ export default function CreationsHistory({
       else next.add(id);
       try {
         window.localStorage.setItem(
-          FAVORITES_KEY,
+          LIBRARY_FAVORITES_KEY,
           JSON.stringify(Array.from(next))
         );
       } catch {
@@ -433,40 +530,53 @@ export default function CreationsHistory({
     });
   }, []);
 
+  const activeProductScope: ProductMediaScope | null =
+    productFeatureTabs ??
+    (isProductMediaScope(mediaScope) ? mediaScope : null);
+
   // The active tab maps to server-side filters so paging stays correct without
   // loading the whole library. mediaType prop (picker usage) takes precedence.
-  const tabMediaType =
-    enableTabs && activeTab === "video"
-      ? "video"
-      : enableTabs && activeTab === "image"
-        ? "image"
-        : undefined;
+  const tabMediaType = libraryFiltering
+    ? activeProductScope === "photo"
+      ? "image"
+      : activeProductScope === "video"
+        ? "video"
+        : mediaScope === "photo"
+          ? "image"
+          : mediaScope === "video"
+            ? "video"
+            : undefined
+    : undefined;
   const effectiveMediaType = mediaType ?? tabMediaType;
-  const tabKind = enableTabs && activeTab === "character" ? "character" : undefined;
-  const isStoryboardTab = enableTabs && activeTab === "storyboard";
-  const isFavoriteTab = enableTabs && activeTab === "favorite";
-  const isTrashTab = enableTabs && activeTab === "trash";
-  // Favorites live in localStorage; serialize the ids so the fetch re-runs when
-  // they change while the Favorites tab is open.
+  const isFavoriteTab = enableTabs && librarySection === "favorite";
+  const isTrashTab = enableTabs && librarySection === "trash";
   const favoriteIdsKey = isFavoriteTab
     ? Array.from(favorites).sort().join(",")
     : "";
-  const toolsKey = tools?.length ? tools.join(",") : "";
+  const historyTools =
+    productFeatureTabs === "video" ? expandVideoStudioHistoryTools(tools) : tools;
+  const toolsKey = historyTools?.length ? historyTools.join(",") : "";
+  const effectiveFeatureTab = featureTab;
 
   const load = useCallback(async () => {
     setError(null);
     const params = new URLSearchParams();
     if (toolsKey) params.set("tool", toolsKey);
-    // The Storyboards tab narrows the listing to storyboards via a separate param
-    // so the pill counts (scoped to `tool`) don't shift when the tab is active.
-    if (isStoryboardTab) params.set("tabTool", "storyboard");
-    if (effectiveMediaType) params.set("mediaType", effectiveMediaType);
-    if (tabKind) params.set("kind", tabKind);
-    if (isTrashTab) params.set("trashed", "1");
+    if (libraryFiltering) {
+      const scopeForApi = productFeatureTabs ?? mediaScope;
+      params.set("libraryScope", scopeForApi);
+      params.set("librarySection", librarySection);
+      params.set(
+        "libraryFeature",
+        activeProductScope ? effectiveFeatureTab : "all"
+      );
+      params.set("libraryCounts", "1");
+      if (isFavoriteTab) params.set("ids", favoriteIdsKey);
+    } else {
+      if (effectiveMediaType) params.set("mediaType", effectiveMediaType);
+    }
     params.set("limit", String(pageSize));
     params.set("offset", String((page - 1) * pageSize));
-    if (enableTabs) params.set("counts", "1");
-    if (isFavoriteTab) params.set("ids", favoriteIdsKey);
 
     const cacheKey = params.toString();
     latestKeyRef.current = cacheKey;
@@ -478,7 +588,7 @@ export default function CreationsHistory({
     if (cached) {
       setItems(cached.items);
       setTotal(cached.total);
-      if (cached.counts) setServerCounts(cached.counts);
+      if (cached.libraryCounts) setServerLibraryCounts(cached.libraryCounts);
       setLoading(false);
     } else {
       setLoading(true);
@@ -491,17 +601,17 @@ export default function CreationsHistory({
       const nextItems: CreationHistoryItem[] = data.items || [];
       const nextTotal =
         typeof data.total === "number" ? data.total : nextItems.length;
-      const nextCounts: TabCounts | null = data.counts ?? null;
+      const nextLibraryCounts: LibraryFeatureCounts | null = data.libraryCounts ?? null;
       historyCache.set(cacheKey, {
         items: nextItems,
         total: nextTotal,
-        counts: nextCounts,
+        libraryCounts: nextLibraryCounts,
       });
       // Drop a slow response for a chip the user already switched away from.
       if (latestKeyRef.current !== cacheKey) return;
       setItems(nextItems);
       setTotal(nextTotal);
-      if (nextCounts) setServerCounts(nextCounts);
+      if (nextLibraryCounts) setServerLibraryCounts(nextLibraryCounts);
     } catch (err: unknown) {
       if (latestKeyRef.current !== cacheKey) return;
       const message = err instanceof Error ? err.message : "Failed to load history";
@@ -517,14 +627,17 @@ export default function CreationsHistory({
   }, [
     toolsKey,
     effectiveMediaType,
-    tabKind,
-    isStoryboardTab,
     isFavoriteTab,
-    isTrashTab,
     favoriteIdsKey,
     enableTabs,
+    libraryFiltering,
+    productFeatureTabs,
+    activeProductScope,
     pageSize,
     page,
+    mediaScope,
+    effectiveFeatureTab,
+    librarySection,
   ]);
 
   // A real parent refresh (new generation, manual Refresh) means the server data
@@ -543,7 +656,7 @@ export default function CreationsHistory({
   // Back to page 1 whenever the filter or the underlying data changes.
   useEffect(() => {
     setPage(1);
-  }, [activeTab, refreshKey, effectiveMediaType, toolsKey]);
+  }, [mediaScope, effectiveFeatureTab, refreshKey, effectiveMediaType, toolsKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -559,7 +672,7 @@ export default function CreationsHistory({
       const next = new Set(prev);
       next.delete(id);
       try {
-        window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(next)));
+        window.localStorage.setItem(LIBRARY_FAVORITES_KEY, JSON.stringify(Array.from(next)));
       } catch {
         // localStorage may be unavailable; favorites stay in-memory
       }
@@ -659,25 +772,55 @@ export default function CreationsHistory({
     }
   }, [load]);
 
-  // Tab pill counts come from the server (favorites are client-side only).
-  const counts = {
-    all: serverCounts?.all ?? 0,
-    video: serverCounts?.video ?? 0,
-    image: serverCounts?.image ?? 0,
-    character: serverCounts?.character ?? 0,
-    storyboard: serverCounts?.storyboard ?? 0,
-    favorite: favorites.size,
-    trash: serverCounts?.trash ?? 0,
+  const photoProductCount = serverLibraryCounts?.photo.all ?? 0;
+  const videoProductCount = serverLibraryCounts?.video.all ?? 0;
+  const allProductCount = photoProductCount + videoProductCount;
+  const showMediaScopeTabs = enableTabs && !productFeatureTabs;
+  const showProductFeatures = Boolean(activeProductScope);
+
+  const featureTabs = activeProductScope
+    ? libraryFeaturesForScopeAndTools(activeProductScope, historyTools)
+    : [];
+
+  const featureCount = (id: ProductFeatureId): number => {
+    if (!activeProductScope) return 0;
+    if (activeProductScope === "photo") {
+      return serverLibraryCounts?.photo[id as PhotoLibraryFeatureId] ?? 0;
+    }
+    return serverLibraryCounts?.video[id as VideoLibraryFeatureId] ?? 0;
+  };
+
+  const onMediaScopeChange = (scope: MediaScope) => {
+    setMediaScope(scope);
+    if (!isProductMediaScope(scope)) {
+      setFeatureTab("all");
+      return;
+    }
+    setFeatureTab((tab) => {
+      const valid = libraryFeaturesForScopeAndTools(scope, historyTools).some(
+        (f) => f.id === tab
+      );
+      return valid ? tab : "all";
+    });
   };
 
   // Items are already filtered + paged by the server.
   const pagedItems = items;
 
-  const showActiveTiles =
-    richUI && !isFavoriteTab && !isTrashTab && activeTab !== "character";
+  const featureQuery =
+    libraryFiltering && activeProductScope && !isFavoriteTab && !isTrashTab
+      ? libraryQueryFromFeature(activeProductScope, effectiveFeatureTab)
+      : null;
+  const activeFilterTools = featureQuery?.tools?.length
+    ? historyTools?.length
+      ? historyTools.filter((t) => featureQuery.tools!.includes(t))
+      : featureQuery.tools
+    : historyTools;
+
+  const showActiveTiles = richUI && !isFavoriteTab && !isTrashTab;
   const activeTiles = showActiveTiles
     ? filterActiveGenerations(activeJobs, {
-        tools: isStoryboardTab ? ["storyboard"] : tools,
+        tools: activeFilterTools,
         mediaType: effectiveMediaType,
       })
     : [];
@@ -698,17 +841,10 @@ export default function CreationsHistory({
     void load();
   }, [liveActiveKey, load]);
 
-  const TABS: { id: LibraryTab; label: string; icon: LucideIcon }[] = [
-    { id: "all", label: "All", icon: LayoutGrid },
-    { id: "video", label: "Videos", icon: Video },
-    { id: "image", label: "Photos", icon: ImageIcon },
-    { id: "character", label: "Characters", icon: User },
-    { id: "storyboard", label: "Storyboards", icon: Layers },
-    { id: "favorite", label: "Favorites", icon: Star },
-    ...(showTrashTab
-      ? [{ id: "trash" as LibraryTab, label: "Trash", icon: Trash2 }]
-      : []),
-  ];
+  const utilityIcon = (id: ProductFeatureId): LucideIcon | null => {
+    if (id === "all") return LayoutGrid;
+    return null;
+  };
 
   const refreshButton = (
     <button
@@ -730,44 +866,65 @@ export default function CreationsHistory({
               <History className="w-6 h-6 text-text-secondary" />
               {title}
             </h2>
-            <p className="text-sm text-text-disabled mt-1">{description}</p>
+            {description ? (
+              <p className="text-sm text-text-disabled mt-1">{description}</p>
+            ) : null}
           </div>
           {showRefresh && refreshButton}
         </div>
       )}
 
-      {enableTabs && (
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
-          <div className="flex flex-wrap items-center gap-2">
-            {TABS.map((tab) => {
-              const active = activeTab === tab.id;
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-full border transition-colors ${
-                    active
-                      ? "bg-white/10 border-white/25 text-text-primary"
-                      : "bg-white/[0.03] border-white/10 text-text-secondary hover:text-N900 hover:border-white/25"
-                  }`}
-                >
-                  <Icon
-                    className="h-3.5 w-3.5"
-                    fill={
-                      tab.id === "favorite" && active ? "currentColor" : "none"
-                    }
-                  />
-                  {tab.label}
-                  <span className={active ? "text-text-secondary" : "text-text-disabled"}>
-                    ({counts[tab.id]})
-                  </span>
-                </button>
-              );
-            })}
+      {(enableTabs || productFeatureTabs) && (
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+            {showMediaScopeTabs ? (
+            <MediaScopeTabList
+              activeId={mediaScope}
+              onChange={onMediaScopeChange}
+              tabs={[
+                { id: "all", label: "All", icon: LayoutGrid, count: allProductCount },
+                { id: "photo", label: "Photo", icon: ImageIcon, count: photoProductCount },
+                { id: "video", label: "Video", icon: Video, count: videoProductCount },
+              ]}
+            />
+            ) : null}
+
+            {showProductFeatures ? (
+            <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+              <div
+                className="flex w-max items-center gap-2"
+                role="tablist"
+                aria-label="Feature type"
+              >
+              {featureTabs.map((tab) => {
+                const active = featureTab === tab.id;
+                const Icon = utilityIcon(tab.id as ProductFeatureId);
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setFeatureTab(tab.id as ProductFeatureId)}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+                      active
+                        ? "border-white/25 bg-white/10 text-text-primary"
+                        : "border-white/10 bg-white/[0.03] text-text-secondary hover:border-white/25 hover:text-text-primary"
+                    }`}
+                  >
+                    {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+                    {tab.label}
+                    <span className={active ? "text-text-secondary" : "text-text-disabled"}>
+                      ({featureCount(tab.id as ProductFeatureId)})
+                    </span>
+                  </button>
+                );
+              })}
+              </div>
+            </div>
+            ) : null}
           </div>
-          {showRefresh && refreshButton}
+          {showRefresh && enableTabs && refreshButton}
         </div>
       )}
 
@@ -791,24 +948,26 @@ export default function CreationsHistory({
         />
       ) : pagedItems.length === 0 && activeTiles.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
-          {enableTabs && activeTab === "favorite" ? (
+          {enableTabs && librarySection === "favorite" ? (
             <>
               <Star className="w-12 h-12 text-text-disabled mx-auto mb-4" />
               <p className="text-text-secondary">No favorites yet.</p>
             </>
-          ) : enableTabs && activeTab === "trash" ? (
+          ) : enableTabs && librarySection === "trash" ? (
             <>
               <Trash2 className="w-12 h-12 text-text-disabled mx-auto mb-4" />
               <p className="text-text-secondary">Trash is empty.</p>
             </>
-          ) : enableTabs && activeTab === "storyboard" ? (
+          ) : (enableTabs || productFeatureTabs) && effectiveFeatureTab === "storyboard" ? (
             <>
               <Layers className="w-12 h-12 text-text-disabled mx-auto mb-4" />
               <p className="text-text-secondary">No storyboards yet.</p>
             </>
           ) : (
             <>
-              {mediaType === "video" || activeTab === "video" ? (
+              {mediaScope === "all" ? (
+                <LayoutGrid className="w-12 h-12 text-text-disabled mx-auto mb-4" />
+              ) : mediaType === "video" || mediaScope === "video" ? (
                 <Video className="w-12 h-12 text-text-disabled mx-auto mb-4" />
               ) : (
                 <ImageIcon className="w-12 h-12 text-text-disabled mx-auto mb-4" />
@@ -1039,7 +1198,7 @@ export default function CreationsHistory({
         </>
       )}
 
-      {enableTabs && activeTab === "trash" && counts.trash > 0 && (
+      {enableTabs && librarySection === "trash" && (serverLibraryCounts?.trash ?? 0) > 0 && (
         <div className="mt-8 flex flex-col items-center gap-3 border-t border-white/10 pt-6">
           <p className="text-xs text-text-disabled">
             Items in Trash are kept for 14 days, then deleted automatically.
@@ -1079,8 +1238,8 @@ export default function CreationsHistory({
               <h3 className="text-base font-semibold text-N900">Empty Trash?</h3>
             </div>
             <p className="mb-6 text-sm text-text-secondary">
-              This permanently deletes all {counts.trash} item
-              {counts.trash === 1 ? "" : "s"} in Trash. This can&apos;t be undone.
+              This permanently deletes all {serverLibraryCounts?.trash ?? 0} item
+              {(serverLibraryCounts?.trash ?? 0) === 1 ? "" : "s"} in Trash. This can&apos;t be undone.
             </p>
             <div className="flex justify-end gap-2">
               <button

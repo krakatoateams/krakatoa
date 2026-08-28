@@ -66,7 +66,15 @@ import {
   buildVideoProviderInput,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
   type StoryboardVideoModelId,
+  type VideoAspectRatio,
 } from "@/lib/video-models";
+import {
+  DevBlankForbiddenError,
+  devBlankJobTag,
+  isDevBlankRequested,
+  readBlankVideoBytes,
+  requireDevBlankAccess,
+} from "@/lib/dev-blank-generation";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -143,6 +151,17 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
+    const devBlank = isDevBlankRequested(body);
+    if (devBlank) {
+      try {
+        await requireDevBlankAccess();
+      } catch (e) {
+        if (e instanceof DevBlankForbiddenError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+        }
+        throw e;
+      }
+    }
     const storyboardId =
       typeof body.storyboardId === "string" ? body.storyboardId.trim() : "";
 
@@ -178,7 +197,7 @@ export async function POST(req: Request) {
     }
     const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;
 
-    if (!process.env.REPLICATE_API_TOKEN?.trim()) {
+    if (!devBlank && !process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
         { error: "REPLICATE_API_TOKEN is not configured." },
         { status: 500 }
@@ -297,11 +316,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const replicate = new Replicate({
-      auth: process.env.REPLICATE_API_TOKEN,
-    });
-
-    // ---- Resolve runtime model (Admin Phase 2) ----
     const resolvedVideoModel = await resolveModel({
       toolKey: "reels",
       configKey: videoModel.modelRole,
@@ -311,7 +325,14 @@ export async function POST(req: Request) {
         parameters: {},
       },
     });
-    const videoModelRef = replicateRef(resolvedVideoModel);
+    let replicate: Replicate | undefined;
+    let videoModelRef: string | undefined;
+    if (!devBlank) {
+      replicate = new Replicate({
+        auth: process.env.REPLICATE_API_TOKEN,
+      });
+      videoModelRef = replicateRef(resolvedVideoModel);
+    }
 
     // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
     // MUST run before createJob, spendCredits, the storyboards.status mutation,
@@ -375,8 +396,8 @@ export async function POST(req: Request) {
       profileId: profileId!,
       tool: "storyboard",
       jobType: "storyboard_video",
-      provider: resolvedVideoModel.provider,
-      model: resolvedVideoModel.model,
+      provider: devBlank ? "dev_blank" : resolvedVideoModel.provider,
+      model: devBlank ? "dev_blank" : resolvedVideoModel.model,
       input: {
         userId: userId!,
         storyboardId,
@@ -386,6 +407,7 @@ export async function POST(req: Request) {
         aspectRatio,
         language,
         style: storyboardStyle,
+        ...(devBlank ? devBlankJobTag() : {}),
       },
     }));
     if (job) {
@@ -410,9 +432,12 @@ export async function POST(req: Request) {
     // Storyboard video is priced via the selected model's per-second provider cost
     // for the chosen resolution over the fixed 15s clip.
     const pricingKey = videoModel.pricingKey({ resolution, hasReferenceVideo: false });
-    const requiredCredits = await getVideoCredits({ pricingKey, durationSec });
-    try {
-      await spendCredits({
+    const requiredCredits = devBlank
+      ? 0
+      : await getVideoCredits({ pricingKey, durationSec });
+    if (!devBlank) {
+      try {
+        await spendCredits({
         profileId: profileId!,
         amount: requiredCredits,
         idempotencyKey: jobId
@@ -434,8 +459,8 @@ export async function POST(req: Request) {
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
+      } catch (e) {
+        if (e instanceof InsufficientCreditsError) {
         const wallet = await getWallet(profileId!).catch(() => null);
         const currentBalance = wallet?.balance ?? 0;
         if (jobId) {
@@ -464,6 +489,7 @@ export async function POST(req: Request) {
         );
       }
       throw e;
+      }
     }
 
     // ---- Storyboard status + processing asset (created AFTER spend succeeds) ----
@@ -490,8 +516,8 @@ export async function POST(req: Request) {
       tool: "storyboard",
       assetType: "video",
       role: "final_video",
-      provider: resolvedVideoModel.provider,
-      model: resolvedVideoModel.model,
+      provider: devBlank ? "dev_blank" : resolvedVideoModel.provider,
+      model: devBlank ? "dev_blank" : resolvedVideoModel.model,
       metadata: {
         storyboardId,
         videoModelId,
@@ -500,6 +526,7 @@ export async function POST(req: Request) {
         aspectRatio,
         language,
         style: storyboardStyle,
+        ...(devBlank ? devBlankJobTag() : {}),
       },
     }));
     if (asset) videoAssetId = asset.id;
@@ -524,83 +551,95 @@ export async function POST(req: Request) {
       }
     };
 
-    await beginStep("video_generation", "Seedance video from storyboard reference");
-    // If the user already hit Cancel between spend and provider call, abort now so
-    // we never start (and pay for) a provider run we're about to throw away.
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    console.log(
-      `[Storyboard Video] Calling ${videoModel.modelLabel} (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`
-    );
-    // Record each Replicate prediction id so POST /api/generations/cancel can stop
-    // this run mid-flight (the SDK progress callback fires on create + each poll).
-    const providerInput = buildVideoProviderInput({
-      model: videoModel,
-      prompt: seedancePrompt,
-      duration: durationSec,
-      resolution,
-      aspectRatio,
-      generateAudio: true,
-      references: { referenceImages: [storyboardUrl] },
-    });
-    const videoResult = await runReplicateWithRetry(
-      replicate,
-      videoModelRef,
-      {
-        input: providerInput,
-      },
-      10,
-      makeReplicateCancelHooks({
-        generationRequestId,
-        profileId,
-        jobId,
-        kind: "storyboard_video",
-      }),
-    );
+    let videoBuffer: Buffer | ArrayBuffer;
 
-    // Post-run cancel safety net: if the user cancelled while the prediction was
-    // still in the provider's initial (pre-poll) window — before its id was
-    // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
-    // refunding and NOT delivering the result, rather than charging for an unwanted clip.
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-
-    const videoRemoteUrl = extractMediaUrl(videoResult);
-    if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
-      console.error("[Storyboard Video] Bad Seedance output:", videoResult);
-      throw new Error("Failed to resolve video URL from Seedance output.");
-    }
-    await endStep({ videoRemoteUrl });
-
-    if (generationRequestId && profileId) {
-      await markProviderCommitted({
-        generationRequestId,
-        profileId,
-        reason: "storyboard_video_generation",
-      });
-    }
-
-    await checkpointRemoteVideo(
-      pipelineRecovery,
-      videoRemoteUrl,
-      `source_${Date.now()}.mp4`,
-      "storyboard_video",
-    );
-
-    await beginStep("storage_upload", "Download Seedance MP4 + upload to Supabase");
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    console.log("[Storyboard Video] Downloading MP4...");
-    const vidRes = await fetch(videoRemoteUrl);
-    if (!vidRes.ok) {
-      throw new Error(
-        `Failed to download video: ${vidRes.status} ${vidRes.statusText}`
+    if (devBlank) {
+      await beginStep("dev_blank", "Deliver blank placeholder video (admin test)");
+      videoBuffer = await readBlankVideoBytes(aspectRatio as VideoAspectRatio);
+      await endStep({ devBlank: true });
+    } else {
+      await beginStep("video_generation", "Seedance video from storyboard reference");
+      // If the user already hit Cancel between spend and provider call, abort now so
+      // we never start (and pay for) a provider run we're about to throw away.
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+      console.log(
+        `[Storyboard Video] Calling ${videoModel.modelLabel} (${durationSec}s, ${resolution}, ${aspectRatio}, audio, reference)...`
       );
+      // Record each Replicate prediction id so POST /api/generations/cancel can stop
+      // this run mid-flight (the SDK progress callback fires on create + each poll).
+      const providerInput = buildVideoProviderInput({
+        model: videoModel,
+        prompt: seedancePrompt,
+        duration: durationSec,
+        resolution,
+        aspectRatio,
+        generateAudio: true,
+        references: { referenceImages: [storyboardUrl] },
+      });
+      const videoResult = await runReplicateWithRetry(
+        replicate!,
+        videoModelRef!,
+        {
+          input: providerInput,
+        },
+        10,
+        makeReplicateCancelHooks({
+          generationRequestId,
+          profileId,
+          jobId,
+          kind: "storyboard_video",
+        }),
+      );
+
+      // Post-run cancel safety net: if the user cancelled while the prediction was
+      // still in the provider's initial (pre-poll) window — before its id was
+      // recorded, so it couldn't be stopped on Replicate — honor the cancel now by
+      // refunding and NOT delivering the result, rather than charging for an unwanted clip.
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+
+      const videoRemoteUrl = extractMediaUrl(videoResult);
+      if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
+        console.error("[Storyboard Video] Bad Seedance output:", videoResult);
+        throw new Error("Failed to resolve video URL from Seedance output.");
+      }
+      await endStep({ videoRemoteUrl });
+
+      if (generationRequestId && profileId) {
+        await markProviderCommitted({
+          generationRequestId,
+          profileId,
+          reason: "storyboard_video_generation",
+        });
+      }
+
+      await checkpointRemoteVideo(
+        pipelineRecovery,
+        videoRemoteUrl,
+        `source_${Date.now()}.mp4`,
+        "storyboard_video",
+      );
+
+      await beginStep("storage_upload", "Download Seedance MP4 + upload to Supabase");
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+      console.log("[Storyboard Video] Downloading MP4...");
+      const vidRes = await fetch(videoRemoteUrl);
+      if (!vidRes.ok) {
+        throw new Error(
+          `Failed to download video: ${vidRes.status} ${vidRes.statusText}`
+        );
+      }
+      videoBuffer = await vidRes.arrayBuffer();
     }
-    const videoBuffer = await vidRes.arrayBuffer();
+
+    if (devBlank) {
+      await beginStep("storage_upload", "Save blank placeholder video to Supabase");
+    }
 
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
@@ -744,7 +783,9 @@ export async function POST(req: Request) {
           language,
           videoModelId,
           modelLabel: videoModel.modelLabel,
-          ...(row.theme ? { prompt: String(row.theme) } : {}),
+          ...(row.theme
+            ? { prompt: String(row.theme), userPrompt: String(row.theme) }
+            : {}),
         },
       });
     } catch (historyErr) {

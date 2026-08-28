@@ -390,6 +390,13 @@ export function kling26PricingKey(params: { generateAudio: boolean }): string {
     : "kling26_without_audio_per_second";
 }
 
+/** Grok Imagine Video (xai/grok-imagine-video) — priced by resolution. */
+export function grokImagineVideoPricingKey(params: { resolution?: string | null }): string {
+  return params.resolution === "480p"
+    ? "grok_imagine_480p_per_second"
+    : "grok_imagine_720p_per_second";
+}
+
 /**
  * Kling v3 Motion Control (kwaivgi/kling-v3-motion-control) pricing key. Priced by
  * mode: std (720p) vs pro (1080p). Output duration follows the reference video.

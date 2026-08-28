@@ -222,7 +222,17 @@ export async function resolveRefForPipeline(
 ): Promise<string | null> {
   const path = resolveStoragePath(ref.path, ref.url);
   if (path) {
-    return signStoragePathForPipeline(path, userId);
+    try {
+      return await signStoragePathForPipeline(path, userId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const fallback = ref.url?.trim();
+      if (fallback?.startsWith("http") && /not found/i.test(message)) {
+        console.warn("[resolveRefForPipeline] storage object missing, using client URL:", path);
+        return fallback;
+      }
+      throw err;
+    }
   }
   const raw = ref.url?.trim();
   if (raw?.startsWith("http")) return raw;

@@ -18,7 +18,6 @@ import { derivePostDisplayStatus } from "@/lib/post-status";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
-import { ConnectionStatusBadge } from "@/components/ConnectionStatusBadge";
 import {
   Upload,
   Zap,
@@ -3280,22 +3279,7 @@ export default function SchedulerDashboardPage() {
         <DeepLinkIntake onAsset={handleDeepLinkAsset} />
       </Suspense>
       <PageContainer>
-        <PageHeader
-          title="Create & Schedule"
-          actions={
-            // Connection status is meaningless without an account — nothing
-            // to be "connected" yet — and the badges' CTA points at
-            // /dashboard/settings, which just bounces a logged-out visitor
-            // into the sign-in modal anyway. Skip the whole row.
-            status === "authenticated" ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <ConnectionStatusBadge platform="youtube" />
-                <ConnectionStatusBadge platform="tiktok" />
-                <ConnectionStatusBadge platform="instagram" />
-              </div>
-            ) : undefined
-          }
-        />
+        <PageHeader title="Create & Schedule" />
 
         {single ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">

@@ -8,6 +8,14 @@ import type { VideoAspectRatio } from "./video-models";
  * (`npx tsx lib/aspect-ratio-match.ts`), mirroring lib/animate-handoff.ts.
  */
 
+/** "16:9" → "16/9" for CSS `aspect-ratio`. Falls back to "9/16" for adaptive. */
+export function aspectRatioToCss(ratio: VideoAspectRatio): string {
+  if (ratio === "adaptive") return "9/16";
+  const [w, h] = ratio.split(":").map(Number);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return "9/16";
+  return `${w}/${h}`;
+}
+
 /** "16:9" → 1.777…; null for labels with no fixed shape, i.e. "adaptive". */
 function ratioValue(label: string): number | null {
   const [w, h] = label.split(":").map(Number);

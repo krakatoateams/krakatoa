@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -29,14 +29,12 @@ import {
   Pencil,
   Mic,
   Smile,
-  Download,
   Type,
   Minus,
   Info,
   ArrowRight,
 } from "lucide-react";
 import CreationsHistory from "@/components/CreationsHistory";
-import { GenerationScheduleButton } from "@/components/GenerationScheduleButton";
 import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import MentionTextarea from "@/components/MentionTextarea";
 import PhotoLibraryPicker, {
@@ -44,7 +42,7 @@ import PhotoLibraryPicker, {
   type PhotoLibrarySource,
 } from "@/components/PhotoLibraryPicker";
 import type { CreationHistoryItem } from "@/lib/creations";
-import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
+import { aspectRatioToCss, nearestAspectRatio } from "@/lib/aspect-ratio-match";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
@@ -58,7 +56,6 @@ import { consumePendingDraft, savePendingDraft, hasPendingDraft } from "@/lib/pe
 function IMPORT_STORYBOARD_DRAFT_KEY(): string {
   return window.location.pathname + ":import-storyboard";
 }
-import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 import {
@@ -66,19 +63,23 @@ import {
   CreditActionButton,
   GENERATE_BTN_CLASS,
   GenerationCancelButton,
+  DevBlankTestToggle,
   Tooltip,
   RefGroup,
   RefMediaGroup,
   useMediaRefs,
   uploadRefFile,
   STUDIO_CHIP_ROW_CLASS,
+  StudioGenerationPreviewProvider,
   StudioModelPanel,
+  useStudioGenerationPreview,
   type ChipOption,
   type RefGroupApi,
 } from "@/components/studio";
 import {
   TEXT_TO_VIDEO_MODELS,
   IMAGE_TO_VIDEO_MODELS,
+  VIRAL_TEMPLATE_MODELS,
   DEFAULT_VIDEO_MODEL_ID,
   DEFAULT_IMAGE_TO_VIDEO_MODEL_ID,
   getVideoModel,
@@ -87,6 +88,8 @@ import {
   STORYBOARD_VIDEO_MODEL_IDS,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
   allowsFrameWithReferenceImages,
+  supportsViralTemplateGeneration,
+  viralTemplateUsesCharacterImageOnly,
   formatVideoModelCreditHint,
   type VideoModelId,
   type StoryboardVideoModelId,
@@ -143,12 +146,15 @@ import {
   filterReelsEngines,
   mapVideoComposerEnablement,
   snapToEnabledModel,
+  defaultModelForComposer,
   type VideoComposerEnablement,
   type VideoComposerKey,
 } from "@/lib/video-composer-features";
 import {
+  absoluteViralTemplateAssetUrl,
   getViralTemplate,
   isViralTemplateId,
+  viralTemplateLabel,
   type TrendingTemplate,
 } from "@/lib/trending-templates";
 
@@ -274,9 +280,8 @@ type VideoCreationType =
   | "storyboard"
   | "reels-creator";
 
-/** Viral Template reuses Image-to-video models in admin config. */
+/** Viral Template uses its own admin composer matrix (start frame + character ref). */
 function composerKeyForCreationType(id: VideoCreationType): VideoComposerKey {
-  if (id === "viral_template") return "image2video";
   return id as VideoComposerKey;
 }
 
@@ -333,7 +338,14 @@ const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm";
 const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/webm";
 
-function VideoOmniPage() {
+function VideoOmniPage({
+  historyRefreshKey,
+  onHistoryRefresh,
+}: {
+  historyRefreshKey: number;
+  onHistoryRefresh: () => void;
+}) {
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
@@ -395,13 +407,13 @@ function VideoOmniPage() {
   const initialPrompt = searchParams.get("prompt") || null;
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
   const { balance, refetch: refetchCredits } = useCreditBalance();
 
   const [composerEnablement, setComposerEnablement] =
     useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);
+  const [devBlank, setDevBlank] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -545,9 +557,6 @@ function VideoOmniPage() {
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
@@ -621,7 +630,7 @@ function VideoOmniPage() {
   // cost label aligned with what the server will actually bill.
   const hasReferenceVideo = refVideos.done.length > 0;
   const pricingKey = model.pricingKey({ resolution, hasReferenceVideo, generateAudio });
-  const videoCost = videoCredits(pricingKey, duration);
+  const videoCost = devBlank ? 0 : videoCredits(pricingKey, duration);
 
   const referenceInputs = {
     firstFrame: firstFrame.done[0]?.url ?? null,
@@ -657,9 +666,8 @@ function VideoOmniPage() {
         throw new Error(data.error || "Resume failed");
       }
       setRecoverableJobId(null);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
-      setHistoryRefreshKey((k) => k + 1);
+      void openPreviewFromResponse(data);
+      onHistoryRefresh();
       refetchCredits();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Resume failed");
@@ -694,11 +702,10 @@ function VideoOmniPage() {
         referenceVideos: toRef(refVideos.done),
         referenceAudios: toRef(refAudios.done),
       },
+      ...(devBlank ? { devBlank: true } : {}),
     };
 
-    // Stable key per attempt + synchronous in-flight lock: a double-click or a
-    // retry after a network blip can't spawn a second provider run. The full
-    // body is the signature, so any input change rotates the key.
+    // Stable key per attempt
     const attempt = beginSubmit(JSON.stringify(body));
     if (!attempt) return;
 
@@ -744,9 +751,8 @@ function VideoOmniPage() {
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
-      setHistoryRefreshKey((k) => k + 1);
+      void openPreviewFromResponse(data);
+      onHistoryRefresh();
       refetchCredits();
 
       // Clear the consumed references — their temp uploads were removed server-side.
@@ -973,6 +979,12 @@ function VideoOmniPage() {
               </div>
 
               <div className="hidden items-center gap-3 lg:flex">
+                <DevBlankTestToggle
+                  isAdmin={isAdmin}
+                  enabled={devBlank}
+                  onChange={setDevBlank}
+                  disabled={loading}
+                />
                 <CreditActionButton
                   balance={balance}
                   cost={videoCost}
@@ -1012,21 +1024,29 @@ function VideoOmniPage() {
           </StudioModelPanel>
 
           {/* Generate (mobile — below the form card) */}
-          <div className="mt-3 flex items-center gap-3 lg:hidden">
-            <CreditActionButton
-              balance={balance}
-              cost={videoCost}
-              ready={canGenerate}
-              loading={loading}
-              label="Generate"
-              className={`${GENERATE_BTN_CLASS} flex-1`}
+          <div className="mt-3 flex flex-col gap-3 lg:hidden">
+            <DevBlankTestToggle
+              isAdmin={isAdmin}
+              enabled={devBlank}
+              onChange={setDevBlank}
+              disabled={loading}
             />
+            <div className="flex items-center gap-3">
+              <CreditActionButton
+                balance={balance}
+                cost={videoCost}
+                ready={canGenerate}
+                loading={loading}
+                label="Generate"
+                className={`${GENERATE_BTN_CLASS} flex-1`}
+              />
             <GenerationCancelButton
               visible={loading}
               cancelling={cancelling}
               cancelAllowed={cancelAllowed}
               onCancel={() => cancelSubmit()}
             />
+            </div>
           </div>
 
           {/* References — reference images live inline beside the prompt; this
@@ -1149,46 +1169,17 @@ function VideoOmniPage() {
           </div>
         )}
 
-        {creationType === "text2video" && resultUrl && !loading && (
-          <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-            <video
-              src={resultUrl}
-              controls
-              playsInline
-              className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
-            />
-            <div className="min-w-0">
-              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-                <Check className="h-3 w-3" />
-                Saved to your library
-              </div>
-              <p className="text-sm text-text-secondary">
-                {model.modelLabel} · {duration}s · {resolution} · {ASPECT_RATIO_LABELS[aspectRatio]}
-              </p>
-              <p className="mt-1 text-sm text-text-disabled">
-                Find it in your history below, or generate another.
-              </p>
-              <div className="mt-3">
-                <GenerationScheduleButton
-                  assetUrl={resultPath ?? resultUrl}
-                  mediaType="video"
-                  title={prompt.trim().slice(0, 100)}
-                  className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
         {creationType === "viral_template" && (
           <ViralTemplateComposer
             initialTemplate={initialViralTemplate}
             creationTypes={availableCreationTypes}
             isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
-              setHistoryRefreshKey((k) => k + 1);
+              onHistoryRefresh();
               refetchCredits();
             }}
           />
@@ -1201,10 +1192,12 @@ function VideoOmniPage() {
             mentionAssets={mentionAssets}
             creationTypes={availableCreationTypes}
             isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
-              setHistoryRefreshKey((k) => k + 1);
+              onHistoryRefresh();
               refetchCredits();
             }}
           />
@@ -1215,10 +1208,12 @@ function VideoOmniPage() {
             initialTemplateVideo={initialTemplateVideo}
             creationTypes={availableCreationTypes}
             isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
-              setHistoryRefreshKey((k) => k + 1);
+              onHistoryRefresh();
               refetchCredits();
             }}
           />
@@ -1229,10 +1224,12 @@ function VideoOmniPage() {
             initialStoryboardId={initialStoryboardId}
             creationTypes={availableCreationTypes}
             isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
-              setHistoryRefreshKey((k) => k + 1);
+              onHistoryRefresh();
               refetchCredits();
             }}
           />
@@ -1242,10 +1239,12 @@ function VideoOmniPage() {
           <ReelsCreatorComposer
             creationTypes={availableCreationTypes}
             isAdmin={isAdmin}
+            devBlank={devBlank}
+            onDevBlankChange={setDevBlank}
             composerEnablement={composerEnablement}
             onSelectCreation={handleCreationType}
             onGenerated={() => {
-              setHistoryRefreshKey((k) => k + 1);
+              onHistoryRefresh();
               refetchCredits();
             }}
           />
@@ -1259,16 +1258,8 @@ function VideoOmniPage() {
             <CreationsHistory
               className="!mt-0"
               title="Generation history"
-              description="Every video you create appears here. Click any clip to preview it."
-              tools={[
-                "video_text2video",
-                "video_image2video",
-                "video_motion_control",
-                "storyboard_video",
-                "reels_seedance",
-                "reels_veo",
-              ]}
-              mediaType="video"
+              tools={["video_text2video", "video_image2video"]}
+              productFeatureTabs="video"
               refreshKey={historyRefreshKey}
               showActions
               showMeta={false}
@@ -1283,10 +1274,24 @@ function VideoOmniPage() {
 
 // useSearchParams() requires a Suspense boundary in the App Router. Wrap the page
 // so the storyboard deep-link (?type=storyboard&storyboardId=...) reads cleanly.
+function VideoStudioPage() {
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const onHistoryRefresh = useCallback(() => setHistoryRefreshKey((k) => k + 1), []);
+
+  return (
+    <StudioGenerationPreviewProvider onHistoryChange={onHistoryRefresh}>
+      <VideoOmniPage
+        historyRefreshKey={historyRefreshKey}
+        onHistoryRefresh={onHistoryRefresh}
+      />
+    </StudioGenerationPreviewProvider>
+  );
+}
+
 export default function VideoOmniPageWrapper() {
   return (
     <Suspense fallback={null}>
-      <VideoOmniPage />
+      <VideoStudioPage />
     </Suspense>
   );
 }
@@ -1294,16 +1299,15 @@ export default function VideoOmniPageWrapper() {
 const MC_IMAGE_ACCEPT = "image/jpeg,image/png";
 const MC_VIDEO_ACCEPT = "video/mp4,video/quicktime";
 
-function viralTemplateLabel(id: string): string {
-  return id.replace(/^kelolako_viral_videos_/, "").replace(/\.mp4$/, "");
-}
-
 // Viral Template — dashboard showcase clips with a baked-in prompt; user only
-// uploads their character photo as the start frame.
+// uploads their character photo as a reference ([Image1]). The template still
+// is the locked i2v start frame.
 function ViralTemplateComposer({
   initialTemplate,
   creationTypes,
   isAdmin,
+  devBlank,
+  onDevBlankChange,
   composerEnablement,
   onSelectCreation,
   onGenerated,
@@ -1311,32 +1315,49 @@ function ViralTemplateComposer({
   initialTemplate: TrendingTemplate | null | undefined;
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
-  const image2videoModels = filterEnabledCatalog(
-    IMAGE_TO_VIDEO_MODELS,
-    "image2video",
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
+  const viralTemplateModels = filterEnabledCatalog(
+    VIRAL_TEMPLATE_MODELS,
+    "viral_template",
     composerEnablement
   );
-  const [modelId, setModelId] = useState<VideoModelId>(DEFAULT_IMAGE_TO_VIDEO_MODEL_ID);
+  const [modelId, setModelId] = useState<VideoModelId>(
+    () => defaultModelForComposer("viral_template") as VideoModelId
+  );
   const model = getVideoModel(modelId);
 
   const template = initialTemplate ?? null;
   const lockedPrompt = template?.prompt?.trim() ?? "";
+  const templateStartFramePath = template?.referenceImageUrl ?? null;
+
+  const [templateStartFrameUrl, setTemplateStartFrameUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!templateStartFramePath) {
+      setTemplateStartFrameUrl(null);
+      return;
+    }
+    setTemplateStartFrameUrl(
+      absoluteViralTemplateAssetUrl(templateStartFramePath, window.location.origin)
+    );
+  }, [templateStartFramePath]);
 
   useEffect(() => {
-    if (image2videoModels.length === 0) return;
+    if (viralTemplateModels.length === 0) return;
     const next = snapToEnabledModel(
       modelId,
-      image2videoModels,
-      "image2video",
+      viralTemplateModels,
+      "viral_template",
       composerEnablement
     ) as VideoModelId;
     if (next !== modelId) setModelId(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [image2videoModels.map((m) => m.id).join(","), composerEnablement]);
+  }, [viralTemplateModels.map((m) => m.id).join(","), composerEnablement]);
 
   const [charSource, setCharSource] = useState<CharacterSource>("upload");
   const [libraryChar, setLibraryChar] = useState<LibraryCharacter | null>(null);
@@ -1368,9 +1389,6 @@ function ViralTemplateComposer({
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
@@ -1382,33 +1400,21 @@ function ViralTemplateComposer({
 
   const charImage = useMediaRefs("image", 1);
 
-  const charImageUrl =
-    charSource === "library" ? (libraryChar?.url ?? null) : (charImage.done[0]?.url ?? null);
-
-  useEffect(() => {
-    if (!charImageUrl || ratioTouchedRef.current) return;
-    let active = true;
-    const probe = new window.Image();
-    probe.onload = () => {
-      if (!active) return;
-      const next = nearestAspectRatio(probe.naturalWidth, probe.naturalHeight, model.aspectRatios);
-      if (next) setAspectRatio(next);
-    };
-    probe.src = `/_next/image?url=${encodeURIComponent(charImageUrl)}&w=64&q=25`;
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [charImageUrl]);
-
   const pricingKey = model.pricingKey({ resolution });
-  const cost = videoCredits(pricingKey, duration);
+  const cost = devBlank ? 0 : videoCredits(pricingKey, duration);
 
   const charReady =
     charSource === "library" ? libraryChar !== null : charImage.done.length > 0;
   const anyUploading = charSource === "upload" && charImage.uploading;
   const canGenerate =
-    !loading && !anyUploading && charReady && lockedPrompt.length > 0 && template !== null;
+    !loading &&
+    !anyUploading &&
+    charReady &&
+    lockedPrompt.length > 0 &&
+    template !== null &&
+    templateStartFramePath !== null &&
+    viralTemplateModels.length > 0 &&
+    supportsViralTemplateGeneration(model);
 
   const handleResumeRecoverable = async () => {
     if (!recoverableJobId) return;
@@ -1429,8 +1435,7 @@ function ViralTemplateComposer({
         throw new Error(data.error || "Resume failed");
       }
       setRecoverableJobId(null);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Resume failed");
@@ -1441,28 +1446,37 @@ function ViralTemplateComposer({
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canGenerate) return;
+    if (!canGenerate || !templateStartFramePath) return;
     if (status !== "authenticated") {
       openSignInModal(undefined, { duration, resolution, aspectRatio });
       return;
     }
 
+    const grokViral = viralTemplateUsesCharacterImageOnly(model);
+    const charUpload =
+      charSource === "upload" && charImage.done[0]
+        ? { url: charImage.done[0].url, path: charImage.done[0].path }
+        : null;
+
     const body = {
       modelId,
       prompt: lockedPrompt,
+      viralTemplateId: template.id,
+      viralTemplateStartFramePath: grokViral ? null : templateStartFramePath,
       duration,
       resolution,
       aspectRatio,
       generateAudio: false,
-      startImageCreationId:
-        charSource === "library" && libraryChar ? libraryChar.id : undefined,
+      referenceCreationIds:
+        charSource === "library" && libraryChar ? [libraryChar.id] : [],
       references: {
-        firstFrame: charSource === "upload" ? (charImage.done[0] ?? null) : null,
+        firstFrame: grokViral && charUpload ? charUpload : null,
         lastFrame: null,
-        referenceImages: [],
+        referenceImages: !grokViral && charUpload ? [charUpload] : [],
         referenceVideos: [],
         referenceAudios: [],
       },
+      ...(devBlank ? { devBlank: true } : {}),
     };
 
     const attempt = beginSubmit(JSON.stringify(body));
@@ -1471,7 +1485,6 @@ function ViralTemplateComposer({
     setLoading(true);
     setError(null);
     setRecoverableJobId(null);
-
     try {
       const response = await fetch("/api/generate-video", {
         method: "POST",
@@ -1507,8 +1520,7 @@ function ViralTemplateComposer({
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
       charImage.reset();
       setLibraryChar(null);
@@ -1541,7 +1553,7 @@ function ViralTemplateComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={image2videoModels.map((m) => ({
+              options={viralTemplateModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1564,9 +1576,14 @@ function ViralTemplateComposer({
             />
             {template ? (
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary">
                   <Film className="h-3.5 w-3.5" />
-                  Template scene
+                  {viralTemplateLabel(template)}
+                  {(template.shotCount ?? 1) > 1 ? (
+                    <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium normal-case text-text-primary">
+                      {template.shotCount} shots
+                    </span>
+                  ) : null}
                   <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-N700">
                     locked
                   </span>
@@ -1583,8 +1600,9 @@ function ViralTemplateComposer({
                     />
                   </div>
                   <p className="text-[11px] text-text-secondary">
-                    Upload your character — we&apos;ll remake this viral scene with your face and
-                    body. No prompt needed.
+                    {viralTemplateUsesCharacterImageOnly(model)
+                      ? "Upload a clear photo of your character — Grok uses that image for face and body identity; template beats and multi-shot structure come from the locked prompt."
+                      : "Upload a clear photo of your character — [Image1] in the prompt is your upload only. The locked template still sets the scene start frame; your character reference defines who appears on screen."}
                   </p>
                 </div>
               </div>
@@ -1678,6 +1696,12 @@ function ViralTemplateComposer({
             </div>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -1704,7 +1728,7 @@ function ViralTemplateComposer({
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={model.modelLabel}
               activeId={modelId}
-              options={image2videoModels.map((m) => ({
+              options={viralTemplateModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
                 hint: formatVideoModelCreditHint(m, videoCredits),
@@ -1715,21 +1739,29 @@ function ViralTemplateComposer({
           </div>
         </StudioModelPanel>
 
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Generate"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
       </form>
 
@@ -1754,34 +1786,6 @@ function ViralTemplateComposer({
         </div>
       )}
 
-      {resultUrl && !loading && template && (
-        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          <video
-            src={resultUrl}
-            controls
-            playsInline
-            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
-          />
-          <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              Viral Template · {model.modelLabel} · {duration}s · {resolution} ·{" "}
-              {ASPECT_RATIO_LABELS[aspectRatio]}
-            </p>
-            <div className="mt-3">
-              <GenerationScheduleButton
-                assetUrl={resultPath ?? resultUrl}
-                mediaType="video"
-                title={`Viral template ${viralTemplateLabel(template.id)}`}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -1793,6 +1797,8 @@ function ImageToVideoComposer({
   mentionAssets,
   creationTypes,
   isAdmin,
+  devBlank,
+  onDevBlankChange,
   composerEnablement,
   onSelectCreation,
   onGenerated,
@@ -1804,10 +1810,13 @@ function ImageToVideoComposer({
   mentionAssets: MentionAsset[];
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const image2videoModels = filterEnabledCatalog(
     IMAGE_TO_VIDEO_MODELS,
     "image2video",
@@ -1882,9 +1891,6 @@ function ImageToVideoComposer({
   }, [modelId, resolution]);
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Shown once, after a gated Generate click's draft is restored — see the
@@ -1941,7 +1947,7 @@ function ImageToVideoComposer({
   }, [startImageUrl]);
 
   const pricingKey = model.pricingKey({ resolution });
-  const cost = videoCredits(pricingKey, duration);
+  const cost = devBlank ? 0 : videoCredits(pricingKey, duration);
 
   const startUploadedReady = startImage.done.length > 0;
   const startLibraryReady = libraryImage !== null;
@@ -1986,8 +1992,7 @@ function ImageToVideoComposer({
         throw new Error(data.error || "Resume failed");
       }
       setRecoverableJobId(null);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Resume failed");
@@ -2028,6 +2033,7 @@ function ImageToVideoComposer({
         referenceVideos: [],
         referenceAudios: [],
       },
+      ...(devBlank ? { devBlank: true } : {}),
     };
 
     const attempt = beginSubmit(JSON.stringify(body));
@@ -2072,8 +2078,7 @@ function ImageToVideoComposer({
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
       startImage.reset();
       endImage.reset();
@@ -2279,6 +2284,12 @@ function ImageToVideoComposer({
             </div>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -2319,21 +2330,29 @@ function ImageToVideoComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Generate"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
       </form>
 
@@ -2366,33 +2385,6 @@ function ImageToVideoComposer({
         </div>
       )}
 
-      {resultUrl && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          <video
-            src={resultUrl}
-            controls
-            playsInline
-            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
-          />
-          <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              {model.modelLabel} · {duration}s · {ASPECT_RATIO_LABELS[aspectRatio]}
-            </p>
-            <div className="mt-3">
-              <GenerationScheduleButton
-                assetUrl={resultPath ?? resultUrl}
-                mediaType="video"
-                title={prompt.trim().slice(0, 100)}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -2406,6 +2398,8 @@ function MotionControlComposer({
   initialTemplateVideo,
   creationTypes,
   isAdmin,
+  devBlank,
+  onDevBlankChange,
   composerEnablement,
   onSelectCreation,
   onGenerated,
@@ -2413,10 +2407,13 @@ function MotionControlComposer({
   initialTemplateVideo?: string | null;
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const motionControlModels = filterEnabledCatalog(
     MOTION_CONTROL_MODELS,
     "motion_control",
@@ -2453,9 +2450,6 @@ function MotionControlComposer({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   // Shown once, after a gated Generate click's draft is restored — see the
   // restore effect below.
@@ -2533,7 +2527,7 @@ function MotionControlComposer({
     refVideoDurationSec: videoDurationSec,
   });
   const pricingKey = model.pricingKey(mode);
-  const cost = videoCredits(pricingKey, billedDuration);
+  const cost = devBlank ? 0 : videoCredits(pricingKey, billedDuration);
 
   // Resolve the character image from whichever source is active. Library characters
   // are resolved server-side via characterCreationId (pipeline-signed URL).
@@ -2577,6 +2571,7 @@ function MotionControlComposer({
         charSource === "library" && libraryChar ? libraryChar.id : undefined,
       image: resolvedCharacter,
       video: resolvedVideo,
+      ...(devBlank ? { devBlank: true } : {}),
     };
 
     // Stable key per attempt + synchronous in-flight lock (see hook docs).
@@ -2620,8 +2615,7 @@ function MotionControlComposer({
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
       charImage.reset();
       motionVideo.reset();
@@ -2831,6 +2825,12 @@ function MotionControlComposer({
             </div>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -2876,21 +2876,29 @@ function MotionControlComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Generate"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
       </form>
 
@@ -2915,36 +2923,6 @@ function MotionControlComposer({
         </div>
       )}
 
-      {resultUrl && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          <video
-            src={resultUrl}
-            controls
-            playsInline
-            className="w-full max-w-xs shrink-0 rounded-2xl border border-white/10 bg-N0"
-          />
-          <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              {model.modelLabel} · {mode === "std" ? "Standard" : "Pro"} · {motionControlResolutionLabel(mode)}
-            </p>
-            <p className="mt-1 text-sm text-text-disabled">
-              Find it in your history below, or generate another.
-            </p>
-            <div className="mt-3">
-              <GenerationScheduleButton
-                assetUrl={resultPath ?? resultUrl}
-                mediaType="video"
-                title={prompt.trim().slice(0, 100)}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -3292,6 +3270,8 @@ function StoryboardToVideoComposer({
   initialStoryboardId,
   creationTypes,
   isAdmin,
+  devBlank,
+  onDevBlankChange,
   composerEnablement,
   onSelectCreation,
   onGenerated,
@@ -3299,10 +3279,13 @@ function StoryboardToVideoComposer({
   initialStoryboardId: string | null;
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const storyboardModels = filterEnabledCatalog(
     STORYBOARD_VIDEO_MODEL_IDS.map((id) => getVideoModel(id)),
     "storyboard",
@@ -3340,9 +3323,6 @@ function StoryboardToVideoComposer({
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   // Double-submit / double-charge guard: stable Idempotency-Key per attempt +
@@ -3410,7 +3390,7 @@ function StoryboardToVideoComposer({
 
   const storyboardVideoModel = getVideoModel(videoModelId);
   const pricingKey = storyboardVideoPricingKey(videoModelId, resolution);
-  const cost = videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
+  const cost = devBlank ? 0 : videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
   const selected = items.find((s) => s.id === selectedId) ?? null;
   const canGenerate = !loading && !!selectedId;
   // When the selected storyboard carries an orientation, the video MUST match it
@@ -3463,8 +3443,7 @@ function StoryboardToVideoComposer({
         throw new Error(data.error || "Resume failed");
       }
       setRecoverableJobId(null);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Resume failed");
@@ -3500,8 +3479,6 @@ function StoryboardToVideoComposer({
     setLoading(true);
     setError(null);
     setRecoverableJobId(null);
-    setResultPath(null);
-    setResultSeed(null);
     try {
       const response = await fetch("/api/generate-storyboard-video", {
         method: "POST",
@@ -3516,6 +3493,7 @@ function StoryboardToVideoComposer({
           aspectRatio: aspect,
           language,
           ...(editedPrompt ? { seedancePrompt: editedPrompt } : {}),
+          ...(devBlank ? { devBlank: true } : {}),
         }),
       });
       const data = await response.json();
@@ -3552,8 +3530,7 @@ function StoryboardToVideoComposer({
           cur.map((s) => (s.id === selectedId ? { ...s, seedancePrompt: editedPrompt } : s))
         );
       }
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       // Keep the key so an immediate identical retry dedupes server-side
@@ -3767,6 +3744,12 @@ function StoryboardToVideoComposer({
             </div>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -3877,21 +3860,29 @@ function StoryboardToVideoComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Create video"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Create video"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
       </form>
 
@@ -3924,39 +3915,6 @@ function StoryboardToVideoComposer({
         </div>
       )}
 
-      {resultUrl && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          <video
-            src={resultUrl}
-            controls
-            playsInline
-            className={`shrink-0 rounded-2xl border border-white/10 bg-N0 ${
-              aspect === "9:16" ? "w-full max-w-[260px]" : "w-full max-w-md"
-            }`}
-          />
-          <div className="min-w-0">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              {storyboardVideoModel.modelLabel} · 15s · {resolution} · {aspect} {storyboardOrientationLabel(aspect)} · {storyboardLanguageLabel(language)}
-              {selected ? ` · ${selected.theme}` : ""}
-            </p>
-            <p className="mt-1 text-sm text-text-disabled">
-              Find it in your history below, or render another resolution.
-            </p>
-            <div className="mt-3">
-              <GenerationScheduleButton
-                assetUrl={resultPath ?? resultUrl}
-                mediaType="video"
-                title={selected?.theme?.trim().slice(0, 100)}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -4187,16 +4145,21 @@ function NumberStepper({
 function ReelsCreatorComposer({
   creationTypes,
   isAdmin,
+  devBlank,
+  onDevBlankChange,
   composerEnablement,
   onSelectCreation,
   onGenerated,
 }: {
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
+  devBlank: boolean;
+  onDevBlankChange: (next: boolean) => void;
   composerEnablement: Record<VideoComposerKey, VideoComposerEnablement> | null;
   onSelectCreation: (id: string) => void;
   onGenerated: () => void;
 }) {
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const reelsEngines = filterReelsEngines(REELS_ENGINES, composerEnablement);
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -4243,9 +4206,6 @@ function ReelsCreatorComposer({
   });
 
   const [loading, setLoading] = useState(false);
-  const [resultPath, setResultPath] = useState<string | null>(null);
-  const [resultSeed, setResultSeed] = useState<string | null>(null);
-  const resultUrl = useSignedMediaUrl(resultPath, resultSeed);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
 
@@ -4293,8 +4253,7 @@ function ReelsCreatorComposer({
         throw new Error(data.error || "Resume failed");
       }
       setRecoverableJobId(null);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Resume failed");
@@ -4320,7 +4279,7 @@ function ReelsCreatorComposer({
     engine,
     engine === "seedance" ? resolution : veoResolution
   );
-  const cost = videoCredits(pricingKey, totalDuration);
+  const cost = devBlank ? 0 : videoCredits(pricingKey, totalDuration);
 
   const canGenerate = !loading && theme.trim().length > 0;
 
@@ -4341,8 +4300,8 @@ function ReelsCreatorComposer({
       return;
     }
 
-    const body: Record<string, unknown> =
-      engine === "seedance"
+    const body: Record<string, unknown> = {
+      ...(engine === "seedance"
         ? {
             engine: "seedance",
             theme: theme.trim(),
@@ -4365,7 +4324,9 @@ function ReelsCreatorComposer({
             ...(veoMode === "single"
               ? { singlePromptScenes }
               : { numScenes: Number(veoNumScenes) }),
-          };
+          }),
+      ...(devBlank ? { devBlank: true } : {}),
+    };
 
     // Stable key per attempt + synchronous in-flight lock (see hook docs).
     const attempt = beginSubmit(`reels-${engine}:${JSON.stringify(body)}`);
@@ -4374,9 +4335,6 @@ function ReelsCreatorComposer({
     setLoading(true);
     setError(null);
     setRecoverableJobId(null);
-    setResultPath(null);
-    setResultSeed(null);
-
     try {
       const response = await fetch("/api/generate-reels", {
         method: "POST",
@@ -4415,8 +4373,7 @@ function ReelsCreatorComposer({
       }
 
       attempt.settle(true);
-      setResultPath(pickGenerateStoragePath(data));
-      setResultSeed(data.videoUrl ?? null);
+      void openPreviewFromResponse(data);
       onGenerated();
     } catch (err: unknown) {
       attempt.settle(false);
@@ -4655,6 +4612,12 @@ function ReelsCreatorComposer({
             </div>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <DevBlankTestToggle
+                isAdmin={isAdmin}
+                enabled={devBlank}
+                onChange={onDevBlankChange}
+                disabled={loading}
+              />
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -4690,21 +4653,29 @@ function ReelsCreatorComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex items-center gap-3 lg:hidden">
-          <CreditActionButton
-            balance={balance}
-            cost={cost}
-            ready={canGenerate}
-            loading={loading}
-            label="Generate"
-            className={`${GENERATE_BTN_CLASS} flex-1`}
+        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <DevBlankTestToggle
+            isAdmin={isAdmin}
+            enabled={devBlank}
+            onChange={onDevBlankChange}
+            disabled={loading}
           />
-          <GenerationCancelButton
-            visible={loading}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
-          />
+          <div className="flex items-center gap-3">
+            <CreditActionButton
+              balance={balance}
+              cost={cost}
+              ready={canGenerate}
+              loading={loading}
+              label="Generate"
+              className={`${GENERATE_BTN_CLASS} flex-1`}
+            />
+            <GenerationCancelButton
+              visible={loading}
+              cancelling={cancelling}
+              cancelAllowed={cancelAllowed}
+              onCancel={() => cancelSubmit()}
+            />
+          </div>
         </div>
 
         {/* Caption styler + live preview */}
@@ -4939,43 +4910,6 @@ function ReelsCreatorComposer({
         </div>
       )}
 
-      {resultUrl && !loading && (
-        <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-4 sm:flex-row">
-          <video
-            src={resultUrl}
-            controls
-            playsInline
-            className="w-full max-w-[260px] shrink-0 rounded-2xl border border-white/10 bg-N0"
-          />
-          <div className="min-w-0 flex-1">
-            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
-              <Check className="h-3 w-3" />
-              Saved to your library
-            </div>
-            <p className="text-sm text-text-secondary">
-              {engine === "veo"
-                ? `${reelsEngineLabel("veo")} · ${veoMode === "single" ? "Single" : "Per scene"} · ${veoResolution} · ${totalDuration}s`
-                : `${reelsEngineLabel("seedance")} · ${numScenes} scene${numScenes > 1 ? "s" : ""} · ${resolution} · ${totalDuration}s`}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <a
-                href={resultUrl}
-                download
-                className="inline-flex items-center gap-2 rounded-radius-sm border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-white/10"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
-              <GenerationScheduleButton
-                assetUrl={resultPath ?? resultUrl}
-                mediaType="video"
-                title={theme.trim().slice(0, 100)}
-                className="inline-flex items-center gap-2 rounded-radius-sm bg-success px-4 py-2 text-sm font-semibold text-text-on-solid shadow-lg shadow-success/20 transition-colors hover:brightness-110"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

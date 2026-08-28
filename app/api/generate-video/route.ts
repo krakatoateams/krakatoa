@@ -49,6 +49,9 @@ import {
   validateVideoReferences,
   buildVideoProviderInput,
   getVideoJobKind,
+  adaptViralTemplatePromptForModel,
+  supportsViralTemplateGeneration,
+  viralTemplateUsesCharacterImageOnly,
   type VideoJobKind,
   type VideoReferenceInputs,
   type VideoResolution,
@@ -70,6 +73,18 @@ import {
   type MentionRef,
 } from "@/lib/mention-assets";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
+import { getViralTemplate, isViralTemplateAssetPath, isViralTemplateId, viralTemplateLabel } from "@/lib/trending-templates";
+import {
+  rewriteViralTemplateFirstFrameUrl,
+  viralTemplateAssetUrlForProvider,
+} from "@/lib/viral-template-pipeline";
+import {
+  DevBlankForbiddenError,
+  devBlankJobTag,
+  isDevBlankRequested,
+  readBlankVideoBytes,
+  requireDevBlankAccess,
+} from "@/lib/dev-blank-generation";
 
 // Vercel Hobby plan caps every Serverless Function at maxDuration=300. Raising
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
@@ -92,12 +107,12 @@ function parseRefAttachment(raw: unknown): RefAttachment | null {
 }
 
 function parseRefList(raw: unknown, max: number): RefAttachment[] {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw) || max <= 0) return [];
   const out: RefAttachment[] = [];
   for (const item of raw) {
+    if (out.length >= max) break;
     const ref = parseRefAttachment(item);
     if (ref) out.push(ref);
-    if (out.length >= max) break;
   }
   return out;
 }
@@ -256,6 +271,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
     const b = body as Record<string, unknown>;
+    const devBlank = isDevBlankRequested(b);
+    if (devBlank) {
+      try {
+        await requireDevBlankAccess();
+      } catch (e) {
+        if (e instanceof DevBlankForbiddenError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });
+        }
+        throw e;
+      }
+    }
 
     const promptRaw = String(b.prompt ?? "").trim();
     const modelId = String(b.modelId ?? "").trim();
@@ -267,6 +293,12 @@ export async function POST(req: Request) {
     const seed =
       typeof seedRaw === "number" && Number.isFinite(seedRaw) ? Math.trunc(seedRaw) : null;
     const referenceCreationIds = parseCreationIdList(b.referenceCreationIds);
+    const viralTemplateId =
+      typeof b.viralTemplateId === "string" ? b.viralTemplateId.trim() : "";
+    const viralTemplateStartFramePath =
+      typeof b.viralTemplateStartFramePath === "string"
+        ? b.viralTemplateStartFramePath.trim()
+        : "";
     const startImageCreationId =
       typeof b.startImageCreationId === "string" ? b.startImageCreationId.trim() : "";
     const endImageCreationId =
@@ -313,11 +345,20 @@ export async function POST(req: Request) {
       );
     }
 
+    const isViralTemplateRun =
+      (viralTemplateId.length > 0 && isViralTemplateId(viralTemplateId)) ||
+      (viralTemplateStartFramePath.length > 0 &&
+        isViralTemplateAssetPath(viralTemplateStartFramePath));
+    const grokViral =
+      isViralTemplateRun && viralTemplateUsesCharacterImageOnly(model);
+
     // ---- Parse reference attachments + collect their temp paths for cleanup ----
     const refsRaw = (b.references ?? {}) as Record<string, unknown>;
     let firstFrame = parseRefAttachment(refsRaw.firstFrame);
     let lastFrame = parseRefAttachment(refsRaw.lastFrame);
-    const referenceImages = parseRefList(refsRaw.referenceImages, model.references.referenceImages);
+    const refImageCap =
+      isViralTemplateRun && model.references.referenceImages === 0 ? 1 : model.references.referenceImages;
+    let referenceImages = parseRefList(refsRaw.referenceImages, refImageCap);
     const referenceVideos = parseRefList(refsRaw.referenceVideos, model.references.referenceVideos);
     const referenceAudios = parseRefList(refsRaw.referenceAudios, model.references.referenceAudios);
 
@@ -363,6 +404,62 @@ export async function POST(req: Request) {
       }
     }
 
+    if (isViralTemplateRun) {
+      if (!supportsViralTemplateGeneration(model)) {
+        return NextResponse.json(
+          {
+            error:
+              "This model does not support Viral template. Pick Seedance 2, Kling v1.6+, or Grok Imagine Video in the Viral template admin matrix.",
+            code: "VIRAL_TEMPLATE_MODEL_UNSUPPORTED",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (grokViral) {
+        const hasCharacterRef =
+          referenceImages.length > 0 ||
+          referenceCreationIds.length > 0 ||
+          Boolean(firstFrame?.url);
+        if (!hasCharacterRef) {
+          return NextResponse.json(
+            { error: "Viral template requires a character reference image." },
+            { status: 400 }
+          );
+        }
+        if (!firstFrame?.url && referenceImages.length > 0) {
+          firstFrame = referenceImages[0];
+          referenceImages = referenceImages.slice(1);
+        }
+      } else {
+        if (viralTemplateStartFramePath) {
+          const providerUrl = viralTemplateAssetUrlForProvider(viralTemplateStartFramePath);
+          if (!providerUrl) {
+            return NextResponse.json(
+              { error: "Invalid viral template start frame." },
+              { status: 400 }
+            );
+          }
+          firstFrame = { url: providerUrl, path: "" };
+        } else if (firstFrame?.url) {
+          const rewritten = rewriteViralTemplateFirstFrameUrl(firstFrame.url);
+          if (rewritten) firstFrame = { url: rewritten, path: firstFrame.path };
+        }
+
+        const hasCharacterRef =
+          referenceImages.length > 0 || referenceCreationIds.length > 0;
+        if (!hasCharacterRef) {
+          return NextResponse.json(
+            { error: "Viral template requires a character reference image." },
+            { status: 400 }
+          );
+        }
+      }
+    } else if (firstFrame?.url) {
+      const rewritten = rewriteViralTemplateFirstFrameUrl(firstFrame.url);
+      if (rewritten) firstFrame = { url: rewritten, path: firstFrame.path };
+    }
+
     for (const ref of [firstFrame, lastFrame, ...referenceImages, ...referenceVideos, ...referenceAudios]) {
       if (ref && ref.path && isVideosTempRefPath(ref.path)) {
         tempRefPaths.push(ref.path);
@@ -383,6 +480,9 @@ export async function POST(req: Request) {
     }
 
     let providerPrompt = prompt;
+    if (isViralTemplateRun) {
+      providerPrompt = adaptViralTemplatePromptForModel(providerPrompt, model);
+    }
     if (mentionRefs.length > 0) {
       if (model.references.referenceImages > 0) {
         providerPrompt = mapMentionsToImageTokens(
@@ -433,6 +533,7 @@ export async function POST(req: Request) {
       referenceCreationIds: referenceCreationIds.join(","),
       startImageCreationId,
       endImageCreationId,
+      devBlank,
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,
@@ -479,7 +580,17 @@ export async function POST(req: Request) {
         jobType: jobKind,
         provider: resolvedModel.provider,
         model: resolvedModel.model,
-        input: { userId: userId!, modelId, duration, resolution, aspectRatio, generateAudio, pricingKey, prompt },
+        input: {
+          userId: userId!,
+          modelId,
+          duration,
+          resolution,
+          aspectRatio,
+          generateAudio,
+          pricingKey,
+          prompt,
+          ...(devBlank ? devBlankJobTag() : {}),
+        },
       })
     );
     if (job) {
@@ -502,10 +613,12 @@ export async function POST(req: Request) {
     }
 
     // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
-    // Variant-aware: pricingKey already encodes video_in vs non_video_in.
-    const requiredCredits = await getVideoCredits({ pricingKey, durationSec: duration });
-    try {
-      await spendCredits({
+    const requiredCredits = devBlank
+      ? 0
+      : await getVideoCredits({ pricingKey, durationSec: duration });
+    if (!devBlank) {
+      try {
+        await spendCredits({
         profileId: profileId!,
         amount: requiredCredits,
         idempotencyKey: jobId
@@ -527,8 +640,8 @@ export async function POST(req: Request) {
       });
       creditsSpent = true;
       creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
+      } catch (e) {
+        if (e instanceof InsufficientCreditsError) {
         const wallet = await getWallet(profileId!).catch(() => null);
         const currentBalance = wallet?.balance ?? 0;
         if (jobId) {
@@ -561,6 +674,7 @@ export async function POST(req: Request) {
         );
       }
       throw e;
+      }
     }
 
     // ---- Processing asset (created AFTER spend succeeds) ----
@@ -578,97 +692,107 @@ export async function POST(req: Request) {
     );
     if (asset) videoAssetId = asset.id;
 
-    // ---- Provider call (Seedance fetches the reference URLs directly) ----
-    const pipelineRefs = await resolveVideoRefsForPipeline(userId!, {
-      firstFrame,
-      lastFrame,
-      referenceImages,
-      referenceVideos,
-      referenceAudios,
-    });
-    if (!pipelineRefs.ok) {
-      throw new Error(pipelineRefs.error);
-    }
-
-    const replicate = createReplicateClient();
-    const providerInput = buildVideoProviderInput({
-      model,
-      prompt: providerPrompt,
-      duration,
-      resolution,
-      aspectRatio,
-      generateAudio,
-      seed,
-      references: pipelineRefs.inputs,
-    });
-
-    await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {
-      duration,
-      resolution,
-      aspectRatio,
-    });
-    // Abort before paying for a provider run the user already asked to cancel.
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    console.log(
-      `[${jobLabel}] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
-    );
-    const output = await runWithRetry(
-      replicate,
-      modelRef,
-      { input: providerInput },
-      10,
-      makeReplicateCancelHooks({
-        generationRequestId,
-        profileId,
-        jobId,
-        kind: jobKind,
-      }),
-    );
-
-    // Post-run cancel safety net (see generate-storyboard-video): honor a cancel
-    // that landed in the provider's pre-poll window with a refund + no delivery.
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-
-    const generatedVideoUrl = extractMediaUrl(output);
-    if (!generatedVideoUrl.startsWith("http")) {
-      throw new Error("Video model did not return a valid video URL");
-    }
-    await endStep({ generatedVideoUrl });
-
-    if (generationRequestId && profileId) {
-      await markProviderCommitted({
-        generationRequestId,
-        profileId,
-        reason: "video_generation",
-      });
-    }
-
-    await checkpointRemoteVideo(
-      pipelineRecovery,
-      generatedVideoUrl,
-      `source_${Date.now()}.mp4`,
-      "video",
-    );
-
-    // ---- Download the MP4 + persist to videos/ (so the sweep keeps it) ----
-    await beginStep("storage_upload", "Download generated video + save to Supabase");
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    const videoResponse = await fetch(generatedVideoUrl);
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
-    }
-    const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+    let videoBuffer: Buffer;
     const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
+
+    if (devBlank) {
+      await beginStep("dev_blank", "Deliver blank placeholder video (admin test)");
+      videoBuffer = await readBlankVideoBytes(aspectRatio);
+      await endStep({ devBlank: true });
+    } else {
+      const pipelineRefs = await resolveVideoRefsForPipeline(userId!, {
+        firstFrame,
+        lastFrame,
+        referenceImages,
+        referenceVideos,
+        referenceAudios,
+      });
+      if (!pipelineRefs.ok) {
+        throw new Error(pipelineRefs.error);
+      }
+
+      const replicate = createReplicateClient();
+      const providerInput = buildVideoProviderInput({
+        model,
+        prompt: providerPrompt,
+        duration,
+        resolution,
+        aspectRatio,
+        generateAudio,
+        seed,
+        references: pipelineRefs.inputs,
+        viralTemplateMode: isViralTemplateRun && !grokViral,
+      });
+
+      await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {
+        duration,
+        resolution,
+        aspectRatio,
+      });
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+      console.log(
+        `[${jobLabel}] Running ${modelRef} (duration=${duration}s, resolution=${resolution}, aspect=${aspectRatio})...`
+      );
+      const output = await runWithRetry(
+        replicate,
+        modelRef,
+        { input: providerInput },
+        10,
+        makeReplicateCancelHooks({
+          generationRequestId,
+          profileId,
+          jobId,
+          kind: jobKind,
+        }),
+      );
+
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+
+      const generatedVideoUrl = extractMediaUrl(output);
+      if (!generatedVideoUrl.startsWith("http")) {
+        throw new Error("Video model did not return a valid video URL");
+      }
+      await endStep({ generatedVideoUrl });
+
+      if (generationRequestId && profileId) {
+        await markProviderCommitted({
+          generationRequestId,
+          profileId,
+          reason: "video_generation",
+        });
+      }
+
+      await checkpointRemoteVideo(
+        pipelineRecovery,
+        generatedVideoUrl,
+        `source_${Date.now()}.mp4`,
+        "video",
+      );
+
+      await beginStep("storage_upload", "Download generated video + save to Supabase");
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+      const videoResponse = await fetch(generatedVideoUrl);
+      if (!videoResponse.ok) {
+        throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
+      }
+      videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+      await endStep({ downloaded: true });
+    }
+
     const storagePath = videosGeneratedVideoPath(userId!, videoMode, `video_${Date.now()}.mp4`);
 
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
+    if (!devBlank) {
+      if (generationRequestId && profileId) {
+        await assertNotCancelled(profileId, generationRequestId);
+      }
+    } else {
+      await beginStep("storage_upload", "Save blank placeholder video to Supabase");
     }
     const { error: uploadError } = await supabaseServer.storage
       .from(STORAGE_BUCKET)
@@ -686,17 +810,32 @@ export async function POST(req: Request) {
     const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath, publicUrl });
 
-    const title = prompt.slice(0, 60) || jobLabel;
+    const viralTemplateMeta =
+      isViralTemplateRun && viralTemplateId
+        ? getViralTemplate(viralTemplateId)
+        : undefined;
+    const title =
+      isViralTemplateRun && viralTemplateMeta
+        ? viralTemplateLabel(viralTemplateMeta)
+        : prompt.slice(0, 60) || jobLabel;
     const creationMetadata = {
-      prompt,
+      ...(isViralTemplateRun && viralTemplateId
+        ? {
+            viralTemplateId,
+            ...(viralTemplateMeta
+              ? { viralTemplateTitle: viralTemplateLabel(viralTemplateMeta) }
+              : {}),
+          }
+        : { prompt, userPrompt: prompt }),
       modelId,
       modelLabel: model.modelLabel,
-      providerModel: resolvedModel.model,
+      providerModel: devBlank ? "dev_blank" : resolvedModel.model,
       duration,
       resolution,
       aspectRatio,
       generateAudio,
       pricingKey,
+      ...(devBlank ? devBlankJobTag() : {}),
     };
 
     // user_creations row (history + sweep reference). Owner = users.id (user_id).
@@ -780,6 +919,7 @@ export async function POST(req: Request) {
       storagePath,
       historyItem,
       savedToCloud: true,
+      devBlank,
     };
     if (generationRequestId) {
       await safe("idemSuccess", () =>

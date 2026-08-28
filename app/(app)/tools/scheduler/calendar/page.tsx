@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import PageContainer from "../../../dashboard/PageContainer";
-import { ConnectionStatusBadge, YoutubeIcon } from "@/components/ConnectionStatusBadge";
+import { YoutubeIcon } from "@/components/ConnectionStatusBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -819,9 +819,6 @@ export default function SchedulerCalendarPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <ConnectionStatusBadge platform="youtube" />
-            <ConnectionStatusBadge platform="tiktok" />
-            <ConnectionStatusBadge platform="instagram" />
             <button
               type="button"
               onClick={goToToday}
@@ -842,7 +839,7 @@ export default function SchedulerCalendarPage() {
         </div>
 
         {/* Stats + period navigation — one row, nav trailing on the right */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             {(["scheduled", "published", "failed"] as const).map((status) => {
               const cfg = STATUS_CFG[status];
@@ -860,23 +857,23 @@ export default function SchedulerCalendarPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-3">
             <button
               type="button"
               onClick={() => shiftPeriod(-1)}
               aria-label={isWeekView ? "Previous week" : "Previous month"}
-              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
+              className="shrink-0 cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <h2 className="min-w-[150px] text-center text-lg font-semibold text-N900">
+            <h2 className="min-w-0 flex-1 truncate text-center text-base font-semibold text-N900 sm:min-w-[150px] sm:flex-none sm:overflow-visible sm:text-lg">
               {periodLabel}
             </h2>
             <button
               type="button"
               onClick={() => shiftPeriod(1)}
               aria-label={isWeekView ? "Next week" : "Next month"}
-              className="cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
+              className="shrink-0 cursor-pointer rounded-radius-xl border border-white/10 bg-white/10 p-1.5 text-text-secondary transition-colors hover:border-white/20 hover:text-N900"
             >
               <ChevronRight className="h-4 w-4" />
             </button>

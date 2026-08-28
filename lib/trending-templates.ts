@@ -36,8 +36,13 @@ export type TrendingTemplate = {
   characterImageUrl?: string;
   /**
    * Generation prompt baked into the Viral Template composer (not shown to the user).
+   * Character templates tag the user's upload as [Image1] and spell out multi-shot beats.
    */
   prompt?: string;
+  /** Viral templates: human-readable name shown in the composer. */
+  title?: string;
+  /** Viral templates: number of sequential shots/beats in the clip. */
+  shotCount?: number;
 };
 
 /** Text-to-video handoff for dashboard template cards. */
@@ -78,6 +83,19 @@ export function viralTemplateImage2VideoHref(prompt: string): string {
 /** Public assets under /viral-templates/ only — never fetch arbitrary URLs. */
 export function isViralTemplateAssetPath(path: string): boolean {
   return path.startsWith("/viral-templates/") && !path.includes("..");
+}
+
+/** Absolute URL for a bundled viral-template asset (browser / UI). */
+export function absoluteViralTemplateAssetUrl(assetPath: string, origin: string): string | null {
+  const trimmed = assetPath.trim();
+  if (!isViralTemplateAssetPath(trimmed)) return null;
+  return `${origin.replace(/\/$/, "")}${trimmed}`;
+}
+
+/** Display label for a viral template card or composer chip. */
+export function viralTemplateLabel(template: Pick<TrendingTemplate, "id" | "title">): string {
+  if (template.title?.trim()) return template.title.trim();
+  return template.id.replace(/^kelolako_viral_videos_/, "").replace(/\.mp4$/, "");
 }
 
 /**
@@ -161,49 +179,138 @@ export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON
  * generation prompt is applied automatically in the Viral Template composer.
  */
 const VIRAL_DIR = "/viral-templates";
-const VIRAL_REFERENCE = `${VIRAL_DIR}/reference.png`;
+/** Default locked start frame for viral-template i2v (scene composition). */
+const VIRAL_START_FRAME = `${VIRAL_DIR}/reference.png`;
 
-const VIRAL_CATALOG: Array<{
+type ViralCatalogEntry = {
   file: string;
-  prompt: string;
-  /** Override if this clip was made from a different still. */
-  referenceImageUrl?: string;
-}> = [
+  title: string;
+  /** When true, [Image1] is the on-screen subject (user's uploaded character). */
+  usesCharacter: boolean;
+  /** One entry per on-screen beat; multiple entries = multi-shot template. */
+  shots: string[];
+  /** Locked i2v start frame when different from the shared default still. */
+  startFrameImageUrl?: string;
+};
+
+function characterIdentityBlock(): string {
+  return [
+    "CHARACTER REFERENCE: The user uploaded a photo of the person who must appear on screen — tagged [Image1].",
+    "[Image1] is ONLY the character identity (face, hair, skin tone, body shape).",
+    "Never treat [Image1] as the background, location, environment, or template scene plate.",
+    "Preserve the same person from [Image1] in every shot where they appear.",
+  ].join(" ");
+}
+
+function templateSceneBlock(): string {
+  return "TEMPLATE SCENE: The locked start-frame image defines environment and composition — place the character from [Image1] into this template scene, not the reverse.";
+}
+
+function buildSingleShotBlock(shot: string): string {
+  return `${shot} Single continuous shot. Vertical 9:16 cinematic framing.`;
+}
+
+function buildMultiShotBlock(shots: string[], usesCharacter: boolean): string {
+  const shotCount = shots.length;
+  const lines = [
+    `MULTI-SHOT STRUCTURE: ${shotCount}-shot vertical video — play all ${shotCount} shots in order as distinct beats.`,
+    "Cut or transition clearly between shots; do not merge unrelated beats into one uninterrupted take unless a shot explicitly says so.",
+  ];
+  if (usesCharacter) {
+    lines.push(
+      "Every shot that includes a person must feature the same character from [Image1] — same face, hair, and body identity."
+    );
+  }
+  shots.forEach((shot, index) => {
+    const role =
+      index === 0 ? "opening" : index === shotCount - 1 ? "closing" : `beat ${index + 1}`;
+    lines.push(`Shot ${index + 1} (${role}): ${shot}`);
+  });
+  lines.push("Maintain vertical 9:16 framing throughout the full sequence.");
+  return lines.join(" ");
+}
+
+function buildViralTemplatePrompt(entry: ViralCatalogEntry): string {
+  const templateId = entry.file.replace(/\.mp4$/, "");
+  const header = `Viral template "${entry.title}" (template id: ${templateId}).`;
+  const parts = [header];
+
+  if (entry.usesCharacter) {
+    parts.push(characterIdentityBlock(), templateSceneBlock());
+  }
+
+  const shots = entry.shots.map((s) => s.trim()).filter(Boolean);
+  if (shots.length === 0) {
+    parts.push("Cinematic vertical 9:16.");
+  } else if (shots.length === 1) {
+    parts.push(buildSingleShotBlock(shots[0]));
+  } else {
+    parts.push(buildMultiShotBlock(shots, entry.usesCharacter));
+  }
+
+  return parts.filter(Boolean).join(" ");
+}
+
+const VIRAL_CATALOG: ViralCatalogEntry[] = [
   {
     file: "kelolako_viral_videos_00001.mp4",
-    prompt:
-      "Cinematic vertical shot of the person from the start frame sitting in a helicopter cockpit at golden hour, smiling as they look out the side window toward the horizon, one hand on the cyclic stick, black harness across their chest, warm sunset light on their face, airfield and hills outside the windows, slow natural movement, 9:16.",
+    title: "Helicopter golden hour",
+    usesCharacter: true,
+    shots: [
+      "Cinematic shot of the person in [Image1] sitting in a helicopter cockpit at golden hour, smiling as they look out the side window toward the horizon, one hand on the cyclic stick, black harness across their chest, warm sunset light on their face, airfield and hills outside the windows, slow natural movement.",
+    ],
   },
   {
     file: "kelolako_viral_videos_00002.mp4",
-    prompt:
-      "Vertical shot of the person from the start frame bouldering on an outdoor climbing wall, athletic side profile leaning back from the wall and reaching for colorful holds, crash pad below, sunny park and blue sky behind them, natural climbing motion, 9:16.",
+    title: "Outdoor bouldering",
+    usesCharacter: true,
+    shots: [
+      "Vertical shot of the person in [Image1] bouldering on an outdoor climbing wall, athletic side profile leaning back from the wall and reaching for colorful holds, crash pad below, sunny park and blue sky behind them, natural climbing motion.",
+    ],
   },
   {
     file: "kelolako_viral_videos_00003.mp4",
-    prompt:
-      "Cinematic vertical shot of the person from the start frame driving a red convertible with the top down through a modern city at golden hour, both hands on the steering wheel, tan leather seats, dense skyscraper skyline behind them, wind in their hair, 9:16.",
+    title: "Convertible city drive",
+    usesCharacter: true,
+    shots: [
+      "Cinematic multiple shots of the person in [Image1] driving a red convertible with the top down through a modern city at golden hour, both hands on the steering wheel, tan leather seats, dense skyscraper skyline behind them, wind in their hair.",
+    ],
   },
   {
     file: "kelolako_viral_videos_00004.mp4",
-    prompt:
-      "Vertical travel montage of the person from the start frame walking toward camera through a grand glass-and-steel arched transit hall with a backpack, then standing at a neon-lit Tokyo crossing at night leaning on a metal railing, then looking up at a vermilion torii gate in a sunlit shrine forest, cinematic, 9:16.",
+    title: "Travel montage",
+    usesCharacter: true,
+    shots: [
+      "the person in [Image1] walking toward camera through a grand glass-and-steel arched transit hall with a backpack",
+      "the person in [Image1] standing at a neon-lit Tokyo crossing at night, leaning on a metal railing",
+      "the person in [Image1] looking up at a vermilion torii gate in a sunlit shrine forest",
+    ],
   },
   {
     file: "kelolako_viral_videos_00005.mp4",
-    prompt:
-      "Cinematic vertical shot pulling from Earth in space down into a dense night city, camera diving along a glowing multi-lane highway packed with light trails, skyscrapers lining both sides, photorealistic, 9:16.",
+    title: "Earth to city dive",
+    usesCharacter: false,
+    shots: [
+      "pull back from Earth in space showing the planet's curvature against the black sky",
+      "camera dives from orbit into a dense night city, skyscrapers rushing toward the lens",
+      "speeding along a glowing multi-lane highway packed with light trails, skyscrapers lining both sides, photorealistic",
+    ],
   },
   {
     file: "kelolako_viral_videos_00006.mp4",
-    prompt:
-      "Vertical shot of the person from the start frame walking through a modern city at golden hour, looking up at a curved glass skyscraper reflecting the skyline, sidewalk in the foreground, warm late-afternoon light, cinematic, 9:16.",
+    title: "Urban skyline walk",
+    usesCharacter: true,
+    shots: [
+      "Vertical shot of the person in [Image1] walking through a modern city at golden hour, looking up at a curved glass skyscraper reflecting the skyline, sidewalk in the foreground, warm late-afternoon light.",
+    ],
   },
 ];
 
 export const VIRAL_TEMPLATES: TrendingTemplate[] = VIRAL_CATALOG.map((item) => ({
   id: item.file,
+  title: item.title,
+  shotCount: item.shots.length,
   videoUrl: `${VIRAL_DIR}/${item.file}`,
-  referenceImageUrl: item.referenceImageUrl ?? VIRAL_REFERENCE,
-  prompt: item.prompt,
+  referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
+  prompt: buildViralTemplatePrompt(item),
 }));

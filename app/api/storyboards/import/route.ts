@@ -469,12 +469,19 @@ export async function POST(req: Request) {
     try {
       historyItem = await insertUserCreation({
         userId: userId as string,
-        tool: "storyboard",
+        tool: "product_photo",
         mediaType: "image",
         mediaUrl: permanentPath!,
         storagePath: permanentPath,
         title: theme,
-        metadata: { storyboardId: inserted.id, source: "uploaded", storyboardStyle, aspectRatio, language },
+        metadata: {
+          mode: "storyboard",
+          storyboardId: inserted.id,
+          source: "uploaded",
+          storyboardStyle,
+          aspectRatio,
+          language,
+        },
       });
     } catch (historyErr) {
       console.warn("[storyboard-import] History log failed:", historyErr);

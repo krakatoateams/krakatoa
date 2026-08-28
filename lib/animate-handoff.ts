@@ -33,6 +33,7 @@ type AnimatableCreation = Pick<CreationHistoryItem, "mediaType" | "tool" | "meta
 export function canAnimateCreation(item: AnimatableCreation): boolean {
   if (item.mediaType !== "image") return false;
   if (item.tool === "storyboard") return false;
+  if (item.metadata?.mode === "storyboard") return false;
   if (item.metadata?.creationKind === "character") return false;
   const deletedAt = item.metadata?.deletedAt;
   if (typeof deletedAt === "string" && deletedAt.trim().length > 0) return false;
@@ -70,6 +71,10 @@ export function animateHandoffSelfCheck(): void {
   );
   assert(
     !canAnimateCreation(base({ tool: "storyboard" })),
+    "a legacy storyboard sheet belongs to Storyboard to video"
+  );
+  assert(
+    !canAnimateCreation(base({ metadata: { mode: "storyboard" } })),
     "a storyboard sheet belongs to Storyboard to video"
   );
   assert(

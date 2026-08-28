@@ -21,6 +21,7 @@ import {
   type MotionControlMode,
   type CharacterOrientation,
 } from "@/lib/motion-control-models";
+import { devBlankJobTag } from "@/lib/dev-blank-generation";
 
 export type MotionControlSuccessResponse = {
   videoUrl: string;
@@ -68,28 +69,37 @@ export async function cleanupMotionControlTempRefs(paths: string[] | undefined):
 
 export async function finalizeMotionControlSuccess(
   ctx: MotionControlFinalizeContext,
-  generatedVideoUrl: string,
+  source: string | Buffer,
+  options?: { devBlank?: boolean },
 ): Promise<MotionControlSuccessResponse> {
+  const devBlank = options?.devBlank === true;
   const model = getMotionControlModel(ctx.modelId);
   const resolutionLabel = motionControlResolutionLabel(ctx.mode);
   const creationMetadata = {
     prompt: ctx.prompt,
+    userPrompt: ctx.prompt,
     modelId: ctx.modelId,
-    modelLabel: model.modelLabel,
-    providerModel: ctx.providerModel,
+    modelLabel: devBlank ? "Dev blank" : model.modelLabel,
+    providerModel: devBlank ? "dev_blank" : ctx.providerModel,
     mode: ctx.mode,
     resolution: resolutionLabel,
     characterOrientation: ctx.characterOrientation,
     keepOriginalSound: ctx.keepOriginalSound,
     billedDuration: ctx.billedDuration,
     pricingKey: ctx.pricingKey,
+    ...(devBlank ? devBlankJobTag() : {}),
   };
 
-  const videoResponse = await fetch(generatedVideoUrl);
-  if (!videoResponse.ok) {
-    throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
-  }
-  const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+  const videoBuffer =
+    typeof source === "string"
+      ? await (async () => {
+          const videoResponse = await fetch(source);
+          if (!videoResponse.ok) {
+            throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
+          }
+          return Buffer.from(await videoResponse.arrayBuffer());
+        })()
+      : source;
   const storagePath = videosGeneratedVideoPath(
     ctx.userId,
     "motion-control",

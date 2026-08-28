@@ -1,6 +1,10 @@
 import { getUserCreationForUser } from "@/lib/creations-db";
 import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
-import type { MentionAssetKind, ResolvedMentionCreation } from "@/lib/mention-assets";
+import {
+  isStoryboardPhotoCreation,
+  type MentionAssetKind,
+  type ResolvedMentionCreation,
+} from "@/lib/mention-assets";
 
 /** Owner-scoped lookup for @-mentioned or library-picked creations (server only). */
 export async function resolveMentionCreations(
@@ -30,7 +34,7 @@ export async function resolveMentionCreations(
     const kind: MentionAssetKind =
       creation.metadata?.creationKind === "character"
         ? "character"
-        : creation.tool === "storyboard"
+        : isStoryboardPhotoCreation(creation)
           ? "storyboard"
           : "image";
     const fallbackName =

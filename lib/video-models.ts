@@ -17,6 +17,7 @@ import {
   kling21PricingKey,
   kling25TurboProPricingKey,
   kling26PricingKey,
+  grokImagineVideoPricingKey,
 } from "@/lib/pricing-math";
 
 /**
@@ -51,7 +52,8 @@ export type VideoModelId =
   | "kling16_standard"
   | "kling16_pro"
   | "kling15_standard"
-  | "kling15_pro";
+  | "kling15_pro"
+  | "grok_imagine_video";
 
 /** Storyboard to Video — Seedance-family models only. */
 export type StoryboardVideoModelId = "seedance2_mini" | "seedance2_fast" | "seedance2";
@@ -89,7 +91,8 @@ export type VideoProviderFamily =
   | "kling16"
   | "kling16pro"
   | "kling15"
-  | "kling15pro";
+  | "kling15pro"
+  | "grokimagine";
 
 /**
  * Inputs that can influence the per-second pricing key. Different models key off
@@ -408,6 +411,34 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     pricingKey: (ctx) => veo31LitePricingKey(ctx.resolution),
   },
   {
+    id: "grok_imagine_video",
+    label: "Grok Imagine Video",
+    modelLabel: "Grok Imagine Video",
+    modelRole: "video_grok_imagine",
+    providerModel: "xai/grok-imagine-video",
+    providerFamily: "grokimagine",
+    durations: [5, 8, 10, 15],
+    defaultDuration: 5,
+    resolutions: ["480p", "720p"],
+    defaultResolution: "720p",
+    aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    defaultAspectRatio: "9:16",
+    // Native audio is always synthesized — no generate_audio toggle on Replicate.
+    supportsAudio: false,
+    defaultGenerateAudio: false,
+    promptMaxChars: 4096,
+    subtools: ["text2video", "image2video"],
+    references: {
+      // Single `image` input — no separate reference-image arrays or last frame.
+      firstFrame: true,
+      lastFrame: false,
+      referenceImages: 0,
+      referenceVideos: 0,
+      referenceAudios: 0,
+    },
+    pricingKey: (ctx) => grokImagineVideoPricingKey(ctx.resolution),
+  },
+  {
     id: "kling_v3",
     label: "Kling v3",
     modelLabel: "Kling v3",
@@ -676,6 +707,8 @@ const VIDEO_MODEL_SORT_ORDER: VideoModelId[] = [
   "kling16_pro", // $0.095/s
   "kling_v3", // $0.168/s (720p, no audio)
   "kling_v3_omni", // $0.168/s
+  // ---- xAI ----
+  "grok_imagine_video", // $0.08/s (720p; audio baked in)
 ];
 
 const VIDEO_MODEL_BY_ID = Object.fromEntries(
@@ -777,10 +810,53 @@ export function getVideoModel(id: string): VideoModel {
   return MODEL_BY_ID[(id as VideoModelId)] ?? MODEL_BY_ID[DEFAULT_VIDEO_MODEL_ID];
 }
 
-/** Kling v1.6 models allow start/end frames alongside reference_images. */
+/** Models that allow start/end frames alongside reference_images (Seedance 2, Kling v1.6+). */
 export function allowsFrameWithReferenceImages(family: VideoProviderFamily): boolean {
-  return family === "kling16" || family === "kling16pro" || family === "kling3omni";
+  return (
+    family === "seedance2" ||
+    family === "kling16" ||
+    family === "kling16pro" ||
+    family === "kling3omni"
+  );
 }
+
+/** Grok viral template: one `image` input (character only); template beats live in the prompt. */
+export function viralTemplateUsesCharacterImageOnly(model: VideoModel): boolean {
+  return model.providerFamily === "grokimagine";
+}
+
+/** Viral Template: dual-ref (start frame + character) or Grok single character image. */
+export function supportsViralTemplateGeneration(model: VideoModel): boolean {
+  if (viralTemplateUsesCharacterImageOnly(model)) {
+    return model.references.firstFrame;
+  }
+  return (
+    model.references.firstFrame &&
+    model.references.referenceImages > 0 &&
+    allowsFrameWithReferenceImages(model.providerFamily)
+  );
+}
+
+/** Map locked [Image1] tokens when the provider only receives a single character image. */
+export function adaptViralTemplatePromptForModel(prompt: string, model: VideoModel): string {
+  if (!viralTemplateUsesCharacterImageOnly(model)) return prompt;
+
+  let out = prompt
+    .replace(/\[Image1\]/gi, "the character in the provided image")
+    .replace(
+      /\s*TEMPLATE SCENE: The locked start-frame image[^.]+\./i,
+      " SCENE: Environment and motion come from the template shot descriptions — the provided image is character identity only."
+    );
+
+  if (!/provided image is the user-uploaded character/i.test(out)) {
+    out = `The provided image is the user-uploaded character reference (face, hair, body) — not a scene or background. ${out}`;
+  }
+
+  return out.trim();
+}
+
+/** Models that support locked template start frame + character reference image. */
+export const VIRAL_TEMPLATE_MODELS = VIDEO_MODELS.filter(supportsViralTemplateGeneration);
 
 /** Kling v1.5/v1.6 Pro allow an end frame without a start frame. */
 export function allowsEndFrameWithoutStart(family: VideoProviderFamily): boolean {
@@ -869,8 +945,7 @@ export function validateVideoReferences(
     return { ok: false, error: `Up to ${caps.referenceAudios} reference audios are allowed.` };
   }
 
-  // Most models forbid reference_images alongside first/last frame; Kling v1.6
-  // Standard allows start_image + reference_images (scene elements) together.
+  // Seedance 2 and Kling v1.6+ allow reference_images alongside first/last frame.
   if (
     referenceImages.length > 0 &&
     (firstFrame || lastFrame) &&
@@ -968,6 +1043,8 @@ export function buildVideoProviderInput(params: {
   seed?: number | null;
   negativePrompt?: string | null;
   references: VideoReferenceInputs;
+  /** Dual-ref viral template: template plate + character — honor aspect_ratio chip. */
+  viralTemplateMode?: boolean;
 }): Record<string, unknown> {
   const { references: refs } = params;
   const hasSeed = typeof params.seed === "number" && Number.isFinite(params.seed);
@@ -1045,7 +1122,7 @@ export function buildVideoProviderInput(params: {
         input.reference_video = referenceVideo;
         input.keep_original_sound = true;
         input.video_reference_type = "feature";
-      } else if (!refs.firstFrame) {
+      } else {
         input.aspect_ratio = params.aspectRatio;
       }
       return input;
@@ -1066,15 +1143,14 @@ export function buildVideoProviderInput(params: {
     }
     case "kling25turbo": {
       // kwaivgi/kling-v2.5-turbo-pro: t2v / optional i2v via start_image + end_image.
-      // aspect_ratio ignored when start_image is set.
       const input: Record<string, unknown> = {
         prompt: params.prompt,
         duration: params.duration,
+        aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling26": {
@@ -1083,24 +1159,37 @@ export function buildVideoProviderInput(params: {
         prompt: params.prompt,
         duration: params.duration,
         generate_audio: params.generateAudio,
+        aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
+      return input;
+    }
+    case "grokimagine": {
+      // xai/grok-imagine-video: t2v / i2v via `image`; native audio always on.
+      // i2v defaults to the input image's aspect ratio unless aspect_ratio is set —
+      // always send the user's chip so square character uploads still render 9:16.
+      const input: Record<string, unknown> = {
+        prompt: params.prompt,
+        duration: params.duration,
+        resolution: params.resolution,
+        aspect_ratio: params.aspectRatio,
+      };
+      if (refs.firstFrame) input.image = refs.firstFrame;
       return input;
     }
     case "kling16": {
       // kwaivgi/kling-v1.6-standard: t2v / i2v + up to 4 reference_images (scene
-      // elements). aspect_ratio ignored when start_image is set.
+      // elements). Always send aspect_ratio so viral-template chips are honored.
       const input: Record<string, unknown> = {
         prompt: params.prompt,
         duration: params.duration,
+        aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
       if (referenceImages.length) input.reference_images = referenceImages;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling16pro": {
@@ -1108,13 +1197,13 @@ export function buildVideoProviderInput(params: {
       const input: Record<string, unknown> = {
         prompt: params.prompt,
         duration: params.duration,
+        aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
       const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
       if (referenceImages.length) input.reference_images = referenceImages;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "kling15": {
@@ -1129,16 +1218,15 @@ export function buildVideoProviderInput(params: {
       return input;
     }
     case "kling15pro": {
-      // kwaivgi/kling-v1.5-pro: start_image and/or end_image required; aspect_ratio
-      // is ignored when start_image is provided.
+      // kwaivgi/kling-v1.5-pro: start_image and/or end_image required.
       const input: Record<string, unknown> = {
         prompt: params.prompt,
         duration: params.duration,
+        aspect_ratio: params.aspectRatio,
       };
       if (negativePrompt) input.negative_prompt = negativePrompt;
       if (refs.firstFrame) input.start_image = refs.firstFrame;
       if (refs.lastFrame) input.end_image = refs.lastFrame;
-      if (!refs.firstFrame) input.aspect_ratio = params.aspectRatio;
       return input;
     }
     case "seedance15": {
@@ -1200,6 +1288,14 @@ export function buildVideoProviderInput(params: {
     }
     case "seedance2":
     default: {
+      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
+      const referenceVideos = (refs.referenceVideos ?? []).filter(Boolean);
+      const referenceAudios = (refs.referenceAudios ?? []).filter(Boolean);
+      const viralDualRef =
+        params.viralTemplateMode &&
+        Boolean(refs.firstFrame) &&
+        referenceImages.length > 0;
+
       const input: Record<string, unknown> = {
         prompt: params.prompt,
         duration: params.duration,
@@ -1208,12 +1304,14 @@ export function buildVideoProviderInput(params: {
         generate_audio: params.generateAudio,
       };
       if (hasSeed) input.seed = params.seed;
-      const referenceImages = (refs.referenceImages ?? []).filter(Boolean);
-      const referenceVideos = (refs.referenceVideos ?? []).filter(Boolean);
-      const referenceAudios = (refs.referenceAudios ?? []).filter(Boolean);
-      if (refs.firstFrame) input.image = refs.firstFrame;
-      if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
-      if (referenceImages.length) input.reference_images = referenceImages;
+      if (viralDualRef) {
+        // Template plate + character ref — omit `image` so aspect_ratio drives output.
+        input.reference_images = [refs.firstFrame!, ...referenceImages];
+      } else {
+        if (refs.firstFrame) input.image = refs.firstFrame;
+        if (refs.lastFrame) input.last_frame_image = refs.lastFrame;
+        if (referenceImages.length) input.reference_images = referenceImages;
+      }
       if (referenceVideos.length) input.reference_videos = referenceVideos;
       if (referenceAudios.length) input.reference_audios = referenceAudios;
       return input;

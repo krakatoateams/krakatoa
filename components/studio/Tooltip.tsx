@@ -7,16 +7,47 @@ import { useEffect, useRef, useState, type FocusEvent, type HTMLAttributes } fro
 // hidden. Visibility is driven by the caller's hover/focus state.
 // `normal-case` matters: several anchors are section labels with their own
 // text-transform, which the bubble would otherwise inherit and shout its prose.
-export function TooltipBubble({ label, show }: { label: string; show: boolean }) {
+export type TooltipAlign = "center" | "start" | "end";
+
+const TOOLTIP_ALIGN: Record<
+  TooltipAlign,
+  { bubble: string; caret: string }
+> = {
+  center: {
+    bubble: "left-1/2 -translate-x-1/2",
+    caret: "left-1/2 -translate-x-1/2",
+  },
+  start: {
+    bubble: "left-0",
+    caret: "left-3",
+  },
+  end: {
+    bubble: "right-0",
+    caret: "right-3",
+  },
+};
+
+export function TooltipBubble({
+  label,
+  show,
+  align = "center",
+}: {
+  label: string;
+  show: boolean;
+  align?: TooltipAlign;
+}) {
+  const pos = TOOLTIP_ALIGN[align];
   return (
     <span
       role="tooltip"
-      className={`pointer-events-none absolute bottom-full left-1/2 z-[80] mb-2 w-max max-w-[260px] -translate-x-1/2 rounded-xl border border-white/10 bg-N50/95 px-3 py-2 text-center text-sm font-medium normal-case leading-snug text-text-primary shadow-2xl shadow-N0/60 backdrop-blur-md transition-all duration-150 ${
+      className={`pointer-events-none absolute bottom-full z-[80] mb-2 w-max max-w-[260px] rounded-xl border border-white/10 bg-N50/95 px-3 py-2 text-center text-sm font-medium normal-case leading-snug text-text-primary shadow-2xl shadow-N0/60 backdrop-blur-md transition-all duration-150 ${pos.bubble} ${
         show ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
       }`}
     >
       {label}
-      <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-N50/95" />
+      <span
+        className={`absolute top-full h-2 w-2 -translate-y-1/2 rotate-45 border-b border-r border-white/10 bg-N50/95 ${pos.caret}`}
+      />
     </span>
   );
 }
@@ -62,11 +93,14 @@ export function Tooltip({
   label,
   children,
   className = "",
+  align = "center",
 }: {
   label: string;
   children: React.ReactNode;
   /** Extra classes for the wrapper (e.g. to let the anchor grow: "flex-1"). */
   className?: string;
+  /** Pin the bubble when the anchor sits flush to a modal edge (avoids clipping). */
+  align?: TooltipAlign;
 }) {
   const { on, bind } = useTooltipGate();
   const [isMobile, setIsMobile] = useState(false);
@@ -83,7 +117,7 @@ export function Tooltip({
   return (
     <div className={`relative inline-flex ${className}`} {...bind}>
       {children}
-      {!isMobile && <TooltipBubble label={label} show={on} />}
+      {!isMobile && <TooltipBubble label={label} show={on} align={align} />}
     </div>
   );
 }
