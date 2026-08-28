@@ -169,6 +169,29 @@ function describeIdempotencyError(
   return null;
 }
 
+// Vercel serves its own HTML error page on a 504 (Hobby plan's 300s cap) or a
+// bad route match. The provider job keeps running server-side regardless, so
+// a raw `.json()` parse crash here reads as "generation failed" when it didn't.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers read varying ad-hoc API shapes (code/error/jobId/videoUrl/...)
+async function parseJsonResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) {
+    if (response.ok) return {};
+    throw new Error(
+      "The request timed out, but the generation may still be finishing — check your history in a moment."
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      response.ok
+        ? "Unexpected response from server."
+        : "The request timed out, but the generation may still be finishing — check your history in a moment."
+    );
+  }
+}
+
 function recoverableGenerationMessage(data: { error?: string }): string {
   return (
     data.error ||
@@ -216,7 +239,7 @@ async function pollMotionControlResult(idempotencyKey: string): Promise<{
     const res = await fetch("/api/generate-motion-control/status", {
       headers: { "Idempotency-Key": idempotencyKey },
     });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (res.ok && data.videoUrl) return data;
     if (res.status === 202) continue;
     if (data.code === "GENERATION_CANCELLED") {
@@ -650,7 +673,7 @@ function VideoOmniPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -718,7 +741,7 @@ function VideoOmniPage() {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User-initiated cancellation: return to idle (credits were refunded),
         // not a red error. settle(false) keeps the key so a same-input retry
@@ -1422,7 +1445,7 @@ function ViralTemplateComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -1484,7 +1507,7 @@ function ViralTemplateComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -1985,7 +2008,7 @@ function ImageToVideoComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -2063,7 +2086,7 @@ function ImageToVideoComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -2612,7 +2635,7 @@ function MotionControlComposer({
         body: JSON.stringify(body),
       });
 
-      let data = await response.json();
+      let data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -3104,7 +3127,7 @@ function ImportStoryboardModal({
           storyboardStyle: style,
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -3470,7 +3493,7 @@ function StoryboardToVideoComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -3534,7 +3557,7 @@ function StoryboardToVideoComposer({
           ...(editedPrompt ? { seedancePrompt: editedPrompt } : {}),
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -4300,7 +4323,7 @@ function ReelsCreatorComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Editing still failing. Try again in a moment.");
@@ -4403,7 +4426,7 @@ function ReelsCreatorComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
