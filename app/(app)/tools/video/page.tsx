@@ -172,6 +172,7 @@ function describeIdempotencyError(
 // Vercel serves its own HTML error page on a 504 (Hobby plan's 300s cap) or a
 // bad route match. The provider job keeps running server-side regardless, so
 // a raw `.json()` parse crash here reads as "generation failed" when it didn't.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers read varying ad-hoc API shapes (code/error/jobId/videoUrl/...)
 async function parseJsonResponse(response: Response): Promise<any> {
   const text = await response.text();
   if (!text) {
