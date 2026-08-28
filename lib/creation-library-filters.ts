@@ -2,10 +2,8 @@ import type { CreationTool } from "@/lib/creations";
 import type { PhotoStudioMode } from "@/lib/product-photo";
 import {
   PHOTO_STUDIO_TOOL,
-  expandVideoStudioHistoryTools,
   isGenerateVideoTool,
   usesPhotoStudioProduct,
-  VIDEO_STUDIO_TOOLS,
 } from "@/lib/studio-product-tools";
 
 export {

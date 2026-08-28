@@ -288,7 +288,17 @@ function intersectTools(
   return tools.length ? tools : undefined;
 }
 
-function applyCreationPageFilters<T extends { not: Function; or: Function; eq: Function; in: Function; like: Function; is: Function }>(
+type CreationListQueryFilter = {
+  not: (column: string, operator: string, value: unknown) => CreationListQueryFilter;
+  or: (filters: string) => CreationListQueryFilter;
+  eq: (column: string, value: unknown) => CreationListQueryFilter;
+  in: (column: string, values: readonly unknown[]) => CreationListQueryFilter;
+  like: (column: string, pattern: string) => CreationListQueryFilter;
+  is: (column: string, value: null) => CreationListQueryFilter;
+  neq: (column: string, value: unknown) => CreationListQueryFilter;
+};
+
+function applyCreationPageFilters<T extends CreationListQueryFilter>(
   query: T,
   options: CreationPageFilters & { tools?: CreationTool[] }
 ): T {

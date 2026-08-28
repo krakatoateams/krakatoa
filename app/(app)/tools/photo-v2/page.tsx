@@ -10,7 +10,6 @@ import {
   PersonStanding,
   Image as ImageIcon,
   Images as ImagesIcon,
-  Check,
   X,
   Maximize2,
   Layers,
@@ -20,7 +19,6 @@ import {
   Palette,
   VenusAndMars,
   Cake,
-  Clapperboard,
   Languages,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
