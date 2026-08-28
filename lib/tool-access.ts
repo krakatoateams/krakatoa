@@ -16,7 +16,11 @@ import { listToolConfigs, type ToolConfig } from "@/lib/tool-configs-db";
  *   generate-caption -> schedule
  */
 
-const CACHE_TTL_MS = 60_000;
+// Short on purpose: getToolConfig now also backs the coming_soon page gate
+// (app/(app)/tools/scheduler/layout.tsx), and an admin toggling coming_soon
+// back on expects the block to re-engage promptly — 60s felt broken ("the
+// badge says coming soon but the page still lets you in").
+const CACHE_TTL_MS = 5_000;
 
 type ToolCache = {
   map: Map<string, ToolConfig> | null;

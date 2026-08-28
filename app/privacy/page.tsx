@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Kebijakan Privasi",
-    effectiveDate: "Terakhir diperbarui: 27 Juli 2026",
+    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
     intro: "Kebijakan Privasi ini menjelaskan bagaimana Kelolako (\"kami\") mengumpulkan, menggunakan, menyimpan, dan melindungi informasi Anda saat menggunakan platform Kelolako (\"Layanan\"). Pengendali data untuk Layanan ini adalah Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta.",
     sections: [
       {
@@ -116,7 +116,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Privacy Policy",
-    effectiveDate: "Last updated: July 27, 2026",
+    effectiveDate: "Last updated: August 24, 2026",
     intro: "This Privacy Policy explains how Kelolako (\"we\") collects, uses, stores, and protects your information when you use the Kelolako platform (\"Service\"). The data controller for this Service is an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta.",
     sections: [
       {

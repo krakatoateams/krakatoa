@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { listToolConfigs } from "@/lib/tool-configs-db";
 
-// Presentational tool flags (enabled / coming_soon / sidebar visibility).
-// Public — the landing page and logged-out dashboard both need them. This is
-// NOT an access-control boundary; generation routes still enforce tool_access
-// server-side.
+// Tool visibility for the sidebar/dashboard, logged in or not — a logged-out
+// visitor browsing the public dashboard (kelolako-dashboard-nonlogin-plan)
+// needs to see the same coming-soon badge a signed-in user would. Returns
+// only what the UI needs to decide visibility (no user data) — it is NOT an
+// access-control boundary; that lives in app/(app)/tools/scheduler/page.tsx
+// and .../calendar/page.tsx (coming_soon) and lib/tool-access.ts (enabled +
+// generation routes), both server-side.
 export const dynamic = "force-dynamic";
 
 export async function GET() {

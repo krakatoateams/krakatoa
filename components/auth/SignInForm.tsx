@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
-import { JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
+import { JUST_SIGNED_IN_FLAG, peekPendingDraftRaw } from "@/lib/pending-form-draft";
 
 function flagJustSignedIn() {
   try {
@@ -19,7 +19,13 @@ type LoginError =
   | { kind: "invalid_credentials" }
   | { kind: "google_only" }
   | { kind: "email_not_confirmed" }
+  | { kind: "too_many_attempts"; retryAfterSec: number }
   | { kind: "other"; message: string };
+
+function formatRetryAfter(seconds: number): string {
+  const minutes = Math.ceil(seconds / 60);
+  return minutes <= 1 ? "1 minute" : `${minutes} minutes`;
+}
 
 function GoogleIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
@@ -72,6 +78,7 @@ export function SignInForm({
   initialEmail = "",
   onSuccess,
   onForgotPassword,
+  onSwitchToSignUp,
 }: {
   next?: string;
   callbackError?: string | null;
@@ -84,6 +91,13 @@ export function SignInForm({
    * which has no modal view state to switch.
    */
   onForgotPassword?: () => void;
+  /**
+   * When set (i.e. rendered inside SignInModal), "Sign up here" swaps the
+   * modal's view in-place instead of navigating. Omit this to fall back to
+   * a real link to /signup — used by the standalone /login page, which has
+   * no modal view state to switch.
+   */
+  onSwitchToSignUp?: () => void;
 }) {
   const router = useRouter();
   const [email, setEmail] = useState(initialEmail);
@@ -100,10 +114,22 @@ export function SignInForm({
     // Optimistic — we're about to leave the page entirely for Google's
     // consent screen, so there's no later point to set this from.
     flagJustSignedIn();
+
+    // Google's is the only sign-in path that leaves the page (a full reload
+    // through Google's consent screen and back), so it's the only one where
+    // sessionStorage might not survive the round trip — ride a copy of the
+    // pending draft through the redirect URL itself as a fallback (see
+    // consumePendingDraft's URL fallback in lib/pending-form-draft.ts).
+    const draftPath = window.location.pathname;
+    const rawDraft = peekPendingDraftRaw(draftPath);
+    const nextWithDraft = rawDraft
+      ? `${next}${next.includes("?") ? "&" : "?"}kdraft=${encodeURIComponent(rawDraft)}`
+      : next;
+
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextWithDraft)}`,
         // Without this, Google silently reuses the browser's single active
         // session + prior consent and skips the chooser entirely — fine with
         // multiple Google accounts signed in (Google disambiguates on its
@@ -120,9 +146,29 @@ export function SignInForm({
     setResendSuccess(false);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // Goes through our own server route (not supabase.auth.signInWithPassword
+    // directly) so the per-email lockout after 5 failed attempts is actually
+    // enforceable — see app/api/auth/signin/route.ts and
+    // lib/login-attempts-db.ts. The route sets the same session cookies the
+    // browser client would have set itself.
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/signin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch {
+      setLoading(false);
+      setLoginError({ kind: "other", message: "Network error. Please try again." });
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
 
-    if (!error) {
+    if (res.ok) {
+      // The route set fresh session cookies server-side — force the browser
+      // client to re-read them so useCurrentUser() picks up the new session.
+      await supabase.auth.getSession();
       flagJustSignedIn();
       onSuccess?.();
       // Keep loading=true — redirect is in flight
@@ -130,8 +176,14 @@ export function SignInForm({
       return;
     }
 
-    const code = (error as { code?: string }).code ?? "";
-    const msg = error.message.toLowerCase();
+    if (data.code === "too_many_attempts") {
+      setLoading(false);
+      setLoginError({ kind: "too_many_attempts", retryAfterSec: data.retryAfterSec ?? 300 });
+      return;
+    }
+
+    const code: string = data.code ?? "";
+    const msg: string = (data.error ?? "").toLowerCase();
 
     if (code === "email_not_confirmed" || msg.includes("email not confirmed")) {
       setLoading(false);
@@ -147,7 +199,7 @@ export function SignInForm({
       setLoginError(isGoogleOnly ? { kind: "google_only" } : { kind: "invalid_credentials" });
     } else {
       setLoading(false);
-      setLoginError({ kind: "other", message: error.message });
+      setLoginError({ kind: "other", message: data.error || "Something went wrong. Please try again." });
     }
   }
 
@@ -169,9 +221,19 @@ export function SignInForm({
         <h1 className="font-display text-xl font-bold text-text-primary">Sign in</h1>
         <p className="mt-1 text-body-3 text-text-secondary">
           Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-brand-primary hover:text-brand-primary-hover">
-            Sign up here
-          </Link>
+          {onSwitchToSignUp ? (
+            <button
+              type="button"
+              onClick={onSwitchToSignUp}
+              className="text-brand-primary hover:text-brand-primary-hover"
+            >
+              Sign up here
+            </button>
+          ) : (
+            <Link href="/signup" className="text-brand-primary hover:text-brand-primary-hover">
+              Sign up here
+            </Link>
+          )}
         </p>
       </div>
 
@@ -263,9 +325,15 @@ export function SignInForm({
         {loginError?.kind === "invalid_credentials" && (
           <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2.5 text-small text-error">
             Wrong email or password. Don&apos;t have an account?{" "}
-            <Link href="/signup" className="underline hover:text-white">
-              Sign up here
-            </Link>
+            {onSwitchToSignUp ? (
+              <button type="button" onClick={onSwitchToSignUp} className="underline hover:text-white">
+                Sign up here
+              </button>
+            ) : (
+              <Link href="/signup" className="underline hover:text-white">
+                Sign up here
+              </Link>
+            )}
           </div>
         )}
 
@@ -288,6 +356,14 @@ export function SignInForm({
           </div>
         )}
 
+        {/* Too many failed attempts — locked out for a few minutes */}
+        {loginError?.kind === "too_many_attempts" && (
+          <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2.5 text-small text-error">
+            Too many failed attempts. Please try again in{" "}
+            {formatRetryAfter(loginError.retryAfterSec)}.
+          </div>
+        )}
+
         {/* Other errors */}
         {loginError?.kind === "other" && (
           <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2 text-small text-error">
@@ -295,7 +371,14 @@ export function SignInForm({
           </div>
         )}
 
-        <Button type="submit" variant="primary" size="md" loading={loading} className="w-full">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          loading={loading}
+          disabled={loginError?.kind === "too_many_attempts"}
+          className="w-full"
+        >
           Sign in
         </Button>
       </form>

@@ -137,29 +137,27 @@ export async function beginGenerationRequest(params: {
     return { action: "in_progress" };
   }
 
-  const { data: takeover, error: takeoverError } = await supabaseServer
-    .from(TABLE)
-    .update({
-      status: "started",
-      request_hash: params.requestHash,
-      route_key: params.routeKey,
-      tool_key: params.toolKey,
-      locked_until: lockedUntil,
-      error_json: null,
-      response_json: null,
-      job_id: null,
-      asset_id: null,
-      cancel_requested: false,
-      cancel_allowed: true,
-    })
-    .eq("id", existing.id)
-    .eq("updated_at", existing.updated_at)
-    .select("id")
-    .maybeSingle();
+  const { data: takeover, error: takeoverError } = await supabaseServer.rpc(
+    "krakatoa_take_over_generation_request",
+    {
+      p_profile_id: params.profileId,
+      p_request_id: existing.id,
+      p_expected_updated_at: existing.updated_at,
+      p_request_hash: params.requestHash,
+      p_route_key: params.routeKey,
+      p_tool_key: params.toolKey,
+      p_locked_until: lockedUntil,
+    },
+  );
 
-  handleError(takeoverError, "Failed to take over generation request.");
-  if (takeover) {
-    return { action: "proceed", id: (takeover as { id: string }).id };
+  if (takeoverError) {
+    throw new Error(
+      `Failed to take over generation request (apply migration 074_atomic_generation_request_takeover.sql): ${takeoverError.message}`,
+    );
+  }
+  const takeoverResult = takeover as { action?: string; id?: string } | null;
+  if (takeoverResult?.action === "proceed" && takeoverResult.id) {
+    return { action: "proceed", id: takeoverResult.id };
   }
   return { action: "in_progress" };
 }
@@ -169,18 +167,27 @@ export async function beginGenerationRequest(params: {
  *  two concurrent gens could be paired by created_at guesswork. */
 export async function attachGenerationRequestJob(params: {
   id: string;
-  jobId: string;
+  profileId: string;
+  jobId?: string | null;
+  assetId?: string | null;
 }): Promise<void> {
+  const patch: Record<string, string> = {};
+  if (params.jobId) patch.job_id = params.jobId;
+  if (params.assetId) patch.asset_id = params.assetId;
+  if (Object.keys(patch).length === 0) return;
+
   const { error } = await supabaseServer
     .from(TABLE)
-    .update({ job_id: params.jobId })
-    .eq("id", params.id);
+    .update(patch)
+    .eq("id", params.id)
+    .eq("profile_id", params.profileId);
 
   handleError(error, "Failed to attach job to generation request.");
 }
 
 export async function finishGenerationRequestSuccess(params: {
   id: string;
+  profileId: string;
   jobId?: string | null;
   assetId?: string | null;
   responseJson: Record<string, unknown>;
@@ -195,13 +202,15 @@ export async function finishGenerationRequestSuccess(params: {
       error_json: null,
       locked_until: null,
     })
-    .eq("id", params.id);
+    .eq("id", params.id)
+    .eq("profile_id", params.profileId);
 
   handleError(error, "Failed to finalize generation request.");
 }
 
 export async function finishGenerationRequestFailure(params: {
   id: string;
+  profileId: string;
   jobId?: string | null;
   errorJson: Record<string, unknown>;
 }): Promise<void> {
@@ -213,7 +222,8 @@ export async function finishGenerationRequestFailure(params: {
       error_json: params.errorJson,
       locked_until: null,
     })
-    .eq("id", params.id);
+    .eq("id", params.id)
+    .eq("profile_id", params.profileId);
 
   handleError(error, "Failed to record generation request failure.");
 }
@@ -221,6 +231,7 @@ export async function finishGenerationRequestFailure(params: {
 /** Mark idempotency row failed but keep job link for recoverable resume (blocks re-spend). */
 export async function finishGenerationRequestRecoverable(params: {
   id: string;
+  profileId: string;
   jobId: string;
   errorJson: Record<string, unknown>;
 }): Promise<void> {
@@ -232,7 +243,8 @@ export async function finishGenerationRequestRecoverable(params: {
       error_json: params.errorJson,
       locked_until: null,
     })
-    .eq("id", params.id);
+    .eq("id", params.id)
+    .eq("profile_id", params.profileId);
 
   handleError(error, "Failed to record recoverable generation request.");
 }

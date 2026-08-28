@@ -75,16 +75,29 @@ export async function GET(req: Request) {
         const failedInput = (failedJob?.input ?? {}) as MotionControlJobInput;
         const failedCredits =
           failedInput.creditsAmount ?? failedJob?.cost_credits ?? 0;
+        const refunded =
+          failedJob?.execution_backend === "workflow"
+            ? await hasSuccessfulRefund(profileId, failedJob.id)
+            : failedCredits > 0;
         return NextResponse.json(
           {
             error: err.message ?? "Generation cancelled.",
             code: "GENERATION_CANCELLED",
-            refunded: failedCredits > 0,
+            refunded,
           },
           { status: 409 },
         );
       }
       return NextResponse.json(err, { status: 500 });
+    }
+
+    const jobIdEarly =
+      generationRequest.job_id ?? (await lookupJobId(profileId, generationRequest.id));
+    const jobEarly = jobIdEarly ? await loadJob(profileId, jobIdEarly) : null;
+    if (jobEarly?.execution_backend === "workflow") {
+      return NextResponse.json(await processingPayload(profileId, generationRequest.id), {
+        status: 202,
+      });
     }
 
     const predictionIds = await listPredictionIds(profileId, generationRequest.id);
@@ -178,7 +191,7 @@ export async function GET(req: Request) {
             : "Motion control generation failed.";
       const errJson = { message };
       await failMotionControlAttempt(ctx, errJson);
-      return NextResponse.json({ error: message }, { status: 500 });
+      return NextResponse.json({ error: "Motion control generation failed." }, { status: 500 });
     }
 
     if (prediction.status !== "succeeded") {
@@ -198,6 +211,7 @@ export async function GET(req: Request) {
       .from("job_steps")
       .select("id")
       .eq("job_id", jobId ?? "")
+      .eq("profile_id", profileId)
       .eq("step_key", "motion_control_generation")
       .eq("status", "running")
       .order("created_at", { ascending: false })
@@ -250,8 +264,22 @@ export async function GET(req: Request) {
       const errJson = { message };
       await failMotionControlAttempt(motionCtx, errJson, { refund: true });
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Motion control generation failed." }, { status: 500 });
   }
+}
+
+async function hasSuccessfulRefund(profileId: string, jobId: string): Promise<boolean> {
+  const { data, error } = await supabaseServer
+    .from("credit_transactions")
+    .select("id")
+    .eq("profile_id", profileId)
+    .eq("job_id", jobId)
+    .eq("type", "refund")
+    .eq("status", "succeeded")
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read generation refund: ${error.message}`);
+  return !!data;
 }
 
 async function lookupJobId(profileId: string, generationRequestId: string): Promise<string | null> {

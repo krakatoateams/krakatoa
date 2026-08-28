@@ -100,6 +100,28 @@ Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/gener
 ### Active generations (survive navigation)
 Composer `loading` state dies on unmount. In-flight work lives on `jobs` (`queued` / `running` / `recoverable`) plus recent `failed` rows. `GET /api/generations/active` lists those for the signed-in profile; `ActiveGenerationsProvider` in `app/(app)/layout.tsx` polls it and drives the layout banner, sidebar dots, and processing tiles in `CreationsHistory` (library-style views only — pickers stay finished-asset-only). The banner hides on the tool that already shows the composer. Mapping job_type → label/href/history tool is `lib/active-generations-pure.ts`. `generation_requests.job_id` is written at `createJob` (`attachGenerationRequestJob`) so cancel-from-tile keys the right attempt. Check: `npm run test:active-generations`.
 
+### Durable generation workflows (Motion Control pilot)
+Vercel Workflow is integrated as a disabled-by-default executor; Supabase remains
+the product and billing source of truth. New jobs choose `legacy` or `workflow` at
+creation and never switch in flight. Enable the internal pilot only with
+`GENERATION_WORKFLOW_ENABLED_JOB_TYPES=video_motion_control`; empty means all legacy.
+
+Workflow Stop is allowed before and after provider commit. Atomic RPCs serialize
+Stop, provider success, and finalization: pre-commit Stop refunds once; post-commit
+Stop removes remaining artifacts without refund. Replicate submissions use
+`generation_provider_submissions` as an at-most-one fence plus a signed, verified
+webhook. Ambiguous submission state never resubmits and conservatively keeps
+credits. Workflow failures use the same atomic provider-commit refund boundary,
+terminal callbacks must match their fenced prediction, and failed-request takeover
+atomically clears attempt state, prediction tracking, and its provider fence.
+A durable run whose heartbeat stops for an hour has no executor left, so the
+reconcile cron settles it through that same failure RPC — never earlier, or it
+would close a run that is still working. The composer derives its poll ceiling
+from `MOTION_CONTROL_MAX_RUNTIME_MS`, so it cannot time out before the run does.
+Migrations `064`–`075` are live. Checks:
+`npm run test:generation-workflows`; runbook:
+[`docs/generation/durable-workflows.md`](docs/generation/durable-workflows.md).
+
 ### Known limitations (intentional)
 - No Xendit / payment gateway / subscription plans yet.
 - No credit-balance UI yet.
@@ -226,6 +248,9 @@ Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-mon
 6. **FFmpeg concat:** Always normalize fps/scale/SAR/pixel format before `concat` when inputs come from generative video models.
 7. **Environment variables (common):**
    - `REPLICATE_API_TOKEN` — Replicate (Gemini, Seedance, MiniMax TTS, Whisper, caption model).
+   - `REPLICATE_WEBHOOK_SECRET` — Optional Replicate webhook signing secret override; the Motion Control workflow otherwise resolves the account default.
+   - `GENERATION_WEBHOOK_SECRET` — Dedicated HMAC secret for per-submission callback binding; required in production (local development may fall back to `NEXTAUTH_SECRET`).
+   - `GENERATION_WORKFLOW_ENABLED_JOB_TYPES` — Comma-separated durable executor canary allowlist; empty/absent keeps all generation routes legacy.
    - `RENDI_API_KEY` — Rendi FFmpeg API.
    - `NEXT_PUBLIC_SUPABASE_URL` — Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Public anon key if you use a browser Supabase client (see `README.md`); server pipelines here rely on the service role for Storage.

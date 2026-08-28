@@ -113,6 +113,7 @@ import {
   type MotionControlModelId,
   type MotionControlMode,
 } from "@/lib/motion-control-models";
+import { MOTION_CONTROL_MAX_RUNTIME_MS } from "@/lib/generation-workflows/motion-control-workflow-types";
 import {
   resolveStoryboardAspectRatio,
   storyboardOrientationLabel,
@@ -174,6 +175,29 @@ function describeIdempotencyError(
   return null;
 }
 
+// Vercel serves its own HTML error page on a 504 (Hobby plan's 300s cap) or a
+// bad route match. The provider job keeps running server-side regardless, so
+// a raw `.json()` parse crash here reads as "generation failed" when it didn't.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers read varying ad-hoc API shapes (code/error/jobId/videoUrl/...)
+async function parseJsonResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) {
+    if (response.ok) return {};
+    throw new Error(
+      "The request timed out, but the generation may still be finishing — check your history in a moment."
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      response.ok
+        ? "Unexpected response from server."
+        : "The request timed out, but the generation may still be finishing — check your history in a moment."
+    );
+  }
+}
+
 function recoverableGenerationMessage(data: { error?: string }): string {
   return (
     data.error ||
@@ -214,13 +238,14 @@ async function pollMotionControlResult(idempotencyKey: string): Promise<{
   historyItem?: { storagePath?: string } | null;
 }> {
   const pollMs = 3000;
-  const maxAttempts = 200;
+  // The composer must never give up before the durable run itself does.
+  const maxAttempts = Math.ceil(MOTION_CONTROL_MAX_RUNTIME_MS / pollMs);
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, pollMs));
     const res = await fetch("/api/generate-motion-control/status", {
       headers: { "Idempotency-Key": idempotencyKey },
     });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (res.ok && data.videoUrl) return data;
     if (res.status === 202) continue;
     if (data.code === "GENERATION_CANCELLED") {
@@ -657,7 +682,7 @@ function VideoOmniPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -723,7 +748,7 @@ function VideoOmniPage({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User-initiated cancellation: return to idle (credits were refunded),
         // not a red error. settle(false) keeps the key so a same-input retry
@@ -1426,7 +1451,7 @@ function ViralTemplateComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -1495,7 +1520,7 @@ function ViralTemplateComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -1866,6 +1891,7 @@ function ImageToVideoComposer({
       duration?: number;
       resolution?: VideoResolution;
       aspectRatio?: VideoAspectRatio;
+      hadMedia?: boolean;
     }>(window.location.pathname);
     if (!draft) return;
     if (draft.prompt) setPrompt(draft.prompt);
@@ -1873,8 +1899,13 @@ function ImageToVideoComposer({
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Any uploaded start/end frame image can't survive the round trip (see
-    // lib/pending-form-draft.ts) — say so explicitly.
-    setRestoreNotice("Signed in — your settings were saved. Please re-attach your start/end image if you'd uploaded one.");
+    // lib/pending-form-draft.ts) — only warn about it if one was actually
+    // attached (hadMedia), not on every restore.
+    setRestoreNotice(
+      draft.hadMedia
+        ? "Signed in — your settings were saved. Please re-attach your start/end image if you'd uploaded one."
+        : "Signed in — your settings were saved."
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1983,7 +2014,7 @@ function ImageToVideoComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -2005,7 +2036,15 @@ function ImageToVideoComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { prompt, duration, resolution, aspectRatio });
+      openSignInModal(undefined, {
+        prompt,
+        duration,
+        resolution,
+        aspectRatio,
+        // So the post-restore banner can be contextual — only warn about
+        // re-attaching a frame image when one was actually attached.
+        hadMedia: startReady || endReady,
+      });
       return;
     }
 
@@ -2053,7 +2092,7 @@ function ImageToVideoComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -2469,7 +2508,7 @@ function MotionControlComposer({
     if (typeof draft.keepOriginalSound === "boolean") setKeepOriginalSound(draft.keepOriginalSound);
     // The character image and motion-reference video can't survive the round
     // trip (see lib/pending-form-draft.ts) — say so explicitly.
-    setRestoreNotice("Signed in — your settings were saved. Please re-attach your character image and motion video.");
+    setRestoreNotice("Signed in — your settings were saved. Please re-attach your character image and motion video if you'd uploaded them.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2591,7 +2630,7 @@ function MotionControlComposer({
         body: JSON.stringify(body),
       });
 
-      let data = await response.json();
+      let data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -3066,7 +3105,7 @@ function ImportStoryboardModal({
           storyboardStyle: style,
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
           attempt.settle(false);
@@ -3434,7 +3473,7 @@ function StoryboardToVideoComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Upload still failing. Try again in a moment.");
@@ -3496,7 +3535,7 @@ function StoryboardToVideoComposer({
           ...(devBlank ? { devBlank: true } : {}),
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {
@@ -4244,7 +4283,7 @@ function ReelsCreatorComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId: recoverableJobId }),
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         if (data.code === "PIPELINE_RECOVERABLE") {
           setError(data.error || "Editing still failing. Try again in a moment.");
@@ -4345,7 +4384,7 @@ function ReelsCreatorComposer({
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const data = await parseJsonResponse(response);
       if (!response.ok) {
         // User cancellation → back to idle (credits refunded), not a red error.
         if (data.code === "GENERATION_CANCELLED") {

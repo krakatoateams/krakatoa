@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 
-/** Lock window for an in-flight attempt. Must exceed the routes' maxDuration
- *  (300s) with buffer, so a still-running attempt is never treated as stale. */
+/** Lock window for unlinked/legacy attempts. Linked active jobs block takeover
+ * regardless of this TTL, including workflows that outlive one HTTP request. */
 export const LOCK_TTL_MS = 15 * 60 * 1000;
 export const MIN_KEY_LEN = 8;
 export const MAX_KEY_LEN = 200;
@@ -84,7 +84,7 @@ export type LinkedJobRow = {
 
 /**
  * Pure linked-job gate for beginGenerationRequest (no DB).
- * Blocks takeover when the job is recoverable or replays when already succeeded.
+ * Blocks takeover while the linked job is active/recoverable, or replays success.
  */
 export function resolveLinkedJobBeginAction(
   existing: Pick<GenerationRequestRow, "id" | "job_id" | "error_json">,
@@ -117,6 +117,10 @@ export function resolveLinkedJobBeginAction(
       jobId: existing.job_id,
       errorJson,
     };
+  }
+
+  if (job.status === "queued" || job.status === "running") {
+    return { action: "in_progress" };
   }
 
   return null;

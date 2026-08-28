@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type Replicate from "replicate";
 import { createReplicateClient, runWithRetry } from "@/lib/replicate-utils";
 import { extractAudioMp3 } from "@/lib/rendi";
 import { getSessionUserId } from "@/lib/resolve-user";
@@ -8,7 +9,7 @@ import {
   signStoragePathForPipeline,
 } from "@/lib/storage-signed-url";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { getScheduleModels, replicateRef } from "@/lib/model-resolver";
+import { getScheduleModels, replicateRef, type ReplicateModelRef } from "@/lib/model-resolver";
 
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
@@ -18,6 +19,39 @@ function joinReplicateOutput(output: unknown): string {
     return (output as string[]).join("").trim();
   }
   return String(output ?? "").trim();
+}
+
+/**
+ * Cheap signal that a generation got cut short instead of completing its
+ * structure (opening line + body + hashtags + emojis) — e.g. Gemini aborting
+ * mid-response. Every prompt variant explicitly asks for hashtags, so their
+ * total absence is a reliable enough tell.
+ */
+function looksIncomplete(caption: string): boolean {
+  return !caption.includes("#");
+}
+
+/**
+ * Retry the SAME request if the caption looks cut short. openai/gpt-5 (see
+ * lib/model-resolver.ts's `schedule.llm` — switched from Gemini 2.5 Flash
+ * after direct testing showed Gemini unreliably truncates this kind of
+ * structured "caption + hashtags" creative-writing task, worse still with an
+ * image attached, while GPT-5 completes it reliably) rarely needs this; it's
+ * a light safety net, not the primary reliability mechanism.
+ */
+async function generateCaptionText(
+  replicate: Replicate,
+  model: ReplicateModelRef,
+  input: Record<string, unknown>,
+  attempts = 3,
+): Promise<string> {
+  let last = "";
+  for (let i = 0; i < attempts; i++) {
+    const output = await runWithRetry(replicate, model, { input });
+    last = joinReplicateOutput(output);
+    if (last && !looksIncomplete(last)) return last;
+  }
+  return last;
 }
 
 function extractTranscript(wRes: unknown): string {
@@ -54,8 +88,9 @@ function buildPrompt(opts: {
   tags?: string;
   description?: string;
   format?: CaptionFormat;
+  hasImage?: boolean;
 }): string {
-  const { transcript, title, tags, description, format = "short" } = opts;
+  const { transcript, title, tags, description, format = "short", hasImage } = opts;
 
   // Long-form video: a richer description, no forced #Shorts, longer allowance.
   if (format === "video") {
@@ -92,34 +127,26 @@ function buildPrompt(opts: {
     return lines.join("\n");
   }
 
-  const lines: string[] = [
-    "You are a YouTube Shorts content expert. Generate an engaging caption for a YouTube Short.",
-    "",
-    "Context about the video:",
-  ];
+  const lines: string[] = hasImage
+    ? [
+        "You are a social media content expert. Write an engaging caption for a photo post based on the attached image — including any visible text on it, like an event name, speaker, date, or location if it's a poster or flyer.",
+        "",
+        "Context:",
+      ]
+    : [
+        "You are a YouTube Shorts content expert. Write an engaging caption for a YouTube Short.",
+        "",
+        "Context about the video:",
+      ];
 
   if (transcript) lines.push(`Video transcript: "${transcript}"`);
-  if (title) lines.push(`Video title: "${title}"`);
+  if (title) lines.push(`${hasImage ? "Creator's original idea/prompt" : "Video title"}: "${title}"`);
   if (tags) lines.push(`Tags/topics: ${tags}`);
   if (description) lines.push(`Creator's description: "${description}"`);
 
   lines.push(
     "",
-    "Write a caption with this exact structure:",
-    "1. A strong hook (first line, max 10 words, must grab attention)",
-    "2. Body (2-3 sentences describing what the video is about)",
-    "3. 5-8 relevant hashtags (include #Shorts)",
-    "4. 2-3 relevant emojis",
-    "",
-    "Rules:",
-    "- Always write the caption in English, even if the transcript or context is in another language",
-    "- Never use placeholder text like [Your Name] or [Topic]",
-    "- Be specific based on the actual content provided",
-    "- Keep total length under 300 characters",
-    "- Sound natural and engaging, not robotic",
-    "- If no context is available, write a generic but engaging YouTube Shorts caption",
-    "",
-    "Return only the caption, nothing else.",
+    `Keep it short and natural, 1-2 sentences, then add 3-5 relevant hashtags${hasImage ? "" : " (include #Shorts)"} and 2 emojis. Write in English, stay under 300 characters, never use placeholder text like [Your Name], and return only the caption text.`,
   );
 
   return lines.join("\n");
@@ -145,21 +172,7 @@ function buildGeneralPrompt(videos: { title?: string; tags?: string }[]): string
 
   lines.push(
     "",
-    "Write a caption with this exact structure:",
-    "1. A strong hook (first line, max 10 words, must grab attention)",
-    "2. Body (2-3 sentences that broadly describe the theme shared across these videos)",
-    "3. 5-8 relevant hashtags",
-    "4. 2-3 relevant emojis",
-    "",
-    "Rules:",
-    "- The caption must read naturally for ANY video in the batch — stay general, do not reference one specific video",
-    "- Always write the caption in English",
-    "- Never use placeholder text like [Your Name] or [Topic]",
-    "- Base it on the actual titles and tags provided",
-    "- Keep total length under 300 characters",
-    "- Sound natural and engaging, not robotic",
-    "",
-    "Return only the caption, nothing else.",
+    "Write ONE short, natural caption (2-3 sentences) that broadly fits the theme shared across all of them — don't reference one specific video. Then add 3-5 relevant hashtags and 2 emojis. Write in English, stay under 300 characters, never use placeholder text like [Your Name], and return only the caption text.",
   );
 
   return lines.join("\n");
@@ -174,34 +187,23 @@ function buildInstagramPrompt(opts: {
   title?: string;
   tags?: string;
   description?: string;
+  hasImage?: boolean;
 }): string {
   const lines: string[] = [
-    "You are an Instagram content expert. Generate an engaging caption for a single Instagram feed post.",
+    opts.hasImage
+      ? "You are an Instagram content expert. Write an engaging caption for a single feed post based on the attached image — including any visible text on it, like an event name, speaker, date, or location if it's a poster or flyer."
+      : "You are an Instagram content expert. Write an engaging caption for a single Instagram feed post.",
     "",
-    "Context about the post:",
+    "Context:",
   ];
 
-  if (opts.title) lines.push(`What the image shows: "${opts.title}"`);
+  if (opts.title) lines.push(`Creator's original idea/prompt for this post: "${opts.title}"`);
   if (opts.tags) lines.push(`Tags/topics: ${opts.tags}`);
   if (opts.description) lines.push(`Creator's notes: "${opts.description}"`);
 
   lines.push(
     "",
-    "Write a caption with this exact structure:",
-    "1. A strong hook (first line, max 10 words, must stop the scroll)",
-    "2. Body (1-2 sentences, conversational, ending with a light call to action)",
-    "3. 5-10 relevant hashtags",
-    "4. 2-3 relevant emojis",
-    "",
-    "Rules:",
-    "- Always write the caption in English, even if the context is in another language",
-    "- Do NOT add a #Shorts hashtag — this is an Instagram post, not a YouTube Short",
-    "- Never use placeholder text like [Your Name] or [Topic]",
-    "- Be specific based on the actual context provided",
-    "- Keep total length under 500 characters",
-    "- Sound natural and human, not robotic",
-    "",
-    "Return only the caption, nothing else.",
+    "Keep it short and natural, 1-2 sentences, then add 3-5 relevant hashtags (no #Shorts — this is Instagram, not YouTube) and 2 emojis. Write in English, stay under 500 characters, never use placeholder text like [Your Name], and return only the caption text.",
   );
 
   return lines.join("\n");
@@ -233,24 +235,29 @@ async function resolveCaptionVideoFetchUrl(params: {
   return null;
 }
 
+/** Resolve a fetchable image URL for the vision caption model (pipeline TTL when ours). */
+async function resolveCaptionImageFetchUrl(params: {
+  imageUrl: string;
+  storagePath: string;
+}): Promise<string | null> {
+  const path = resolveStoragePath(params.storagePath || null, params.imageUrl || null);
+  if (path) {
+    const userId = await getSessionUserId();
+    if (!userId) throw new Error("Not authenticated.");
+    await assertPathOwnedByUser(path, userId);
+    return signStoragePathForPipeline(path, userId);
+  }
+  if (params.imageUrl.startsWith("http")) return urlForExternalFetch(params.imageUrl);
+  return null;
+}
+
 function buildPolishPrompt(existingCaption: string): string {
   return [
-    "You are a YouTube Shorts content expert.",
-    "Polish this caption draft to be more engaging:",
+    "You are a YouTube Shorts content expert. Polish this caption draft to read more naturally and flow better, keeping its relevant hashtags and up to 3 emojis:",
     "",
     `"${existingCaption}"`,
     "",
-    "Improve:",
-    "- Hook (first line must grab attention in max 10 words)",
-    "- Flow and readability",
-    "- Hashtags (keep relevant ones, improve if needed)",
-    "- Emojis (add if missing, max 3)",
-    "",
-    "Rules:",
-    "- Keep the same topic and intent",
-    "- Never change the core message",
-    "- Keep under 300 characters",
-    "- Return only the caption, nothing else",
+    "Keep the same topic, intent, and core message, stay under 300 characters, and return only the polished caption text.",
   ].join("\n");
 }
 
@@ -277,6 +284,9 @@ export async function POST(req: NextRequest) {
     const tags: string = (body.tags ?? "").toString().trim();
     const videoUrl: string = (body.videoUrl ?? "").toString().trim();
     const storagePath: string = (body.storage_path ?? body.storagePath ?? "").toString().trim();
+    // Cover photo of a photo post (Scheduler) — mutually exclusive with videoUrl/
+    // storagePath above, which are video-only (Whisper transcription).
+    const photoStoragePath: string = (body.photo_storage_path ?? body.photoStoragePath ?? "").toString().trim();
     const existingCaption: string = (body.existingCaption ?? "").toString().trim();
     const format: CaptionFormat = body.format === "video" ? "video" : "short";
 
@@ -305,15 +315,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const generalOutput = await runWithRetry(replicate, llmModel, {
-        input: {
-          prompt: buildGeneralPrompt(videos),
-          max_tokens: 300,
-          temperature: 0.7,
-        },
+      const generalCaption = await generateCaptionText(replicate, llmModel, {
+        prompt: buildGeneralPrompt(videos),
+        max_completion_tokens: 400,
+        reasoning_effort: "low",
       });
-
-      const generalCaption = joinReplicateOutput(generalOutput);
       if (!generalCaption) {
         return NextResponse.json(
           { error: "Model returned an empty response. Please try again." },
@@ -333,15 +339,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const polishOutput = await runWithRetry(replicate, llmModel, {
-        input: {
-          prompt: buildPolishPrompt(existingCaption),
-          max_tokens: 300,
-          temperature: 0.7,
-        },
+      const polished = await generateCaptionText(replicate, llmModel, {
+        prompt: buildPolishPrompt(existingCaption),
+        max_completion_tokens: 400,
+        reasoning_effort: "low",
       });
-
-      const polished = joinReplicateOutput(polishOutput);
       if (!polished) {
         return NextResponse.json(
           { error: "Model returned an empty response. Please try again." },
@@ -354,26 +356,48 @@ export async function POST(req: NextRequest) {
 
     // ----- Instagram: caption a Photo Studio social post, no transcription -----
     if (platform === "instagram") {
-      if (!title && !tags && !description) {
+      const imageUrlRaw: string = (body.imageUrl ?? "").toString().trim();
+      const imageStoragePath: string = (body.image_storage_path ?? body.storage_path ?? body.storagePath ?? "")
+        .toString()
+        .trim();
+
+      if (!title && !tags && !description && !imageUrlRaw && !imageStoragePath) {
         return NextResponse.json(
           { error: "Describe the post first, then generate a caption." },
           { status: 400 },
         );
       }
 
-      const igOutput = await runWithRetry(replicate, llmModel, {
-        input: {
-          prompt: buildInstagramPrompt({
-            title: title || undefined,
-            tags: tags || undefined,
-            description: description || undefined,
-          }),
-          max_tokens: 400,
-          temperature: 0.8,
-        },
+      let resolvedImageUrl: string | null = null;
+      if (imageUrlRaw || imageStoragePath) {
+        try {
+          resolvedImageUrl = await resolveCaptionImageFetchUrl({
+            imageUrl: imageUrlRaw,
+            storagePath: imageStoragePath,
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          const status = /not authenticated/i.test(message)
+            ? 401
+            : /forbidden/i.test(message)
+              ? 403
+              : 400;
+          return NextResponse.json({ error: message }, { status });
+        }
+      }
+
+      const igCaption = await generateCaptionText(replicate, llmModel, {
+        prompt: buildInstagramPrompt({
+          title: title || undefined,
+          tags: tags || undefined,
+          description: description || undefined,
+          hasImage: !!resolvedImageUrl,
+        }),
+        ...(resolvedImageUrl ? { image_input: [resolvedImageUrl] } : {}),
+        max_completion_tokens: 500,
+        reasoning_effort: "low",
       });
 
-      const igCaption = joinReplicateOutput(igOutput);
       if (!igCaption) {
         return NextResponse.json(
           { error: "Model returned an empty response. Please try again." },
@@ -381,26 +405,51 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      return NextResponse.json({ caption: igCaption, platform: "instagram" });
+      return NextResponse.json({
+        caption: igCaption,
+        platform: "instagram",
+        usedImage: !!resolvedImageUrl,
+      });
     }
 
-    // ----- Generate mode: build a caption from video/context -----
-    if (!description && !title && !tags && !videoUrl && !storagePath) {
+    // ----- Generate mode: build a caption from video/photo/context -----
+    if (!description && !title && !tags && !videoUrl && !storagePath && !photoStoragePath) {
       return NextResponse.json(
         {
           error:
-            "Provide at least one of: videoUrl, storage_path, title, tags, or description.",
+            "Provide at least one of: videoUrl, storage_path, photo_storage_path, title, tags, or description.",
         },
         { status: 400 },
       );
+    }
+
+    let resolvedPhotoUrl: string | null = null;
+    // Photo posts have no video/transcript — resolve the cover photo instead so
+    // the model can actually see it, mirroring the Instagram branch above.
+    if (!videoUrl && !storagePath && photoStoragePath) {
+      try {
+        resolvedPhotoUrl = await resolveCaptionImageFetchUrl({
+          imageUrl: "",
+          storagePath: photoStoragePath,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = /not authenticated/i.test(message)
+          ? 401
+          : /forbidden/i.test(message)
+            ? 403
+            : 400;
+        return NextResponse.json({ error: message }, { status });
+      }
     }
 
     let transcript: string | null = null;
     // Distinguish the two reasons `transcript` ends up null so the client can
     // show an honest message: "no_audio" = pipeline ran but found no speech;
     // "failed" = extraction/Whisper threw (e.g. missing RENDI_API_KEY, provider
-    // error, timeout). Defaults to "no_audio" (incl. the no-videoUrl case).
-    let transcriptStatus: "ok" | "no_audio" | "failed" = "no_audio";
+    // error, timeout). Stays null when there was no video at all (e.g. a photo
+    // post) so the client doesn't wrongly warn "no audio detected".
+    let transcriptStatus: "ok" | "no_audio" | "failed" | null = null;
     if (videoUrl || storagePath) {
       let sourceUrl: string;
       try {
@@ -466,18 +515,16 @@ export async function POST(req: NextRequest) {
       tags: tags || undefined,
       description: description || undefined,
       format,
+      hasImage: !!resolvedPhotoUrl,
     });
 
-    const output = await runWithRetry(replicate, llmModel, {
-      input: {
-        prompt,
-        // Long-form descriptions get more room than the 300-char Shorts caption.
-        max_tokens: format === "video" ? 600 : 300,
-        temperature: 0.7,
-      },
+    const caption = await generateCaptionText(replicate, llmModel, {
+      prompt,
+      ...(resolvedPhotoUrl ? { image_input: [resolvedPhotoUrl] } : {}),
+      // Long-form descriptions get more room than the 300-char Shorts caption.
+      max_completion_tokens: format === "video" ? 700 : 400,
+      reasoning_effort: "low",
     });
-
-    const caption = joinReplicateOutput(output);
 
     if (!caption) {
       return NextResponse.json(
@@ -490,6 +537,7 @@ export async function POST(req: NextRequest) {
       caption,
       usedTranscript: !!transcript,
       transcriptStatus,
+      usedImage: !!resolvedPhotoUrl,
     });
   } catch (err: unknown) {
     console.error("[generate-caption]", err);

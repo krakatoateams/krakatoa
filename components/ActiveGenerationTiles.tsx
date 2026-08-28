@@ -20,7 +20,7 @@ function actionErrorMessage(data: Record<string, unknown>, status: number): stri
 async function postAction(
   url: string,
   body: Record<string, string>,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -29,11 +29,14 @@ async function postAction(
     });
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) return { ok: false, error: actionErrorMessage(data, res.status) };
-    return { ok: true };
+    return { ok: true, data };
   } catch {
     return { ok: false, error: "Network error" };
   }
 }
+
+const touchActionClass =
+  "inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs disabled:opacity-50";
 
 /** In-progress tiles meant to sit in the same grid as finished history cards. */
 export function ActiveGenerationTiles({
@@ -45,18 +48,70 @@ export function ActiveGenerationTiles({
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [notices, setNotices] = useState<Record<string, string>>({});
 
-  const cancelJob = async (item: ActiveGeneration) => {
-    if (!item.idempotencyKey) return;
-    setBusyId(item.jobId);
+  const clearFeedback = (jobId: string) => {
     setErrors((prev) => {
       const next = { ...prev };
-      delete next[item.jobId];
+      delete next[jobId];
       return next;
     });
-    const result = await postAction("/api/generations/cancel", {
-      idempotencyKey: item.idempotencyKey,
+    setNotices((prev) => {
+      const next = { ...prev };
+      delete next[jobId];
+      return next;
     });
+  };
+
+  const stopJob = async (item: ActiveGeneration) => {
+    if (
+      !item.refundEligible &&
+      !window.confirm(
+        "The provider has already completed billable work. Stop and remove remaining artifacts without a credit refund?",
+      )
+    ) {
+      return;
+    }
+
+    setBusyId(item.jobId);
+    clearFeedback(item.jobId);
+
+    const useJobStop =
+      item.executionBackend === "workflow" ||
+      item.isStale ||
+      !item.cancelAllowed ||
+      !item.idempotencyKey;
+
+    const result = await postAction(
+      "/api/generations/cancel",
+      useJobStop ? { jobId: item.jobId } : { idempotencyKey: item.idempotencyKey! },
+    );
+    setBusyId(null);
+    if (!result.ok) {
+      setErrors((prev) => ({ ...prev, [item.jobId]: result.error }));
+      return;
+    }
+
+    const refundEligibleNow = result.data.refundEligible !== false;
+    if (!refundEligibleNow) {
+      setNotices((prev) => ({
+        ...prev,
+        [item.jobId]: "Stopping — credits will not be refunded because generation already committed.",
+      }));
+    } else if (result.data.status === "stopping") {
+      setNotices((prev) => ({
+        ...prev,
+        [item.jobId]: "Stopping — eligible credits will be refunded.",
+      }));
+    }
+
+    emitChanged();
+  };
+
+  const resumeJob = async (item: ActiveGeneration) => {
+    setBusyId(item.jobId);
+    clearFeedback(item.jobId);
+    const result = await postAction("/api/generations/resume", { jobId: item.jobId });
     setBusyId(null);
     if (!result.ok) {
       setErrors((prev) => ({ ...prev, [item.jobId]: result.error }));
@@ -65,14 +120,10 @@ export function ActiveGenerationTiles({
     emitChanged();
   };
 
-  const resumeJob = async (item: ActiveGeneration) => {
+  const dismissJob = async (item: ActiveGeneration) => {
     setBusyId(item.jobId);
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[item.jobId];
-      return next;
-    });
-    const result = await postAction("/api/generations/resume", { jobId: item.jobId });
+    clearFeedback(item.jobId);
+    const result = await postAction("/api/generations/dismiss", { jobId: item.jobId });
     setBusyId(null);
     if (!result.ok) {
       setErrors((prev) => ({ ...prev, [item.jobId]: result.error }));
@@ -89,6 +140,7 @@ export function ActiveGenerationTiles({
         const live = isLiveStatus(item.status);
         const busy = busyId === item.jobId;
         const actionError = errors[item.jobId];
+        const actionNotice = notices[item.jobId];
         const statusCopy =
           item.status === "queued"
             ? "Queued…"
@@ -98,7 +150,9 @@ export function ActiveGenerationTiles({
                 : "Generating…"
               : item.status === "recoverable"
                 ? "Paused — try again"
-                : item.errorMessage || "Generation failed";
+                : item.status === "cancelled"
+                  ? item.errorMessage || "Generation stopped"
+                  : item.errorMessage || "Generation failed";
 
         return (
           <div key={item.jobId} className={`overflow-hidden ${tileClassName}`}>
@@ -115,36 +169,65 @@ export function ActiveGenerationTiles({
               <p className="relative mt-1 max-w-[90%] truncate px-3 text-center text-[11px] text-text-secondary">
                 {statusCopy}
               </p>
+              {item.isStale && live && (
+                <p className="relative mt-1 max-w-[90%] px-3 text-center text-[11px] text-warning/90">
+                  May be stuck — you can stop it.
+                </p>
+              )}
+              {actionNotice && (
+                <p className="relative mt-1 max-w-[90%] px-3 text-center text-[11px] text-text-secondary">
+                  {actionNotice}
+                </p>
+              )}
               {actionError && (
                 <p className="relative mt-1 max-w-[90%] px-3 text-center text-[11px] text-warning">
                   {actionError}
                 </p>
               )}
             </div>
-            <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
               <Link href={item.href} className="text-xs text-text-secondary hover:text-N900">
                 Open tool
               </Link>
-              {live && item.idempotencyKey && item.cancelAllowed && (
-                <button
-                  type="button"
-                  onClick={() => void cancelJob(item)}
-                  disabled={busy}
-                  className="text-xs text-text-secondary hover:text-N900 disabled:opacity-50"
-                >
-                  {busy ? "Cancelling" : "Cancel"}
-                </button>
-              )}
-              {item.status === "recoverable" && (
-                <button
-                  type="button"
-                  onClick={() => void resumeJob(item)}
-                  disabled={busy}
-                  className="text-xs text-brand-primary hover:text-N900 disabled:opacity-50"
-                >
-                  {busy ? "Retrying" : "Try again"}
-                </button>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                {item.canStop && (
+                  <button
+                    type="button"
+                    onClick={() => void stopJob(item)}
+                    disabled={busy}
+                    className={`${touchActionClass} text-text-secondary hover:text-N900`}
+                    aria-label={
+                      item.refundEligible
+                        ? `Stop ${item.label}`
+                        : `Stop ${item.label} without refund`
+                    }
+                  >
+                    {busy ? "Stopping" : "Stop"}
+                  </button>
+                )}
+                {item.canRetry && (
+                  <button
+                    type="button"
+                    onClick={() => void resumeJob(item)}
+                    disabled={busy}
+                    className={`${touchActionClass} text-brand-primary hover:text-N900`}
+                    aria-label={`Try again ${item.label}`}
+                  >
+                    {busy ? "Retrying" : "Try again"}
+                  </button>
+                )}
+                {item.canDismiss && (
+                  <button
+                    type="button"
+                    onClick={() => void dismissJob(item)}
+                    disabled={busy}
+                    className={`${touchActionClass} text-text-secondary hover:text-N900`}
+                    aria-label={`Remove ${item.label} from list`}
+                  >
+                    {busy ? "Removing" : "Remove"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );

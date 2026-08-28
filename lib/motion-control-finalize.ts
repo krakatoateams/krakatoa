@@ -11,6 +11,7 @@ import {
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
+import { assertTrustedReplicateOutputUrl } from "@/lib/replicate-output-url";
 import {
   finishGenerationRequestFailure,
   finishGenerationRequestSuccess,
@@ -93,6 +94,7 @@ export async function finalizeMotionControlSuccess(
   const videoBuffer =
     typeof source === "string"
       ? await (async () => {
+          assertTrustedReplicateOutputUrl(source);
           const videoResponse = await fetch(source);
           if (!videoResponse.ok) {
             throw new Error(`Failed to download generated video: ${videoResponse.statusText}`);
@@ -178,6 +180,7 @@ export async function finalizeMotionControlSuccess(
     await safe("idemSuccess", () =>
       finishGenerationRequestSuccess({
         id: ctx.generationRequestId!,
+        profileId: ctx.profileId,
         jobId: ctx.jobId ?? null,
         assetId: ctx.videoAssetId ?? null,
         responseJson: successResponse,
@@ -230,6 +233,7 @@ export async function failMotionControlAttempt(
     await safe("idemFailure", () =>
       finishGenerationRequestFailure({
         id: ctx.generationRequestId!,
+        profileId: ctx.profileId,
         jobId: ctx.jobId ?? null,
         errorJson: errJson,
       }),

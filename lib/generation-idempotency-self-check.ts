@@ -120,7 +120,13 @@ export function generationIdempotencySelfCheck(): void {
     { id: requestId, job_id: jobId, error_json: storedRecoverableError },
     { status: "running", output: {}, error: null },
   );
-  assert(runningJob === null, "running linked job → null (caller may takeover or wait)");
+  assert(runningJob?.action === "in_progress", "running linked job blocks takeover");
+
+  const queuedJob = resolveLinkedJobBeginAction(
+    { id: requestId, job_id: jobId, error_json: null },
+    { status: "queued", output: {}, error: null },
+  );
+  assert(queuedJob?.action === "in_progress", "queued linked job blocks takeover");
 
   const hashA = computeRequestHash({ b: 2, a: 1 });
   const hashB = computeRequestHash({ a: 1, b: 2 });

@@ -1,5 +1,15 @@
 import { CREATION_TOOLS, type CreationTool } from "./creations";
 import { getPhotoFeature, isPhotoFeatureKey } from "./creation-features";
+import {
+  canStopGenerationNow,
+  generationControlSnapshot,
+  isTerminalJobStatus,
+} from "./generation-workflows/control-policy-pure";
+import {
+  isLegacyJobForceStoppable,
+  isWorkflowHeartbeatStale,
+} from "./generation-workflows/stop-settlement-pure";
+import type { ExecutionBackend } from "./generation-workflows/types";
 
 /**
  * User-facing view of an in-flight / recently-failed generation job.
@@ -8,7 +18,12 @@ import { getPhotoFeature, isPhotoFeatureKey } from "./creation-features";
 
 export const FAILED_LOOKBACK_MS = 15 * 60 * 1000;
 
-export type ActiveGenerationStatus = "queued" | "running" | "recoverable" | "failed";
+export type ActiveGenerationStatus =
+  | "queued"
+  | "running"
+  | "recoverable"
+  | "failed"
+  | "cancelled";
 
 export type ActiveGeneration = {
   jobId: string;
@@ -22,11 +37,21 @@ export type ActiveGeneration = {
   phase: string | null;
   idempotencyKey: string | null;
   cancelAllowed: boolean;
+  executionBackend: ExecutionBackend;
+  heartbeatAt: string | null;
+  updatedAt: string;
+  isStale: boolean;
+  canStop: boolean;
+  refundEligible: boolean;
+  canRetry: boolean;
+  canDismiss: boolean;
   errorMessage: string | null;
   createdAt: string;
 };
 
 export const LIVE_JOB_STATUSES = ["queued", "running", "recoverable"] as const;
+
+export const TERMINAL_TILE_STATUSES = ["failed", "cancelled"] as const;
 
 type JobTypeSpec = {
   label: string;
@@ -102,7 +127,13 @@ const JOB_TYPE_SPEC: Record<string, JobTypeSpec> = {
 };
 
 export function isActiveGenerationStatus(value: string): value is ActiveGenerationStatus {
-  return value === "queued" || value === "running" || value === "recoverable" || value === "failed";
+  return (
+    value === "queued" ||
+    value === "running" ||
+    value === "recoverable" ||
+    value === "failed" ||
+    value === "cancelled"
+  );
 }
 
 export function specForJobType(jobType: string): JobTypeSpec | null {
@@ -121,20 +152,61 @@ export function errorMessageOf(error: Record<string, unknown> | null | undefined
   return null;
 }
 
+export type MatchableRequest = {
+  jobId: string | null;
+  idempotencyKey: string;
+  cancelAllowed: boolean;
+  providerCommittedAt: string | null;
+};
+
+export function activeGenerationStale(params: {
+  executionBackend: ExecutionBackend;
+  heartbeatAt: string | null;
+  updatedAt: string;
+  jobStatus: string;
+  nowMs?: number;
+}): boolean {
+  if (isTerminalJobStatus(params.jobStatus)) return false;
+  if (params.executionBackend === "workflow") {
+    return isWorkflowHeartbeatStale(params.heartbeatAt, params.updatedAt, params.nowMs);
+  }
+  return isLegacyJobForceStoppable(params.updatedAt, params.nowMs);
+}
+
 export function describeJob(params: {
   jobId: string;
   jobType: string;
   status: string;
   createdAt: string;
+  updatedAt?: string;
   input?: Record<string, unknown> | null;
   error?: Record<string, unknown> | null;
   phase?: string | null;
   idempotencyKey?: string | null;
   cancelAllowed?: boolean;
+  providerCommittedAt?: string | null;
+  executionBackend?: ExecutionBackend;
+  heartbeatAt?: string | null;
 }): ActiveGeneration | null {
   if (!isActiveGenerationStatus(params.status)) return null;
   const spec = specForJobType(params.jobType);
   if (!spec) return null;
+  const executionBackend = params.executionBackend ?? "legacy";
+  const updatedAt = params.updatedAt ?? params.createdAt;
+  const heartbeatAt = params.heartbeatAt ?? null;
+  const providerCommittedAt = params.providerCommittedAt ?? null;
+  const cancelAllowed = params.cancelAllowed ?? false;
+  const controls = generationControlSnapshot({
+    jobStatus: params.status,
+    providerCommittedAt,
+    cancelAllowed,
+  });
+  const isStale = activeGenerationStale({
+    executionBackend,
+    heartbeatAt,
+    updatedAt,
+    jobStatus: params.status,
+  });
   const label = params.jobType === "product_photo" ? photoLabel(params.input?.mode) : spec.label;
   return {
     jobId: params.jobId,
@@ -147,10 +219,24 @@ export function describeJob(params: {
     status: params.status,
     phase: params.phase ?? null,
     idempotencyKey: params.idempotencyKey ?? null,
-    cancelAllowed: params.cancelAllowed ?? false,
-    errorMessage: params.status === "failed" || params.status === "recoverable"
-      ? errorMessageOf(params.error)
-      : null,
+    cancelAllowed,
+    executionBackend,
+    heartbeatAt,
+    updatedAt,
+    isStale,
+    canStop: canStopGenerationNow({
+      jobStatus: params.status,
+      executionBackend,
+      cancelAllowed,
+      isStale,
+    }),
+    refundEligible: controls.refundEligible,
+    canRetry: controls.canRetry,
+    canDismiss: controls.canDismiss,
+    errorMessage:
+      params.status === "failed" || params.status === "recoverable" || params.status === "cancelled"
+        ? errorMessageOf(params.error)
+        : null,
     createdAt: params.createdAt,
   };
 }
@@ -172,22 +258,23 @@ export function isLiveStatus(status: ActiveGenerationStatus): boolean {
   return status === "queued" || status === "running";
 }
 
-export type MatchableRequest = {
-  jobId: string | null;
-  idempotencyKey: string;
-  cancelAllowed: boolean;
-};
-
 /** Direct job_id only — a time-window guess can cancel the wrong in-flight attempt. */
 export function matchRequestsToJobs(
   jobs: { id: string }[],
   requests: MatchableRequest[],
-): Map<string, { idempotencyKey: string; cancelAllowed: boolean }> {
+): Map<string, { idempotencyKey: string; cancelAllowed: boolean; providerCommittedAt: string | null }> {
   const jobIds = new Set(jobs.map((j) => j.id));
-  const out = new Map<string, { idempotencyKey: string; cancelAllowed: boolean }>();
+  const out = new Map<
+    string,
+    { idempotencyKey: string; cancelAllowed: boolean; providerCommittedAt: string | null }
+  >();
   for (const req of requests) {
     if (req.jobId && jobIds.has(req.jobId)) {
-      out.set(req.jobId, { idempotencyKey: req.idempotencyKey, cancelAllowed: req.cancelAllowed });
+      out.set(req.jobId, {
+        idempotencyKey: req.idempotencyKey,
+        cancelAllowed: req.cancelAllowed,
+        providerCommittedAt: req.providerCommittedAt,
+      });
     }
   }
   return out;
@@ -282,13 +369,64 @@ export function activeGenerationsSelfCheck(): void {
       { id: "job-unlinked" },
     ],
     [
-      { jobId: "job-linked", idempotencyKey: "key-linked", cancelAllowed: false },
-      { jobId: null, idempotencyKey: "key-orphan", cancelAllowed: true },
+      {
+        jobId: "job-linked",
+        idempotencyKey: "key-linked",
+        cancelAllowed: false,
+        providerCommittedAt: "2026-08-14T00:00:00.000Z",
+      },
+      { jobId: null, idempotencyKey: "key-orphan", cancelAllowed: true, providerCommittedAt: null },
     ],
   );
   assert(matched.get("job-linked")?.idempotencyKey === "key-linked", "direct job_id match wins");
   assert(matched.get("job-linked")?.cancelAllowed === false, "cancelAllowed rides along");
+  assert(
+    matched.get("job-linked")?.providerCommittedAt === "2026-08-14T00:00:00.000Z",
+    "providerCommittedAt rides along",
+  );
   assert(!matched.has("job-unlinked"), "unlinked jobs do not guess a key");
+
+  const workflowPostCommit = describeJob({
+    jobId: "wf1",
+    jobType: "video_motion_control",
+    status: "running",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z",
+    executionBackend: "workflow",
+    cancelAllowed: false,
+    providerCommittedAt: "2026-08-14T00:00:00.000Z",
+  });
+  assert(workflowPostCommit?.canStop === true, "workflow post-commit remains stoppable");
+  assert(workflowPostCommit?.refundEligible === false, "workflow post-commit is not refundable");
+
+  const staleLegacy = describeJob({
+    jobId: "legacy-stale",
+    jobType: "video_image2video",
+    status: "running",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z",
+    executionBackend: "legacy",
+  });
+  assert(
+    activeGenerationStale({
+      executionBackend: "legacy",
+      heartbeatAt: null,
+      updatedAt: "2026-08-14T00:00:00.000Z",
+      jobStatus: "running",
+      nowMs: Date.parse("2026-08-14T00:11:00.000Z"),
+    }),
+    "legacy running job older than 10m is stale",
+  );
+  assert(staleLegacy?.canStop === true, "stale legacy job remains stoppable via jobId path");
+
+  const dismissible = describeJob({
+    jobId: "cancelled1",
+    jobType: "video_image2video",
+    status: "cancelled",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    error: { message: "Stopped" },
+  });
+  assert(dismissible?.canDismiss === true, "cancelled jobs are dismissible");
 
   assert(isCurrentTool("/tools/video", "/tools/video"), "video page is the video tool");
   assert(isCurrentTool("/tools/video/x", "/tools/video"), "nested video path is still the video tool");
