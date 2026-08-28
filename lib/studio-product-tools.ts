@@ -40,7 +40,7 @@ export function expandVideoStudioHistoryTools(
 ): CreationTool[] | undefined {
   if (!tools?.length) return tools;
   if (!tools.some((t) => isGenerateVideoTool(t))) return tools;
-  return [...new Set([...tools, ...VIDEO_STUDIO_TOOLS])];
+  return Array.from(new Set([...tools, ...VIDEO_STUDIO_TOOLS]));
 }
 
 export function usesPhotoStudioProduct(tools?: CreationTool[]): boolean {

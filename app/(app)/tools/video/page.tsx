@@ -42,7 +42,7 @@ import PhotoLibraryPicker, {
   type PhotoLibrarySource,
 } from "@/components/PhotoLibraryPicker";
 import type { CreationHistoryItem } from "@/lib/creations";
-import { aspectRatioToCss, nearestAspectRatio } from "@/lib/aspect-ratio-match";
+import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
 import { parseMentionAssetsFromHistory, type MentionAsset } from "@/lib/mention-assets";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
@@ -152,7 +152,6 @@ import {
   type VideoComposerKey,
 } from "@/lib/video-composer-features";
 import {
-  absoluteViralTemplateAssetUrl,
   getViralTemplate,
   isViralTemplateId,
   viralTemplateLabel,
@@ -1360,17 +1359,6 @@ function ViralTemplateComposer({
   const template = initialTemplate ?? null;
   const lockedPrompt = template?.prompt?.trim() ?? "";
   const templateStartFramePath = template?.referenceImageUrl ?? null;
-
-  const [templateStartFrameUrl, setTemplateStartFrameUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!templateStartFramePath) {
-      setTemplateStartFrameUrl(null);
-      return;
-    }
-    setTemplateStartFrameUrl(
-      absoluteViralTemplateAssetUrl(templateStartFramePath, window.location.origin)
-    );
-  }, [templateStartFramePath]);
 
   useEffect(() => {
     if (viralTemplateModels.length === 0) return;

@@ -436,7 +436,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
       referenceVideos: 0,
       referenceAudios: 0,
     },
-    pricingKey: (ctx) => grokImagineVideoPricingKey(ctx.resolution),
+    pricingKey: (ctx) => grokImagineVideoPricingKey({ resolution: ctx.resolution }),
   },
   {
     id: "kling_v3",

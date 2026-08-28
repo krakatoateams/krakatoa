@@ -526,7 +526,7 @@ export async function handlePhotoStoryboardGeneration(
       await safe("startJob", () => startJob(profileId!, jobId!));
       if (generationRequestId) {
         await safe("attachJob", () =>
-          attachGenerationRequestJob({ id: generationRequestId!, jobId: job.id }),
+          attachGenerationRequestJob({ id: generationRequestId!, profileId: profileId!, jobId: job.id }),
         );
       }
     }
@@ -572,6 +572,7 @@ export async function handlePhotoStoryboardGeneration(
         if (generationRequestId) {
           await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
             id: generationRequestId!,
+            profileId: profileId!,
             jobId: jobId ?? null,
             errorJson: {
               code: "INSUFFICIENT_CREDITS",
@@ -921,6 +922,7 @@ export async function handlePhotoStoryboardGeneration(
     if (generationRequestId) {
       await safe("idemSuccess", () => finishGenerationRequestSuccess({
         id: generationRequestId!,
+        profileId: profileId!,
         jobId: jobId ?? null,
         assetId: imageAssetId ?? null,
         responseJson: successResponse,
@@ -981,6 +983,7 @@ export async function handlePhotoStoryboardGeneration(
     if (generationRequestId) {
       await safe("idemFailure", () => finishGenerationRequestFailure({
         id: generationRequestId!,
+        profileId: profileId!,
         jobId: jobId ?? null,
         errorJson: errJson,
       }));

@@ -36,7 +36,6 @@ import {
 import {
   expandVideoStudioHistoryTools,
   isProductMediaScope,
-  libraryFeaturesForScope,
   libraryFeaturesForScopeAndTools,
   libraryQueryFromFeature,
   type LibraryFeatureCounts,
