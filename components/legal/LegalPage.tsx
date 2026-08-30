@@ -103,18 +103,6 @@ export function LegalPage({ content }: { content: LegalContent }) {
       </header>
 
       <main className="mx-auto max-w-3xl px-6 py-12">
-        {/* Draft notice banner */}
-        <div className="mb-10 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-          <p>
-            <strong>Catatan:</strong> Dokumen ini masih dalam tahap penyusunan. Detail badan
-            hukum sedang dalam proses pendaftaran usaha OSS Indonesia.
-          </p>
-          <p className="mt-1">
-            <strong>Note:</strong> This document is a draft under active development. Business
-            entity details are pending Indonesian OSS business registration completion.
-          </p>
-        </div>
-
         {/* Indonesian content */}
         <LangSection content={content.indonesian} />
 

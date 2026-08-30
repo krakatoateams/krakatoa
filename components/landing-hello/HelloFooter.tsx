@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { Mail } from "lucide-react";
 import { TextRollButton } from "@/components/landing/TextRollButton";
 import { useCurrentUser } from "@/lib/auth-context";
@@ -55,6 +56,21 @@ export function HelloFooter() {
           <Mail className="h-3.5 w-3.5" strokeWidth={2} />
           {FOOTER.supportLabel}
         </a>
+      </div>
+
+      {/* Legal links — required to be visible on the homepage without login
+          for Google OAuth verification (the app requests the youtube.upload
+          scope, which Google reviews against this). */}
+      <div className="mx-auto mt-6 flex items-center gap-4 text-[11px] font-medium text-text-disabled">
+        <Link href="/privacy" className="transition-colors hover:text-N900">
+          Privacy Policy
+        </Link>
+        <span aria-hidden className="text-white/20">
+          ·
+        </span>
+        <Link href="/terms" className="transition-colors hover:text-N900">
+          Terms of Service
+        </Link>
       </div>
     </footer>
   );
