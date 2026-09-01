@@ -1,14 +1,57 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Image from "next/image";
 import { TextRollButton } from "@/components/landing/TextRollButton";
-import { FadePhotoCarousel } from "@/components/landing/FadePhotoCarousel";
-import { ABOUT, ABOUT_PHOTOS } from "@/lib/landing-content";
+import { ABOUT } from "@/lib/landing-content";
+import { ABOUT_BANNER_VIDEO_SRC } from "@/lib/landing-media";
 import { ctaAccent, eyebrow, heading, panel } from "./theme";
 import { GatherGrid, GatherItem } from "./GatherReveal";
 
 /** Lead text in the manifesto and stat panels, kept at one scale across both. */
 const PANEL_LEAD_SIZE = "clamp(1.25rem, 2.2vw, 1.625rem)";
+
+function AboutBannerVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const play = () => {
+      void video.play().catch(() => {});
+    };
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) play();
+      },
+      { threshold: 0.2 }
+    );
+    observer.observe(video);
+    play();
+    video.addEventListener("loadeddata", play);
+
+    return () => {
+      observer.disconnect();
+      video.removeEventListener("loadeddata", play);
+    };
+  }, []);
+
+  return (
+    <video
+      ref={videoRef}
+      src={ABOUT_BANNER_VIDEO_SRC}
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="auto"
+      className="h-full min-h-[360px] w-full object-cover object-[center_30%]"
+      aria-label="Kelolako AI content creation showcase"
+    />
+  );
+}
 
 export function HelloAbout() {
   return (
@@ -56,18 +99,13 @@ export function HelloAbout() {
             </div>
           </GatherItem>
 
-          {/* Editorial photo */}
+          {/* Editorial showreel */}
           <GatherItem
             from="translate3d(44px, 24px, 0) scale(0.94)"
             delay={90}
-            className={`relative min-h-[360px] overflow-hidden sm:col-span-2 lg:col-span-2 lg:min-h-0 ${panel}`}
+            className={`relative min-h-[360px] overflow-hidden sm:col-span-2 lg:col-span-2 ${panel}`}
           >
-            <FadePhotoCarousel images={ABOUT_PHOTOS} />
-            {/* Desaturate so the photography doesn't reintroduce colour. */}
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 bg-N0/35 mix-blend-multiply"
-            />
+            <AboutBannerVideo />
           </GatherItem>
 
           {/* Manifesto */}

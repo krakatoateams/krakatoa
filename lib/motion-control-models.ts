@@ -138,6 +138,37 @@ export function isValidCharacterOrientation(orientation: string): orientation is
 /** Motion clip length for Follow motion (provider-safe). */
 export const MOTION_CONTROL_REF_DURATION_LABEL = "3–30s";
 
+/** Human-readable clip length for panel labels (e.g. `12.4s` or `14s`). */
+export function formatMotionClipDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec <= 0) return "—";
+  return sec >= 10 ? `${Math.round(sec)}s` : `${sec.toFixed(1)}s`;
+}
+
+/** Caption under Motion to copy — duration, billed seconds, and credit cost. */
+export function motionControlPanelCaption(params: {
+  refDurationSec: number | null;
+  billedDurationSec: number;
+  costCredits: number;
+  measuring: boolean;
+  probeFailed: boolean;
+  qualityLabel: string;
+}): string {
+  if (params.measuring) {
+    return "Detecting clip length…";
+  }
+  if (params.refDurationSec != null) {
+    const clip = formatMotionClipDuration(params.refDurationSec);
+    const rounded = Math.round(params.refDurationSec);
+    const billedNote =
+      params.billedDurationSec !== rounded ? ` · billed ${params.billedDurationSec}s` : "";
+    return `${clip} clip${billedNote} · ${params.costCredits} credits (${params.qualityLabel}).`;
+  }
+  if (params.probeFailed) {
+    return `Couldn't read clip length — cost uses ${params.billedDurationSec}s max (${params.costCredits} credits, ${params.qualityLabel}).`;
+  }
+  return `Movement to copy — your character performs these actions. Clip ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
+}
+
 export function motionControlRefVideoDurationError(
   durationSec: number | null | undefined,
 ): string | null {
@@ -155,15 +186,9 @@ export function motionControlRefVideoDurationError(
 export const MOTION_CONTROL_QUALITY_TOOLTIP =
   "Output sharpness. Standard is 720p and costs less. Pro is 1080p, sharper, and uses more credits.";
 
-/** RefGroup hint for the motion reference video upload. */
-export function motionControlVideoHint(params: {
-  refDurationSec: number | null;
-  billedDurationSec: number;
-}): string {
-  if (params.refDurationSec != null) {
-    return `Movement to copy (dance, walk, gestures). Yours: ${params.refDurationSec.toFixed(1)}s · billed ${params.billedDurationSec}s. Keep the clip within ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
-  }
-  return `Movement to copy — your character performs these actions. Motion clip ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
+/** Tooltip on the Motion to copy info icon (upload path). */
+export function motionControlVideoHint(): string {
+  return `Movement to copy (dance, walk, gestures). Clip ${MOTION_CONTROL_REF_DURATION_LABEL}. MP4 or MOV, max 100 MB.`;
 }
 
 /** PhotoLibraryPicker hint for the character image. */

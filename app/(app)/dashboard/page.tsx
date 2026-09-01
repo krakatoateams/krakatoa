@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
 import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
-import TrendingTemplates, { ViralTemplates } from "./TrendingTemplates";
+import TrendingTemplates, { VideoTemplateCarousels } from "./TrendingTemplates";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
 import ToolCardThumbnail from "./ToolCardThumbnail";
@@ -201,7 +201,7 @@ export default function DashboardPage() {
       </section>
 
       <TrendingTemplates />
-      <ViralTemplates />
+      <VideoTemplateCarousels />
 
       {isAuthenticated && <RecentCreations />}
 

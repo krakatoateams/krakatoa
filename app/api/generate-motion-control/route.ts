@@ -54,6 +54,7 @@ import {
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
+import { motionControlGenerationVideoUrl } from "@/lib/trending-templates";
 import { start } from "workflow/api";
 import { resolveExecutionBackendForJobType } from "@/lib/generation-workflows/feature-flags";
 import { attachWorkflowRun } from "@/lib/generation-workflows/workflow-db";
@@ -189,7 +190,7 @@ export async function POST(req: Request) {
 
     // ---- Parse the required reference attachments + collect temp paths ----
     let imageRef = parseRefAttachment(b.image);
-    const videoRef = parseRefAttachment(b.video);
+    let videoRef = parseRefAttachment(b.video);
 
     if (characterCreationId && userId) {
       const resolved = await resolveMentionCreations(userId, [characterCreationId]);
@@ -204,6 +205,10 @@ export async function POST(req: Request) {
     }
     if (!videoRef) {
       return NextResponse.json({ error: "A reference video is required." }, { status: 400 });
+    }
+    // Dashboard templates may preview webm; pipeline always needs the MP4 twin on CDN.
+    if (videoRef.url && !videoRef.path?.trim()) {
+      videoRef = { ...videoRef, url: motionControlGenerationVideoUrl(videoRef.url) };
     }
     for (const ref of [imageRef, videoRef]) {
       if (ref.path && isVideosTempRefPath(ref.path)) tempRefPaths.push(ref.path);

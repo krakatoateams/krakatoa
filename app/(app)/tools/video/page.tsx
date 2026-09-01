@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -102,10 +102,11 @@ import {
   effectiveMotionControlDuration,
   motionControlRefVideoDurationError,
   formatMotionControlModelCreditHint,
+  formatMotionClipDuration,
+  motionControlPanelCaption,
   motionControlResolutionLabel,
   MOTION_CONTROL_QUALITY_TOOLTIP,
   motionControlVideoHint,
-  MOTION_CONTROL_REF_DURATION_LABEL,
   MOTION_CONTROL_CHARACTER_HINT,
   MOTION_CONTROL_PROMPT_PLACEHOLDER,
   motionControlSoundTooltip,
@@ -113,6 +114,7 @@ import {
   type MotionControlModelId,
   type MotionControlMode,
 } from "@/lib/motion-control-models";
+import { useVideoDurationSec } from "@/lib/use-video-duration";
 import { MOTION_CONTROL_MAX_RUNTIME_MS } from "@/lib/generation-workflows/motion-control-workflow-types";
 import {
   resolveStoryboardAspectRatio,
@@ -154,6 +156,7 @@ import {
 import {
   getViralTemplate,
   isViralTemplateId,
+  motionControlGenerationVideoUrl,
   viralTemplateLabel,
   type TrendingTemplate,
 } from "@/lib/trending-templates";
@@ -2466,7 +2469,6 @@ function MotionControlComposer({
   const [keepOriginalSound, setKeepOriginalSound] = useState<boolean>(
     model.defaultKeepOriginalSound
   );
-  const [videoDurationSec, setVideoDurationSec] = useState<number | null>(null);
 
   // Character source: upload your own, or pick one created in Photo → Character.
   const [charSource, setCharSource] = useState<CharacterSource>("upload");
@@ -2520,41 +2522,41 @@ function MotionControlComposer({
     initialTemplateVideo ?? null
   );
 
-  // Measure the reference video's duration so the cost label matches what the
-  // server will bill (output length follows the reference video). Works for both
-  // an uploaded file (object URL) and a hosted template (public URL).
   const motionFile = motionVideo.items[0]?.file ?? null;
+  const motionObjectUrl = useMemo(
+    () => (motionFile ? URL.createObjectURL(motionFile) : null),
+    [motionFile]
+  );
   useEffect(() => {
-    // Uploaded file wins over a preloaded template.
-    const objectUrl = motionFile ? URL.createObjectURL(motionFile) : null;
-    const src = objectUrl ?? templateUrl;
-    if (!src) {
-      setVideoDurationSec(null);
-      return;
-    }
-    const el = document.createElement("video");
-    el.preload = "metadata";
-    el.crossOrigin = "anonymous";
-    el.onloadedmetadata = () => {
-      setVideoDurationSec(Number.isFinite(el.duration) ? el.duration : null);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-    el.onerror = () => {
-      setVideoDurationSec(null);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-    el.src = src;
     return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (motionObjectUrl) URL.revokeObjectURL(motionObjectUrl);
     };
-  }, [motionFile, templateUrl]);
+  }, [motionObjectUrl]);
+
+  // Uploaded file wins over a preloaded template. Duration drives billing.
+  const motionVideoSrc = motionObjectUrl ?? templateUrl;
+  const {
+    durationSec: videoDurationSec,
+    measuring: durationMeasuring,
+    failed: durationProbeFailed,
+  } = useVideoDurationSec(motionVideoSrc);
 
   const billedDuration = effectiveMotionControlDuration({
     model,
     refVideoDurationSec: videoDurationSec,
   });
+  const qualityLabel = `${mode === "std" ? "Standard" : "Pro"} · ${motionControlResolutionLabel(mode)}`;
   const pricingKey = model.pricingKey(mode);
   const cost = devBlank ? 0 : videoCredits(pricingKey, billedDuration);
+  const motionPanelCaption = motionControlPanelCaption({
+    refDurationSec: videoDurationSec,
+    billedDurationSec: billedDuration,
+    costCredits: cost,
+    measuring: durationMeasuring,
+    probeFailed: durationProbeFailed,
+    qualityLabel,
+  });
+  const modelCreditDuration = videoDurationSec != null ? billedDuration : undefined;
 
   // Resolve the character image from whichever source is active. Library characters
   // are resolved server-side via characterCreationId (pipeline-signed URL).
@@ -2564,8 +2566,9 @@ function MotionControlComposer({
       : null;
 
   // The driving video comes from a preloaded template (hosted URL) or an upload.
+  // Template preview may be webm; generation always uses the catalog MP4 mapping.
   const resolvedVideo: { url: string; path: string } | null = templateUrl
-    ? { url: templateUrl, path: "" }
+    ? { url: motionControlGenerationVideoUrl(templateUrl), path: "" }
     : motionVideo.done[0]
       ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
       : null;
@@ -2576,8 +2579,10 @@ function MotionControlComposer({
   const anyUploading =
     motionVideo.uploading || (charSource === "upload" && charImage.uploading);
   const durationError = motionControlRefVideoDurationError(videoDurationSec);
+  const durationReady =
+    !durationMeasuring && (videoDurationSec != null || durationProbeFailed);
   const canGenerate =
-    !loading && !anyUploading && imageReady && videoReady && !durationError;
+    !loading && !anyUploading && imageReady && videoReady && durationReady && !durationError;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2685,7 +2690,7 @@ function MotionControlComposer({
               options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
-                hint: formatMotionControlModelCreditHint(m, videoCredits),
+                hint: formatMotionControlModelCreditHint(m, videoCredits, modelCreditDuration),
               }))}
               onSelect={(id) => setModelId(id as MotionControlModelId)}
               disabled={loading}
@@ -2735,37 +2740,37 @@ function MotionControlComposer({
                       autoPlay
                       className="absolute inset-0 h-full w-full object-cover"
                     />
+                    {videoDurationSec != null && !durationMeasuring ? (
+                      <span className="absolute bottom-1 right-1 rounded bg-N0/80 px-1 py-0.5 text-[10px] font-semibold tabular-nums text-N900">
+                        {formatMotionClipDuration(videoDurationSec)}
+                      </span>
+                    ) : null}
                   </div>
-                  <p className="text-[11px] text-text-secondary">
-                    {videoDurationSec
-                      ? `Trending template ~${Math.round(videoDurationSec)}s · billed ${billedDuration}s.`
-                      : "Trending template loaded. Your character will copy this motion."}
-                  </p>
+                  <p className="text-[11px] leading-snug text-text-secondary">{motionPanelCaption}</p>
                 </div>
               </div>
             ) : (
-              <RefGroup
-                icon={<Film className="h-3.5 w-3.5" />}
-                label="Motion to copy"
-                accept={MC_VIDEO_ACCEPT}
-                multiple={false}
-                group={motionVideo}
-                disabled={loading}
-                hint={motionControlVideoHint({
-                  refDurationSec: videoDurationSec,
-                  billedDurationSec: billedDuration,
-                })}
-              />
+              <div>
+                <RefGroup
+                  icon={<Film className="h-3.5 w-3.5" />}
+                  label="Motion to copy"
+                  accept={MC_VIDEO_ACCEPT}
+                  multiple={false}
+                  group={motionVideo}
+                  disabled={loading}
+                  hint={motionControlVideoHint()}
+                />
+                {motionVideo.items.length > 0 ? (
+                  <p className="mt-2 text-[11px] leading-snug text-text-secondary">
+                    {motionPanelCaption}
+                  </p>
+                ) : null}
+              </div>
             )}
           </div>
 
           {durationError ? (
             <p className="mt-2 text-sm leading-snug text-warning/90">{durationError}</p>
-          ) : videoReady && videoDurationSec != null ? (
-            <p className="mt-2 text-sm leading-snug text-text-secondary">
-              Motion clip limit:{" "}
-              <span className="text-text-secondary">{MOTION_CONTROL_REF_DURATION_LABEL}</span>
-            </p>
           ) : null}
 
           {/* Advanced settings (collapsed by default). The prompt is optional —
@@ -2811,6 +2816,23 @@ function MotionControlComposer({
           {/* Controls row */}
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className={STUDIO_CHIP_ROW_CLASS}>
+              {videoReady ? (
+                <div
+                  className="flex h-10 items-center gap-2 rounded-radius-sm bg-white/5 px-3 text-sm text-text-secondary"
+                  title="Output length follows your motion clip; credits scale with billed seconds."
+                >
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  <span className="tabular-nums">
+                    {durationMeasuring
+                      ? "Measuring clip…"
+                      : videoDurationSec != null
+                        ? `${formatMotionClipDuration(videoDurationSec)} · ${cost} cr`
+                        : durationProbeFailed
+                          ? `~${billedDuration}s est. · ${cost} cr`
+                          : "—"}
+                  </span>
+                </div>
+              ) : null}
               <ChipDropdown
                 sheetTitle="Select quality"
                 square
@@ -2873,12 +2895,6 @@ function MotionControlComposer({
               />
             </div>
           </div>
-
-          {imageReady && videoReady && !durationError ? (
-            <p className="mt-3 pl-1 text-sm text-text-disabled">
-              Motion clip length: {MOTION_CONTROL_REF_DURATION_LABEL}.
-            </p>
-          ) : null}
         </div>
 
         {/* Model — attached under the form card on mobile only */}
@@ -2894,7 +2910,7 @@ function MotionControlComposer({
               options={motionControlModels.map((m) => ({
                 id: m.id,
                 label: m.modelLabel,
-                hint: formatMotionControlModelCreditHint(m, videoCredits),
+                hint: formatMotionControlModelCreditHint(m, videoCredits, modelCreditDuration),
               }))}
               onSelect={(id) => setModelId(id as MotionControlModelId)}
               disabled={loading}
