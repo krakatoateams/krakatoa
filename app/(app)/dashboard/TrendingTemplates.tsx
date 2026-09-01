@@ -6,9 +6,11 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   TRENDING_TEMPLATES,
   VIRAL_TEMPLATES,
+  PRODUCT_REVIEW_TEMPLATES,
   VIRTUAL_PRODUCT_TRYON_TEMPLATES,
   tryOnTemplateHref,
   viralTemplateHref,
+  productReviewTemplateHref,
   productTryOnHref,
   type TrendingTemplate,
 } from "@/lib/trending-templates";
@@ -41,14 +43,23 @@ export default function TrendingTemplates() {
   );
 }
 
-export function ViralTemplates() {
+export function VideoTemplateCarousels() {
   return (
-    <section className="mb-10">
-      <TemplateCarousel
-        title="Viral templates"
-        templates={VIRAL_TEMPLATES}
-        hrefFor={(t) => viralTemplateHref(t.id)}
-      />
+    <section className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+      <div className="min-w-0">
+        <TemplateCarousel
+          title="Product review templates"
+          templates={PRODUCT_REVIEW_TEMPLATES}
+          hrefFor={(t) => productReviewTemplateHref(t.id)}
+        />
+      </div>
+      <div className="min-w-0">
+        <TemplateCarousel
+          title="Viral templates"
+          templates={VIRAL_TEMPLATES}
+          hrefFor={(t) => viralTemplateHref(t.id)}
+        />
+      </div>
     </section>
   );
 }
@@ -99,20 +110,41 @@ function TemplateCarousel({
         )}
       </div>
 
-      <div
-        ref={scrollerRef}
-        className="flex min-h-[17.75rem] snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {templates.map((template) => (
-          <TemplateCard
-            key={template.id}
-            template={template}
-            onUse={() => router.push(hrefFor(template))}
-          />
-        ))}
-      </div>
+      {templates.length === 0 ? (
+        <p className="flex min-h-[17.75rem] items-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-sm text-text-disabled">
+          Templates coming soon.
+        </p>
+      ) : (
+        <div
+          ref={scrollerRef}
+          className="flex min-h-[17.75rem] snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {templates.map((template) => (
+            <TemplateCard
+              key={template.id}
+              template={template}
+              onUse={() => router.push(hrefFor(template))}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Corner thumbs on template cards — separate from composer-only fields like the viral start frame. */
+function templateThumbUrls(template: TrendingTemplate): string[] {
+  if (template.characterImageUrl && template.productImageUrl) {
+    return [template.characterImageUrl, template.productImageUrl];
+  }
+  if (template.productImageUrl) {
+    return [template.characterImageUrl, template.referenceImageUrl].filter(
+      (src): src is string => Boolean(src)
+    );
+  }
+  if (template.characterImageUrl) return [template.characterImageUrl];
+  if (template.referenceImageUrl) return [template.referenceImageUrl];
+  return [];
 }
 
 function TemplateCard({
@@ -122,14 +154,31 @@ function TemplateCard({
   template: TrendingTemplate;
   onUse: () => void;
 }) {
-  const thumbs = [template.characterImageUrl, template.referenceImageUrl].filter(
-    (src): src is string => Boolean(src)
-  );
+  const thumbs = templateThumbUrls(template);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const handlePreviewEnter = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = false;
+    el.play().catch(() => {});
+  };
+
+  const handlePreviewLeave = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = true;
+  };
 
   return (
-    <div className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl bg-white/[0.04] sm:w-44">
+    <div
+      className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl bg-white/[0.04] sm:w-44"
+      onMouseEnter={template.videoUrl ? handlePreviewEnter : undefined}
+      onMouseLeave={template.videoUrl ? handlePreviewLeave : undefined}
+    >
       {template.videoUrl ? (
         <video
+          ref={videoRef}
           src={template.videoUrl}
           autoPlay
           muted

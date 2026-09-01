@@ -1,12 +1,14 @@
 import type { CreationHistoryItem } from "@/lib/creations";
-import { VIRAL_TEMPLATES } from "@/lib/trending-templates";
+import { PRODUCT_REVIEW_TEMPLATES, VIRAL_TEMPLATES } from "@/lib/trending-templates";
 
 /** Legacy viral runs stored the full provider prompt in metadata.prompt. */
 const VIRAL_ASSEMBLED_PROMPT_RE =
   /^Viral template "([^"]+)" \(template id: [^)]+\)/;
 
 const VIRAL_TEMPLATE_TITLES = new Set(
-  VIRAL_TEMPLATES.map((t) => t.title?.trim()).filter((t): t is string => Boolean(t))
+  [...VIRAL_TEMPLATES, ...PRODUCT_REVIEW_TEMPLATES]
+    .map((t) => t.title?.trim())
+    .filter((t): t is string => Boolean(t))
 );
 
 function isViralTemplateOnlyMetadata(

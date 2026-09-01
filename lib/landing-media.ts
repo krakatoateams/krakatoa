@@ -41,6 +41,10 @@ export const LANDING_VIDEO_FILES = [
 
 export const LANDING_VIDEO_SRCS = LANDING_VIDEO_FILES.map(landingVideoSrc);
 
+/** About panel banner — compressed mp4 on CDN root. */
+export const ABOUT_BANNER_VIDEO_SRC =
+  "https://cdn.kelolako.com/Banner%20home%20kelolako_compressed.mp4";
+
 /**
  * Showreel for the homepage hero: one clip per model, so the model strip
  * doubles as the playlist selector.

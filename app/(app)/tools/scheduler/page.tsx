@@ -26,7 +26,7 @@ export default async function SchedulerPage() {
   const canBypass = !!admin || (await canPreviewComingSoon(profile?.email));
 
   if (config?.coming_soon && !canBypass) {
-    return (
+  return (
       <ComingSoonPlaceholder
         toolName="Schedule"
         description="Plan and auto-publish your posts to YouTube and TikTok — this is still being finished. Check back soon."

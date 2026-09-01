@@ -1,3 +1,5 @@
+import { LANDING_VIDEO_BASE } from "@/lib/landing-media";
+
 /**
  * Clips for the dashboard "Trending templates" carousel.
  *
@@ -13,19 +15,27 @@
  */
 const BASE = "https://cdn.kelolako.com/trending-template-1";
 
-/** Carousel order. */
-const FILES = [
-  "2c90d936-07e9-4f0e-a0eb-fb7cdbf48228-8b28bde63ae889a5.mp4",
-  "5fcbc237-7bfc-4275-8c8c-6c0c80eff401-dcb267808091d553.mp4",
-  "71d459a3-7025-459b-82fb-8ba29008ba32-1c64ea186d659820.mp4",
-  "9f4320b6-27ce-47dc-be0d-ebc98b232fef-4618b39cd3aedf6a.mp4",
-  "eb68f0d4-6a2e-473b-ad39-a34c7e8b1d00-7fd7325a427ac5a7.mp4",
-  "f6b20b46-4a5f-4514-91cf-c65d5ad10c82-bf553f1b0fd58f61.mp4",
+/**
+ * Motion-control carousel clips. `preview` is shown in the UI (often webm for size);
+ * `generation` is the MP4 sent to Replicate / stored refs (provider-safe).
+ */
+const MOTION_CLIP_CATALOG: Array<{ preview: string; generation?: string }> = [
+  { preview: "kelolako_motion1.webm", generation: "kelolako_motion1_compressed.mp4" },
+  { preview: "5fcbc237-7bfc-4275-8c8c-6c0c80eff401-dcb267808091d553.mp4" },
+  { preview: "9f4320b6-27ce-47dc-be0d-ebc98b232fef-4618b39cd3aedf6a.mp4" },
+  { preview: "eb68f0d4-6a2e-473b-ad39-a34c7e8b1d00-7fd7325a427ac5a7.mp4" },
+  { preview: "f6b20b46-4a5f-4514-91cf-c65d5ad10c82-bf553f1b0fd58f61.mp4" },
 ];
 
 export type TrendingTemplate = {
   id: string;
+  /** Preview URL (carousel + composer thumbnail); may be webm for bandwidth. */
   videoUrl?: string;
+  /**
+   * MP4 (or provider-safe) URL for generation when `videoUrl` is a lighter preview
+   * format. Defaults to `videoUrl` when omitted.
+   */
+  generationVideoUrl?: string;
   /** Still preview when the template is a photo (product try-on). */
   imageUrl?: string;
   /** Optional source still shown on hover — the image this clip was made from. */
@@ -66,11 +76,19 @@ export function viralTemplateHref(templateId: string): string {
 }
 
 export function getViralTemplate(templateId: string): TrendingTemplate | undefined {
-  return VIRAL_TEMPLATES.find((t) => t.id === templateId);
+  return (
+    VIRAL_TEMPLATES.find((t) => t.id === templateId) ??
+    PRODUCT_REVIEW_TEMPLATES.find((t) => t.id === templateId)
+  );
 }
 
 export function isViralTemplateId(templateId: string): boolean {
-  return VIRAL_TEMPLATES.some((t) => t.id === templateId);
+  return getViralTemplate(templateId) !== undefined;
+}
+
+/** Same composer as viral templates — separate dashboard carousel only. */
+export function productReviewTemplateHref(templateId: string): string {
+  return viralTemplateHref(templateId);
 }
 
 /** @deprecated Use viralTemplateHref(templateId) — image2video prompt links are retired. */
@@ -80,9 +98,12 @@ export function viralTemplateImage2VideoHref(prompt: string): string {
   return `/tools/video?type=image2video&prompt=${encodeURIComponent(trimmed)}`;
 }
 
-/** Public assets under /viral-templates/ only — never fetch arbitrary URLs. */
+/** Public assets under bundled template folders only — never fetch arbitrary URLs. */
 export function isViralTemplateAssetPath(path: string): boolean {
-  return path.startsWith("/viral-templates/") && !path.includes("..");
+  return (
+    (path.startsWith("/viral-templates/") || path.startsWith("/product-review-templates/")) &&
+    !path.includes("..")
+  );
 }
 
 /** Absolute URL for a bundled viral-template asset (browser / UI). */
@@ -113,10 +134,31 @@ export function productTryOnHref(opts: {
   return `/tools/photo-v2?${q.toString()}`;
 }
 
-export const TRENDING_TEMPLATES: TrendingTemplate[] = FILES.map((file) => ({
-  id: file,
-  videoUrl: `${BASE}/${file}`,
-}));
+export const TRENDING_TEMPLATES: TrendingTemplate[] = MOTION_CLIP_CATALOG.map(
+  ({ preview, generation }) => {
+    const videoUrl = `${BASE}/${preview}`;
+    const generationVideoUrl = `${BASE}/${generation ?? preview}`;
+    return {
+      id: preview,
+      videoUrl,
+      ...(generationVideoUrl !== videoUrl ? { generationVideoUrl } : {}),
+    };
+  }
+);
+
+/**
+ * Resolve the provider/Supabase-safe motion reference URL from a preview URL
+ * (deep-link query param or catalog `videoUrl`). Preview webm stays UI-only.
+ */
+export function motionControlGenerationVideoUrl(previewUrl: string): string {
+  const normalized = previewUrl.trim();
+  const match = TRENDING_TEMPLATES.find((t) => t.videoUrl === normalized);
+  if (match?.generationVideoUrl) return match.generationVideoUrl;
+  if (/\.webm$/i.test(normalized)) {
+    return normalized.replace(/\.webm$/i, "_compressed.mp4");
+  }
+  return normalized;
+}
 
 /**
  * Dashboard "Photo try-on" carousel (left column next to Video try-on).
@@ -181,6 +223,8 @@ export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON
 const VIRAL_DIR = "/viral-templates";
 /** Default locked start frame for viral-template i2v (scene composition). */
 const VIRAL_START_FRAME = `${VIRAL_DIR}/reference.png`;
+/** Carousel hint — user supplies their own character; not the locked i2v start frame. */
+const VIRAL_CHARACTER_THUMB = `${VIRAL_DIR}/character-thumb.webp`;
 
 type ViralCatalogEntry = {
   file: string;
@@ -191,6 +235,8 @@ type ViralCatalogEntry = {
   shots: string[];
   /** Locked i2v start frame when different from the shared default still. */
   startFrameImageUrl?: string;
+  /** Product review carousel: product still beside the character thumb. */
+  productThumb?: string;
 };
 
 function characterIdentityBlock(): string {
@@ -230,9 +276,12 @@ function buildMultiShotBlock(shots: string[], usesCharacter: boolean): string {
   return lines.join(" ");
 }
 
-function buildViralTemplatePrompt(entry: ViralCatalogEntry): string {
+function buildTemplatePrompt(
+  label: "Viral template" | "Product review template",
+  entry: ViralCatalogEntry
+): string {
   const templateId = entry.file.replace(/\.mp4$/, "");
-  const header = `Viral template "${entry.title}" (template id: ${templateId}).`;
+  const header = `${label} "${entry.title}" (template id: ${templateId}).`;
   const parts = [header];
 
   if (entry.usesCharacter) {
@@ -249,6 +298,14 @@ function buildViralTemplatePrompt(entry: ViralCatalogEntry): string {
   }
 
   return parts.filter(Boolean).join(" ");
+}
+
+function buildViralTemplatePrompt(entry: ViralCatalogEntry): string {
+  return buildTemplatePrompt("Viral template", entry);
+}
+
+function buildProductReviewTemplatePrompt(entry: ViralCatalogEntry): string {
+  return buildTemplatePrompt("Product review template", entry);
 }
 
 const VIRAL_CATALOG: ViralCatalogEntry[] = [
@@ -311,6 +368,78 @@ export const VIRAL_TEMPLATES: TrendingTemplate[] = VIRAL_CATALOG.map((item) => (
   title: item.title,
   shotCount: item.shots.length,
   videoUrl: `${VIRAL_DIR}/${item.file}`,
+  characterImageUrl: VIRAL_CHARACTER_THUMB,
   referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
   prompt: buildViralTemplatePrompt(item),
 }));
+
+/**
+ * Dashboard "Product review templates" carousel (beside Viral templates).
+ *
+ * Clips live in the `video-banner` R2 bucket under `Product review/` and are
+ * served from cdn.kelolako.com (same pattern as landing hero clips). Append one
+ * object to PRODUCT_REVIEW_CATALOG per file uploaded there. Opens the Viral
+ * Template composer on Use.
+ */
+const PRODUCT_REVIEW_CDN_DIR = "Product review";
+
+function productReviewCdnUrl(file: string): string {
+  const dir = PRODUCT_REVIEW_CDN_DIR.split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${LANDING_VIDEO_BASE}/${dir}/${encodeURIComponent(file)}`;
+}
+
+const PRODUCT_REVIEW_DIR = "/product-review-templates";
+
+const PRODUCT_REVIEW_CATALOG: ViralCatalogEntry[] = [
+  {
+    file: "kelolako_product_r1_compressed.webm",
+    title: "Product review 1",
+    usesCharacter: true,
+    productThumb: `${PRODUCT_REVIEW_DIR}/r1-product.webp`,
+    shots: [
+      "Vertical UGC product review shot of the person in [Image1] holding the product toward camera, natural window light, authentic handheld framing.",
+    ],
+  },
+  {
+    file: "kelolako_product_r4_compressed.webm",
+    title: "Product review 4",
+    usesCharacter: true,
+    productThumb: `${PRODUCT_REVIEW_DIR}/r4-product.webp`,
+    shots: [
+      "Vertical UGC product review of the person in [Image1] presenting the product with enthusiastic delivery, casual home setting, authentic creator-style framing.",
+    ],
+  },
+  {
+    file: "kelolako_product_r3_compressed.webm",
+    title: "Product review 3",
+    usesCharacter: true,
+    productThumb: `${PRODUCT_REVIEW_DIR}/r3-product.webp`,
+    shots: [
+      "Vertical UGC close-up product review with the person in [Image1] showing product details to camera, soft natural light, authentic testimonial energy.",
+    ],
+  },
+  {
+    file: "kelolako_product_r2_compressed.webm",
+    title: "Product review 2",
+    usesCharacter: true,
+    productThumb: `${PRODUCT_REVIEW_DIR}/r2-product.webp`,
+    shots: [
+      "Vertical UGC product review of the person in [Image1] demonstrating the product with confident gestures, clean indoor background, social-native pacing.",
+    ],
+  },
+];
+
+export const PRODUCT_REVIEW_TEMPLATES: TrendingTemplate[] = PRODUCT_REVIEW_CATALOG.map(
+  (item) => ({
+    id: item.file,
+    title: item.title,
+    shotCount: item.shots.length,
+    videoUrl: productReviewCdnUrl(item.file),
+    characterImageUrl: VIRAL_CHARACTER_THUMB,
+    productImageUrl: item.productThumb,
+    referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
+    prompt: buildProductReviewTemplatePrompt(item),
+  })
+);

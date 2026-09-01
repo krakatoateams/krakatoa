@@ -99,13 +99,6 @@ export const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
 /* About                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export const ABOUT_PHOTOS = [
-  "https://images.unsplash.com/photo-1614858978391-a3feca014006?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1767571900953-a6efae9c0ac1?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1761898565688-b5dec21c908a?w=1200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1675573206424-36f844f7627a?w=1200&auto=format&fit=crop&q=80",
-];
-
 export const ABOUT = {
   /** Rendered one per line on desktop, joined with spaces on mobile. */
   headingLines: ["AI video and images,", "from prompt to", "post in minutes."],
