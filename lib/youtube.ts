@@ -1,6 +1,8 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
+export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
+
 export interface YouTubeUploadParams {
   videoUrl: string;
   title: string;
@@ -8,6 +10,8 @@ export interface YouTubeUploadParams {
   tags: string[];
   accessToken: string;
   refreshToken: string;
+  /** Defaults to "public" — preserves prior behavior for callers/rows with none chosen. */
+  privacyStatus?: YouTubePrivacyStatus;
 }
 
 /**
@@ -32,7 +36,7 @@ function mimeFromUrl(url: string): string {
  * Returns the newly created YouTube video ID.
  */
 export async function uploadToYouTube(params: YouTubeUploadParams): Promise<string> {
-  const { videoUrl, title, description, tags, refreshToken } = params;
+  const { videoUrl, title, description, tags, refreshToken, privacyStatus = "public" } = params;
   // ── Auth client ─────────────────────────────────────────────────────────
   const auth = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID!,
@@ -84,9 +88,8 @@ export async function uploadToYouTube(params: YouTubeUploadParams): Promise<stri
       },
       status: {
         // Scheduler publishes for real. The API honors requested visibility for
-        // this project (verified: test uploads land as requested, not force-private),
-        // so scheduled videos go live publicly. No per-post override by design.
-        privacyStatus: "public",
+        // this project (verified: test uploads land as requested, not force-private).
+        privacyStatus,
       },
     },
     media: {

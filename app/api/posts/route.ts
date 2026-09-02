@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
       tiktok_privacy_level,
       tiktok_brand_organic_toggle,
       tiktok_brand_content_toggle,
+      youtube_privacy_status,
     } = body as {
       video_url?: string;
       storage_path?: string;
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
       tiktok_privacy_level?: string;
       tiktok_brand_organic_toggle?: boolean;
       tiktok_brand_content_toggle?: boolean;
+      youtube_privacy_status?: string;
     };
 
     // photo_urls (a TikTok photo-post carousel, or an Instagram single-image
@@ -161,6 +163,17 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+    }
+
+    // YouTube-only field. Unlike TikTok's privacy level, "public" is a safe,
+    // pre-existing default (that was the prior hardcoded behavior), so an
+    // omitted value defaults rather than rejecting the request.
+    const YOUTUBE_PRIVACY_STATUSES = new Set(["public", "unlisted", "private"]);
+    if (platform === "youtube" && youtube_privacy_status !== undefined && !YOUTUBE_PRIVACY_STATUSES.has(youtube_privacy_status)) {
+      return NextResponse.json(
+        { error: "youtube_privacy_status must be one of: public, unlisted, private." },
+        { status: 400 },
+      );
     }
 
     // Optional platform linkage. Validate UUID format up front so malformed ids
@@ -303,6 +316,11 @@ export async function POST(req: NextRequest) {
     if (verifiedProjectId) insertRow.project_id = verifiedProjectId;
     if (verifiedAssetId) insertRow.asset_id = verifiedAssetId;
     if (normalizedFormat) insertRow.format = normalizedFormat;
+    if (platform === "youtube") {
+      insertRow.youtube_privacy_status = YOUTUBE_PRIVACY_STATUSES.has(youtube_privacy_status ?? "")
+        ? youtube_privacy_status
+        : "public";
+    }
     if (platform === "tiktok") {
       insertRow.tiktok_privacy_level = tiktok_privacy_level;
       insertRow.tiktok_brand_organic_toggle = Boolean(tiktok_brand_organic_toggle);
