@@ -661,6 +661,9 @@ export async function GET(req: NextRequest) {
         tags,
         accessToken: token.access_token,
         refreshToken: token.refresh_token,
+        // NULL on older rows (scheduled before this field existed) — fall
+        // back to "public", the prior hardcoded behavior.
+        privacyStatus: (post.youtube_privacy_status as "public" | "unlisted" | "private" | null) ?? "public",
       });
 
       console.log(`[cron] ✓ Post ${post.id} published → YouTube ID: ${youtubeId}`);

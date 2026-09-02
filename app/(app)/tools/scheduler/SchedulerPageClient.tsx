@@ -121,6 +121,10 @@ interface VideoItem {
   // "tiktok" is included and are never defaulted silently — the user must
   // choose them (see openspec/changes/tiktok-publish/design.md).
   platforms: Array<"youtube" | "tiktok">;
+  // YouTube-only. Unlike tiktokPrivacyLevel this always has a value — it
+  // defaults to "public" (the prior hardcoded behavior) rather than forcing
+  // a choice, since there's no external API call needed to know the options.
+  youtubePrivacyStatus: "public" | "unlisted" | "private";
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
@@ -172,6 +176,7 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     scheduleStatus: "idle",
     scheduleError: null,
     platforms: ["youtube"],
+    youtubePrivacyStatus: "public",
     tiktokPrivacyLevel: null,
     tiktokBrandOrganicToggle: false,
     tiktokBrandContentToggle: false,
@@ -1136,6 +1141,12 @@ const TIKTOK_PRIVACY_LABELS: Record<string, string> = {
   SELF_ONLY: "Only me",
 };
 
+const YOUTUBE_PRIVACY_LABELS: Record<"public" | "unlisted" | "private", string> = {
+  public: "Public",
+  unlisted: "Unlisted",
+  private: "Private",
+};
+
 const PLATFORM_LABELS: Record<"youtube" | "tiktok", string> = {
   youtube: "YouTube",
   tiktok: "TikTok",
@@ -1158,7 +1169,7 @@ function PlatformTag({ platform }: { platform: "youtube" | "tiktok" }) {
 }
 
 type PlatformPatch = Partial<
-  Pick<VideoItem, "platforms" | "tiktokPrivacyLevel" | "tiktokBrandOrganicToggle" | "tiktokBrandContentToggle" | "platformResults">
+  Pick<VideoItem, "platforms" | "youtubePrivacyStatus" | "tiktokPrivacyLevel" | "tiktokBrandOrganicToggle" | "tiktokBrandContentToggle" | "platformResults">
 >;
 
 // Shared by ScheduleCard (single mode) and BulkVideoCard (bulk mode) so both
@@ -1169,6 +1180,7 @@ type PlatformPatch = Partial<
 function PlatformFields({
   platforms,
   platformResults,
+  youtubePrivacyStatus,
   tiktokPrivacyLevel,
   tiktokBrandOrganicToggle,
   tiktokBrandContentToggle,
@@ -1179,6 +1191,7 @@ function PlatformFields({
 }: {
   platforms: VideoItem["platforms"];
   platformResults: VideoItem["platformResults"];
+  youtubePrivacyStatus: VideoItem["youtubePrivacyStatus"];
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
@@ -1277,6 +1290,26 @@ function PlatformFields({
           <p className="mt-1 text-xs text-warning">Select at least one platform.</p>
         )}
       </div>
+
+      {hasYoutube && (
+        <div>
+          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+            Privacy
+            <PlatformTag platform="youtube" />
+          </label>
+          <select
+            value={youtubePrivacyStatus}
+            onChange={(e) => onChange({ youtubePrivacyStatus: e.target.value as VideoItem["youtubePrivacyStatus"] })}
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+          >
+            {(Object.keys(YOUTUBE_PRIVACY_LABELS) as Array<keyof typeof YOUTUBE_PRIVACY_LABELS>).map((opt) => (
+              <option key={opt} value={opt}>
+                {YOUTUBE_PRIVACY_LABELS[opt]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {hasTiktok && (
         <>
@@ -1395,6 +1428,7 @@ interface ScheduleCardProps {
   // Platform(s) + TikTok privacy/disclosure (lifted to page, patched generically)
   platforms: VideoItem["platforms"];
   platformResults: VideoItem["platformResults"];
+  youtubePrivacyStatus: VideoItem["youtubePrivacyStatus"];
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
@@ -1432,6 +1466,7 @@ function ScheduleCard({
   onTagsChange,
   platforms,
   platformResults,
+  youtubePrivacyStatus,
   tiktokPrivacyLevel,
   tiktokBrandOrganicToggle,
   tiktokBrandContentToggle,
@@ -1553,7 +1588,7 @@ function ScheduleCard({
               tags,
               scheduled_time,
               platform: p,
-              ...(p === "youtube" ? { format } : {}),
+              ...(p === "youtube" ? { format, youtube_privacy_status: youtubePrivacyStatus } : {}),
               ...(p === "tiktok"
                 ? {
                     tiktok_privacy_level: tiktokPrivacyLevel,
@@ -1635,6 +1670,7 @@ function ScheduleCard({
         <PlatformFields
           platforms={platforms}
           platformResults={platformResults}
+          youtubePrivacyStatus={youtubePrivacyStatus}
           tiktokPrivacyLevel={tiktokPrivacyLevel}
           tiktokBrandOrganicToggle={tiktokBrandOrganicToggle}
           tiktokBrandContentToggle={tiktokBrandContentToggle}
@@ -2546,6 +2582,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           <PlatformFields
             platforms={item.platforms}
             platformResults={item.platformResults}
+            youtubePrivacyStatus={item.youtubePrivacyStatus}
             tiktokPrivacyLevel={item.tiktokPrivacyLevel}
             tiktokBrandOrganicToggle={item.tiktokBrandOrganicToggle}
             tiktokBrandContentToggle={item.tiktokBrandContentToggle}
@@ -3202,7 +3239,7 @@ export default function SchedulerDashboardPage() {
               tags: it.tags,
               scheduled_time,
               platform: p,
-              ...(p === "youtube" ? { format: it.format } : {}),
+              ...(p === "youtube" ? { format: it.format, youtube_privacy_status: it.youtubePrivacyStatus } : {}),
               ...(p === "tiktok"
                 ? {
                     tiktok_privacy_level: it.tiktokPrivacyLevel,
@@ -3329,6 +3366,7 @@ export default function SchedulerDashboardPage() {
                 onTagsChange={handleItem0Tags}
                 platforms={item0.platforms}
                 platformResults={item0.platformResults}
+                youtubePrivacyStatus={item0.youtubePrivacyStatus}
                 tiktokPrivacyLevel={item0.tiktokPrivacyLevel}
                 tiktokBrandOrganicToggle={item0.tiktokBrandOrganicToggle}
                 tiktokBrandContentToggle={item0.tiktokBrandContentToggle}
