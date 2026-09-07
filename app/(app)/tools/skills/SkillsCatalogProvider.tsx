@@ -43,6 +43,12 @@ function withRecipes(list: Skill[]): CatalogSkill[] {
 }
 
 export function SkillsCatalogProvider({ children }: { children: ReactNode }) {
+  const parent = useContext(SkillsCatalogContext);
+  if (parent) return children;
+  return <SkillsCatalogProviderInner>{children}</SkillsCatalogProviderInner>;
+}
+
+function SkillsCatalogProviderInner({ children }: { children: ReactNode }) {
   const [skills, setSkills] = useState<CatalogSkill[]>(() => withRecipes(SKILLS));
   const [ready, setReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);

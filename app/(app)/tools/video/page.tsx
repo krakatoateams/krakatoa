@@ -825,7 +825,7 @@ function VideoOmniPage({
   return (
     <div className="min-h-screen text-text-primary selection:bg-white/20">
 
-      <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
+      <div className="relative z-10 mx-auto max-w-5xl px-6 pb-10 pt-6 md:py-10">
         <div className="mb-8">
           <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Video studio
@@ -1054,7 +1054,7 @@ function VideoOmniPage({
           </StudioModelPanel>
 
           {/* Generate (mobile — below the form card) */}
-          <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <div className="flex flex-col gap-3 lg:hidden">
             <DevBlankTestToggle
               isAdmin={isAdmin}
               enabled={devBlank}
@@ -1758,7 +1758,7 @@ function ViralTemplateComposer({
           </div>
         </StudioModelPanel>
 
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}
@@ -2363,7 +2363,7 @@ function ImageToVideoComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}
@@ -2922,7 +2922,7 @@ function MotionControlComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}
@@ -3906,7 +3906,7 @@ function StoryboardToVideoComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}
@@ -4699,7 +4699,7 @@ function ReelsCreatorComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}

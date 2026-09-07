@@ -31,17 +31,12 @@ function SkillsCatalogBody() {
 
   return (
     <>
-      <div className="mb-10 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
+      <div className="mb-10">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h1 className="min-w-0 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Skills
           </h1>
-          <p className="max-w-xl text-body-3 text-text-secondary">
-            Pick a recipe to generate from the Agent form. Skills you add stay on your
-            account under Your skills.
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {isAdmin ? (
             <button
               type="button"
@@ -59,7 +54,12 @@ function SkillsCatalogBody() {
             <Plus className="h-4 w-4" />
             Add skill
           </button>
+          </div>
         </div>
+        <p className="max-w-xl text-body-3 text-text-secondary">
+          Pick a recipe to generate from the Agent form. Skills you add stay on your
+          account under Your skills.
+        </p>
       </div>
 
       <SkillsGrid

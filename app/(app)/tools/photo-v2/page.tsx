@@ -82,6 +82,7 @@ import {
   StudioForm,
   StudioFormCard,
   StudioFormHeader,
+  StudioModelPanel,
   StudioGenerationPreviewProvider,
   UploadTile,
   CharacterTile,
@@ -332,7 +333,7 @@ function StoryboardComposer({
         </StudioFormHeader>
 
         {/* Theme tile — above the form card on mobile only */}
-        <div className="mb-3 flex items-stretch gap-3 lg:hidden">
+        <div className="flex items-stretch gap-3 lg:hidden">
           <UploadTile label="Theme" upload={themeReference} disabled={loading} fluid />
         </div>
 
@@ -428,7 +429,7 @@ function StoryboardComposer({
         </StudioFormCard>
 
         {/* Generate (mobile — full-width, below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}
@@ -981,7 +982,7 @@ function PhotoOmniPage({
   return (
     <div className="min-h-screen text-text-primary selection:bg-white/20">
 
-      <div className="relative z-10 mx-auto max-w-5xl px-6 py-10">
+      <div className="relative z-10 mx-auto max-w-5xl px-6 pb-10 pt-6 md:py-10">
         <div className="mb-8">
           <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
             Photo studio
@@ -1063,7 +1064,7 @@ function PhotoOmniPage({
 
           {/* Upload tiles — above the form card on mobile only */}
           {(requiresProduct || allowReferenceUpload) && (
-            <div className="mb-3 flex items-stretch gap-3 lg:hidden">
+            <div className="flex items-stretch gap-3 lg:hidden">
               {requiresProduct && (
                 <>
                   <UploadTile label="Product" upload={product} disabled={loading} fluid />
@@ -1327,8 +1328,7 @@ function PhotoOmniPage({
             </div>
           </StudioFormCard>
 
-          {/* Model selector — attached under the form card on mobile only */}
-          <div className="-mt-3 mb-6 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden">
+          <StudioModelPanel>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-text-disabled">Model</span>
               <ChipDropdown
@@ -1348,10 +1348,10 @@ function PhotoOmniPage({
                 disabled={loading}
               />
             </div>
-          </div>
+          </StudioModelPanel>
 
           {/* Generate (mobile — full-width, below the form card) */}
-          <div className="mt-3 flex flex-col gap-3 lg:hidden">
+          <div className="flex flex-col gap-3 lg:hidden">
             {isAdmin ? (
               <DevBlankTestToggle
                 isAdmin={isAdmin}

@@ -76,18 +76,24 @@ export function UploadTile({
       disabled={disabled}
       className={`group relative flex overflow-hidden font-semibold normal-case tracking-wide transition-colors ${
         fluid
-          ? "h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-radius-xl text-xs"
+          ? upload.preview
+            ? "h-16 w-20 shrink-0 rounded-radius-sm bg-white/5"
+            : "h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-radius-xl text-xs bg-white/5 text-text-secondary hover:bg-white/10 hover:text-N900"
           : iconOnly
             ? upload.preview
               ? "h-16 w-16 shrink-0 items-center justify-center rounded-radius-xl"
-              : "h-10 w-10 shrink-0 items-center justify-center rounded-[10px]"
-            : "h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm p-2 text-xs"
-      } ${
-        upload.preview
-          ? ""
-          : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-N900"
+              : "h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-white/5 text-text-secondary hover:bg-white/10 hover:text-N900"
+            : upload.preview
+              ? "h-16 w-20 shrink-0 rounded-radius-sm bg-white/5"
+              : "h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm p-2 text-xs bg-white/5 text-text-secondary hover:bg-white/10 hover:text-N900"
       }`}
-      title={upload.preview ? `Change ${label.toLowerCase()} image` : `Add ${label.toLowerCase()} image`}
+      title={
+        upload.preview
+          ? `Change ${label.replace(/^add /i, "").toLowerCase()} image`
+          : /^add /i.test(label)
+            ? label
+            : `Add ${label.toLowerCase()} image`
+      }
     >
       {upload.preview ? (
         <>
@@ -192,9 +198,7 @@ export function CharacterTile({
   if (preview) {
     return (
       <div
-        className={`relative h-16 ${
-          fluid ? "w-full flex-1 rounded-radius-xl" : "w-20 shrink-0 rounded-radius-sm"
-        } overflow-hidden`}
+        className="relative h-16 w-20 shrink-0 overflow-hidden rounded-radius-sm"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={preview} alt="Character" className="absolute inset-0 h-full w-full object-cover" />

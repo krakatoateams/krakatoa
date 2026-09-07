@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, startTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -66,7 +66,8 @@ import FeaturedSkillsRow from "./FeaturedSkillsRow";
 import SkillPicker from "./SkillPicker";
 import { SkillsCatalogProvider, useSkillsCatalog } from "./SkillsCatalogProvider";
 
-const AGENT_PLACEHOLDER = "Share your idea with me, or pick a skill to get started quickly.";
+const AGENT_PLACEHOLDER = "Pick a skill to get started.";
+const SKILL_PROMPT_FALLBACK = "Describe what you want to create.";
 
 function describeIdempotencyError(
   status: number,
@@ -109,6 +110,7 @@ function SkillOmniInner({
     skillFromUrl && isAgentSkill(skillFromUrl) ? skillFromUrl.id : null
   );
   const skill = skillId ? skillById(skillId) : undefined;
+  const ignoreUrlSkillRef = useRef<string | null>(null);
 
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -118,21 +120,40 @@ function SkillOmniInner({
     (id: SkillId) => {
       const next = skillById(id);
       if (!next || !isAgentSkill(next)) return;
-      setSkillId(id);
       setError(null);
+      if (skillId === id) {
+        ignoreUrlSkillRef.current = id;
+        setSkillId(null);
+        startTransition(() => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("skill");
+          const qs = params.toString();
+          router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
+        });
+        return;
+      }
+      ignoreUrlSkillRef.current = null;
+      setSkillId(id);
       startTransition(() => {
         router.replace(skillHref(id), { scroll: false });
       });
     },
-    [router, skillById]
+    [router, searchParams, skillById, skillId]
   );
 
   useEffect(() => {
     const next = searchParams.get("skill");
+    if (ignoreUrlSkillRef.current) {
+      if (next === ignoreUrlSkillRef.current) return;
+      ignoreUrlSkillRef.current = null;
+    }
     const fromUrl = next ? skillById(next) : undefined;
-    if (fromUrl && isAgentSkill(fromUrl) && fromUrl.id !== skillId) setSkillId(fromUrl.id);
-    else if (skillId && !skillById(skillId)) setSkillId(null);
-  }, [searchParams, skillId, skillById]);
+    if (fromUrl && isAgentSkill(fromUrl)) {
+      setSkillId(fromUrl.id);
+      return;
+    }
+    setSkillId(null);
+  }, [searchParams, skillById]);
 
   const subject = useImageUpload();
   const scene = useImageUpload();
@@ -145,12 +166,14 @@ function SkillOmniInner({
   const needsSubject = !!skill?.inputs.some((slot) => slot.key === "subject" && slot.required);
   const needsScene = !!skill?.inputs.some((slot) => slot.key === "scene" && slot.required);
   const needsStartFrame = !!skill?.inputs.some((slot) => slot.key === "startFrame" && slot.required);
-  const showSubjectTile = !skill || (!isVideo && hasSlot("subject"));
+  const showSubjectTile = Boolean(skill) && !isVideo && hasSlot("subject");
   const showStartFrame = isVideo && hasSlot("startFrame");
   const showScene = hasSlot("scene");
   const showCharacter = hasSlot("character");
   const subjectLabel =
     skill?.inputs.find((slot) => slot.key === "subject")?.label ?? "Ref";
+  const mobileSubjectLabel =
+    subjectLabel === "Ref" ? "Add reference" : subjectLabel;
   const startFrameLabel =
     skill?.inputs.find((slot) => slot.key === "startFrame")?.label ?? "Start frame";
 
@@ -399,6 +422,16 @@ function SkillOmniInner({
           onChange={character.onChange}
         />
 
+        {embed ? (
+          <StudioFormHeader className="w-full min-w-0 !flex-nowrap lg:hidden">
+            <FeaturedSkillsRow
+              activeSkillId={skillId}
+              onSelectSkill={selectSkill}
+              className="min-w-0 flex-1"
+            />
+          </StudioFormHeader>
+        ) : null}
+
         {!isVideo && skill ? (
           <StudioFormHeader className="hidden lg:flex">
             <ChipDropdown
@@ -414,10 +447,10 @@ function SkillOmniInner({
         ) : null}
 
             {showUploads && (
-              <div className="mb-3 flex items-stretch gap-3 lg:hidden">
+              <div className="flex items-stretch gap-3 lg:hidden">
                 {showSubjectTile && (
                   <UploadTile
-                    label={subjectLabel}
+                    label={mobileSubjectLabel}
                     upload={subject}
                     disabled={loading}
                     fluid
@@ -436,6 +469,7 @@ function SkillOmniInner({
                     group={startFrame}
                     disabled={loading}
                     bare
+                    fluid
                   />
                 )}
               </div>
@@ -472,7 +506,11 @@ function SkillOmniInner({
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={loading}
                 rows={3}
-                placeholder={skill?.promptPlaceholder ?? AGENT_PLACEHOLDER}
+                placeholder={
+                  skill
+                    ? skill.promptPlaceholder || SKILL_PROMPT_FALLBACK
+                    : AGENT_PLACEHOLDER
+                }
                 className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
               />
             </div>
@@ -629,7 +667,7 @@ function SkillOmniInner({
           </StudioModelPanel>
         ) : null}
 
-            <div className="mt-3 flex items-center gap-3 lg:hidden">
+            <div className="flex items-center gap-3 lg:hidden">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -650,6 +688,7 @@ function SkillOmniInner({
           <FeaturedSkillsRow
             activeSkillId={skillId}
             onSelectSkill={selectSkill}
+            className="mt-4 hidden lg:flex"
           />
         ) : null}
       </StudioForm>

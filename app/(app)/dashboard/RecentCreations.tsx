@@ -1,8 +1,12 @@
 "use client";
 
 import CreationsHistory from "@/components/CreationsHistory";
+import { useDesktopMedia } from "@/lib/use-desktop-media";
 
 export default function RecentCreations() {
+  const desktop = useDesktopMedia();
+  if (!desktop) return null;
+
   return (
     <section className="mb-16">
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">

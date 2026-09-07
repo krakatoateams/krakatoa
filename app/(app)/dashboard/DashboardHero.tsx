@@ -17,7 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Grainient from "@/components/Grainient";
-import { SkillsCatalogProvider, useSkillsCatalog } from "@/app/(app)/tools/skills/SkillsCatalogProvider";
+import { useSkillsCatalog } from "@/app/(app)/tools/skills/SkillsCatalogProvider";
 
 /** Scrolling feature ticker items. */
 const TICKER: { icon: LucideIcon; text: string }[] = [
@@ -304,8 +304,7 @@ function HeroPanel({
 
 export default function DashboardHero() {
   return (
-    <SkillsCatalogProvider>
-    <section className="mb-16 hidden md:block">
+    <section className="mb-16">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <HeroPanel colors={["#FF995A", "#F26522", "#B24610"]}>
           <h2 className="font-display text-balance text-2xl font-bold tracking-tight text-N900 sm:text-3xl">
@@ -452,6 +451,5 @@ export default function DashboardHero() {
         }
       `}</style>
     </section>
-    </SkillsCatalogProvider>
   );
 }
