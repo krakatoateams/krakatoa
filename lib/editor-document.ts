@@ -339,8 +339,20 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
       EDITOR_MAX_DURATION_SEC
     )
   );
-  const sequence = parsedClips.map(({ packed: _packed, ...clip }) =>
-    clampClipToComposition(clip, durationSec)
+  const sequence = parsedClips.map((clip) =>
+    clampClipToComposition(
+      {
+        id: clip.id,
+        creationId: clip.creationId,
+        storagePath: clip.storagePath,
+        startSec: clip.startSec,
+        endSec: clip.endSec,
+        inSec: clip.inSec,
+        sourceDurationSec: clip.sourceDurationSec,
+        order: clip.order,
+      },
+      durationSec
+    )
   );
   return {
     v: EDITOR_DOCUMENT_VERSION,

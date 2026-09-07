@@ -7,7 +7,6 @@ import {
   getBezierPath,
   useReactFlow,
   useStore,
-  MarkerType,
   type EdgeProps,
 } from "@xyflow/react";
 import { X } from "lucide-react";
@@ -54,6 +53,8 @@ export default function CanvasEdge({
   const gradientId = `kk-wire-${id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const hotAtTarget = link === "in";
 
+  const markerId = `${gradientId}-end`;
+
   return (
     <>
       {active && (
@@ -70,6 +71,17 @@ export default function CanvasEdge({
             <stop offset="52%" stopColor="#FF7B33" />
             <stop offset="100%" stopColor={hotAtTarget ? "#F26522" : "#FFBC8D"} />
           </linearGradient>
+          <marker
+            id={markerId}
+            markerWidth="16"
+            markerHeight="16"
+            viewBox="0 0 16 16"
+            orient="auto"
+            refX="14"
+            refY="8"
+          >
+            <path d="M0 1 L15 8 L0 15 z" fill={hotAtTarget ? "#F26522" : "#FF7B33"} />
+          </marker>
         </defs>
       )}
       {active && (
@@ -84,16 +96,7 @@ export default function CanvasEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        markerEnd={
-          active
-            ? {
-                type: MarkerType.ArrowClosed,
-                width: 16,
-                height: 16,
-                color: hotAtTarget ? "#F26522" : "#FF7B33",
-              }
-            : markerEnd
-        }
+        markerEnd={active ? `url(#${markerId})` : markerEnd}
         interactionWidth={28}
         style={{
           ...style,

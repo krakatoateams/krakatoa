@@ -80,7 +80,7 @@ export function SkillsCatalogProvider({ children }: { children: ReactNode }) {
         return found;
       },
       featured: FEATURED_SKILL_IDS.map((id) => byId.get(id)).filter(
-        (s): s is CatalogSkill => Boolean(s) && !s.hidden
+        (s): s is CatalogSkill => s != null && !s.hidden
       ),
     };
   }, [skills, ready, isAdmin, refresh]);
@@ -104,7 +104,7 @@ export function useSkillsCatalog(): SkillsCatalogValue {
     refresh: async () => {},
     skillById: (id: string) => byId.get(id as SkillId),
     featured: FEATURED_SKILL_IDS.map((id) => byId.get(id)).filter(
-      (s): s is CatalogSkill => Boolean(s) && !s.hidden
+      (s): s is CatalogSkill => s != null && !s.hidden
     ),
   };
 }
