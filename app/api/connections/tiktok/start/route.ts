@@ -29,6 +29,13 @@ export async function GET(request: NextRequest) {
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
+  // Always show TikTok's account-picker + consent screen, even if the
+  // browser has a still-valid TikTok session — without this, TikTok may
+  // silently reauthorize whatever account is currently logged in on
+  // tiktok.com, which is wrong for creators/agencies juggling multiple
+  // TikTok accounts. Only affects this explicit connect/reconnect flow, not
+  // background token refresh (refreshAccessToken never goes through here).
+  authUrl.searchParams.set("disable_auto_auth", "1");
 
   const response = NextResponse.redirect(authUrl.toString());
   const cookieOpts = {
