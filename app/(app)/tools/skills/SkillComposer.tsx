@@ -44,6 +44,7 @@ import {
   PHOTO_ASPECT_RATIOS,
   PRODUCT_PHOTO_TIERS,
   getProductPhotoTier,
+  isValidProductPhotoTier,
   tierSupportsMultiReference,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
@@ -53,9 +54,20 @@ import {
   DEFAULT_VIDEO_MODEL_ID,
   getAllowedDurations,
   getVideoModel,
+  IMAGE_TO_VIDEO_MODELS,
+  TEXT_TO_VIDEO_MODELS,
+  isValidVideoModelId,
   type VideoAspectRatio,
+  type VideoModelId,
   type VideoResolution,
 } from "@/lib/video-models";
+import {
+  filterEnabledCatalog,
+  mapVideoComposerEnablement,
+  snapToEnabledModel,
+  type VideoComposerEnablement,
+  type VideoComposerKey,
+} from "@/lib/video-composer-features";
 import {
   isAgentSkill,
   skillHref,
@@ -96,13 +108,13 @@ function SkillOmniInner({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { imageCredits, videoCredits } = usePricing();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openPreviewFromResponse } = useStudioGenerationPreview();
   const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
-  const { imageCredits, videoCredits } = usePricing();
 
   const { skillById } = useSkillsCatalog();
   const skillFromUrl = skillById(searchParams.get("skill") ?? "");
@@ -188,6 +200,10 @@ function SkillOmniInner({
     photoTiers.find((t) => t.id === DEFAULT_PRODUCT_PHOTO_TIER)?.id ??
     photoTiers[0]?.id ??
     DEFAULT_PRODUCT_PHOTO_TIER;
+  const designatedPhotoTier =
+    !isVideo && skill?.modelId && isValidProductPhotoTier(skill.modelId)
+      ? photoTiers.find((t) => t.id === skill.modelId)
+      : undefined;
 
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(defaultPhotoTier);
   const [resolution, setResolution] = useState<ProductPhotoResolution>(
@@ -197,10 +213,14 @@ function SkillOmniInner({
 
   const tier = getProductPhotoTier(modelTier);
   useEffect(() => {
+    if (designatedPhotoTier) {
+      if (modelTier !== designatedPhotoTier.id) setModelTier(designatedPhotoTier.id);
+      return;
+    }
     if (!photoTiers.some((t) => t.id === modelTier) && photoTiers[0]) {
       setModelTier(photoTiers[0].id);
     }
-  }, [modelTier, photoTiers]);
+  }, [designatedPhotoTier, modelTier, photoTiers]);
 
   useEffect(() => {
     if (!tier.hasResolution) return;
@@ -209,7 +229,73 @@ function SkillOmniInner({
     }
   }, [tier, resolution]);
 
-  const videoModel = getVideoModel(DEFAULT_VIDEO_MODEL_ID);
+  const [composerEnablement, setComposerEnablement] = useState<Record<
+    VideoComposerKey,
+    VideoComposerEnablement
+  > | null>(null);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let active = true;
+    fetch("/api/tools/video/features")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data?.composers) return;
+        const raw = {} as Record<
+          VideoComposerKey,
+          { enabledTiers: string[]; defaultTier: string }
+        >;
+        for (const c of data.composers) {
+          if (c.key) {
+            raw[c.key as VideoComposerKey] = {
+              enabledTiers: c.enabledModelIds ?? [],
+              defaultTier: c.defaultModelId ?? "",
+            };
+          }
+        }
+        setComposerEnablement(mapVideoComposerEnablement(raw));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
+  const useImageToVideo = startFrame.done.length > 0;
+  const videoComposerKey: VideoComposerKey = useImageToVideo ? "image2video" : "text2video";
+  const videoCatalog = useImageToVideo ? IMAGE_TO_VIDEO_MODELS : TEXT_TO_VIDEO_MODELS;
+  const enabledVideoModels = filterEnabledCatalog(
+    videoCatalog,
+    videoComposerKey,
+    composerEnablement
+  );
+
+  const [videoModelId, setVideoModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
+  const videoModel = getVideoModel(videoModelId);
+
+  useEffect(() => {
+    if (enabledVideoModels.length === 0) return;
+    const designated =
+      skill?.modelId && isValidVideoModelId(skill.modelId)
+        ? enabledVideoModels.find((m) => m.id === skill.modelId)
+        : undefined;
+    const next = designated
+      ? designated.id
+      : (snapToEnabledModel(
+          videoModelId,
+          enabledVideoModels,
+          videoComposerKey,
+          composerEnablement
+        ) as VideoModelId);
+    if (next !== videoModelId) setVideoModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    enabledVideoModels.map((m) => m.id).join(","),
+    composerEnablement,
+    videoComposerKey,
+    skill?.modelId,
+  ]);
+
   const [duration, setDuration] = useState(videoModel.defaultDuration);
   const [videoResolution, setVideoResolution] = useState<VideoResolution>(
     videoModel.defaultResolution
@@ -222,6 +308,18 @@ function SkillOmniInner({
       setDuration(allowedDurations[0]);
     }
   }, [allowedDurations, duration]);
+
+  useEffect(() => {
+    if (!videoModel.resolutions.includes(videoResolution) && videoModel.resolutions[0]) {
+      setVideoResolution(videoModel.resolutions[0]);
+    }
+  }, [videoModel, videoResolution]);
+
+  useEffect(() => {
+    if (!videoModel.aspectRatios.includes(videoAspect) && videoModel.aspectRatios[0]) {
+      setVideoAspect(videoModel.aspectRatios[0]);
+    }
+  }, [videoModel, videoAspect]);
 
   const photoPricingKey = tier.hasResolution
     ? tier.resolutions.find((r) => r.id === resolution)?.pricingKey ??
@@ -287,6 +385,11 @@ function SkillOmniInner({
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
+          if (response.status === 401) {
+            openSignInModal();
+            attempt.settle(false);
+            return;
+          }
           if (data.code === "GENERATION_CANCELLED") {
             attempt.settle(false);
             refetchCredits();
@@ -441,7 +544,7 @@ function SkillOmniInner({
               activeId={modelTier}
               options={photoModelOptions}
               onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
-              disabled={loading}
+              disabled={loading || Boolean(designatedPhotoTier)}
             />
           </StudioFormHeader>
         ) : null}
@@ -661,7 +764,7 @@ function SkillOmniInner({
                 activeId={modelTier}
                 options={photoModelOptions}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
-                disabled={loading}
+                disabled={loading || Boolean(designatedPhotoTier)}
               />
             </div>
           </StudioModelPanel>

@@ -4,7 +4,6 @@
  */
 
 export const NAV_LINKS = [
-  { label: "Features", href: "#features" },
   { label: "Pricing", href: "#pricing" },
   { label: "Testimonials", href: "#testimonials" },
 ];
@@ -103,7 +102,7 @@ export const ABOUT = {
   /** Rendered one per line on desktop, joined with spaces on mobile. */
   headingLines: ["AI video and images,", "from prompt to", "post in minutes."],
   body: "Generate faceless reels, cinematic clips, and studio-grade product photos with one AI suite, scripted, generated, captioned, and ready to publish.",
-  cta: { label: "Explore our tools", href: "#features" },
+  cta: { label: "Explore our tools", href: "/dashboard" },
   manifesto:
     "We don't just generate content, we help brands realize their voice at scale.",
   byline: "Kelolako team · est. 2026",

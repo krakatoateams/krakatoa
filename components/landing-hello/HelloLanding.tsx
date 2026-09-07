@@ -3,7 +3,6 @@
 import { HelloHero } from "./HelloHero";
 import { HelloStatement } from "./HelloStatement";
 import { HelloAbout } from "./HelloAbout";
-import { HelloFeatures } from "./HelloFeatures";
 import { HelloPricing } from "./HelloPricing";
 import { HelloTestimonials } from "./HelloTestimonials";
 import { HelloFooter } from "./HelloFooter";
@@ -18,7 +17,6 @@ export function HelloLanding() {
       <HelloHero />
       <HelloStatement />
       <HelloAbout />
-      <HelloFeatures />
       <HelloPricing />
       <HelloTestimonials />
       <HelloFooter />

@@ -6,6 +6,7 @@ import {
   listCatalogSkills,
   parseSkillInputs,
   upsertSkillConfig,
+  parseSkillModelId,
   type SkillConfigPatch,
 } from "@/lib/skill-configs-db";
 import {
@@ -156,6 +157,17 @@ export async function PATCH(
       if (existing.origin === "custom" && !("mediaType" in patch)) {
         patch.mediaType = nextMediaType;
       }
+    }
+
+    if ("modelId" in body) {
+      const parsed = parseSkillModelId(body.modelId, nextMediaType);
+      if ("error" in parsed) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      patch.modelId = parsed.modelId;
+    } else if ("mediaType" in patch && existing.modelId) {
+      const parsed = parseSkillModelId(existing.modelId, nextMediaType);
+      if ("error" in parsed) patch.modelId = null;
     }
 
     if (Object.keys(patch).length === 0) {

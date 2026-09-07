@@ -16,6 +16,12 @@ import {
   type SkillInputSlot,
   type SkillMediaType,
 } from "@/lib/skills";
+import { PRODUCT_PHOTO_TIERS } from "@/lib/product-photo";
+import {
+  VIDEO_MODELS,
+  isImageToVideoModel,
+  isTextToVideoModel,
+} from "@/lib/video-models";
 import type { CatalogSkill } from "./SkillsCatalogProvider";
 
 export type SkillEditorKind = "user" | "master";
@@ -57,6 +63,18 @@ function emptyStates(mediaType: SkillMediaType, inputs: SkillInputSlot[]): Recor
   };
 }
 
+function designatedModelOptions(mediaType: SkillMediaType): { id: string; label: string }[] {
+  if (mediaType === "image") {
+    return PRODUCT_PHOTO_TIERS.map((t) => ({ id: t.id, label: t.modelLabel }));
+  }
+  return VIDEO_MODELS.map((m) => {
+    const t2v = isTextToVideoModel(m);
+    const i2v = isImageToVideoModel(m);
+    const suffix = t2v && i2v ? "" : i2v ? " · start frame" : " · text to video";
+    return { id: m.id, label: `${m.modelLabel}${suffix}` };
+  });
+}
+
 export function SkillModifyPanel({
   skill,
   kind,
@@ -84,6 +102,7 @@ export function SkillModifyPanel({
   const [badgeNew, setBadgeNew] = useState(skill?.badge === "new");
   const [promptRequired, setPromptRequired] = useState(skill?.promptRequired ?? true);
   const [mediaType, setMediaType] = useState<SkillMediaType>(skill?.mediaType ?? "image");
+  const [modelId, setModelId] = useState(skill?.modelId ?? "");
   const [slots, setSlots] = useState<Record<SkillInputKey, SlotState>>(() =>
     emptyStates(skill?.mediaType ?? "image", skill?.inputs ?? defaultSkillInputs("image"))
   );
@@ -118,6 +137,7 @@ export function SkillModifyPanel({
   const setMedia = (next: SkillMediaType) => {
     setMediaType(next);
     setSlots(emptyStates(next, defaultSkillInputs(next)));
+    setModelId("");
   };
 
   const payload = () => {
@@ -133,6 +153,7 @@ export function SkillModifyPanel({
     if (!isUser) {
       body.category = category;
       body.badge = badgeNew ? "new" : null;
+      body.modelId = modelId.trim() || null;
     }
     return body;
   };
@@ -363,6 +384,31 @@ export function SkillModifyPanel({
               ))}
             </div>
           </div>
+
+          {isUser ? null : (
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-text-disabled">
+              Designated model
+            </span>
+            <p className="mb-2 text-xs text-text-secondary">
+              Pinned for everyone who uses this skill. Leave as catalog default to follow the live
+              Photo or Video default. The model must be enabled in Admin Config or generate falls
+              back.
+            </p>
+            <select
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-N900 outline-none focus:border-white/25"
+            >
+              <option value="">Catalog default</option>
+              {designatedModelOptions(mediaType).map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          )}
 
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled">
