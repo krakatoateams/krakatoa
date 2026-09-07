@@ -22,9 +22,9 @@ const FIELD_TEXT =
   "whitespace-pre-wrap break-words px-3 py-2 text-sm leading-5";
 
 function highlightMentions(text: string, labels: string[]): ReactNode {
-  const names = [...new Set(labels.map((label) => label.trim()).filter(Boolean))].sort(
-    (a, b) => b.length - a.length
-  );
+  const names = Array.from(
+    new Set(labels.map((label) => label.trim()).filter(Boolean))
+  ).sort((a, b) => b.length - a.length);
   const nodes: ReactNode[] = [];
   if (!names.length || !text.includes("@")) {
     nodes.push(text);

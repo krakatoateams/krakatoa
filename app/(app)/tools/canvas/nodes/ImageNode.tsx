@@ -158,7 +158,7 @@ export default function ImageNode({
     if (refImages.length > 0) {
       try {
         const frames = await resolveCanvasRefFrames(refImages);
-        for (const [index, frame] of frames.entries()) {
+        for (const [index, frame] of Array.from(frames.entries())) {
           const file = await blobFileFromUrl(frame.url, `reference-${index + 1}.jpg`);
           formData.append("reference", file);
         }
