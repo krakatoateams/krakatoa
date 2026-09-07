@@ -74,6 +74,9 @@ export async function POST(req: NextRequest) {
       tiktok_privacy_level,
       tiktok_brand_organic_toggle,
       tiktok_brand_content_toggle,
+      tiktok_disable_comment,
+      tiktok_disable_duet,
+      tiktok_disable_stitch,
       youtube_privacy_status,
     } = body as {
       video_url?: string;
@@ -90,6 +93,9 @@ export async function POST(req: NextRequest) {
       tiktok_privacy_level?: string;
       tiktok_brand_organic_toggle?: boolean;
       tiktok_brand_content_toggle?: boolean;
+      tiktok_disable_comment?: boolean;
+      tiktok_disable_duet?: boolean;
+      tiktok_disable_stitch?: boolean;
       youtube_privacy_status?: string;
     };
 
@@ -325,6 +331,14 @@ export async function POST(req: NextRequest) {
       insertRow.tiktok_privacy_level = tiktok_privacy_level;
       insertRow.tiktok_brand_organic_toggle = Boolean(tiktok_brand_organic_toggle);
       insertRow.tiktok_brand_content_toggle = Boolean(tiktok_brand_content_toggle);
+      insertRow.tiktok_disable_comment = Boolean(tiktok_disable_comment);
+      // Duet/Stitch are not a photo-post concept at all — derived
+      // server-side rather than trusted from the client, alongside the
+      // client never rendering those controls for a photo post and
+      // lib/tiktok.ts's initPhotoPost hardcoding them too. Three independent
+      // layers agreeing beats one implicit default.
+      insertRow.tiktok_disable_duet = hasPhotoUrls ? true : Boolean(tiktok_disable_duet);
+      insertRow.tiktok_disable_stitch = hasPhotoUrls ? true : Boolean(tiktok_disable_stitch);
       if (hasPhotoUrls) insertRow.photo_urls = photo_urls;
     }
     // Instagram has no privacy-level/disclosure-toggle equivalent — just the

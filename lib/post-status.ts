@@ -1,10 +1,14 @@
 // Derived display status for scheduled posts.
 //
 // The stored `status` column only knows draft/scheduled/published/failed. The UI
-// wants two extra *derived* states so a past-due post doesn't look stuck or get
+// wants three extra *derived* states so a past-due post doesn't look stuck or get
 // mistaken for a failure:
 //   - "publishing": the cron has claimed it (publish_started_at is recent) and is
 //                   uploading right now.
+//   - "retrying":   the cron already attempted it and is intentionally waiting
+//                   before trying again (TikTok's daily-cap auto-retry, or
+//                   Instagram's IN_PROGRESS poll) — distinct from "overdue",
+//                   which means the cron hasn't looked at it at all yet.
 //   - "overdue":    its scheduled time has passed but the cron hasn't claimed it
 //                   yet (the next tick will pick it up).
 //
@@ -14,6 +18,7 @@ export type PostDisplayStatus =
   | "draft"
   | "scheduled"
   | "overdue"
+  | "retrying"
   | "publishing"
   | "published"
   | "failed"
@@ -23,6 +28,7 @@ export interface PostStatusInput {
   status: "draft" | "scheduled" | "published" | "failed" | "canceled";
   scheduled_time: string;
   publish_started_at?: string | null;
+  last_error?: string | null;
 }
 
 // A claim older than this is treated as abandoned, so the post reads as "overdue"
@@ -47,7 +53,9 @@ export function derivePostDisplayStatus(
   }
 
   const dueAt = new Date(post.scheduled_time).getTime();
-  if (Number.isFinite(dueAt) && dueAt <= now) return "overdue";
+  if (Number.isFinite(dueAt) && dueAt <= now) {
+    return post.last_error ? "retrying" : "overdue";
+  }
 
   return "scheduled";
 }

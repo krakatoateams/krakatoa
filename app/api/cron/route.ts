@@ -9,7 +9,9 @@ import {
   waitForTikTokPublishOutcome,
   getCreatorInfo,
   buildTikTokShareUrl,
+  TikTokCreatorInfoError,
 } from "@/lib/tiktok";
+import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
 import {
   ensureInstagramCompatibleImage,
   createMediaContainer,
@@ -48,6 +50,21 @@ const MAX_PUBLISH_ATTEMPTS = 3;
 // user at 10 minutes).
 const INSTAGRAM_GIVE_UP_MS = 10 * 60 * 1000;
 
+// TikTok's spam_risk_too_many_posts ("daily post cap reached") is explicitly
+// a rolling daily cap, not a permanent block — and Kelolako's own core use
+// case (scheduling many reels/day) makes hitting it a plausible routine
+// occurrence, not a rare edge case. So it gets its own bounded wall-clock
+// auto-retry (mirroring INSTAGRAM_GIVE_UP_MS's pattern) instead of the
+// immediate-fail treatment used for a genuine account ban.
+const TIKTOK_RATE_LIMIT_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+// Backoff between re-checks while auto-retrying a rate-limited post. Without
+// this, the post would keep the oldest scheduled_time of anything due and
+// win the shared MAX_POSTS_PER_RUN = 1 slot on every ~1-minute cron tick for
+// up to 24 hours, starving every other user's due post. 15 minutes keeps
+// re-checks comfortably granular (~96 over 24h) while cutting both that
+// starvation risk and the load on TikTok's creator_info endpoint by ~15x.
+const TIKTOK_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000;
+
 /**
  * Classify an upload failure. Permanent failures will not self-heal on retry and
  * may waste scarce YouTube quota, so they are marked failed immediately.
@@ -76,8 +93,19 @@ function isPermanentFailure(err: unknown, message: string): boolean {
  * overlap with Google's): auth/scope/reconnect problems and the SELF_ONLY +
  * branded-content conflict are permanent (retrying wastes an attempt on
  * something that cannot self-heal); everything else is treated as transient.
+ *
+ * A TikTokCreatorInfoError for spam_risk_user_banned_from_posting (genuine
+ * account ban, no time dimension in TikTok's own docs) is permanent too —
+ * but its sibling spam_risk_too_many_posts (daily post cap) is NOT handled
+ * here at all: that one gets its own bounded wall-clock auto-retry inside
+ * the TikTok branch above, before this function ever runs, since a routine
+ * daily cap for a high-volume scheduler shouldn't cost the user a manual
+ * retry every time.
  */
-function isTikTokPermanentFailure(_err: unknown, message: string): boolean {
+function isTikTokPermanentFailure(err: unknown, message: string): boolean {
+  if (err instanceof TikTokCreatorInfoError && err.code === "spam_risk_user_banned_from_posting") {
+    return true;
+  }
   const m = message.toLowerCase();
   if (/re-?authori|refresh token|reconnect|token for user|token request failed/.test(m)) {
     return true;
@@ -168,6 +196,11 @@ export async function GET(req: NextRequest) {
     .select("*")
     .eq("status", "scheduled")
     .lte("scheduled_time", now)
+    // A post currently backing off a TikTok daily-cap hit steps out of the
+    // way here so it can't win this shared MAX_POSTS_PER_RUN = 1 slot on
+    // every tick for up to 24 hours — a no-op for every row that isn't
+    // currently backed off (the column is null for everything else).
+    .or(`tiktok_rate_limit_retry_after.is.null,tiktok_rate_limit_retry_after.lte.${now}`)
     .order("scheduled_time", { ascending: true })
     .limit(MAX_POSTS_PER_RUN);
 
@@ -207,7 +240,7 @@ export async function GET(req: NextRequest) {
       .eq("id", post.id)
       .eq("status", "scheduled")
       .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
-      .select("id, youtube_video_id, tiktok_publish_id, instagram_container_id, instagram_media_id, instagram_first_attempted_at")
+      .select("id, youtube_video_id, tiktok_publish_id, tiktok_rate_limited_first_attempted_at, instagram_container_id, instagram_media_id, instagram_first_attempted_at")
       .maybeSingle();
 
     if (claimErr) {
@@ -370,27 +403,83 @@ export async function GET(req: NextRequest) {
             `[cron] Calling ${isPhotoPost ? "publishPhotoToTikTok" : "publishToTikTok"} for post ${post.id}`,
           );
 
-          publishId = isPhotoPost
-            ? await publishPhotoToTikTok({
-                accessToken: refreshed.accessToken,
-                photoUrls: post.photo_urls,
-                title: post.title,
-                description: post.description ?? "",
-                privacyLevel: post.tiktok_privacy_level,
-                brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
-                brandContentToggle: !!post.tiktok_brand_content_toggle,
-                origin: resolveOrigin(req),
-              })
-            : await publishToTikTok({
-                accessToken: refreshed.accessToken,
-                // Non-null: this branch only runs when !isPhotoPost, which is
-                // exactly when publishVideoUrl was computed above.
-                videoUrl: publishVideoUrl!,
-                title: post.title,
-                privacyLevel: post.tiktok_privacy_level,
-                brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
-                brandContentToggle: !!post.tiktok_brand_content_toggle,
-              });
+          try {
+            publishId = isPhotoPost
+              ? await publishPhotoToTikTok({
+                  accessToken: refreshed.accessToken,
+                  photoUrls: post.photo_urls,
+                  title: post.title,
+                  description: post.description ?? "",
+                  privacyLevel: post.tiktok_privacy_level,
+                  brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+                  brandContentToggle: !!post.tiktok_brand_content_toggle,
+                  disableComment: !!post.tiktok_disable_comment,
+                  origin: resolveOrigin(req),
+                })
+              : await publishToTikTok({
+                  accessToken: refreshed.accessToken,
+                  // Non-null: this branch only runs when !isPhotoPost, which is
+                  // exactly when publishVideoUrl was computed above.
+                  videoUrl: publishVideoUrl!,
+                  title: post.title,
+                  privacyLevel: post.tiktok_privacy_level,
+                  brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
+                  brandContentToggle: !!post.tiktok_brand_content_toggle,
+                  disableComment: !!post.tiktok_disable_comment,
+                  disableDuet: !!post.tiktok_disable_duet,
+                  disableStitch: !!post.tiktok_disable_stitch,
+                });
+          } catch (publishErr) {
+            // spam_risk_too_many_posts (daily cap) gets its own bounded
+            // wall-clock auto-retry, handled entirely here — it never
+            // reaches the outer generic catch, and never increments
+            // publish_attempts while still within budget, exactly like
+            // Instagram's IN_PROGRESS handling below (this isn't a failure,
+            // it's an expected wait). Anything else — including a genuine
+            // ban (spam_risk_user_banned_from_posting) — is re-thrown so the
+            // outer catch's existing isTikTokPermanentFailure/last_error/
+            // Retry-button machinery handles it unchanged.
+            if (publishErr instanceof TikTokCreatorInfoError) {
+              const cls = classifyTikTokCreatorInfoError(publishErr.code);
+              if (cls.severity === "rate_limited") {
+                const firstAttemptedAt = claimed.tiktok_rate_limited_first_attempted_at ?? null;
+                const elapsedMs = firstAttemptedAt ? Date.now() - new Date(firstAttemptedAt).getTime() : 0;
+                const giveUp = !!firstAttemptedAt && elapsedMs >= TIKTOK_RATE_LIMIT_GIVE_UP_MS;
+
+                if (giveUp) {
+                  await supabaseServer
+                    .from("posts")
+                    .update({
+                      status: "failed",
+                      last_error:
+                        "TikTok's daily post cap kept blocking this post for over 24 hours — please retry manually once you've confirmed the cap has cleared.",
+                      publish_started_at: null,
+                      publish_attempts: (post.publish_attempts ?? 0) + 1,
+                      tiktok_rate_limited_first_attempted_at: null,
+                      tiktok_rate_limit_retry_after: null,
+                    })
+                    .eq("id", post.id);
+                  console.error(`[cron] ✗ Post ${post.id} — TikTok daily cap never cleared within 24h, giving up`);
+                  failed++;
+                } else {
+                  await supabaseServer
+                    .from("posts")
+                    .update({
+                      status: "scheduled",
+                      last_error: cls.message,
+                      publish_started_at: null,
+                      tiktok_rate_limited_first_attempted_at: firstAttemptedAt ?? new Date().toISOString(),
+                      tiktok_rate_limit_retry_after: new Date(Date.now() + TIKTOK_RATE_LIMIT_BACKOFF_MS).toISOString(),
+                    })
+                    .eq("id", post.id);
+                  console.warn(`[cron] ⏳ Post ${post.id} — TikTok daily post cap reached, auto-retrying within 24h`);
+                  skipped++;
+                }
+                continue;
+              }
+            }
+            throw publishErr;
+          }
 
           console.log(`[cron] Init succeeded for post ${post.id} → TikTok publish ID: ${publishId}`);
 
@@ -473,6 +562,8 @@ export async function GET(req: NextRequest) {
             publish_started_at: null,
             publish_attempts: 0,
             tiktok_share_url: shareUrl,
+            tiktok_rate_limited_first_attempted_at: null,
+            tiktok_rate_limit_retry_after: null,
           })
           .eq("id", post.id);
 
@@ -684,7 +775,16 @@ export async function GET(req: NextRequest) {
       await cleanupPostPhotos(post.id, post.photo_urls);
       published++;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // A classified TikTok creator-info error (currently only the "banned"
+      // severity reaches here — rate_limited is fully handled inline in the
+      // TikTok branch above) gets its friendly message, not TikTok's raw
+      // error string.
+      const message =
+        err instanceof TikTokCreatorInfoError
+          ? classifyTikTokCreatorInfoError(err.code).message
+          : err instanceof Error
+            ? err.message
+            : String(err);
       const stack = err instanceof Error ? err.stack : undefined;
       console.error(`[cron] ✗ Post ${post.id} failed — message:`, message);
       if (stack) console.error(`[cron] Stack trace:`, stack);

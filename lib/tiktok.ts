@@ -8,6 +8,22 @@ import {
   storagePathFromSignedUrl,
 } from "@/lib/storage-buckets";
 
+/**
+ * Thrown by getCreatorInfo when TikTok returns a non-"ok" error.code (still
+ * HTTP 200) — e.g. spam_risk_user_banned_from_posting or
+ * spam_risk_too_many_posts. Callers classify `code` via
+ * classifyTikTokCreatorInfoError (lib/tiktok-creator-info-pure.ts) rather
+ * than pattern-matching the message string.
+ */
+export class TikTokCreatorInfoError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "TikTokCreatorInfoError";
+    this.code = code;
+  }
+}
+
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
 const TIKTOK_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
@@ -141,7 +157,13 @@ export async function getCreatorInfo(accessToken: string): Promise<TikTokCreator
 
   const json = (await res.json()) as RawCreatorInfoResponse;
 
-  if (!res.ok || (json.error?.code && json.error.code !== "ok") || !json.data) {
+  if (json.error?.code && json.error.code !== "ok") {
+    throw new TikTokCreatorInfoError(
+      json.error.code,
+      `TikTok creator info query failed: ${json.error.message ?? json.error.code}`,
+    );
+  }
+  if (!res.ok || !json.data) {
     throw new Error(`TikTok creator info query failed: ${json.error?.message ?? res.statusText}`);
   }
 
@@ -293,6 +315,9 @@ export interface TikTokPublishParams {
   privacyLevel: string;
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
+  disableComment: boolean;
+  disableDuet: boolean;
+  disableStitch: boolean;
 }
 
 interface RawInitResponse {
@@ -323,6 +348,9 @@ async function initDirectPost(params: {
   privacyLevel: string;
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
+  disableComment: boolean;
+  disableDuet: boolean;
+  disableStitch: boolean;
 }): Promise<{ publishId: string; uploadUrl: string }> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
 
@@ -338,6 +366,9 @@ async function initDirectPost(params: {
         privacy_level: params.privacyLevel,
         brand_organic_toggle: params.brandOrganicToggle,
         brand_content_toggle: params.brandContentToggle,
+        disable_comment: params.disableComment,
+        disable_duet: params.disableDuet,
+        disable_stitch: params.disableStitch,
       },
       source_info: {
         source: "FILE_UPLOAD",
@@ -424,6 +455,9 @@ export async function publishToTikTok(params: TikTokPublishParams): Promise<stri
     privacyLevel: params.privacyLevel,
     brandOrganicToggle: params.brandOrganicToggle,
     brandContentToggle: params.brandContentToggle,
+    disableComment: params.disableComment,
+    disableDuet: params.disableDuet,
+    disableStitch: params.disableStitch,
   });
 
   await uploadVideoChunks(uploadUrl, video, chunkSize, totalChunkCount);
@@ -452,6 +486,7 @@ async function initPhotoPost(params: {
   privacyLevel: string;
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
+  disableComment: boolean;
 }): Promise<{ publishId: string }> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
 
@@ -468,6 +503,13 @@ async function initPhotoPost(params: {
         privacy_level: params.privacyLevel,
         brand_organic_toggle: params.brandOrganicToggle,
         brand_content_toggle: params.brandContentToggle,
+        disable_comment: params.disableComment,
+        // Duet and Stitch are not a photo-post concept at all (TikTok's own
+        // guideline: "Duet and Stitch features are not applicable to photo
+        // posts") — always disabled here, unconditionally, rather than
+        // threaded through as params that could be passed incorrectly.
+        disable_duet: true,
+        disable_stitch: true,
       },
       source_info: {
         source: "PULL_FROM_URL",
@@ -602,6 +644,7 @@ export interface TikTokPhotoPublishParams {
   privacyLevel: string;
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
+  disableComment: boolean;
   /** This app's own origin (e.g. from resolveOrigin(request) in the cron
    * route) — used to build the verified-domain proxy URL for each photo. */
   origin: string;
@@ -641,6 +684,7 @@ export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Pr
     privacyLevel: params.privacyLevel,
     brandOrganicToggle: params.brandOrganicToggle,
     brandContentToggle: params.brandContentToggle,
+    disableComment: params.disableComment,
   });
 
   return publishId;
