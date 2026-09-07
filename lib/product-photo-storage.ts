@@ -70,6 +70,7 @@ export async function saveGeneratedProductPhoto(params: {
   characterName?: string;
   modelTier?: string;
   modelLabel?: string;
+  skillId?: string;
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
   const storagePath = photosGeneratedPath(params.userId, params.photoMode, params.filename);
 
@@ -96,6 +97,7 @@ export async function saveGeneratedProductPhoto(params: {
     characterName: params.characterName,
     modelTier: params.modelTier,
     modelLabel: params.modelLabel,
+    skillId: params.skillId,
   });
 
   return { storagePath, publicUrl, historyItem };

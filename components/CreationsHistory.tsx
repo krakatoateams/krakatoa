@@ -58,6 +58,8 @@ type Props = {
   description?: string;
   tools?: CreationTool[];
   mediaType?: "image" | "video";
+  /** Restrict history to one Skills catalog recipe (`metadata.skillId`). */
+  skillId?: string;
   limit?: number;
   onSelect?: (item: CreationHistoryItem) => void;
   selectedUrl?: string | null;
@@ -92,6 +94,8 @@ type Props = {
   showRefresh?: boolean;
   /** Skip the title/description header row (parent supplies its own section label). */
   hideHeader?: boolean;
+  /** Drop items the parent cannot use (e.g. character sheets in the Canvas picker). */
+  itemFilter?: (item: CreationHistoryItem) => boolean;
   /** Override the asset grid layout classes (defaults to 5 columns on lg). */
   gridClassName?: string;
   /** Show a "go create one" CTA (linking to the relevant generation tool) in
@@ -421,6 +425,8 @@ export default function CreationsHistory({
   hideHeader = false,
   gridClassName,
   showCreateCta = false,
+  skillId,
+  itemFilter,
 }: Props) {
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
@@ -561,6 +567,7 @@ export default function CreationsHistory({
     setError(null);
     const params = new URLSearchParams();
     if (toolsKey) params.set("tool", toolsKey);
+    if (skillId) params.set("skillId", skillId);
     if (libraryFiltering) {
       const scopeForApi = productFeatureTabs ?? mediaScope;
       params.set("libraryScope", scopeForApi);
@@ -625,6 +632,7 @@ export default function CreationsHistory({
     }
   }, [
     toolsKey,
+    skillId,
     effectiveMediaType,
     isFavoriteTab,
     favoriteIdsKey,
@@ -804,7 +812,7 @@ export default function CreationsHistory({
   };
 
   // Items are already filtered + paged by the server.
-  const pagedItems = items;
+  const pagedItems = itemFilter ? items.filter(itemFilter) : items;
 
   const featureQuery =
     libraryFiltering && activeProductScope && !isFavoriteTab && !isTrashTab

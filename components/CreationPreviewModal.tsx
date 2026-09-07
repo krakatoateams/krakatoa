@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Star,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -21,6 +22,7 @@ import {
   isTrashedItem,
 } from "@/lib/creations";
 import { animateVideoHref, canAnimateCreation } from "@/lib/animate-handoff";
+import { canvasCreationHref, canDropOnCanvas } from "@/lib/canvas-handoff";
 import { getCreationModelLabel } from "@/lib/creation-model-label";
 import { getCreationUserPrompt } from "@/lib/creation-user-prompt";
 import { GenerationScheduleButton } from "@/components/GenerationScheduleButton";
@@ -334,6 +336,16 @@ export function CreationPreviewModal({
               >
                 <Clapperboard className="h-3.5 w-3.5" />
                 Animate
+              </Link>
+            )}
+
+            {richUI && canDropOnCanvas(item) && (
+              <Link
+                href={canvasCreationHref(item.id)}
+                className={`${GHOST_BTN} border border-white/15 bg-white/5 font-semibold text-text-primary hover:bg-white/10`}
+              >
+                <Workflow className="h-3.5 w-3.5" />
+                Canvas
               </Link>
             )}
 

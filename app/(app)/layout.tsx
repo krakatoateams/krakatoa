@@ -1,8 +1,7 @@
-import Sidebar from "./dashboard/Sidebar";
+import AppChrome from "./AppChrome";
 import { CreditBalanceProvider } from "./credit-balance-context";
 import { PricingProvider } from "./pricing-context";
 import { ActiveGenerationsProvider } from "./active-generations-context";
-import { ActiveGenerationBanner } from "@/components/ActiveGenerationBanner";
 import { getCurrentProfile } from "@/lib/profiles-db";
 import {
   listToolConfigs,
@@ -25,13 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <CreditBalanceProvider>
       <PricingProvider>
         <ActiveGenerationsProvider>
-          <div className="flex min-h-screen bg-N50 text-text-primary md:gap-2 md:p-2">
-            <Sidebar initialToolVisibility={initialToolVisibility} />
-            <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:h-[calc(100vh-1rem)] md:rounded-2xl md:pb-0">
-              <ActiveGenerationBanner />
-              {children}
-            </main>
-          </div>
+          <AppChrome initialToolVisibility={initialToolVisibility}>{children}</AppChrome>
         </ActiveGenerationsProvider>
       </PricingProvider>
     </CreditBalanceProvider>

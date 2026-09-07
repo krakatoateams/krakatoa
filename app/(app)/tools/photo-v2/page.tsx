@@ -79,6 +79,9 @@ import {
   DevBlankTestToggle,
   GENERATE_BTN_CLASS,
   GenerationCancelButton,
+  StudioForm,
+  StudioFormCard,
+  StudioFormHeader,
   StudioGenerationPreviewProvider,
   UploadTile,
   CharacterTile,
@@ -311,8 +314,8 @@ function StoryboardComposer({
         className="hidden"
         onChange={themeReference.onChange}
       />
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+      <StudioForm mode="image" onSubmit={handleGenerate}>
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -326,14 +329,14 @@ function StoryboardComposer({
             onSelect={onSelectCreation}
             disabled={loading}
           />
-        </div>
+        </StudioFormHeader>
 
         {/* Theme tile — above the form card on mobile only */}
         <div className="mb-3 flex items-stretch gap-3 lg:hidden">
           <UploadTile label="Theme" upload={themeReference} disabled={loading} fluid />
         </div>
 
-        <div className="rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+        <StudioFormCard>
           <div className="flex items-start gap-3">
             <MentionTextarea
               value={theme}
@@ -422,7 +425,7 @@ function StoryboardComposer({
               />
             </div>
           </div>
-        </div>
+        </StudioFormCard>
 
         {/* Generate (mobile — full-width, below the form card) */}
         <div className="mt-3 flex flex-col gap-3 lg:hidden">
@@ -452,7 +455,7 @@ function StoryboardComposer({
         <p className="mt-2 pl-1 text-xs text-text-disabled">
           Generates one six-panel storyboard sheet — attach a theme reference for mood and palette, or type @ for saved assets. Turn it into a video next.
         </p>
-      </form>
+      </StudioForm>
 
       {error && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
@@ -1022,9 +1025,9 @@ function PhotoOmniPage({
         />
 
         {/* Omni-form composer */}
-        <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
+        <StudioForm mode="image" onSubmit={handleGenerate}>
           {/* Top-left chips: creation type + model */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <StudioFormHeader>
             <ChipDropdown
               sheetTitle="Select creation type"
               icon={<Layers className="h-3.5 w-3.5" />}
@@ -1056,7 +1059,7 @@ function PhotoOmniPage({
                 disabled={loading}
               />
             </div>
-          </div>
+          </StudioFormHeader>
 
           {/* Upload tiles — above the form card on mobile only */}
           {(requiresProduct || allowReferenceUpload) && (
@@ -1080,7 +1083,7 @@ function PhotoOmniPage({
             </div>
           )}
 
-          <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+          <StudioFormCard>
             {/* Character name (Character creation only) */}
             {isCharacterMode && (
               <div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-3">
@@ -1322,7 +1325,7 @@ function PhotoOmniPage({
                 />
               </div>
             </div>
-          </div>
+          </StudioFormCard>
 
           {/* Model selector — attached under the form card on mobile only */}
           <div className="-mt-3 mb-6 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden">
@@ -1381,7 +1384,7 @@ function PhotoOmniPage({
               try-on.
             </p>
           ) : null}
-        </form>
+        </StudioForm>
 
         {warning && (
           <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">

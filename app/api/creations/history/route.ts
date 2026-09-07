@@ -98,6 +98,7 @@ export async function GET(req: NextRequest) {
     const mediaType =
       mediaTypeRaw === "image" || mediaTypeRaw === "video" ? mediaTypeRaw : undefined;
     const kind = searchParams.get("kind")?.trim() || undefined;
+    const skillId = searchParams.get("skillId")?.trim() || undefined;
     const trashed = searchParams.get("trashed") === "1";
     const limit = Math.min(
       200,
@@ -140,6 +141,7 @@ export async function GET(req: NextRequest) {
           tools: listTools,
           mediaType,
           kind,
+          skillId,
           ids,
           trashed,
         };

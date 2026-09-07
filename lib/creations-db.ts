@@ -260,6 +260,8 @@ export type CreationPageFilters = {
   mediaType?: "image" | "video";
   /** Restrict to a creation kind stored in metadata (e.g. "character"). */
   kind?: string;
+  /** Restrict to Skills catalog runs (`metadata.skillId`). */
+  skillId?: string;
   /** Restrict to specific creation ids (used by the client-side Favorites view). */
   ids?: string[];
   /** Photo studio output folder under `photos/generated/{mode}/`. */
@@ -312,6 +314,7 @@ function applyCreationPageFilters<T extends CreationListQueryFilter>(
   }
   if (options.mediaType) q = q.eq("media_type", options.mediaType) as T;
   if (options.kind) q = q.eq("metadata->>creationKind", options.kind) as T;
+  if (options.skillId) q = q.eq("metadata->>skillId", options.skillId) as T;
   if (options.ids) q = q.in("id", options.ids) as T;
   if (options.photoMode) {
     q = q.like("storage_path", `%/photos/generated/${options.photoMode}/%`) as T;

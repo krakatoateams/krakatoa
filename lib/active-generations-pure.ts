@@ -124,6 +124,12 @@ const JOB_TYPE_SPEC: Record<string, JobTypeSpec> = {
     navHref: PHOTO,
     creationTool: "product_photo",
   },
+  video_editor: {
+    label: CREATION_TOOLS.video_editor.label,
+    href: "/tools/editor",
+    navHref: "/tools/editor",
+    creationTool: "video_editor",
+  },
 };
 
 export function isActiveGenerationStatus(value: string): value is ActiveGenerationStatus {
@@ -333,6 +339,17 @@ export function activeGenerationsSelfCheck(): void {
   });
   assert(storyboard?.href === "/tools/photo-v2?type=storyboard", "storyboard image deep-links");
   assert(storyboard?.creationTool === "storyboard", "storyboard image filters the storyboard history");
+
+  const editor = describeJob({
+    jobId: "j-editor",
+    jobType: "video_editor",
+    status: "running",
+    createdAt: "2026-08-14T00:00:00.000Z",
+  });
+  assert(editor?.href === "/tools/editor", "editor export deep-links to the timeline");
+  assert(editor?.navHref === "/tools/editor", "editor badges the Editor nav item");
+  assert(editor?.creationTool === "video_editor", "editor maps to history tool filter");
+  assert(editor?.mediaType === "video", "editor export is video");
 
   assert(describeJob({
     jobId: "x",

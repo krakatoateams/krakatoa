@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useEffect, type CSSProperties, type ReactNode } from "react";
+import { useRef, useCallback, useEffect, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
 import "./BorderGlow.css";
 
 type BorderGlowProps = {
@@ -16,7 +16,7 @@ type BorderGlowProps = {
   animated?: boolean;
   colors?: string[];
   fillOpacity?: number;
-};
+} & Omit<HTMLAttributes<HTMLDivElement>, "children" | "onPointerMove">;
 
 type HSL = { h: number; s: number; l: number };
 
@@ -108,6 +108,7 @@ export default function BorderGlow({
   animated = false,
   colors = ["#c084fc", "#f472b6", "#38bdf8"],
   fillOpacity = 0.5,
+  ...rest
 }: BorderGlowProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -208,6 +209,7 @@ export default function BorderGlow({
   return (
     <div
       ref={cardRef}
+      {...rest}
       onPointerMove={handlePointerMove}
       className={`border-glow-card ${className}`}
       style={

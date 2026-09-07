@@ -10,6 +10,7 @@ import {
   calculateCredits,
   videoCreditsFromRow,
   imageCreditsFromRow,
+  runCreditsFromRow,
   type PricingRow,
 } from "@/lib/pricing-math";
 import { V2_PRICING_DEFAULTS } from "@/lib/pricing-defaults";
@@ -52,7 +53,9 @@ type PricingState = {
   videoCredits: (pricingKey: string, durationSec: number) => number;
   /** Credits for a per-image tier over an image count. */
   imageCredits: (pricingKey: string, imageCount: number) => number;
-  /** Generic dispatch by the tier's cost unit (per_second → video, else image). */
+  /** Credits for one Canvas Text (Gemini) run. */
+  canvasTextCredits: () => number;
+  /** Generic dispatch by the tier's cost unit (per_second → video, per_run → run, else image). */
   creditsFor: (pricingKey: string, unitCount: number) => number;
 };
 
@@ -105,6 +108,12 @@ function fallbackPerImage(pricingKey: string, settings: BillingSettings): number
   return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
 }
 
+function fallbackPerRun(pricingKey: string, settings: BillingSettings): number {
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (!def || def.costUnit !== "per_run") return 0;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
+}
+
 const DEFAULT_STATE: PricingState = {
   billingSettings: DEFAULT_BILLING_SETTINGS,
   configs: {},
@@ -116,6 +125,10 @@ const DEFAULT_STATE: PricingState = {
   imageCredits: (pricingKey, imageCount) => {
     const row = resolveRow({}, pricingKey);
     return imageCreditsFromRow(row, imageCount, DEFAULT_BILLING_SETTINGS, fallbackPerImage(pricingKey, DEFAULT_BILLING_SETTINGS));
+  },
+  canvasTextCredits: () => {
+    const row = resolveRow({}, "canvas_text_per_run");
+    return runCreditsFromRow(row, DEFAULT_BILLING_SETTINGS, fallbackPerRun("canvas_text_per_run", DEFAULT_BILLING_SETTINGS));
   },
   creditsFor: () => 0,
 };
@@ -180,15 +193,26 @@ export function PricingProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
+    const canvasTextCredits = (): number => {
+      const row = resolveRow(configs, "canvas_text_per_run");
+      return runCreditsFromRow(
+        row,
+        billingSettings,
+        fallbackPerRun("canvas_text_per_run", billingSettings)
+      );
+    };
+
     const creditsFor = (pricingKey: string, unitCount: number): number => {
       const row = resolveRow(configs, pricingKey);
       if (!row?.costUnit) return 0;
-      return row.costUnit === "per_second"
-        ? videoCredits(pricingKey, unitCount)
-        : imageCredits(pricingKey, unitCount);
+      if (row.costUnit === "per_second") return videoCredits(pricingKey, unitCount);
+      if (row.costUnit === "per_run") {
+        return runCreditsFromRow(row, billingSettings, fallbackPerRun(pricingKey, billingSettings));
+      }
+      return imageCredits(pricingKey, unitCount);
     };
 
-    return { billingSettings, configs, loading, videoCredits, imageCredits, creditsFor };
+    return { billingSettings, configs, loading, videoCredits, imageCredits, canvasTextCredits, creditsFor };
   }, [billingSettings, configs, loading]);
 
   return <PricingContext.Provider value={value}>{children}</PricingContext.Provider>;
