@@ -50,7 +50,7 @@ function SettingsContent() {
 
       <div className="flex flex-col gap-8 md:flex-row">
         {/* Tab nav */}
-        <nav className="md:w-52 md:shrink-0">
+        <nav className="hidden md:block md:w-52 md:shrink-0">
           <ul className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
             {TABS.map((tab) => {
               const Icon = tab.icon;

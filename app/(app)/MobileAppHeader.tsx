@@ -5,9 +5,12 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   ChevronDown,
+  Coins,
+  Link2,
   LogOut,
-  Settings,
   Shield,
+  SlidersHorizontal,
+  User,
   type LucideIcon,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
@@ -17,7 +20,10 @@ import CreditBadge from "@/components/CreditBadge";
 import { Button } from "@/components/ui/Button";
 
 const PRIMARY_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
+  { label: "Account", href: "/dashboard/settings?tab=account", icon: User },
+  { label: "Credits", href: "/dashboard/settings?tab=credits", icon: Coins },
+  { label: "Connections", href: "/dashboard/settings?tab=connections", icon: Link2 },
+  { label: "Basic Settings", href: "/dashboard/settings?tab=settings", icon: SlidersHorizontal },
 ];
 
 const ITEM =
