@@ -44,10 +44,7 @@ import {
   type ProductMediaScope,
   type VideoLibraryFeatureId,
 } from "@/lib/creation-library-filters";
-import {
-  LIBRARY_FAVORITES_KEY,
-  loadLibraryFavorites,
-} from "@/lib/library-favorites";
+import { useCreationItemActions } from "@/lib/use-creation-item-actions";
 
 export type LibrarySection = "browse" | "favorite" | "trash";
 
@@ -140,27 +137,6 @@ const historyCache = new Map<string, CachedHistory>();
 
 const DEFAULT_GRID_CLASS =
   "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4";
-
-function loadFavorites(): Set<string> {
-  return loadLibraryFavorites();
-}
-
-function downloadFilename(item: CreationHistoryItem, mimeType?: string): string {
-  const ext =
-    item.mediaType === "video"
-      ? "mp4"
-      : mimeType?.includes("png")
-        ? "png"
-        : mimeType?.includes("webp")
-          ? "webp"
-          : "jpg";
-  const base =
-    (item.title || item.toolLabel || "kelolako")
-      .replace(/[^a-z0-9]+/gi, "-")
-      .replace(/^-+|-+$/g, "")
-      .toLowerCase() || "kelolako";
-  return `${base}-${item.id.slice(0, 8)}.${ext}`;
-}
 
 /** Duration in seconds recorded at generation time, for tools that store one. */
 function metadataDurationSec(item: CreationHistoryItem): number | undefined {
@@ -445,40 +421,32 @@ export default function CreationsHistory({
   // and detect a real parent refresh (vs. the initial mount) to drop stale cache.
   const latestKeyRef = useRef<string>("");
   const prevRefreshKeyRef = useRef(refreshKey);
+  const libraryChangedRef = useRef<() => void | Promise<void>>(async () => {});
   const [mediaScope, setMediaScope] = useState<MediaScope>("all");
   const [featureTab, setFeatureTab] = useState<ProductFeatureId>(
     initialLibraryFeature ?? "all"
   );
   const [page, setPage] = useState(1);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [previewItem, setPreviewItem] = useState<CreationHistoryItem | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const { items: activeJobs } = useActiveGenerations();
 
-  const downloadItem = useCallback(async (item: CreationHistoryItem) => {
-    setDownloadingId(item.id);
-    try {
-      const res = await fetch(item.mediaUrl);
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = downloadFilename(item, blob.type);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      // Fallback: open in a new tab so the user can save manually
-      window.open(item.mediaUrl, "_blank", "noopener,noreferrer");
-    } finally {
-      setDownloadingId(null);
-    }
-  }, []);
+  const {
+    favorites,
+    downloadingId,
+    mutatingId,
+    toggleFavorite,
+    downloadItem,
+    trashItem,
+    restoreItem,
+    deleteForever,
+  } = useCreationItemActions({
+    favoritesEnabled: richUI,
+    onBeforeMutation: () => setError(null),
+    onLibraryChanged: () => libraryChangedRef.current(),
+    onError: (message) => setError(message),
+  });
 
   // Stable so the preview's key handler doesn't resubscribe on every render.
   const closePreview = useCallback(() => setPreviewItem(null), []);
@@ -512,27 +480,6 @@ export default function CreationsHistory({
     setItems((prev) => prev.map((it) => (it.id === updated.id ? updated : it)));
     setPreviewItem(updated);
     historyCache.clear();
-  }, []);
-
-  useEffect(() => {
-    if (richUI) setFavorites(loadFavorites());
-  }, [richUI]);
-
-  const toggleFavorite = useCallback((id: string) => {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        window.localStorage.setItem(
-          LIBRARY_FAVORITES_KEY,
-          JSON.stringify(Array.from(next))
-        );
-      } catch {
-        // localStorage may be unavailable (private mode); favorites stay in-memory
-      }
-      return next;
-    });
   }, []);
 
   const activeProductScope: ProductMediaScope | null =
@@ -672,94 +619,11 @@ export default function CreationsHistory({
     setPage((p) => Math.min(p, totalPages));
   }, [totalPages]);
 
-  // Drop an id from the client-side favorites set (used after permanent delete).
-  const forgetFavorite = useCallback((id: string) => {
-    setFavorites((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      try {
-        window.localStorage.setItem(LIBRARY_FAVORITES_KEY, JSON.stringify(Array.from(next)));
-      } catch {
-        // localStorage may be unavailable; favorites stay in-memory
-      }
-      return next;
-    });
-  }, []);
-
-  const trashItem = useCallback(
-    async (item: CreationHistoryItem) => {
-      setMutatingId(item.id);
-      setError(null);
-      try {
-        const res = await fetch(`/api/creations/${item.id}`, { method: "DELETE" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Failed to move to Trash");
-        setPreviewItem(null);
-        historyCache.clear();
-        await load();
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to move to Trash");
-      } finally {
-        setMutatingId(null);
-      }
-    },
-    [load]
-  );
-
-  const restoreItem = useCallback(
-    async (item: CreationHistoryItem) => {
-      setMutatingId(item.id);
-      setError(null);
-      try {
-        const res = await fetch(`/api/creations/${item.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "restore" }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Failed to restore");
-        setPreviewItem(null);
-        historyCache.clear();
-        await load();
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to restore");
-      } finally {
-        setMutatingId(null);
-      }
-    },
-    [load]
-  );
-
-  const deleteForever = useCallback(
-    async (item: CreationHistoryItem) => {
-      if (
-        !window.confirm(
-          "Permanently delete this asset? This can't be undone."
-        )
-      ) {
-        return;
-      }
-      setMutatingId(item.id);
-      setError(null);
-      try {
-        const res = await fetch(`/api/creations/${item.id}?permanent=1`, {
-          method: "DELETE",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Failed to delete");
-        forgetFavorite(item.id);
-        setPreviewItem(null);
-        historyCache.clear();
-        await load();
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to delete");
-      } finally {
-        setMutatingId(null);
-      }
-    },
-    [load, forgetFavorite]
-  );
+  libraryChangedRef.current = async () => {
+    setPreviewItem(null);
+    historyCache.clear();
+    await load();
+  };
 
   const emptyTrash = useCallback(async () => {
     setEmptyingTrash(true);

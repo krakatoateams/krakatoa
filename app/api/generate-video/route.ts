@@ -4,7 +4,6 @@ import { isCancellation } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
-import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import {
   checkpointRemoteVideo,
   markRecoverableIfArtifacts,
@@ -12,26 +11,22 @@ import {
 import { RecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { finishJob } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
-  createProcessingAsset,
+  beginMeteredAttempt,
+  finishMeteredAttempt,
+  type MeteredAttemptHandle,
+} from "@/lib/metered-generation/lifecycle";
+import {
   markAssetReady,
-  markAssetFailed,
   findAssetByStoragePath,
 } from "@/lib/assets-db";
 import { createAssetRelation } from "@/lib/asset-relations-db";
-import {
-  spendCredits,
-  refundCredits,
-  getWallet,
-  InsufficientCreditsError,
-} from "@/lib/credits-db";
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   MEDIA_CACHE_CONTROL,
@@ -60,12 +55,6 @@ import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
-  beginGenerationRequest,
-  attachGenerationRequestJob,
-  finishGenerationRequestSuccess,
-  finishGenerationRequestFailure,
-  finishGenerationRequestRecoverable,
-  buildRecoverableGenerationJson,
 } from "@/lib/generation-idempotency";
 import {
   buildMentionGuidanceSuffix,
@@ -197,6 +186,7 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
+  let metered: MeteredAttemptHandle | null = null;
   let userId: string | null = null;
   let pipelineRecovery: ReturnType<typeof createPipelineRecoveryHandle> | undefined;
   let jobKind: VideoJobKind = "video_text2video";
@@ -573,47 +563,19 @@ export async function POST(req: Request) {
       skillId: skillId ?? "",
       devBlank,
     });
-    const begin = await beginGenerationRequest({
+    const requiredCredits = devBlank
+      ? 0
+      : await getVideoCredits({ pricingKey, durationSec: duration });
+    const beginResult = await beginMeteredAttempt({
       profileId: profileId!,
-      idempotencyKey: idemKey,
-      routeKey: "generate_video",
-      toolKey: "reels",
-      requestHash,
-    });
-    if (begin.action === "conflict") {
-      return NextResponse.json(
-        {
-          error: "This idempotency key was already used with a different request.",
-          code: "IDEMPOTENCY_CONFLICT",
-        },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "in_progress") {
-      return NextResponse.json(
-        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "replay") {
-      return NextResponse.json(begin.response);
-    }
-    if (begin.action === "recoverable") {
-      return NextResponse.json(
-        buildRecoverableGenerationJson({
-          jobId: begin.jobId,
-          message:
-            typeof begin.errorJson.message === "string" ? begin.errorJson.message : undefined,
-        }),
-        { status: 503 },
-      );
-    }
-    generationRequestId = begin.id;
-
-    // ---- Platform job (best-effort observability) ----
-    const job = await safe("createJob", () =>
-      createJob({
-        profileId: profileId!,
+      userId,
+      idempotency: {
+        key: idemKey,
+        routeKey: "generate_video",
+        toolKey: "reels",
+        requestHash,
+      },
+      job: {
         tool: "reels",
         jobType: jobKind,
         provider: resolvedModel.provider,
@@ -630,44 +592,10 @@ export async function POST(req: Request) {
           ...(skillId ? { skillId } : {}),
           ...(devBlank ? devBlankJobTag() : {}),
         },
-      })
-    );
-    if (job) {
-      jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: job.id,
-          }),
-        );
-      }
-      pipelineRecovery =
-        userId
-          ? createPipelineRecoveryHandle({
-              profileId: profileId!,
-              userId: userId!,
-              jobId: job.id,
-              existingJob: job,
-            })
-          : undefined;
-    }
-
-    // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
-    const requiredCredits = devBlank
-      ? 0
-      : await getVideoCredits({ pricingKey, durationSec: duration });
-    if (!devBlank) {
-      try {
-        await spendCredits({
-        profileId: profileId!,
+      },
+      spend: {
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:${jobKind}:${jobId}`
-          : `spend:${jobKind}:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        jobType: jobKind,
         description: `${jobLabel} generation`,
         metadata: {
           tool: "reels",
@@ -680,61 +608,35 @@ export async function POST(req: Request) {
           pricingKey,
           providerModel: resolvedModel.model,
         },
-      });
-      creditsSpent = true;
-      creditsAmount = requiredCredits;
-      } catch (e) {
-        if (e instanceof InsufficientCreditsError) {
-        const wallet = await getWallet(profileId!).catch(() => null);
-        const currentBalance = wallet?.balance ?? 0;
-        if (jobId) {
-          await safe("failJobInsufficient", () =>
-            failJob(profileId!, jobId!, {
-              code: "INSUFFICIENT_CREDITS",
-              message: "Insufficient credits.",
-              requiredCredits,
-              currentBalance,
-            })
-          );
-        }
-        if (generationRequestId) {
-          await safe("idemFailInsufficient", () =>
-            finishGenerationRequestFailure({
-              id: generationRequestId!,
-              profileId: profileId!,
-              jobId: jobId ?? null,
-              errorJson: {
-                code: "INSUFFICIENT_CREDITS",
-                message: "Insufficient credits.",
-                requiredCredits,
-                currentBalance,
-              },
-            })
-          );
-        }
-        return NextResponse.json(
-          { error: "Insufficient credits.", requiredCredits, currentBalance },
-          { status: 402 }
-        );
-      }
-      throw e;
-      }
+        skip: devBlank,
+      },
+      processingAssets: [
+        {
+          tool: "reels",
+          assetType: "video",
+          role: jobKind,
+          provider: resolvedModel.provider,
+          model: resolvedModel.model,
+          metadata: { modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
+        },
+      ],
+    });
+    if (beginResult.kind === "early_exit") {
+      return NextResponse.json(beginResult.http.body, { status: beginResult.http.status });
     }
-
-    // ---- Processing asset (created AFTER spend succeeds) ----
-    const asset = await safe("createAsset", () =>
-      createProcessingAsset({
+    metered = beginResult.handle;
+    jobId = metered.jobId;
+    generationRequestId = metered.generationRequestId;
+    creditsSpent = metered.creditsSpent;
+    creditsAmount = metered.creditsAmount;
+    videoAssetId = metered.assetIds[0] ?? null;
+    if (jobId && userId) {
+      pipelineRecovery = createPipelineRecoveryHandle({
         profileId: profileId!,
-        jobId: jobId ?? undefined,
-        tool: "reels",
-        assetType: "video",
-        role: jobKind,
-        provider: resolvedModel.provider,
-        model: resolvedModel.model,
-        metadata: { modelId, duration, resolution, aspectRatio, generateAudio, pricingKey },
-      })
-    );
-    if (asset) videoAssetId = asset.id;
+        userId: userId!,
+        jobId,
+      });
+    }
 
     let videoBuffer: Buffer;
     const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
@@ -946,21 +848,6 @@ export async function POST(req: Request) {
       );
     }
 
-    await safe("recordUsage", () =>
-      recordUsageEvent({
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: videoAssetId ?? null,
-        tool: "reels",
-        provider: resolvedModel.provider,
-        model: resolvedModel.model,
-        unitType: "video_seconds",
-        units: duration,
-        creditsCharged: creditsAmount,
-        metadata: { jobType: jobKind, modelId, resolution, aspectRatio, pricingKey },
-      })
-    );
-
     const successResponse = {
       videoUrl: publicUrl,
       storagePath,
@@ -968,20 +855,22 @@ export async function POST(req: Request) {
       savedToCloud: true,
       devBlank,
     };
-    if (generationRequestId) {
-      await safe("idemSuccess", () =>
-        finishGenerationRequestSuccess({
-          id: generationRequestId!,
-          profileId: profileId!,
-          jobId: jobId ?? null,
-          assetId: videoAssetId ?? null,
-          responseJson: successResponse,
-        })
-      );
-    }
-    if (jobId && userId) {
-      await safe("purgeResumable", () => purgeResumableJobStorage(userId!, jobId!));
-    }
+    await finishMeteredAttempt(metered, {
+      kind: "success",
+      responseJson: successResponse,
+      primaryAssetId: videoAssetId,
+      usage: {
+        assetId: videoAssetId,
+        tool: "reels",
+        provider: resolvedModel.provider,
+        model: resolvedModel.model,
+        unitType: "video_seconds",
+        units: duration,
+        creditsCharged: creditsAmount,
+        metadata: { jobType: jobKind, modelId, resolution, aspectRatio, pricingKey },
+      },
+      purgeResumable: true,
+    });
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const recoverableHandled =
@@ -1000,106 +889,59 @@ export async function POST(req: Request) {
         },
       }));
     const recoverable = recoverableHandled || error instanceof RecoverablePipelineError;
-    // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
-    const message = cancelled
-      ? "Generation cancelled."
-      : error instanceof Error
-        ? error.message
-        : String(error);
+    const pricingMissing = error instanceof PricingConfigError;
+    const rawMessage =
+      error instanceof Error ? error.message : String(error);
     if (cancelled) console.log(`[${jobLabel}] Cancelled by user.`);
     else console.error(`[${jobLabel}] Error:`, error);
-    const pricingMissing = error instanceof PricingConfigError;
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : recoverable
-        ? { message, code: "PIPELINE_RECOVERABLE" }
-        : pricingMissing
-          ? { message, code: "PRICING_CONFIG_MISSING" }
-          : { message };
-
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (videoAssetId && profileId && !recoverable) {
-      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      if (cancelled) {
-        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
-      } else if (!recoverable) {
-        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
-        if (userId) await safe("purge", () => purgeResumableJobStorage(userId!, jobId!));
+    const handle =
+      metered ??
+      (profileId
+        ? {
+            profileId,
+            userId,
+            jobId,
+            generationRequestId,
+            creditsSpent,
+            creditsAmount,
+            assetIds: videoAssetId ? [videoAssetId] : [],
+            refundJobType: jobKind,
+          }
+        : null);
+    if (handle) {
+      const finished = await finishMeteredAttempt(
+        handle,
+        recoverable
+          ? {
+              kind: "recoverable",
+              rawMessage,
+              currentStepId,
+              clearCurrentStep: () => {
+                currentStepId = null;
+              },
+              settlementOptions: { recoverableJobAction: "skip", resumablePurge: true },
+            }
+          : {
+              kind: "terminal",
+              cancelled,
+              pricingMissing,
+              rawMessage,
+              currentStepId,
+              clearCurrentStep: () => {
+                currentStepId = null;
+              },
+              settlementOptions: { resumablePurge: true },
+            },
+      );
+      if (finished.http) {
+        return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-
-    // Best-effort refund on failure/cancel. Skip when recoverable (credits held).
-    if (creditsSpent && profileId && creditsAmount > 0 && !recoverable) {
-      await safe("refundCredits", () =>
-        refundCredits({
-          profileId: profileId!,
-          amount: creditsAmount,
-          idempotencyKey: jobId
-            ? `refund:${jobKind}:${jobId}`
-            : `refund:${jobKind}:profile:${profileId}:${Date.now()}`,
-          jobId: jobId ?? null,
-          description: cancelled
-            ? "Refund after user cancellation"
-            : "Best-effort refund after generation failure",
-          metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
-        })
-      );
-    }
-
-    if (generationRequestId) {
-      if (recoverable && jobId) {
-        await safe("idemRecoverable", () =>
-          finishGenerationRequestRecoverable({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId!,
-            errorJson: errJson,
-          })
-        );
-      } else {
-        await safe("idemFailure", () =>
-          finishGenerationRequestFailure({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId ?? null,
-            errorJson: errJson,
-          })
-        );
-      }
-    }
-
-    if (cancelled) {
-      return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
-        { status: 409 }
-      );
-    }
-    if (recoverable) {
-      return NextResponse.json(
-        {
-          recoverable: true,
-          jobId,
-          error: message,
-          code: "PIPELINE_RECOVERABLE",
-          refunded: false,
-        },
-        { status: 503 },
-      );
-    }
-    return NextResponse.json(
-      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: rawMessage }, { status: 500 });
   } finally {
     // Clean up the transient reference uploads regardless of outcome
     // (success / failure / insufficient credits). The 24h videos/temp/ sweep is

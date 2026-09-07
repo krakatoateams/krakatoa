@@ -32,8 +32,7 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
-import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
+import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
 import {
   DEFAULT_MODEL_POSE,
@@ -68,23 +67,6 @@ import { SkillsCatalogProvider, useSkillsCatalog } from "./SkillsCatalogProvider
 
 const AGENT_PLACEHOLDER = "Share your idea with me, or pick a skill to get started quickly.";
 
-function describeIdempotencyError(
-  status: number,
-  data: { code?: string; error?: string }
-): string | null {
-  if (status === 409 && data?.code === "GENERATION_CANCELLED") return null;
-  if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
-    return "Generation already in progress, please wait.";
-  }
-  if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
-    return data?.error || "This request conflicts with a previous one.";
-  }
-  if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
-    return data?.error || "Missing idempotency key. Please retry.";
-  }
-  return null;
-}
-
 function SkillOmniInner({
   onHistoryRefresh,
   embed = false,
@@ -98,9 +80,20 @@ function SkillOmniInner({
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openPreviewFromResponse } = useStudioGenerationPreview();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
-  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
+  const {
+    loading,
+    error,
+    clearError,
+    submit,
+    cancel: cancelSubmit,
+    cancelling,
+    cancelAllowed,
+  } = useStudioGenerationSubmit({
+    refetchCredits,
+    refreshHistory: onHistoryRefresh,
+    openPreviewFromResponse,
+  });
   const { imageCredits, videoCredits } = usePricing();
 
   const { skillById } = useSkillsCatalog();
@@ -111,20 +104,18 @@ function SkillOmniInner({
   const skill = skillId ? skillById(skillId) : undefined;
 
   const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const selectSkill = useCallback(
     (id: SkillId) => {
       const next = skillById(id);
       if (!next || !isAgentSkill(next)) return;
+      clearError();
       setSkillId(id);
-      setError(null);
       startTransition(() => {
         router.replace(skillHref(id), { scroll: false });
       });
     },
-    [router, skillById]
+    [clearError, router, skillById]
   );
 
   useEffect(() => {
@@ -249,65 +240,18 @@ function SkillOmniInner({
           firstFrame: startFrame.done[0] ?? null,
         },
       };
-      const attempt = beginSubmit(JSON.stringify(body));
-      if (!attempt) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await fetch("/api/generate-video", {
+      await submit(JSON.stringify(body), (idempotencyKey) =>
+        fetch("/api/generate-video", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Idempotency-Key": attempt.key,
+            "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify(body),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          if (data.code === "GENERATION_CANCELLED") {
-            attempt.settle(false);
-            refetchCredits();
-            return;
-          }
-          if (response.status === 402) {
-            throw new Error(
-              `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
-            );
-          }
-          const idemMsg = describeIdempotencyError(response.status, data);
-          if (idemMsg) throw new Error(idemMsg);
-          throw new Error(data.error || "Generation failed");
-        }
-        attempt.settle(true);
-        refetchCredits();
-        onHistoryRefresh();
-        void openPreviewFromResponse(data);
-      } catch (err) {
-        attempt.settle(false);
-        setError(err instanceof Error ? err.message : "Generation failed");
-      } finally {
-        setLoading(false);
-      }
+        }),
+        { fallbackCost: cost, unexpectedErrorFallback: "Generation failed" },
+      );
       return;
-    }
-
-    const formData = new FormData();
-    formData.append("skillId", skill.id);
-    formData.append("poseId", DEFAULT_MODEL_POSE);
-    formData.append("styleId", DEFAULT_PHOTO_STYLE);
-    formData.append("modelTier", modelTier);
-    formData.append("aspectRatio", aspectRatio);
-    if (tier.hasResolution) formData.append("resolution", resolution);
-    if (prompt.trim()) formData.append("prompt", prompt.trim());
-    const photoMode = skillPhotoMode(skill) ?? "image";
-    formData.append("mode", photoMode);
-    if (photoMode === "product") {
-      if (scene.file) formData.append("image", scene.file);
-      if (character.file) formData.append("character", character.file);
-    } else if (subject.file) {
-      formData.append("reference", subject.file);
-    } else if (character.file) {
-      formData.append("reference", character.file);
     }
 
     const signature = [
@@ -320,45 +264,45 @@ function SkillOmniInner({
       scene.file?.name ?? "",
       character.file?.name ?? "",
     ].join("|");
-    const attempt = beginSubmit(signature);
-    if (!attempt) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/generate-photo", {
+    await submit(signature, (idempotencyKey) => {
+      const formData = new FormData();
+      formData.append("skillId", skill.id);
+      formData.append("poseId", DEFAULT_MODEL_POSE);
+      formData.append("styleId", DEFAULT_PHOTO_STYLE);
+      formData.append("modelTier", modelTier);
+      formData.append("aspectRatio", aspectRatio);
+      if (tier.hasResolution) formData.append("resolution", resolution);
+      if (prompt.trim()) formData.append("prompt", prompt.trim());
+      const photoMode = skillPhotoMode(skill) ?? "image";
+      formData.append("mode", photoMode);
+      if (photoMode === "product") {
+        if (scene.file) formData.append("image", scene.file);
+        if (character.file) formData.append("character", character.file);
+      } else if (subject.file) {
+        formData.append("reference", subject.file);
+      } else if (character.file) {
+        formData.append("reference", character.file);
+      }
+      return fetch("/api/generate-photo", {
         method: "POST",
-        headers: { "Idempotency-Key": attempt.key },
+        headers: { "Idempotency-Key": idempotencyKey },
         body: formData,
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
-          attempt.settle(false);
-          refetchCredits();
-          return;
-        }
-        if (response.status === 402) {
-          throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
-          );
-        }
-        const idemMsg = describeIdempotencyError(response.status, data);
-        if (idemMsg) throw new Error(idemMsg);
-        throw new Error(data.error || "Generation failed");
-      }
-      attempt.settle(true);
-      refetchCredits();
-      onHistoryRefresh();
-      void openPreviewFromResponse({
+    }, {
+      fallbackCost: cost,
+      unexpectedErrorFallback: "Generation failed",
+      previewData: (data) => ({
         ...data,
-        storagePath: pickGenerateStoragePath(data),
-      });
-    } catch (err) {
-      attempt.settle(false);
-      setError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setLoading(false);
-    }
+        storagePath: pickGenerateStoragePath(
+          data as {
+            storagePath?: string | null;
+            historyItem?: { storagePath?: string } | null;
+            videoUrl?: string | null;
+            imageUrl?: string | null;
+          },
+        ),
+      }),
+    });
   };
 
   const photoModelOptions = photoTiers.map((t) => ({

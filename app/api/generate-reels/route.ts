@@ -22,40 +22,29 @@ import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/admin-auth";
 import { insertUserCreation } from "@/lib/creations-db";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob, cancelJob, markJobRecoverable } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { finishJob, markJobRecoverable } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
-  createProcessingAsset,
+  beginMeteredAttempt,
+  finishMeteredAttempt,
+  type MeteredAttemptHandle,
+} from "@/lib/metered-generation/lifecycle";
+import {
   markAssetReady,
-  markAssetFailed,
 } from "@/lib/assets-db";
 import { isCancellation } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
-import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
 import { isRecoverablePipelineError } from "@/lib/pipeline-recovery/errors";
-import {
-  spendCredits,
-  refundCredits,
-  getWallet,
-  InsufficientCreditsError,
-} from "@/lib/credits-db";
 import { getSeedanceCredits, getVeoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getReelsModels, getVeoModels, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import { createReplicateClient } from "@/lib/replicate-utils";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
-  beginGenerationRequest,
-  attachGenerationRequestJob,
-  finishGenerationRequestSuccess,
-  finishGenerationRequestFailure,
-  finishGenerationRequestRecoverable,
-  buildRecoverableGenerationJson,
 } from "@/lib/generation-idempotency";
 import { validateReelsRequest, REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
@@ -98,6 +87,7 @@ export async function POST(req: Request) {
   let currentStepId: string | null = null;
   let finalAssetId: string | null = null;
   let generationRequestId: string | null = null;
+  let metered: MeteredAttemptHandle | null = null;
   // Credit-spend trackers. `creditsSpent` is the gate; without it the catch
   // block must NOT refund (no spend = no debt). `jobType` keys the refund.
   let creditsSpent = false;
@@ -274,45 +264,6 @@ export async function POST(req: Request) {
               : { numScenes: reqv.numScenes }),
           }
     );
-    const begin = await beginGenerationRequest({
-      profileId: profileId!,
-      idempotencyKey: idemKey,
-      routeKey: "generate_reels",
-      toolKey: "reels",
-      requestHash,
-    });
-    if (begin.action === "conflict") {
-      return NextResponse.json(
-        {
-          error: "This idempotency key was already used with a different request.",
-          code: "IDEMPOTENCY_CONFLICT",
-        },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "in_progress") {
-      return NextResponse.json(
-        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "replay") {
-      return NextResponse.json(begin.response);
-    }
-    if (begin.action === "recoverable") {
-      return NextResponse.json(
-        buildRecoverableGenerationJson({
-          jobId: begin.jobId,
-          message:
-            typeof begin.errorJson.message === "string" ? begin.errorJson.message : undefined,
-        }),
-        { status: 503 },
-      );
-    }
-    generationRequestId = begin.id;
-
-    // ---- Platform job (best-effort observability) ----
-    // Asset creation is deferred until AFTER the credit spend succeeds.
     const jobInput: Record<string, unknown> =
       reqv.engine === "seedance"
         ? {
@@ -340,9 +291,21 @@ export async function POST(req: Request) {
               ? { singlePromptScenes: reqv.singlePromptScenes }
               : { numScenes: reqv.numScenes }),
           };
-    const job = await safe("createJob", () =>
-      createJob({
-        profileId: profileId!,
+    const requiredCredits = devBlank
+      ? 0
+      : reqv.engine === "veo"
+        ? await getVeoCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration })
+        : await getSeedanceCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration });
+    const beginResult = await beginMeteredAttempt({
+      profileId: profileId!,
+      userId,
+      idempotency: {
+        key: idemKey,
+        routeKey: "generate_reels",
+        toolKey: "reels",
+        requestHash,
+      },
+      job: {
         tool: reqv.jobTool,
         jobType: reqv.jobType,
         provider: devBlank ? "dev_blank" : models!.video.provider,
@@ -351,41 +314,10 @@ export async function POST(req: Request) {
           ...jobInput,
           ...(devBlank ? devBlankJobTag() : {}),
         },
-      })
-    );
-    if (job) {
-      jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: job.id,
-          }),
-        );
-      }
-    }
-
-    // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Compute cost from central pricing config and debit BEFORE any provider
-    // call. PricingConfigError (unknown key) throws here, before the spend, and
-    // bubbles to the outer catch as a 500 with no charge. jobId-based idempotency
-    // prevents double-charges on in-flight retries within this request.
-    const requiredCredits = devBlank
-      ? 0
-      : reqv.engine === "veo"
-        ? await getVeoCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration })
-        : await getSeedanceCredits({ resolution: reqv.resolution, durationSec: reqv.totalDuration });
-    if (!devBlank) {
-      try {
-        await spendCredits({
-        profileId: profileId!,
+      },
+      spend: {
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:${reqv.jobType}:${jobId}`
-          : `spend:${reqv.jobType}:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        jobType: reqv.jobType,
         description:
           reqv.engine === "seedance"
             ? "ReelsGen (Seedance) generation"
@@ -403,68 +335,33 @@ export async function POST(req: Request) {
               ? { mode: "single", duration: reqv.duration, singlePromptScenes: reqv.singlePromptScenes }
               : { mode: "perScene", duration: reqv.duration, sceneCount: reqv.numScenes }),
         },
-      });
-      creditsSpent = true;
-      creditsAmount = requiredCredits;
-      } catch (e) {
-        if (e instanceof InsufficientCreditsError) {
-        const wallet = await getWallet(profileId!).catch(() => null);
-        const currentBalance = wallet?.balance ?? 0;
-        if (jobId) {
-          await safe("failJobInsufficient", () =>
-            failJob(profileId!, jobId!, {
-              code: "INSUFFICIENT_CREDITS",
-              message: "Insufficient credits.",
-              requiredCredits,
-              currentBalance,
-            })
-          );
-        }
-        if (generationRequestId) {
-          await safe("idemFailInsufficient", () =>
-            finishGenerationRequestFailure({
-              id: generationRequestId!,
-              profileId: profileId!,
-              jobId: jobId ?? null,
-              errorJson: {
-                code: "INSUFFICIENT_CREDITS",
-                message: "Insufficient credits.",
-                requiredCredits,
-                currentBalance,
-              },
-            })
-          );
-        }
-        return NextResponse.json(
-          { error: "Insufficient credits.", requiredCredits, currentBalance },
-          { status: 402 }
-        );
-      }
-      // Non-balance infra failure: bubble to the outer catch as a 500.
-      // creditsSpent stays false so no refund is attempted.
-      throw e;
-      }
-    }
-
-    // ---- Processing asset (created AFTER spend succeeds) ----
-    const asset = await safe("createAsset", () =>
-      createProcessingAsset({
-        profileId: profileId!,
-        jobId: jobId ?? undefined,
-        tool: reqv.jobTool,
-        assetType: "video",
-        role: "final_video",
-        provider: devBlank ? "dev_blank" : models!.video.provider,
-        model: devBlank ? "dev_blank" : models!.video.model,
-        metadata: {
-          theme: reqv.theme.slice(0, 200),
-          engine: reqv.engine,
-          ...(reqv.engine === "veo" ? { mode: reqv.mode } : {}),
-          ...(devBlank ? devBlankJobTag() : {}),
+        skip: devBlank,
+      },
+      processingAssets: [
+        {
+          tool: reqv.jobTool,
+          assetType: "video",
+          role: "final_video",
+          provider: devBlank ? "dev_blank" : models!.video.provider,
+          model: devBlank ? "dev_blank" : models!.video.model,
+          metadata: {
+            theme: reqv.theme.slice(0, 200),
+            engine: reqv.engine,
+            ...(reqv.engine === "veo" ? { mode: reqv.mode } : {}),
+            ...(devBlank ? devBlankJobTag() : {}),
+          },
         },
-      })
-    );
-    if (asset) finalAssetId = asset.id;
+      ],
+    });
+    if (beginResult.kind === "early_exit") {
+      return NextResponse.json(beginResult.http.body, { status: beginResult.http.status });
+    }
+    metered = beginResult.handle;
+    jobId = metered.jobId;
+    generationRequestId = metered.generationRequestId;
+    creditsSpent = metered.creditsSpent;
+    creditsAmount = metered.creditsAmount;
+    finalAssetId = metered.assetIds[0] ?? null;
 
     if (devBlank) {
       await beginStep("dev_blank", "Deliver blank placeholder video (admin test)");
@@ -552,33 +449,26 @@ export async function POST(req: Request) {
         storagePath: blankResult.storagePath,
         historyItem,
       };
-      if (generationRequestId) {
-        await safe("idemSuccess", () =>
-          finishGenerationRequestSuccess({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId ?? null,
-            assetId: finalAssetId ?? null,
-            responseJson: successResponse,
-          }),
-        );
-      }
+      await finishMeteredAttempt(metered, {
+        kind: "success",
+        responseJson: successResponse,
+        primaryAssetId: finalAssetId,
+      });
       return NextResponse.json(successResponse);
     }
 
     const pipelineModels = models!;
     const pipelineRefs = refs!;
 
-    const recovery =
+    pipelineRecovery =
       jobId && profileId && userId
         ? createPipelineRecoveryHandle({
             profileId: profileId!,
             userId: userId!,
             jobId: jobId!,
-            existingJob: job,
           })
         : undefined;
-    pipelineRecovery = recovery;
+    const recovery = pipelineRecovery;
 
     // ---- Build the pipeline context + dispatch ----
     const ctx: ReelsPipelineContext = {
@@ -740,16 +630,14 @@ export async function POST(req: Request) {
       );
     }
 
-    if (jobId && userId) {
-      await safe("purgeResumable", () => purgeResumableJobStorage(userId!, jobId!));
-    }
-
     // Usage event — analytics only, NEVER affects billing/response.
-    await safe("recordUsage", () =>
-      recordUsageEvent({
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: finalAssetId ?? null,
+    const successResponse = { videoUrl: result.videoUrl, storagePath: result.storagePath, historyItem };
+    await finishMeteredAttempt(metered!, {
+      kind: "success",
+      responseJson: successResponse,
+      primaryAssetId: finalAssetId,
+      usage: {
+        assetId: finalAssetId,
         tool: reqv.jobTool,
         provider: pipelineModels.video.provider,
         model: pipelineModels.video.model,
@@ -777,23 +665,9 @@ export async function POST(req: Request) {
                   resolution: reqv.resolution,
                   sceneCount: reqv.numScenes,
                 },
-      })
-    );
-
-    // Standardized response for ALL engines. Persisted on the idempotency row so
-    // a duplicate same-key request replays this exact body without regenerating.
-    const successResponse = { videoUrl: result.videoUrl, storagePath: result.storagePath, historyItem };
-    if (generationRequestId) {
-      await safe("idemSuccess", () =>
-        finishGenerationRequestSuccess({
-          id: generationRequestId!,
-          profileId: profileId!,
-          jobId: jobId ?? null,
-          assetId: finalAssetId ?? null,
-          responseJson: successResponse,
-        })
-      );
-    }
+      },
+      purgeResumable: true,
+    });
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const recoverable = isRecoverablePipelineError(error);
@@ -801,132 +675,73 @@ export async function POST(req: Request) {
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
+    const pricingMissing = error instanceof PricingConfigError;
+    const rawMessage =
+      error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[reels] Cancelled by user.");
     else if (recoverable) console.warn("[reels] Recoverable pipeline error:", error);
     else console.error("[reels] pipeline error:", error);
-
-    // Pricing fail-closed (v2.2): an unknown pricing key throws BEFORE the spend
-    // and any provider call, so no credits were charged and no provider ran.
-    const pricingMissing = error instanceof PricingConfigError;
-    const message = cancelled
-      ? "Generation cancelled."
-      : recoverable
-        ? error instanceof Error
-          ? error.message
-          : String(error)
-        : error instanceof Error
-          ? error.message
-          : String(error);
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : recoverable
-        ? { message, code: "PIPELINE_RECOVERABLE" }
-        : pricingMissing
-          ? { message, code: "PRICING_CONFIG_MISSING" }
-          : { message };
-
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (finalAssetId && profileId && !recoverable) {
-      await safe("failAsset", () => markAssetFailed(profileId!, finalAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      if (cancelled) {
-        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-        if (userId) {
-          await safe("purgeResumableCancel", () => purgeResumableJobStorage(userId!, jobId!));
-        }
-      } else if (recoverable) {
-        const manifest = pipelineRecovery?.getManifest();
-        await safe("markRecoverable", () =>
-          markJobRecoverable(profileId!, jobId!, {
-            recovery: (manifest ?? {}) as unknown as Record<string, unknown>,
-            outputExtra: finalAssetId ? { assetId: finalAssetId } : undefined,
-            error: errJson,
-          })
-        );
-      } else {
-        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
-        if (userId) {
-          await safe("purgeResumableFail", () => purgeResumableJobStorage(userId!, jobId!));
-        }
+    const handle =
+      metered ??
+      (profileId
+        ? {
+            profileId,
+            userId,
+            jobId,
+            generationRequestId,
+            creditsSpent,
+            creditsAmount,
+            assetIds: finalAssetId ? [finalAssetId] : [],
+            refundJobType: jobType ?? "reels",
+          }
+        : null);
+    if (handle) {
+      if (finalAssetId) handle.assetIds = [finalAssetId];
+      const finished = await finishMeteredAttempt(
+        handle,
+        recoverable
+          ? {
+              kind: "recoverable",
+              rawMessage,
+              currentStepId,
+              clearCurrentStep: () => {
+                currentStepId = null;
+              },
+              settlementOptions: {
+                recoverableJobAction: "mark_recoverable",
+                resumablePurge: true,
+                requireJobTypeForRefund: true,
+              },
+              settlementLegacyOpts: {
+                markRecoverableJob: async ({ profileId: pid, jobId: jid, errJson }) => {
+                  const manifest = pipelineRecovery?.getManifest();
+                  await markJobRecoverable(pid, jid, {
+                    recovery: (manifest ?? {}) as unknown as Record<string, unknown>,
+                    outputExtra: finalAssetId ? { assetId: finalAssetId } : undefined,
+                    error: errJson,
+                  });
+                },
+              },
+            }
+          : {
+              kind: "terminal",
+              cancelled,
+              pricingMissing,
+              rawMessage,
+              currentStepId,
+              clearCurrentStep: () => {
+                currentStepId = null;
+              },
+              settlementOptions: {
+                resumablePurge: true,
+                requireJobTypeForRefund: true,
+              },
+            },
+      );
+      if (finished.http) {
+        return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-
-    // Best-effort refund. Skip when recoverable (credits held for resume).
-    if (
-      creditsSpent &&
-      profileId &&
-      creditsAmount > 0 &&
-      jobType &&
-      !recoverable
-    ) {
-      await safe("refundCredits", () =>
-        refundCredits({
-          profileId: profileId!,
-          amount: creditsAmount,
-          idempotencyKey: jobId
-            ? `refund:${jobType}:${jobId}`
-            : `refund:${jobType}:profile:${profileId}:${Date.now()}`,
-          jobId: jobId ?? null,
-          description: cancelled
-            ? "Refund after user cancellation"
-            : "Best-effort refund after generation failure",
-          metadata: {
-            reason: cancelled ? "generation_cancelled" : "generation_failed",
-            originalError: errJson,
-          },
-        })
-      );
-    }
-
-    if (generationRequestId) {
-      if (recoverable && jobId) {
-        await safe("idemRecoverable", () =>
-          finishGenerationRequestRecoverable({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId!,
-            errorJson: errJson,
-          })
-        );
-      } else {
-        await safe("idemFailure", () =>
-          finishGenerationRequestFailure({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId ?? null,
-            errorJson: errJson,
-          })
-        );
-      }
-    }
-
-    if (cancelled) {
-      return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
-        { status: 409 }
-      );
-    }
-    if (recoverable) {
-      return NextResponse.json(
-        {
-          recoverable: true,
-          jobId,
-          error: message,
-          code: "PIPELINE_RECOVERABLE",
-          refunded: false,
-        },
-        { status: 503 }
-      );
-    }
-    return NextResponse.json(
-      pricingMissing
-        ? { error: message, code: "PRICING_CONFIG_MISSING" }
-        : { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: rawMessage }, { status: 500 });
   }
 }

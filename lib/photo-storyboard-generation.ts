@@ -18,28 +18,22 @@ import {
   isCancellation,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
-import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import { finishJob } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
-  spendCredits,
-  refundCredits,
-  getWallet,
-  InsufficientCreditsError,
-} from "@/lib/credits-db";
+  beginMeteredAttempt,
+  finishMeteredAttempt,
+  type MeteredAttemptHandle,
+} from "@/lib/metered-generation/lifecycle";
+import { markAssetReady } from "@/lib/assets-db";
 import { getStoryboardImageCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getStoryboardModels, replicateRef } from "@/lib/model-resolver";
 import { labelForProviderModel } from "@/lib/creation-model-label";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
-  beginGenerationRequest,
-  attachGenerationRequestJob,
-  finishGenerationRequestSuccess,
-  finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import {
   assertNotCancelled,
@@ -325,6 +319,7 @@ export async function handlePhotoStoryboardGeneration(
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
   let generationRequestId: string | null = null;
+  let metered: MeteredAttemptHandle | null = null;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -477,74 +472,33 @@ export async function handlePhotoStoryboardGeneration(
       hasThemeReference,
       devBlank,
     });
-    const begin = await beginGenerationRequest({
-      profileId: profileId!,
-      idempotencyKey: idemKey,
-      routeKey: "generate_photo",
-      toolKey: "photo",
-      requestHash,
-    });
-    if (begin.action === "conflict") {
-      return NextResponse.json(
-        {
-          error: "This idempotency key was already used with a different request.",
-          code: "IDEMPOTENCY_CONFLICT",
-        },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "in_progress") {
-      return NextResponse.json(
-        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "replay") {
-      return NextResponse.json(begin.response);
-    }
-    generationRequestId = begin.id;
-
-    // ---- Platform job (best-effort observability) ----
-    // Asset creation is deferred until after the credit spend succeeds.
-    const job = await safe("createJob", () => createJob({
-      profileId: profileId!,
-      tool: "photo",
-      jobType: "storyboard_image",
-      provider: devBlank ? "dev_blank" : imageModel.provider,
-      model: devBlank ? "dev_blank" : imageModel.model,
-      input: {
-        mode: "storyboard",
-        theme: theme.slice(0, 500),
-        storyboardStyle,
-        aspectRatio,
-        language,
-        ...(devBlank ? devBlankJobTag() : {}),
-      },
-    }));
-    if (job) {
-      jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({ id: generationRequestId!, profileId: profileId!, jobId: job.id }),
-        );
-      }
-    }
-
-    // ---- Credit spend (BUSINESS LOGIC — not safe-wrapped) ----
-    // Storyboard image is priced from the GPT Image 2 `auto` tier provider cost
-    // (v2.2 default 12 credits). Insufficient → 402 with no provider call; other
-    // infra failures bubble to outer catch as 500.
     const requiredCredits = devBlank ? 0 : await getStoryboardImageCredits();
-    if (!devBlank) {
-    try {
-      await spendCredits({
-        profileId: profileId!,
+    const beginResult = await beginMeteredAttempt({
+      profileId: profileId!,
+      userId,
+      idempotency: {
+        key: idemKey,
+        routeKey: "generate_photo",
+        toolKey: "photo",
+        requestHash,
+      },
+      job: {
+        tool: "photo",
+        jobType: "storyboard_image",
+        provider: devBlank ? "dev_blank" : imageModel.provider,
+        model: devBlank ? "dev_blank" : imageModel.model,
+        input: {
+          mode: "storyboard",
+          theme: theme.slice(0, 500),
+          storyboardStyle,
+          aspectRatio,
+          language,
+          ...(devBlank ? devBlankJobTag() : {}),
+        },
+      },
+      spend: {
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:storyboard_image:${jobId}`
-          : `spend:storyboard_image:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        jobType: "storyboard_image",
         description: "Storyboard image generation",
         metadata: {
           tool: "photo",
@@ -554,61 +508,34 @@ export async function handlePhotoStoryboardGeneration(
           aspectRatio,
           language,
         },
-      });
-      creditsSpent = true;
-      creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
-        const wallet = await getWallet(profileId!).catch(() => null);
-        const currentBalance = wallet?.balance ?? 0;
-        if (jobId) {
-          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
-            code: "INSUFFICIENT_CREDITS",
-            message: "Insufficient credits.",
-            requiredCredits,
-            currentBalance,
-          }));
-        }
-        if (generationRequestId) {
-          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId ?? null,
-            errorJson: {
-              code: "INSUFFICIENT_CREDITS",
-              message: "Insufficient credits.",
-              requiredCredits,
-              currentBalance,
-            },
-          }));
-        }
-        return NextResponse.json(
-          { error: "Insufficient credits.", requiredCredits, currentBalance },
-          { status: 402 }
-        );
-      }
-      throw e;
-    }
-    }
-
-    // ---- Processing asset (created AFTER spend succeeds) ----
-    const asset = await safe("createAsset", () => createProcessingAsset({
-      profileId: profileId!,
-      jobId: jobId ?? undefined,
-      tool: "photo",
-      assetType: "image",
-      role: "storyboard_image",
-      provider: devBlank ? "dev_blank" : imageModel.provider,
-      model: devBlank ? "dev_blank" : imageModel.model,
-      metadata: {
-        storyboardStyle,
-        aspectRatio,
-        language,
-        theme: theme.slice(0, 200),
-        ...(devBlank ? devBlankJobTag() : {}),
+        skip: devBlank,
       },
-    }));
-    if (asset) imageAssetId = asset.id;
+      processingAssets: [
+        {
+          tool: "photo",
+          assetType: "image",
+          role: "storyboard_image",
+          provider: devBlank ? "dev_blank" : imageModel.provider,
+          model: devBlank ? "dev_blank" : imageModel.model,
+          metadata: {
+            storyboardStyle,
+            aspectRatio,
+            language,
+            theme: theme.slice(0, 200),
+            ...(devBlank ? devBlankJobTag() : {}),
+          },
+        },
+      ],
+    });
+    if (beginResult.kind === "early_exit") {
+      return NextResponse.json(beginResult.http.body, { status: beginResult.http.status });
+    }
+    metered = beginResult.handle;
+    jobId = metered.jobId;
+    generationRequestId = metered.generationRequestId;
+    creditsSpent = metered.creditsSpent;
+    creditsAmount = metered.creditsAmount;
+    imageAssetId = metered.assetIds[0] ?? null;
 
     const replicateHooks = makeReplicateCancelHooks({
       generationRequestId,
@@ -871,20 +798,6 @@ export async function handlePhotoStoryboardGeneration(
       }));
     }
 
-    // Usage event — analytics only, NEVER affects billing/response.
-    await safe("recordUsage", () => recordUsageEvent({
-      profileId: profileId!,
-      jobId: jobId ?? null,
-      assetId: imageAssetId ?? null,
-      tool: "photo",
-      provider: devBlank ? "dev_blank" : imageModel.provider,
-      model: devBlank ? "dev_blank" : imageModel.model,
-      unitType: "images",
-      units: 1,
-      creditsCharged: creditsAmount,
-      metadata: { mode: "storyboard", jobType: "storyboard_image", storyboardStyle, aspectRatio, language, storyboardId: inserted.id },
-    }));
-
     let historyItem;
     try {
       historyItem = await insertUserCreation({
@@ -919,86 +832,70 @@ export async function handlePhotoStoryboardGeneration(
       language,
       historyItem,
     };
-    if (generationRequestId) {
-      await safe("idemSuccess", () => finishGenerationRequestSuccess({
-        id: generationRequestId!,
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: imageAssetId ?? null,
-        responseJson: successResponse,
-      }));
-    }
+
+    // Usage event — analytics only, NEVER affects billing/response.
+    await finishMeteredAttempt(metered, {
+      kind: "success",
+      responseJson: successResponse,
+      primaryAssetId: imageAssetId,
+      usage: {
+        assetId: imageAssetId,
+        tool: "photo",
+        provider: devBlank ? "dev_blank" : imageModel.provider,
+        model: devBlank ? "dev_blank" : imageModel.model,
+        unitType: "images",
+        units: 1,
+        creditsCharged: creditsAmount,
+        metadata: {
+          mode: "storyboard",
+          jobType: "storyboard_image",
+          storyboardStyle,
+          aspectRatio,
+          language,
+          storyboardId: inserted.id,
+        },
+      },
+    });
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
+    const pricingMissing = error instanceof PricingConfigError;
+    const rawMessage =
+      error instanceof Error ? error.message : String(error ?? "Unknown error");
     if (cancelled) console.log("[Storyboard] Cancelled by user.");
     else console.error("[Storyboard] Error:", error);
-    const pricingMissing = error instanceof PricingConfigError;
-    const message = cancelled
-      ? "Generation cancelled."
-      : error instanceof Error
-        ? error.message
-        : String(error ?? "Unknown error");
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (imageAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, imageAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      if (cancelled) {
-        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-      } else {
-        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    const handle =
+      metered ??
+      (profileId
+        ? {
+            profileId,
+            userId: null,
+            jobId,
+            generationRequestId,
+            creditsSpent,
+            creditsAmount,
+            assetIds: imageAssetId ? [imageAssetId] : [],
+            refundJobType: "storyboard_image",
+          }
+        : null);
+    if (handle) {
+      const finished = await finishMeteredAttempt(handle, {
+        kind: "terminal",
+        cancelled,
+        pricingMissing,
+        rawMessage,
+        currentStepId,
+        clearCurrentStep: () => {
+          currentStepId = null;
+        },
+      });
+      if (finished.http) {
+        return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-
-    if (creditsSpent && profileId && creditsAmount > 0) {
-      await safe("refundCredits", () => refundCredits({
-        profileId: profileId!,
-        amount: creditsAmount,
-        idempotencyKey: jobId
-          ? `refund:storyboard_image:${jobId}`
-          : `refund:storyboard_image:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
-        description: cancelled
-          ? "Refund after user cancellation"
-          : "Best-effort refund after generation failure",
-        metadata: {
-          reason: cancelled ? "generation_cancelled" : "generation_failed",
-          originalError: errJson,
-        },
-      }));
-    }
-
-    if (generationRequestId) {
-      await safe("idemFailure", () => finishGenerationRequestFailure({
-        id: generationRequestId!,
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        errorJson: errJson,
-      }));
-    }
-
-    if (cancelled) {
-      return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: rawMessage }, { status: 500 });
   }
 }
