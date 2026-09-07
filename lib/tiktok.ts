@@ -504,12 +504,16 @@ async function initPhotoPost(params: {
         brand_organic_toggle: params.brandOrganicToggle,
         brand_content_toggle: params.brandContentToggle,
         disable_comment: params.disableComment,
-        // Duet and Stitch are not a photo-post concept at all (TikTok's own
-        // guideline: "Duet and Stitch features are not applicable to photo
-        // posts") — always disabled here, unconditionally, rather than
-        // threaded through as params that could be passed incorrectly.
-        disable_duet: true,
-        disable_stitch: true,
+        // Duet and Stitch are not a photo-post concept in TikTok's UX
+        // guideline, but critically that's a UI rule, not part of this
+        // endpoint's actual request schema — TikTok's Photo Post post_info
+        // has no disable_duet/disable_stitch field at all (confirmed against
+        // developers.tiktok.com/doc/content-posting-api-reference-photo-post;
+        // only title, description, privacy_level, disable_comment,
+        // auto_add_music, brand_organic_toggle, brand_content_toggle are
+        // valid). Sending either one made TikTok reject the whole request
+        // with a generic "review our integration guidelines" error — do not
+        // add them back here.
       },
       source_info: {
         source: "PULL_FROM_URL",
