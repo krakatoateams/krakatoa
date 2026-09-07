@@ -1,10 +1,65 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { Pencil, Star } from "lucide-react";
 import type { Skill } from "@/lib/skills";
 
 const CARD =
   "group flex items-center gap-3 rounded-xl bg-white/[0.04] p-2 pr-2 text-left transition-colors hover:bg-white/[0.08]";
+
+function RunningTitle({ text }: { text: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [overflowPx, setOverflowPx] = useState(0);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const measure = measureRef.current;
+    if (!viewport || !measure) return;
+
+    const update = () => {
+      const delta = measure.scrollWidth - viewport.clientWidth;
+      setOverflowPx(delta > 1 ? delta : 0);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    observer.observe(measure);
+    return () => observer.disconnect();
+  }, [text]);
+
+  const running = overflowPx > 0;
+  const durationSec = Math.max(5, overflowPx / 24);
+
+  return (
+    <span
+      ref={viewportRef}
+      title={text}
+      className={`relative min-w-0 flex-1 overflow-hidden text-sm font-medium text-N900 ${
+        running ? "[mask-image:linear-gradient(to_right,black_calc(100%-10px),transparent)]" : ""
+      }`}
+    >
+      <span
+        ref={measureRef}
+        className="invisible absolute left-0 top-0 whitespace-nowrap"
+        aria-hidden
+      >
+        {text}
+      </span>
+      {running ? (
+        <span
+          className="inline-flex w-max gap-8 whitespace-nowrap animate-marquee-left motion-reduce:animate-none"
+          style={{ animationDuration: `${durationSec}s` }}
+        >
+          <span>{text}</span>
+          <span aria-hidden>{text}</span>
+        </span>
+      ) : (
+        <span className="block truncate whitespace-nowrap">{text}</span>
+      )}
+    </span>
+  );
+}
 
 export function SkillTile({
   skill,
@@ -46,9 +101,7 @@ export function SkillTile({
             />
           ) : null}
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-N900">
-          {skill.title}
-        </span>
+        <RunningTitle text={skill.title} />
       </button>
       <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center">
         {onModify ? (

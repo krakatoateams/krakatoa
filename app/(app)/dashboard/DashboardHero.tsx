@@ -317,7 +317,7 @@ export default function DashboardHero() {
           <h3 className="font-display text-xl font-bold tracking-tight text-N900">Skills</h3>
         </HeroPanel>
 
-        <HeroPanel href="/tools/canvas" badge="New" backdrop={<CanvasHeroGraph />}>
+        <HeroPanel badge="Soon" backdrop={<CanvasHeroGraph />}>
           <Workflow className="h-5 w-5 text-N900/80" />
           <h3 className="font-display text-xl font-bold tracking-tight text-N900">Canvas</h3>
         </HeroPanel>

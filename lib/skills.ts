@@ -135,6 +135,8 @@ export type Skill = {
   /** Open another studio instead of the Agent omni form. */
   openHref?: string;
   badge?: "new";
+  /** Admin-pinned Photo tier or Video model. Absent = catalog default. */
+  modelId?: string;
 };
 
 export const SKILL_CATEGORIES: { id: SkillCategoryId; title: string }[] = [
