@@ -70,6 +70,9 @@ import {
   useMediaRefs,
   uploadRefFile,
   STUDIO_CHIP_ROW_CLASS,
+  StudioForm,
+  StudioFormCard,
+  StudioFormHeader,
   StudioGenerationPreviewProvider,
   StudioModelPanel,
   useStudioGenerationPreview,
@@ -830,9 +833,9 @@ function VideoOmniPage({
         </div>
 
         {creationType === "text2video" && (
-        <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
+        <StudioForm mode="video" onSubmit={handleGenerate}>
           {/* Top-left chips: creation type + model */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <StudioFormHeader>
             <ChipDropdown
               sheetTitle="Select creation type"
               icon={<Layers className="h-3.5 w-3.5" />}
@@ -858,9 +861,9 @@ function VideoOmniPage({
                 disabled={loading}
               />
             </div>
-          </div>
+          </StudioFormHeader>
 
-          <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+          <StudioFormCard>
             <div className="flex items-start gap-3">
               {/* Reference media inline before the prompt on desktop */}
               {model.references.referenceImages > 0 && (
@@ -1027,7 +1030,7 @@ function VideoOmniPage({
                 />
               </div>
             </div>
-          </div>
+          </StudioFormCard>
 
           {/* Model — attached under the form card on mobile only */}
           <StudioModelPanel>
@@ -1171,7 +1174,7 @@ function VideoOmniPage({
           {!refCheck.ok && (
             <p className="mt-2 pl-1 text-sm text-warning/80">{refCheck.error}</p>
           )}
-        </form>
+        </StudioForm>
         )}
 
         {creationType === "text2video" && recoverableJobId && (
@@ -1552,8 +1555,8 @@ function ViralTemplateComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+      <StudioForm mode="video" onSubmit={handleGenerate}>
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -1578,9 +1581,9 @@ function ViralTemplateComposer({
               disabled={loading}
             />
           </div>
-        </div>
+        </StudioFormHeader>
 
-        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
+        <StudioFormCard>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CharacterPicker
               group={charImage}
@@ -1733,7 +1736,7 @@ function ViralTemplateComposer({
               />
             </div>
           </div>
-        </div>
+        </StudioFormCard>
 
         <StudioModelPanel>
           <div className="flex items-center justify-between gap-3">
@@ -1779,7 +1782,7 @@ function ViralTemplateComposer({
             />
           </div>
         </div>
-      </form>
+      </StudioForm>
 
       {error && !recoverableJobId && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
@@ -2126,8 +2129,8 @@ function ImageToVideoComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+      <StudioForm mode="video" onSubmit={handleGenerate}>
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -2153,9 +2156,9 @@ function ImageToVideoComposer({
               disabled={loading}
             />
           </div>
-        </div>
+        </StudioFormHeader>
 
-        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
+        <StudioFormCard>
           <div
             className={`grid grid-cols-1 gap-3 ${
               model.references.lastFrame ? "lg:grid-cols-3" : "sm:grid-cols-2"
@@ -2336,7 +2339,7 @@ function ImageToVideoComposer({
             </div>
           </div>
 
-        </div>
+        </StudioFormCard>
 
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
@@ -2384,7 +2387,7 @@ function ImageToVideoComposer({
             />
           </div>
         </div>
-      </form>
+      </StudioForm>
 
       {recoverableJobId && (
         <GenerationRecoverableBanner
@@ -2668,9 +2671,9 @@ function MotionControlComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
+      <StudioForm mode="video" onSubmit={handleGenerate}>
         {/* Top-left chips: creation type + model */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -2696,9 +2699,9 @@ function MotionControlComposer({
               disabled={loading}
             />
           </div>
-        </div>
+        </StudioFormHeader>
 
-        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
+        <StudioFormCard>
           {/* Uploads: character image + motion video (both required) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CharacterPicker
@@ -2895,7 +2898,7 @@ function MotionControlComposer({
               />
             </div>
           </div>
-        </div>
+        </StudioFormCard>
 
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
@@ -2943,7 +2946,7 @@ function MotionControlComposer({
             />
           </div>
         </div>
-      </form>
+      </StudioForm>
 
       {error && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
@@ -3587,9 +3590,9 @@ function StoryboardToVideoComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
+      <StudioForm mode="video" onSubmit={handleGenerate}>
         {/* Top-left chips: creation type + model */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -3615,9 +3618,9 @@ function StoryboardToVideoComposer({
               disabled={loading}
             />
           </div>
-        </div>
+        </StudioFormHeader>
 
-        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm sm:p-5">
+        <StudioFormCard>
           {/* Storyboard picker */}
           <div className="mb-1 flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold uppercase tracking-wider text-text-secondary">
@@ -3879,7 +3882,7 @@ function StoryboardToVideoComposer({
               Pick a storyboard to turn into a video.
             </p>
           ) : null}
-        </div>
+        </StudioFormCard>
 
         {/* Model — attached under the form card on mobile only */}
         <StudioModelPanel>
@@ -3927,7 +3930,7 @@ function StoryboardToVideoComposer({
             />
           </div>
         </div>
-      </form>
+      </StudioForm>
 
       {showUpload && (
         <ImportStoryboardModal
@@ -4431,9 +4434,9 @@ function ReelsCreatorComposer({
 
   return (
     <>
-      <form onSubmit={handleGenerate} className="relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0">
+      <StudioForm mode="video" onSubmit={handleGenerate}>
         {/* Top-left chips: creation type + engine (+ Veo mode) */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <StudioFormHeader>
           <ChipDropdown
             sheetTitle="Select creation type"
             icon={<Layers className="h-3.5 w-3.5" />}
@@ -4469,9 +4472,9 @@ function ReelsCreatorComposer({
               disabled={loading}
             />
           )}
-        </div>
+        </StudioFormHeader>
 
-        <div className="relative z-10 rounded-radius-xl border border-white/10 bg-N50 p-4 backdrop-blur-sm transition-colors focus-within:border-white/25 sm:p-5">
+        <StudioFormCard>
           {/* Theme */}
           <textarea
             value={theme}
@@ -4676,7 +4679,7 @@ function ReelsCreatorComposer({
               />
             </div>
           </div>
-        </div>
+        </StudioFormCard>
 
         {/* Engine — attached under the form card on mobile only */}
         <StudioModelPanel>
@@ -4919,7 +4922,7 @@ function ReelsCreatorComposer({
             })()}
           </div>
         </div>
-      </form>
+      </StudioForm>
 
       {recoverableJobId && (
         <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning sm:flex-row sm:items-center sm:justify-between">

@@ -7,6 +7,7 @@ export const CREATION_TOOLS = {
   video_text2video: { label: "Text to Video", mediaType: "video" as const },
   video_image2video: { label: "Image to Video", mediaType: "video" as const },
   video_motion_control: { label: "Motion Control", mediaType: "video" as const },
+  video_editor: { label: "Editor", mediaType: "video" as const },
 } as const;
 
 export type CreationTool = keyof typeof CREATION_TOOLS;

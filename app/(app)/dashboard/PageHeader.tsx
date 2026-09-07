@@ -8,11 +8,13 @@ export default function PageHeader({
   description,
   actions,
   className = "",
+  titleClassName = "",
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
+  titleClassName?: string;
 }) {
   return (
     <div
@@ -23,7 +25,7 @@ export default function PageHeader({
       } ${className}`}
     >
       <div className={actions ? "min-w-0 flex-1" : undefined}>
-        <h1 className="mb-0 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-[clamp(1.625rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-transparent sm:mb-0">
+        <h1 className={`mb-0 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-[clamp(1.625rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-transparent sm:mb-0 ${titleClassName}`}>
           {title}
         </h1>
         {description ? (

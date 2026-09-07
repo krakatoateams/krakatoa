@@ -10,13 +10,16 @@ export { GenerationCancelButton } from "./GenerationCancelButton";
 export { DevBlankTestToggle } from "./DevBlankTestToggle";
 export {
   StudioForm,
+  StudioFormHeader,
   StudioFormCard,
   StudioChipRow,
   STUDIO_CHIP_ROW_CLASS,
+  STUDIO_FORM_CLASS,
   StudioModelPanel,
   StudioResultCard,
   StudioBanner,
 } from "./layout";
+export type { StudioModeId } from "./StudioModeRail";
 export {
   UploadTile,
   CharacterTile,

@@ -78,6 +78,11 @@ import {
   rewriteViralTemplateFirstFrameUrl,
   viralTemplateAssetUrlForProvider,
 } from "@/lib/viral-template-pipeline";
+import { resolveLiveSkill } from "@/lib/skill-configs-db";
+import {
+  assembleSkillPrompt,
+  skillDefaultTitle,
+} from "@/lib/skills";
 import {
   DevBlankForbiddenError,
   devBlankJobTag,
@@ -271,6 +276,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
     const b = body as Record<string, unknown>;
+    const skillIdRaw = typeof b.skillId === "string" ? b.skillId.trim() : "";
+    const liveSkill = skillIdRaw ? await resolveLiveSkill(skillIdRaw, profileId) : null;
+    if (skillIdRaw) {
+      if (!liveSkill || liveSkill.mediaType !== "video" || liveSkill.openHref) {
+        return NextResponse.json({ error: "Unknown video skill." }, { status: 400 });
+      }
+      try {
+        await assertToolEnabled("skills");
+      } catch (e) {
+        if (e instanceof ToolDisabledError) {
+          return NextResponse.json(
+            { error: e.message, code: "TOOL_DISABLED" },
+            { status: 403 }
+          );
+        }
+        console.warn("[video] skills tool guard unexpected error (failing open):", e);
+      }
+    }
+    const skillId = liveSkill?.id;
     const devBlank = isDevBlankRequested(b);
     if (devBlank) {
       try {
@@ -318,7 +342,7 @@ export async function POST(req: Request) {
     // Cap the prompt to the selected model's limit (e.g. Kling v3 = 2500 chars).
     const prompt = promptRaw.slice(0, model.promptMaxChars ?? PROMPT_MAX_CHARS);
 
-    if (!prompt) {
+    if (!prompt && (!liveSkill || liveSkill.promptRequired)) {
       return NextResponse.json(
         { error: "A prompt is required to generate a video." },
         { status: 400 }
@@ -479,7 +503,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: refCheck.error }, { status: 400 });
     }
 
+    if (
+      liveSkill?.inputs.some((slot) => slot.key === "startFrame" && slot.required) &&
+      !referenceInputs.firstFrame
+    ) {
+      return NextResponse.json(
+        { error: "A start frame is required for this skill." },
+        { status: 400 }
+      );
+    }
+
     let providerPrompt = prompt;
+    if (skillId) {
+      providerPrompt = assembleSkillPrompt(skillId, prompt, liveSkill?.recipe);
+    }
     if (isViralTemplateRun) {
       providerPrompt = adaptViralTemplatePromptForModel(providerPrompt, model);
     }
@@ -533,6 +570,7 @@ export async function POST(req: Request) {
       referenceCreationIds: referenceCreationIds.join(","),
       startImageCreationId,
       endImageCreationId,
+      skillId: skillId ?? "",
       devBlank,
     });
     const begin = await beginGenerationRequest({
@@ -589,6 +627,7 @@ export async function POST(req: Request) {
           generateAudio,
           pricingKey,
           prompt,
+          ...(skillId ? { skillId } : {}),
           ...(devBlank ? devBlankJobTag() : {}),
         },
       })
@@ -822,7 +861,9 @@ export async function POST(req: Request) {
     const title =
       isViralTemplateRun && viralTemplateMeta
         ? viralTemplateLabel(viralTemplateMeta)
-        : prompt.slice(0, 60) || jobLabel;
+        : skillId
+          ? prompt.slice(0, 60) || skillDefaultTitle(skillId, liveSkill?.title)
+          : prompt.slice(0, 60) || jobLabel;
     const creationMetadata = {
       ...(isViralTemplateRun && viralTemplateId
         ? {
@@ -832,6 +873,7 @@ export async function POST(req: Request) {
               : {}),
           }
         : { prompt, userPrompt: prompt }),
+      ...(skillId ? { skillId } : {}),
       modelId,
       modelLabel: model.modelLabel,
       providerModel: devBlank ? "dev_blank" : resolvedModel.model,

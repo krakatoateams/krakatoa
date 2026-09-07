@@ -14,6 +14,8 @@ import { listToolConfigs, type ToolConfig } from "@/lib/tool-configs-db";
  *   generate-storyboard -> deprecated proxy; use generate-photo mode=storyboard
  *   generate-photo -> photo
  *   generate-caption -> schedule
+ *   generate-canvas-text -> canvas
+ *   render-editor -> editor
  */
 
 // Short on purpose: getToolConfig now also backs the coming_soon page gate

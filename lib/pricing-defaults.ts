@@ -150,6 +150,8 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   product_photo_ideogram_v3_turbo_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "ideogram3" },
   product_photo_seedream_3_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "seedream3" },
   product_photo_flux_schnell_per_image: { providerCostUsd: 0.003, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "flux_schnell" },
+  // Canvas Text — Gemini 2.5 Flash rewrite. ~0.01 USD → 1 cr at factor 90.
+  canvas_text_per_run: { providerCostUsd: 0.01, costUnit: "per_run", pricingGroup: "canvas", variantKey: "text" },
 };
 
 /** Built-in v2 default for a pricing key, or null if the key is unknown. */

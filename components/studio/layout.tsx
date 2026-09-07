@@ -1,36 +1,90 @@
 "use client";
 
+import { Children, isValidElement } from "react";
+import BorderGlow from "@/components/BorderGlow";
+import { StudioModeRail, type StudioModeId } from "./StudioModeRail";
+
+export type { StudioModeId };
+
 // Presentational layout shells shared by the studio tool composers. They own the
 // canonical class strings so spacing / radius / mobile behavior can be tuned once
-// and apply across Photo + Video. Page-specific spacing is passed via `className`.
+// and apply across Photo + Video + Skills. Page-specific spacing is passed via
+// `className`.
 
 type DivProps = {
   children: React.ReactNode;
   className?: string;
 };
 
-// The <form> wrapper. Base owns stacking only; each page passes its own vertical
-// spacing (photo uses a tall hero margin, video a small one) via `className`.
+export const STUDIO_FORM_CLASS = "relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0";
+
+const STUDIO_FORM_HEADER = "StudioFormHeader";
+
+// Chip row that sits above the omni card. StudioForm places it in the same
+// grid as the mode rail so the rail top-aligns with the card, not the chips.
+export function StudioFormHeader({ children, className = "" }: DivProps) {
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>{children}</div>
+  );
+}
+StudioFormHeader.displayName = STUDIO_FORM_HEADER;
+
+function isStudioFormHeader(
+  child: React.ReactNode
+): child is React.ReactElement<{ children?: React.ReactNode; className?: string }> {
+  return isValidElement(child) && child.type === StudioFormHeader;
+}
+
+// The <form> wrapper. Always renders the Agent / Image / Video rail in one grid
+// with the composer card so every studio form shares alignment and switching.
 export function StudioForm({
   children,
   className = "",
   onSubmit,
-}: DivProps & { onSubmit: (e: React.FormEvent) => void }) {
+  mode,
+}: DivProps & { onSubmit: (e: React.FormEvent) => void; mode: StudioModeId }) {
+  const childList = Children.toArray(children);
+  const headers = childList.filter(isStudioFormHeader);
+  const rest = childList.filter((child) => !isStudioFormHeader(child));
+  const hasHeader = headers.length > 0;
+
   return (
-    <form onSubmit={onSubmit} className={`relative z-20 ${className}`}>
-      {children}
+    <form onSubmit={onSubmit} className={`${STUDIO_FORM_CLASS} ${className}`}>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
+        {hasHeader ? <div className="lg:col-start-2">{headers}</div> : null}
+        <StudioModeRail
+          active={mode}
+          className={hasHeader ? "max-lg:order-first lg:col-start-1 lg:row-start-2" : ""}
+        />
+        <div className={`min-w-0 ${hasHeader ? "lg:col-start-2 lg:row-start-2" : ""}`}>
+          {rest}
+        </div>
+      </div>
     </form>
   );
 }
 
+export const STUDIO_FORM_CARD_CLASS = "z-10 p-4 sm:p-5";
+
 // The glass "form card" container that holds the prompt + controls.
+// Cursor-follow border glow is shared by Agent / Photo / Video.
 export function StudioFormCard({ children, className = "" }: DivProps) {
   return (
-    <div
-      className={`rounded-radius-xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-sm sm:p-5 ${className}`}
+    <BorderGlow
+      data-studio-form-card
+      borderRadius={16}
+      glowColor="22 90 72"
+      backgroundColor="#121212"
+      glowRadius={40}
+      glowIntensity={1}
+      coneSpread={25}
+      edgeSensitivity={30}
+      animated
+      colors={["#FF995A", "#F26522", "#B24610"]}
+      className={`${STUDIO_FORM_CARD_CLASS} ${className}`}
     >
       {children}
-    </div>
+    </BorderGlow>
   );
 }
 

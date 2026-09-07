@@ -18,14 +18,16 @@ interface StatsCardProps {
 
 function StatsCard({ label, value, icon, accent, loading }: StatsCardProps) {
   return (
-    <div className="rounded-xl bg-white/[0.04] p-5">
-      <div className="flex items-center gap-3">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent}`}>
+    <div className="rounded-xl bg-white/[0.04] p-3 md:p-5">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg md:h-9 md:w-9 ${accent}`}>
           {icon}
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-text-disabled">{label}</p>
-        <p className="ml-auto text-3xl font-bold leading-none text-N900">
-          {loading ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-N900/10" /> : value}
+        <p className="text-[10px] font-medium uppercase leading-tight tracking-wider text-text-disabled md:text-xs">
+          {label}
+        </p>
+        <p className="text-2xl font-bold leading-none text-N900 md:ml-auto md:text-3xl">
+          {loading ? <span className="inline-block h-7 w-8 animate-pulse rounded bg-N900/10 md:h-8 md:w-12" /> : value}
         </p>
       </div>
     </div>
@@ -51,7 +53,7 @@ export default function StatsRow() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-3 gap-2 md:gap-4">
       <StatsCard
         label="Scheduled Posts"
         value={counts.scheduled}

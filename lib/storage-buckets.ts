@@ -51,6 +51,25 @@ export const PHOTOS_FOLDER = "photos";
 /** Platform foundation prefix — not user media. */
 export const PROFILES_FOLDER = "profiles";
 
+/** Admin-uploaded skill catalog thumbs. Not user media. */
+export const PLATFORM_SKILLS_PREFIX = "platform/skills/";
+
+const PLATFORM_SKILL_THUMB_PATH =
+  /^platform\/skills\/[a-z0-9-]+\/thumb_[0-9]+\.(jpe?g|png|webp)$/i;
+
+export function isPlatformSkillThumbPath(path: string): boolean {
+  return PLATFORM_SKILL_THUMB_PATH.test(path);
+}
+
+export function platformSkillThumbPath(
+  skillId: string,
+  ext: "jpg" | "jpeg" | "png" | "webp"
+): string {
+  const safeId = skillId.replace(/[^a-z0-9-]/gi, "").toLowerCase();
+  const safeExt = ext === "jpeg" ? "jpg" : ext;
+  return `${PLATFORM_SKILLS_PREFIX}${safeId}/thumb_${Date.now()}.${safeExt}`;
+}
+
 /** Path segment that marks transient reference uploads (legacy or per-user). */
 const TEMP_REFS_SEGMENT_PATH = `/${VIDEOS_TEMP_SEGMENT}/${VIDEOS_TEMP_REFS_SEGMENT}/`;
 
@@ -94,6 +113,7 @@ export function storagePathMediaKind(path: string): UserMediaFolder | null {
  */
 export function isStorageRelativePath(value: string): boolean {
   if (!value || value.includes("..")) return false;
+  if (isPlatformSkillThumbPath(value)) return true;
   if (LEGACY_MEDIA_PREFIX.test(value)) return true;
   return USER_FIRST_MEDIA_PREFIX.test(value) || USER_FIRST_RESUMABLE_PREFIX.test(value);
 }
@@ -145,7 +165,7 @@ export function videosUserPrefix(userId: string): string {
 }
 
 /** Video studio modes under `generated/video/` (sibling folders, one per tool). */
-export type VideoStudioMode = "reelscreator" | "t2v" | "i2v" | "motion-control";
+export type VideoStudioMode = "reelscreator" | "t2v" | "i2v" | "motion-control" | "editor";
 
 function safeModeSegment(mode: string, label: string): string {
   const safe = mode.replace(/[^a-z0-9-]/g, "");
@@ -309,9 +329,13 @@ export function storagePathFromStorageUrl(url: string | null | undefined): strin
 if (process.env.NODE_ENV !== "production") {
   const uid = "abc-123-def";
   const video = videosGeneratedVideoPath(uid, "t2v", "x.mp4");
+  const editor = videosGeneratedVideoPath(uid, "editor", "x.mp4");
   const photo = `${photosUserPrefix(uid)}/generated/product/y.png`;
   if (video !== `${uid}/videos/generated/video/t2v/x.mp4`) {
     throw new Error(`storage-buckets self-check failed: video path ${video}`);
+  }
+  if (editor !== `${uid}/videos/generated/video/editor/x.mp4`) {
+    throw new Error(`storage-buckets self-check failed: editor path ${editor}`);
   }
   if (!photo.endsWith("/generated/product/y.png")) {
     throw new Error(`storage-buckets self-check failed: photo path ${photo}`);

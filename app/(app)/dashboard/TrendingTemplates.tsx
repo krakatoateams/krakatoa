@@ -22,7 +22,7 @@ import {
  */
 export default function TrendingTemplates() {
   return (
-    <section className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+    <section className="mb-16 grid grid-cols-1 gap-6 md:grid-cols-2">
       <TemplateCarousel
         title="Photo try-on"
         templates={VIRTUAL_PRODUCT_TRYON_TEMPLATES}
@@ -45,7 +45,7 @@ export default function TrendingTemplates() {
 
 export function VideoTemplateCarousels() {
   return (
-    <section className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+    <section className="mb-16 grid grid-cols-1 gap-6 md:grid-cols-2">
       <div className="min-w-0">
         <TemplateCarousel
           title="Product review templates"

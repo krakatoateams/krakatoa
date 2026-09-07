@@ -28,6 +28,7 @@ export const VIDEO_STUDIO_TOOLS: CreationTool[] = [
   "storyboard_video",
   "reels_seedance",
   "reels_veo",
+  "video_editor",
 ];
 
 export function isGenerateVideoTool(tool: CreationTool): boolean {

@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { ResetPasswordModal } from "@/components/auth/ResetPasswordModal";
-import { Button } from "@/components/ui/Button";
 import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
 import DashboardHero from "./DashboardHero";
 import RecentCreations from "./RecentCreations";
@@ -16,6 +15,7 @@ import ToolCardThumbnail from "./ToolCardThumbnail";
 import PageContainer from "./PageContainer";
 import PageHeader from "./PageHeader";
 import PromoOfferModal from "@/components/PromoOfferModal";
+import SkillComposer from "@/app/(app)/tools/skills/SkillComposer";
 import { PROMO_DEADLINE, isPromoLive } from "@/lib/promo-offer";
 import { useToolAvailabilityMap } from "@/lib/use-tool-availability";
 
@@ -97,7 +97,6 @@ function AuthRequiredModalTrigger() {
 
 export default function DashboardPage() {
   const { status, name } = useCurrentUser();
-  const { openSignInModal } = useAuthModal();
   const isAuthenticated = status === "authenticated";
   const firstName = name?.split(" ")[0];
   const [promoOpen, setPromoOpen] = useState(false);
@@ -138,7 +137,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <PageContainer>
+    <PageContainer className="max-md:pt-4">
       <Suspense fallback={null}>
         <AuthRequiredModalTrigger />
       </Suspense>
@@ -146,29 +145,24 @@ export default function DashboardPage() {
 
       <PageHeader
         title={isAuthenticated ? `Welcome back, ${firstName ?? "there"}` : "Welcome to Kelolako"}
-        actions={
-          !isAuthenticated && status !== "loading" ? (
-            // Sidebar already has its own Sign in button on desktop (md+) —
-            // this one exists only so mobile (where the Sidebar is hidden)
-            // still has a way in.
-            <Button
-              variant="primary"
-              size="md"
-              className="md:hidden"
-              onClick={() => openSignInModal()}
-            >
-              Sign in
-            </Button>
-          ) : undefined
-        }
+        className="max-md:hidden"
       />
 
       <DashboardHero />
 
+      <section className="mb-16">
+        <h1 className="mb-10 mt-8 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-[clamp(1.75rem,7vw,2.5rem)] font-bold leading-[1.1] tracking-tight text-transparent md:hidden">
+          Start creating today
+        </h1>
+        <Suspense fallback={null}>
+          <SkillComposer embed />
+        </Suspense>
+      </section>
+
       {/* Stats + recent creations need a real account — no point showing an
           all-zero/empty state to a logged-out visitor. */}
       {isAuthenticated && schedulerActivityReady && (
-        <section className="mb-10">
+        <section className="mb-16">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
             Scheduler activity
           </h2>
@@ -177,11 +171,11 @@ export default function DashboardPage() {
       )}
 
       {/* Tools */}
-      <section className="mb-10">
+      <section className="mb-16">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
           Your tools
         </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           {TOOLS.map(({ thumbMediaType, thumbOutlined, toolKey, ...tool }) => (
             <ToolCard
               key={tool.name}

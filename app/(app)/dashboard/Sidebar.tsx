@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -9,6 +9,9 @@ import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import {
   Video,
   Camera,
+  Sparkles,
+  Workflow,
+  Scissors,
   CalendarClock,
   CalendarDays,
   LayoutDashboard,
@@ -16,7 +19,6 @@ import {
   Settings,
   Shield,
   LogOut,
-  LogIn,
   Coins,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
@@ -27,6 +29,7 @@ import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 import { useActiveGenerations } from "@/app/(app)/active-generations-context";
 import { isLiveStatus } from "@/lib/active-generations-pure";
 import type { ToolSidebarVisibility } from "@/lib/tool-configs-db";
+import MobileDock from "../MobileDock";
 
 interface NavItem {
   label: string;
@@ -57,6 +60,9 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Video", href: "/tools/video", icon: <Video className="h-4 w-4" />, toolKey: "reels" },
       { label: "Photo", href: "/tools/photo-v2", icon: <Camera className="h-4 w-4" />, toolKey: "photo" },
+      { label: "Skills", href: "/tools/skills", icon: <Sparkles className="h-4 w-4" />, toolKey: "skills" },
+      { label: "Canvas", href: "/tools/canvas", icon: <Workflow className="h-4 w-4" />, toolKey: "canvas" },
+      { label: "Editor", href: "/tools/editor", icon: <Scissors className="h-4 w-4" />, toolKey: "editor" },
     ],
   },
   {
@@ -207,40 +213,6 @@ export default function Sidebar({
     return pathname === href || pathname?.startsWith(`${href}/`);
   };
 
-  const mobileNavItems = sectionsToRender.flatMap((section) => section.items);
-
-  // Light haptic feedback while the mobile nav is scrolled (Android/Chrome only —
-  // iOS Safari lacks the Vibration API). Throttled so it reads as a subtle
-  // texture rather than a constant buzz.
-  const lastHapticRef = useRef(0);
-
-  const handleHapticScroll = () => {
-    const now = Date.now();
-    if (now - lastHapticRef.current < 90) return;
-    lastHapticRef.current = now;
-    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-      navigator.vibrate(3);
-    }
-  };
-
-  // Dashboard uses the Kelolako logo instead of a lucide icon. Pick the logo
-  // variant that reads on the current background (black on light, white on dark).
-  const renderNavIcon = (
-    item: NavItem,
-    opts: { onLight: boolean; sizeClass: string }
-  ) =>
-    item.href === "/dashboard" ? (
-      <Image
-        src={opts.onLight ? "/Logo White.png" : "/Logo White transparent.png"}
-        alt=""
-        width={32}
-        height={32}
-        className={`${opts.sizeClass} shrink-0 object-contain`}
-      />
-    ) : (
-      item.icon
-    );
-
   return (
     <>
       <aside
@@ -279,12 +251,24 @@ export default function Sidebar({
                     <Link
                       href={item.href}
                       className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-body-3 transition-colors ${
-                        active
-                          ? "bg-white/10 text-text-primary"
-                          : "text-text-secondary hover:bg-white/10 hover:text-white"
+                        comingSoon
+                          ? active
+                            ? "bg-white/10 text-text-disabled"
+                            : "text-text-disabled hover:bg-white/10 hover:text-text-secondary"
+                          : active
+                            ? "bg-white/10 text-text-primary"
+                            : "text-text-secondary hover:bg-white/10 hover:text-white"
                       }`}
                     >
-                      <span className={active ? "text-icon-high-emphasis" : "text-icon-low-emphasis"}>
+                      <span
+                        className={
+                          comingSoon
+                            ? "text-text-disabled"
+                            : active
+                              ? "text-icon-high-emphasis"
+                              : "text-icon-low-emphasis"
+                        }
+                      >
                         {item.icon}
                       </span>
                       {item.label}
@@ -380,64 +364,7 @@ export default function Sidebar({
       </div>
       </aside>
 
-      {/* Mobile floating navigation — individual circular buttons */}
-      {mobileNavItems.length > 0 && (
-        <nav
-          aria-label="Primary"
-          className="fixed bottom-4 left-1/2 z-[60] max-w-[calc(100vw-1rem)] -translate-x-1/2 md:hidden"
-        >
-          <div
-            onScroll={handleHapticScroll}
-            className="flex items-center gap-2.5 overflow-x-auto rounded-full border border-white/10 bg-N0/60 px-2 py-2 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {mobileNavItems.map((item) => {
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-label={item.label}
-                  title={item.label}
-                  className={`relative flex h-14 shrink-0 items-center justify-center gap-2 rounded-full shadow-lg shadow-black/30 transition-colors [&_svg]:h-6 [&_svg]:w-6 ${
-                    active
-                      ? "bg-white px-5 text-N50"
-                      : "w-14 border border-white/20 bg-white/10 text-text-primary ring-1 ring-inset ring-white/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-white/20 hover:text-white"
-                  }`}
-                >
-                  {renderNavIcon(item, { onLight: active, sizeClass: active ? "h-8 w-8" : "h-6 w-6" })}
-                  {generatingNav.has(item.href) && (
-                    <span
-                      className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-primary animate-pulse"
-                      aria-hidden
-                    />
-                  )}
-                  {active && (
-                    <span className="whitespace-nowrap text-body-3 font-semibold">
-                      {item.label}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-            {/* Desktop's Sidebar has its own Sign in button (in the profile
-                card slot), but that <aside> is `hidden md:flex` — without
-                this, a logged-out mobile visitor has no way to sign in
-                except by first triggering a gated action somewhere. */}
-            {status === "unauthenticated" && (
-              <button
-                type="button"
-                onClick={() => openSignInModal()}
-                aria-label="Sign in"
-                title="Sign in"
-                className="flex h-14 shrink-0 items-center justify-center gap-2 rounded-full bg-brand-primary px-5 text-text-on-solid shadow-lg shadow-black/30 transition-colors hover:bg-brand-primary-hover"
-              >
-                <LogIn className="h-5 w-5" />
-                <span className="whitespace-nowrap text-body-3 font-semibold">Sign in</span>
-              </button>
-            )}
-          </div>
-        </nav>
-      )}
+      <MobileDock toolVisibility={toolVisibility} generatingHrefs={generatingNav} />
     </>
   );
 }

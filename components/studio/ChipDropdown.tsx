@@ -12,7 +12,8 @@ import { TooltipBubble, useTooltipGate } from "./Tooltip";
 //  - `fluid`   : stretch the chip to fill the container width on mobile (auto on sm+)
 //  - `bare`    : borderless trigger (just value + chevron) — used for inline Model rows
 //  - `tooltip` : hover/focus tooltip bubble above the trigger
-//  - `square`  : square corners instead of pill
+//  - `square`  : in-form param chip (radius-sm, no border, no chevron) — always
+//                use this for chips inside the omni card. Header chips omit it.
 // The menu sizes to its content, bounded to 224–288px, so both tools keep their
 // original menu widths without per-call configuration.
 const MENU_MAX_WIDTH = 288;
@@ -41,7 +42,7 @@ export function ChipDropdown({
   onSelect,
   disabled,
   square = false,
-  showChevron = true,
+  showChevron,
   fluid = false,
   bare = false,
   tooltip,
@@ -67,6 +68,7 @@ export function ChipDropdown({
   /** Title shown at the top of the mobile bottom sheet (e.g. "Select video ratio"). */
   sheetTitle?: string;
 }) {
+  const showTriggerChevron = showChevron ?? !square;
   const [open, setOpen] = useState(false);
   const { on: hover, bind: tooltipBind } = useTooltipGate();
   const [isMobile, setIsMobile] = useState(false);
@@ -215,7 +217,7 @@ export function ChipDropdown({
         <span className={`font-semibold ${dimValue ? "text-text-disabled" : ""}`}>
           {withMinorWordCase(value)}
         </span>
-        {showChevron && (
+        {showTriggerChevron && (
           <ChevronDown
             className={`h-3.5 w-3.5 text-text-secondary transition-transform ${open ? "rotate-180" : ""}`}
           />

@@ -193,6 +193,38 @@ async function computeVideoCreditsV2(
   throw new PricingConfigError(pricingKey);
 }
 
+/** Fallback per-run amount from a built-in v2 default. */
+function defaultPerRunAmount(pricingKey: string, settings: BillingSettings): number {
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (!def || def.costUnit !== "per_run") return 0;
+  return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
+}
+
+/** Per-run credits. Option A: credit_amount on DB row wins; else provider $; else built-in. */
+async function computeRunCreditsV2(pricingKey: string): Promise<number> {
+  const [settings, dbRow] = await Promise.all([
+    getBillingSettings(),
+    getPricingConfig(pricingKey),
+  ]);
+  const fallback = defaultPerRunAmount(pricingKey, settings);
+
+  if (dbRow && dbRow.enabled && !dbRow.is_deprecated) {
+    return runCreditsFromRow(toRow(dbRow), settings, fallback);
+  }
+
+  const def = V2_PRICING_DEFAULTS[pricingKey];
+  if (def && def.costUnit === "per_run") {
+    if (dbRow && (!dbRow.enabled || dbRow.is_deprecated)) {
+      console.warn(
+        `[pricing-resolver] "${pricingKey}" DB row is disabled/deprecated — using built-in v2 default.`
+      );
+    }
+    return calculateCredits({ providerCostUsd: def.providerCostUsd, unitCount: 1, settings });
+  }
+
+  throw new PricingConfigError(pricingKey);
+}
+
 /** Per-image credits. Option A: credit_amount on DB row wins; else provider $; else built-in. */
 async function computeImageCreditsV2(
   pricingKey: string,
@@ -311,6 +343,11 @@ export async function getStoryboardImageCredits(params?: {
  */
 export async function getStoryboardImportCredits(): Promise<number> {
   return computeImageCreditsV2("storyboard_import_vision_per_image", 1);
+}
+
+/** Canvas Text (Gemini rewrite). Fail-closed like other charged keys. Default ~1 cr. */
+export async function getCanvasTextCredits(): Promise<number> {
+  return computeRunCreditsV2("canvas_text_per_run");
 }
 
 /**

@@ -73,6 +73,12 @@ import {
   requireDevBlankAccess,
 } from "@/lib/dev-blank-generation";
 import { handlePhotoStoryboardGeneration } from "@/lib/photo-storyboard-generation";
+import { resolveLiveSkill } from "@/lib/skill-configs-db";
+import {
+  assembleSkillPrompt,
+  skillDefaultTitle,
+  skillPhotoMode,
+} from "@/lib/skills";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -199,8 +205,33 @@ export async function POST(req: Request) {
     }
 
     const formData = await req.formData();
+    const skillIdRaw = String(formData.get("skillId") || "").trim();
+    const liveSkill = skillIdRaw ? await resolveLiveSkill(skillIdRaw, profileId) : null;
+    if (skillIdRaw) {
+      if (!liveSkill || liveSkill.mediaType !== "image" || liveSkill.openHref) {
+        return NextResponse.json({ error: "Unknown photo skill." }, { status: 400 });
+      }
+      try {
+        await assertToolEnabled("skills");
+      } catch (e) {
+        if (e instanceof ToolDisabledError) {
+          return NextResponse.json(
+            { error: e.message, code: "TOOL_DISABLED" },
+            { status: 403 }
+          );
+        }
+        console.warn("[photo] skills tool guard unexpected error (failing open):", e);
+      }
+    }
+    const skillId = liveSkill?.id;
+    const skillOverride = liveSkill
+      ? { recipe: liveSkill.recipe, title: liveSkill.title }
+      : null;
     const modeRaw = String(formData.get("mode") || "product").trim();
     if (modeRaw === "storyboard") {
+      if (skillId) {
+        return NextResponse.json({ error: "This skill cannot generate a storyboard." }, { status: 400 });
+      }
       return handlePhotoStoryboardGeneration(req, { formData });
     }
 
@@ -222,7 +253,7 @@ export async function POST(req: Request) {
     //   - Generate any image: `reference` — an optional reference image used only
     //     by reference-capable models.
     const characterFile = formData.get("character");
-    const referenceFile = formData.get("reference");
+    const referenceFiles = formData.getAll("reference").filter((file): file is File => file instanceof File);
     // Product Try-on can use a previously generated character (by creation id)
     // instead of an uploaded character image. Resolved to the creation's image URL
     // (owner-scoped) and passed as an extra reference — no re-upload needed.
@@ -258,9 +289,10 @@ export async function POST(req: Request) {
     //                  in social-composition scaffolding; 1:1 or 4:5.
     //   - "storyboard": handled above via handlePhotoStoryboardGeneration.
     const mode: "product" | "image" | "character" | "social" =
-      modeRaw === "image" || modeRaw === "character" || modeRaw === "social"
+      (liveSkill && skillPhotoMode(liveSkill)) ||
+      (modeRaw === "image" || modeRaw === "character" || modeRaw === "social"
         ? modeRaw
-        : "product";
+        : "product");
     const requiresProductImage = mode === "product";
     const isCharacterMode = mode === "character";
     const isSocialMode = mode === "social";
@@ -304,20 +336,26 @@ export async function POST(req: Request) {
     } else if (isCharacterMode) {
       // Character creation: need a description and/or a reference image to define
       // the character.
-      if (!userPrompt && !(referenceFile instanceof File)) {
+      if (!userPrompt && referenceFiles.length === 0 && !liveSkill) {
         return NextResponse.json(
           { error: "Describe your character or attach a reference image." },
           { status: 400 }
         );
       }
     } else {
-      // Text-to-image: the prompt carries the full intent.
-      if (!userPrompt) {
+      // Text-to-image: the prompt carries the full intent unless a skill marks it optional.
+      if (!userPrompt && (!liveSkill || liveSkill.promptRequired)) {
         return NextResponse.json(
           { error: "A prompt is required to generate an image." },
           { status: 400 }
         );
       }
+    }
+    if (liveSkill?.promptRequired && !userPrompt) {
+      return NextResponse.json(
+        { error: "A prompt is required for this skill." },
+        { status: 400 }
+      );
     }
 
     // Pose/style are product-photo concepts. The omni-form always sends valid
@@ -393,10 +431,12 @@ export async function POST(req: Request) {
         }
         directReferenceUrls.push(resolved.items[0].url);
       }
-    } else if (tier.supportsReference && referenceFile instanceof File) {
-      const err = validateImageUpload(referenceFile);
-      if (err) return NextResponse.json({ error: err }, { status: 400 });
-      extraReferenceFiles.push(referenceFile);
+    } else if (tier.supportsReference) {
+      for (const referenceFile of referenceFiles) {
+        const err = validateImageUpload(referenceFile);
+        if (err) return NextResponse.json({ error: err }, { status: 400 });
+        extraReferenceFiles.push(referenceFile);
+      }
     }
 
     // Product Try-on with a distinct character/model image. The references are sent
@@ -406,6 +446,52 @@ export async function POST(req: Request) {
     const hasCharacterReference =
       requiresProductImage &&
       (extraReferenceFiles.length > 0 || directReferenceUrls.length > 0);
+
+    if (skillId === "change-background") {
+      if (extraReferenceFiles.length === 0) {
+        return NextResponse.json(
+          { error: "A subject image is required to change the background." },
+          { status: 400 }
+        );
+      }
+      if (!tier.supportsReference) {
+        return NextResponse.json(
+          {
+            error: `${tier.modelLabel} doesn't support a reference image. Choose a reference-capable model.`,
+          },
+          { status: 400 }
+        );
+      }
+    } else if (liveSkill?.inputs.some((slot) => slot.key === "subject" && slot.required)) {
+      if (extraReferenceFiles.length === 0) {
+        return NextResponse.json(
+          { error: "A subject image is required for this skill." },
+          { status: 400 }
+        );
+      }
+      if (!tier.supportsReference) {
+        return NextResponse.json(
+          {
+            error: `${tier.modelLabel} doesn't support a reference image. Choose a reference-capable model.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+    if (skillId === "change-character" && !hasCharacterReference) {
+      return NextResponse.json(
+        { error: "A character image is required to change the character." },
+        { status: 400 }
+      );
+    } else if (
+      liveSkill?.inputs.some((slot) => slot.key === "character" && slot.required) &&
+      !hasCharacterReference
+    ) {
+      return NextResponse.json(
+        { error: "A character image is required for this skill." },
+        { status: 400 }
+      );
+    }
 
     // @-mentioned assets: resolve each tagged creation (saved character / storyboard)
     // owner-scoped to its image URL, append as references, and remember its name +
@@ -490,6 +576,7 @@ export async function POST(req: Request) {
       extraRefCount: extraReferenceFiles.length + directReferenceUrls.length,
       characterRef: characterCreationId,
       mentionRefs: referenceCreationIds.join(","),
+      skillId: skillId ?? "",
       devBlank,
     });
     const begin = await beginGenerationRequest({
@@ -541,6 +628,7 @@ export async function POST(req: Request) {
         mode,
         imageCount,
         ...(userPrompt ? { prompt: userPrompt } : {}),
+        ...(skillId ? { skillId } : {}),
         ...(devBlank ? devBlankJobTag() : {}),
       },
     }));
@@ -645,6 +733,7 @@ export async function POST(req: Request) {
       resolution,
       pricingKey,
       providerResolution,
+      ...(skillId ? { skillId } : {}),
       ...(devBlank ? devBlankJobTag() : {}),
     };
     for (let index = 0; index < imageCount; index += 1) {
@@ -678,18 +767,20 @@ export async function POST(req: Request) {
     // mode builds a multi-angle turnaround sheet; social mode adds feed-native
     // composition; image mode uses the prompt verbatim.
     const basePrompt =
-      mode === "product"
-        ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
-        : mode === "character"
-          ? buildCharacterSheetPrompt({
-              userPrompt,
-              styleId: characterStyle,
-              genderId: characterGender,
-              ageId: characterAge,
-            })
-          : isSocialMode
-            ? buildSocialPostPrompt({ userPrompt, aspectRatio })
-            : userPrompt;
+      skillId
+        ? assembleSkillPrompt(skillId, userPrompt, skillOverride?.recipe)
+        : mode === "product"
+          ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
+          : mode === "character"
+            ? buildCharacterSheetPrompt({
+                userPrompt,
+                styleId: characterStyle,
+                genderId: characterGender,
+                ageId: characterAge,
+              })
+            : isSocialMode
+              ? buildSocialPostPrompt({ userPrompt, aspectRatio })
+              : userPrompt;
 
     // @-mention guidance: tell the model that the trailing reference images depict the
     // named subjects from the prompt, so it actually uses them as visual references.
@@ -703,13 +794,15 @@ export async function POST(req: Request) {
     // so fall back to the prompt (or a generic label) in that case too.
     const savedTitle = isCharacterMode
       ? characterName || "Character"
-      : mode === "image"
-        ? userPrompt.slice(0, 60) || "Generated image"
-        : isSocialMode
-          ? userPrompt.slice(0, 60) || "Social media post"
-          : poseId === "auto" && styleId === "auto"
-            ? userPrompt.slice(0, 60) || "Product photo"
-            : undefined;
+      : skillId
+        ? userPrompt.slice(0, 60) || skillDefaultTitle(skillId, skillOverride?.title)
+        : mode === "image"
+          ? userPrompt.slice(0, 60) || "Generated image"
+          : isSocialMode
+            ? userPrompt.slice(0, 60) || "Social media post"
+            : poseId === "auto" && styleId === "auto"
+              ? userPrompt.slice(0, 60) || "Product photo"
+              : undefined;
 
     let blankImageBuffer: Buffer | null = null;
     let providerInput: Record<string, unknown> | null = null;
@@ -837,6 +930,7 @@ export async function POST(req: Request) {
         characterName: isCharacterMode && characterName ? characterName : undefined,
         modelTier,
         modelLabel: tier.modelLabel,
+        skillId,
       });
       console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
       return { saved, mimeType };

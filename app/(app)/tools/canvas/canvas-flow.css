@@ -1,0 +1,87 @@
+.kk-canvas {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.kk-canvas .react-flow__controls-button {
+  background: transparent !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+  fill: rgba(255, 255, 255, 0.7);
+}
+
+.kk-canvas .react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.kk-canvas .react-flow__attribution {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.kk-canvas .react-flow__minimap {
+  background: rgb(18, 18, 18) !important;
+}
+
+.kk-canvas .react-flow__edge-interaction {
+  cursor: pointer;
+}
+
+.kk-canvas .react-flow__node {
+  overflow: visible;
+}
+
+.kk-canvas .react-flow__connection-line {
+  stroke: rgba(255, 255, 255, 0.5);
+}
+
+.kk-canvas .react-flow__edge:has(.kk-canvas-wire-run) {
+  z-index: 1001 !important;
+}
+
+.kk-canvas-wire-glow {
+  pointer-events: none;
+}
+
+.kk-canvas .react-flow__selection {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.kk-canvas .react-flow__nodesselection-rect {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+}
+
+/* Transparency grid for PNG stills */
+.kk-canvas-png-board {
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(45deg, #2c2c2c 25%, transparent 25%),
+    linear-gradient(-45deg, #2c2c2c 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2c2c2c 75%),
+    linear-gradient(-45deg, transparent 75%, #2c2c2c 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+@keyframes kk-canvas-wire-run {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+.kk-canvas-wire-run {
+  pointer-events: none;
+  stroke-dasharray: 10 18;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(242, 101, 34, 0.7));
+  animation: kk-canvas-wire-run 0.85s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kk-canvas-wire-run {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

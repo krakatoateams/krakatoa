@@ -11,6 +11,9 @@ const PUBLIC_APP_ROUTES = new Set([
   "/tools/scheduler",
   "/tools/scheduler/calendar",
   "/tools/video",
+  "/tools/canvas",
+  "/tools/editor",
+  "/tools/skills",
 ]);
 
 export async function middleware(request: NextRequest) {
@@ -54,7 +57,11 @@ export async function middleware(request: NextRequest) {
     // catches (dashboard subroutes, other /tools/*, /admin/*) still
     // redirects, but now to /dashboard (which opens the sign-in modal
     // itself) instead of the old standalone /login page.
-    if (PUBLIC_APP_ROUTES.has(request.nextUrl.pathname)) {
+    const pathname = request.nextUrl.pathname;
+    if (
+      PUBLIC_APP_ROUTES.has(pathname) ||
+      pathname.startsWith("/tools/skills/")
+    ) {
       return supabaseResponse;
     }
     const url = request.nextUrl.clone();
