@@ -69,6 +69,13 @@ const STATUS_CFG = {
     chip: "border-warning/40 bg-warning/10 text-warning hover:bg-warning/20",
     stat: "text-warning",
   },
+  retrying: {
+    label: "Retrying",
+    dot: "bg-info",
+    badge: "border-info/30 bg-info/10 text-info",
+    chip: "border-info/40 bg-info/10 text-info hover:bg-info/20",
+    stat: "text-info",
+  },
   publishing: {
     label: "Publishing",
     dot: "bg-N900/70",
@@ -399,8 +406,12 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               {fmtDateTime(post.scheduled_time)}
             </div>
 
-            {post.status === "failed" && post.last_error && (
-              <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
+            {post.last_error && (post.status === "failed" || post.status === "scheduled") && (
+              <div
+                className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+                  post.status === "failed" ? "border-error/30 bg-error/10 text-error" : "border-info/30 bg-info/10 text-info"
+                }`}
+              >
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span className="leading-relaxed">{post.last_error}</span>
               </div>

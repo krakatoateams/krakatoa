@@ -128,6 +128,21 @@ interface VideoItem {
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
+  // Whether the "Disclose video content" section is expanded. Lifted (not
+  // local component state) so the submit gate can detect TikTok's required
+  // "toggle on but neither option chosen" block — see PlatformFields.
+  tiktokDiscloseOpen: boolean;
+  // Interaction toggles — TikTok's own UX guideline: "Allow Comment/Duet/
+  // Stitch", none checked by default. Duet/Stitch are never shown (or sent)
+  // for a photo post — see PlatformFields and the submit payload builders.
+  tiktokAllowComment: boolean;
+  tiktokAllowDuet: boolean;
+  tiktokAllowStitch: boolean;
+  // Express consent for TikTok's Music Usage Confirmation declaration — an
+  // act, not real data (never sent to the API), but lifted here rather than
+  // local component state so bulk mode's "Schedule All" gate can check it
+  // per-item, same as tiktokDiscloseOpen above.
+  tiktokConsentChecked: boolean;
   // Per-platform submission outcome, so a retry only resends to platforms
   // that haven't already succeeded.
   platformResults: Partial<Record<"youtube" | "tiktok", PlatformResult>>;
@@ -156,7 +171,7 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEOS = 5;
 
-function makeDraft(date: string, time = "18:00"): VideoItem {
+function makeDraft(date: string, time: string = nextScheduleSlot().time): VideoItem {
   return {
     id: crypto.randomUUID(),
     file: null,
@@ -180,6 +195,11 @@ function makeDraft(date: string, time = "18:00"): VideoItem {
     tiktokPrivacyLevel: null,
     tiktokBrandOrganicToggle: false,
     tiktokBrandContentToggle: false,
+    tiktokDiscloseOpen: false,
+    tiktokAllowComment: false,
+    tiktokAllowDuet: false,
+    tiktokAllowStitch: false,
+    tiktokConsentChecked: false,
     platformResults: {},
     contentType: "video",
     photoUrls: [],
@@ -353,6 +373,38 @@ function spacedSlot(anchorDate: string, index: number): { date: string; time: st
   const d = new Date(`${anchorDate}T00:00:00`);
   d.setDate(d.getDate() + Math.floor(index / SCHEDULE_SLOTS.length));
   return { date: toDateInput(d), time: SCHEDULE_SLOTS[index % SCHEDULE_SLOTS.length] };
+}
+
+// Smart default for a fresh schedule form: the nearest upcoming slot from
+// SCHEDULE_SLOTS, today if it hasn't passed yet, otherwise the first slot
+// tomorrow. Fixes a form that used to pre-fill a fixed "today at 18:00" —
+// once 18:00 had actually passed, that silently pre-filled a time already in
+// the past, which makes no sense for a feature whose whole point is
+// scheduling for later.
+function nextScheduleSlot(now: Date = new Date()): { date: string; time: string } {
+  const todayStr = toDateInput(now);
+  for (const slot of SCHEDULE_SLOTS) {
+    if (new Date(`${todayStr}T${slot}:00`) > now) {
+      return { date: todayStr, time: slot };
+    }
+  }
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { date: toDateInput(tomorrow), time: SCHEDULE_SLOTS[0] };
+}
+
+// "Best Time" is a deliberate recommendation (the evening slot specifically),
+// distinct from nextScheduleSlot's "just the nearest slot" — but it must
+// follow the same rule: never suggest a time that has already passed today.
+function bestTimeSlot(now: Date = new Date()): { date: string; time: string; isToday: boolean } {
+  const BEST_TIME = "18:00";
+  const todayStr = toDateInput(now);
+  if (new Date(`${todayStr}T${BEST_TIME}:00`) > now) {
+    return { date: todayStr, time: BEST_TIME, isToday: true };
+  }
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { date: toDateInput(tomorrow), time: BEST_TIME, isToday: false };
 }
 
 function fmtScheduledTime(iso: string): string {
@@ -1023,26 +1075,88 @@ interface DescriptionCardProps {
   videoUrl: string | null;
   storagePath: string | null;
   format: VideoFormat;
+  // A photo post has no video/transcript — the cover photo (first entry) is
+  // sent for vision-based captioning instead (the backend already supports
+  // this via photo_storage_path; hasMedia below is what previously kept the
+  // Generate button disabled for every photo post regardless).
+  contentType: VideoItem["contentType"];
+  photoUrls: string[];
+  // Upload is deferred until "Schedule Post" is clicked (see ScheduleCard's
+  // handleSubmit) — so a just-picked file has neither videoUrl/storagePath
+  // nor a photoUrls entry yet, only `file`. Generate needs real bytes on a
+  // server the model can fetch, so it uploads on demand here rather than
+  // just staying disabled until the user schedules the post.
+  file: File | null;
+  onMediaUploaded: (
+    patch: Partial<Pick<VideoItem, "videoUrl" | "storagePath" | "photoUrls" | "file" | "uploadStatus">>,
+  ) => void;
 }
 
-function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, storagePath, format }: DescriptionCardProps) {
+function DescriptionCard({
+  caption,
+  onCaptionChange,
+  title,
+  tags,
+  videoUrl,
+  storagePath,
+  format,
+  contentType,
+  photoUrls,
+  file,
+  onMediaUploaded,
+}: DescriptionCardProps) {
   // Reconciled onto the shared useCaptionAI() hook + CaptionControls (task 7.3),
   // removing the duplicated fetch logic. Behavior is preserved: Generate requires
-  // a video (Whisper), Polish appears once there's content, and the two-branch
-  // usedTranscript warning is rendered by CaptionControls.
+  // a video (Whisper) or, for a photo post, the cover photo (vision), and the
+  // two-branch usedTranscript warning is rendered by CaptionControls.
   const ai = useCaptionAI();
+  const [uploadingForCaption, setUploadingForCaption] = useState(false);
+  const isPhoto = contentType === "photo";
+  const photoStoragePath = photoUrls[0] ?? null;
+  // A staged-but-unuploaded file counts as media too — otherwise Generate
+  // stays disabled the whole time a video/photo is only in memory, which is
+  // most of the time given upload is deferred until scheduling.
+  const hasMedia = isPhoto ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
 
-  // Clear the transcript warning whenever the video changes (removed or replaced)
+  // Clear the transcript warning whenever the media changes (removed or replaced)
   useEffect(() => {
     ai.resetWarning();
-  }, [videoUrl, storagePath, ai.resetWarning]);
+  }, [videoUrl, storagePath, photoStoragePath, ai.resetWarning]);
 
   const handleGenerate = async () => {
     try {
-      const next = await ai.generate({ title, tags, videoUrl, storagePath, format });
+      let effectiveVideoUrl = videoUrl;
+      let effectiveStoragePath = storagePath;
+      let effectivePhotoStoragePath = photoStoragePath;
+
+      // Nothing hosted yet — upload the staged file now so the model has a
+      // real URL to fetch, and persist the result so a later "Schedule Post"
+      // (or another Generate click) doesn't upload it again.
+      if (file && !effectiveStoragePath && !effectiveVideoUrl && !effectivePhotoStoragePath) {
+        setUploadingForCaption(true);
+        try {
+          const uploaded = await signAndUploadFile(file, isPhoto ? "image" : "video");
+          if (isPhoto) {
+            effectivePhotoStoragePath = uploaded.storagePath;
+            onMediaUploaded({ photoUrls: [uploaded.storagePath, ...photoUrls], file: null, uploadStatus: "done" });
+          } else {
+            effectiveVideoUrl = uploaded.url;
+            effectiveStoragePath = uploaded.storagePath;
+            onMediaUploaded({ videoUrl: uploaded.url, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
+          }
+        } finally {
+          setUploadingForCaption(false);
+        }
+      }
+
+      const next = isPhoto
+        ? await ai.generate({ title, tags, videoUrl: null, storagePath: null, photoStoragePath: effectivePhotoStoragePath, format })
+        : await ai.generate({ title, tags, videoUrl: effectiveVideoUrl, storagePath: effectiveStoragePath, format });
       onCaptionChange(next);
     } catch {
-      // error surfaced by the hook
+      // error surfaced by the hook (upload failures fall through as a plain
+      // thrown error, also swallowed here — the hint text stays honest since
+      // hasMedia/hasContent don't change on a failed upload)
     }
   };
 
@@ -1079,12 +1193,13 @@ function DescriptionCard({ caption, onCaptionChange, title, tags, videoUrl, stor
 
         <CaptionControls
           ai={ai}
-          hasVideo={!!(storagePath || videoUrl)}
+          hasMedia={hasMedia}
           hasContent={!!caption.trim()}
           hasTitle={!!title.trim()}
           generateLabel="Generate Caption"
           onGenerate={handleGenerate}
           onPolish={handlePolish}
+          extraBusy={uploadingForCaption}
         />
       </div>
     </Card>
@@ -1152,25 +1267,107 @@ const PLATFORM_LABELS: Record<"youtube" | "tiktok", string> = {
   tiktok: "TikTok",
 };
 
-// Small inline clue so a platform-specific field (Format = YouTube-only,
-// Privacy/Disclose = TikTok-only) isn't mistaken for a shared/global setting
-// when both platforms are selected at once.
-function PlatformTag({ platform }: { platform: "youtube" | "tiktok" }) {
+const TIKTOK_MUSIC_USAGE_URL = "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en";
+const TIKTOK_BRANDED_CONTENT_POLICY_URL = "https://www.tiktok.com/legal/page/global/bc-policy/en";
+
+// TikTok's own required pre-publish declaration + express-consent gate.
+// Text is TikTok's literal required copy — never paraphrase it, and never
+// swap in a self-hosted link for either policy (see the guideline audit).
+// Consent is intentionally not part of VideoItem: it's an act, not data, so
+// it resets on every fresh card rather than persisting.
+function TikTokConsentDeclaration({
+  brandContentToggle,
+  checked,
+  onCheckedChange,
+}: {
+  brandContentToggle: boolean;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-text-disabled">
-      {platform === "tiktok" ? (
-        <Music2 className="h-2.5 w-2.5 text-pink-400" />
-      ) : (
-        <YoutubeIcon className="h-2.5 w-2.5 text-red-400" />
-      )}
-      {PLATFORM_LABELS[platform]}
-    </span>
+    <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-3">
+      <p className="text-[11px] text-text-disabled">Processing on TikTok can take a few minutes after you post.</p>
+      <label className="flex cursor-pointer items-start gap-2 text-xs text-text-secondary">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onCheckedChange(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+        />
+        <span>
+          By posting, you agree to TikTok&apos;s{" "}
+          {brandContentToggle && (
+            <>
+              <a
+                href={TIKTOK_BRANDED_CONTENT_POLICY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-N900"
+              >
+                Branded Content Policy
+              </a>{" "}
+              and{" "}
+            </>
+          )}
+          <a href={TIKTOK_MUSIC_USAGE_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-N900">
+            Music Usage Confirmation
+          </a>
+          .
+        </span>
+      </label>
+    </div>
   );
 }
 
 type PlatformPatch = Partial<
-  Pick<VideoItem, "platforms" | "youtubePrivacyStatus" | "tiktokPrivacyLevel" | "tiktokBrandOrganicToggle" | "tiktokBrandContentToggle" | "platformResults">
+  Pick<
+    VideoItem,
+    | "platforms"
+    | "youtubePrivacyStatus"
+    | "tiktokPrivacyLevel"
+    | "tiktokBrandOrganicToggle"
+    | "tiktokBrandContentToggle"
+    | "tiktokDiscloseOpen"
+    | "tiktokAllowComment"
+    | "tiktokAllowDuet"
+    | "tiktokAllowStitch"
+    | "tiktokConsentChecked"
+    | "platformResults"
+  >
 >;
+
+// Full creator_info-derived state for the connected TikTok account, fetched
+// once at the page level and passed down to every card. postingBlocked vs.
+// rateLimited get deliberately different UX: a genuine ban blocks scheduling
+// outright, but a same-moment daily post cap never should — Kelolako's core
+// use case is scheduling many reels/day, so hitting a transient daily cap
+// must not stop someone from scheduling a post for three days from now (the
+// cron's own 24h auto-retry handles it at actual publish time instead).
+interface TikTokCreatorInfoState {
+  privacyLevelOptions: string[];
+  creatorNickname: string;
+  commentDisabled: boolean;
+  duetDisabled: boolean;
+  stitchDisabled: boolean;
+  maxVideoPostDurationSec: number;
+  postingBlocked: boolean;
+  blockedReason: string | null;
+  rateLimited: boolean;
+  rateLimitedReason: string | null;
+}
+
+const DEFAULT_TIKTOK_CREATOR_INFO: TikTokCreatorInfoState = {
+  privacyLevelOptions: [],
+  creatorNickname: "",
+  commentDisabled: false,
+  duetDisabled: false,
+  stitchDisabled: false,
+  maxVideoPostDurationSec: 0,
+  postingBlocked: false,
+  blockedReason: null,
+  rateLimited: false,
+  rateLimitedReason: null,
+};
 
 // Shared by ScheduleCard (single mode) and BulkVideoCard (bulk mode) so both
 // stay in sync with the same platform-choice + TikTok privacy/disclosure
@@ -1184,10 +1381,18 @@ function PlatformFields({
   tiktokPrivacyLevel,
   tiktokBrandOrganicToggle,
   tiktokBrandContentToggle,
+  tiktokDiscloseOpen,
+  tiktokAllowComment,
+  tiktokAllowDuet,
+  tiktokAllowStitch,
   onChange,
   tiktokConnected,
-  tiktokPrivacyOptions,
+  tiktokCreatorInfo,
   contentType,
+  videoDurationSec,
+  format,
+  onFormatChange,
+  shortWarn,
 }: {
   platforms: VideoItem["platforms"];
   platformResults: VideoItem["platformResults"];
@@ -1195,19 +1400,34 @@ function PlatformFields({
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
+  // Lifted (not local UI state) so the parent card can gate its submit
+  // button on "disclosure opened but neither option chosen" — TikTok's own
+  // guideline requires disabling publish in exactly that state, which is
+  // otherwise invisible outside this component.
+  tiktokDiscloseOpen: boolean;
+  tiktokAllowComment: boolean;
+  tiktokAllowDuet: boolean;
+  tiktokAllowStitch: boolean;
   onChange: (patch: PlatformPatch) => void;
   tiktokConnected: boolean;
-  tiktokPrivacyOptions: string[];
+  tiktokCreatorInfo: TikTokCreatorInfoState;
   // openspec/changes/tiktok-photo-post (Decision 6, revised): content type is
   // derived from what was actually dropped, never chosen here — this only
   // reads it, to gray out YouTube (no photo-post support) when it's "photo".
   contentType: VideoItem["contentType"];
+  // Measured video duration, used to render TikTok's max_video_post_duration_sec
+  // warning inside the TikTok section (gating still happens in the caller).
+  videoDurationSec: number | null;
+  // Format is optional here: single-mode ScheduleCard renders it inside the
+  // YouTube section for one contiguous block of YouTube settings; bulk mode's
+  // compact card keeps its own Format toggle next to the thumbnail instead
+  // (different layout, not part of this settings block) and omits these.
+  format?: VideoFormat;
+  onFormatChange?: (next: VideoFormat) => void;
+  shortWarn?: string | null;
 }) {
   const { status } = useCurrentUser();
-  // Local UI-only switch for whether the disclosure sub-checkboxes are shown.
-  // Not persisted — derived once from any existing toggle so a card loaded
-  // with disclosure already set opens with it visible.
-  const [discloseOpen, setDiscloseOpen] = useState(tiktokBrandOrganicToggle || tiktokBrandContentToggle);
+  const discloseOpen = tiktokDiscloseOpen;
   const isSelfOnly = tiktokPrivacyLevel === "SELF_ONLY";
   const isPhoto = contentType === "photo";
   const hasYoutube = !isPhoto && platforms.includes("youtube");
@@ -1230,13 +1450,18 @@ function PlatformFields({
             tiktokPrivacyLevel: null,
             tiktokBrandOrganicToggle: false,
             tiktokBrandContentToggle: false,
+            tiktokDiscloseOpen: false,
+            tiktokAllowComment: false,
+            tiktokAllowDuet: false,
+            tiktokAllowStitch: false,
+            tiktokConsentChecked: false,
             platformResults: { ...platformResults, tiktok: undefined },
           },
     );
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div>
         <label className="mb-1.5 block text-xs font-medium text-text-secondary">
           Platform <span className="text-error" aria-hidden>*</span>
@@ -1291,105 +1516,261 @@ function PlatformFields({
         )}
       </div>
 
+      {/* Every YouTube-only setting lives in this one block — never split
+          across the card so it doesn't read as interleaved with TikTok's. */}
       {hasYoutube && (
-        <div>
-          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-            Privacy
-            <PlatformTag platform="youtube" />
-          </label>
-          <select
-            value={youtubePrivacyStatus}
-            onChange={(e) => onChange({ youtubePrivacyStatus: e.target.value as VideoItem["youtubePrivacyStatus"] })}
-            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
-          >
-            {(Object.keys(YOUTUBE_PRIVACY_LABELS) as Array<keyof typeof YOUTUBE_PRIVACY_LABELS>).map((opt) => (
-              <option key={opt} value={opt}>
-                {YOUTUBE_PRIVACY_LABELS[opt]}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+        <div className="space-y-3 rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-N900">
+            <YoutubeIcon className="h-3.5 w-3.5 text-red-400" />
+            YouTube
+          </div>
 
-      {hasTiktok && (
-        <>
           <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-              Privacy <span className="text-error" aria-hidden>*</span>
-              <PlatformTag platform="tiktok" />
-            </label>
+            <label className="mb-1.5 block text-xs font-medium text-text-secondary">Privacy</label>
             <select
-              value={tiktokPrivacyLevel ?? ""}
-              onChange={(e) => {
-                const next = e.target.value;
-                // Leaving SELF_ONLY invalidates a branded-content disclosure.
-                onChange(
-                  next === "SELF_ONLY"
-                    ? { tiktokPrivacyLevel: next, tiktokBrandContentToggle: false }
-                    : { tiktokPrivacyLevel: next },
-                );
-              }}
+              value={youtubePrivacyStatus}
+              onChange={(e) => onChange({ youtubePrivacyStatus: e.target.value as VideoItem["youtubePrivacyStatus"] })}
               className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
             >
-              <option value="" disabled>
-                {tiktokPrivacyOptions.length === 0 ? "Loading…" : "Select privacy…"}
-              </option>
-              {tiktokPrivacyOptions.map((opt) => (
+              {(Object.keys(YOUTUBE_PRIVACY_LABELS) as Array<keyof typeof YOUTUBE_PRIVACY_LABELS>).map((opt) => (
                 <option key={opt} value={opt}>
-                  {TIKTOK_PRIVACY_LABELS[opt] ?? opt}
+                  {YOUTUBE_PRIVACY_LABELS[opt]}
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary">
-              <input
-                type="checkbox"
-                checked={discloseOpen}
-                onChange={(e) => {
-                  const open = e.target.checked;
-                  setDiscloseOpen(open);
-                  if (!open) onChange({ tiktokBrandOrganicToggle: false, tiktokBrandContentToggle: false });
-                }}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
-              />
-              Disclose video content
-              <PlatformTag platform="tiktok" />
-            </label>
+          {format && onFormatChange && (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-text-secondary">Format</label>
+              <FormatToggle value={format} onChange={onFormatChange} />
+              <p className="mt-1 text-xs text-text-disabled">
+                {format === "short"
+                  ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
+                  : "Any aspect ratio or length · publishes as a regular video"}
+              </p>
+              {shortWarn && (
+                <div role="alert" className="mt-2 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-3">
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0 text-warning" />
+                  <p className="text-xs text-warning">{shortWarn}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
-            {discloseOpen && (
-              <div className="mt-2 space-y-1.5 pl-5.5">
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={tiktokBrandOrganicToggle}
-                    onChange={(e) => onChange({ tiktokBrandOrganicToggle: e.target.checked })}
-                    className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
-                  />
-                  Your Brand
-                </label>
-                <label
-                  className={`flex items-center gap-2 text-xs ${isSelfOnly ? "cursor-not-allowed text-text-disabled" : "cursor-pointer text-text-secondary"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={tiktokBrandContentToggle}
-                    disabled={isSelfOnly}
-                    onChange={(e) => onChange({ tiktokBrandContentToggle: e.target.checked })}
-                    className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
-                  />
-                  Branded Content
-                </label>
-                {isSelfOnly && (
-                  <p className="text-[11px] text-text-disabled">
-                    Branded content must be public — unavailable while privacy is &ldquo;Only me&rdquo;.
-                  </p>
-                )}
-              </div>
+      {/* Every TikTok-only setting lives in this one block, same reasoning. */}
+      {hasTiktok && (
+        <div className="space-y-3 rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-N900">
+            <Music2 className="h-3.5 w-3.5 text-pink-400" />
+            TikTok
+            {tiktokCreatorInfo.creatorNickname && (
+              <span className="font-normal text-text-secondary">
+                · posting as {tiktokCreatorInfo.creatorNickname}
+              </span>
             )}
           </div>
-        </>
+
+          {tiktokCreatorInfo.postingBlocked ? (
+            <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/10 px-3.5 py-3">
+              <AlertCircle className="mt-px h-4 w-4 shrink-0 text-error" />
+              <p className="text-xs text-error">
+                {tiktokCreatorInfo.blockedReason ?? "This TikTok account can't publish right now."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {tiktokCreatorInfo.rateLimited && (
+                <div role="status" className="flex items-start gap-2.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-3">
+                  <AlertCircle className="mt-px h-4 w-4 shrink-0 text-info" />
+                  <p className="text-xs text-info">
+                    {tiktokCreatorInfo.rateLimitedReason ??
+                      "TikTok's daily post cap is reached right now — you can still schedule; this won't affect a future-dated post."}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+                  Privacy <span className="text-error" aria-hidden>*</span>
+                </label>
+                <select
+                  value={tiktokPrivacyLevel ?? ""}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    // Leaving SELF_ONLY invalidates a branded-content disclosure.
+                    onChange(
+                      next === "SELF_ONLY"
+                        ? { tiktokPrivacyLevel: next, tiktokBrandContentToggle: false }
+                        : { tiktokPrivacyLevel: next },
+                    );
+                  }}
+                  className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+                >
+                  <option value="" disabled>
+                    {tiktokCreatorInfo.privacyLevelOptions.length === 0 ? "Loading…" : "Select privacy…"}
+                  </option>
+                  {tiktokCreatorInfo.privacyLevelOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {TIKTOK_PRIVACY_LABELS[opt] ?? opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* TikTok's own max_video_post_duration_sec check — blocking,
+                  unlike the advisory YouTube Shorts warning above. */}
+              {videoDurationSec != null &&
+                tiktokCreatorInfo.maxVideoPostDurationSec > 0 &&
+                videoDurationSec > tiktokCreatorInfo.maxVideoPostDurationSec && (
+                  <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/10 px-3.5 py-3">
+                    <AlertCircle className="mt-px h-4 w-4 shrink-0 text-error" />
+                    <p className="text-xs text-error">
+                      This video is {Math.round(videoDurationSec)}s long, longer than the{" "}
+                      {tiktokCreatorInfo.maxVideoPostDurationSec}s TikTok allows for this account.
+                    </p>
+                  </div>
+                )}
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-text-secondary">Interactions</label>
+                <div className="space-y-1.5">
+                  <div>
+                    <label
+                      className={`flex items-center gap-2 text-xs ${tiktokCreatorInfo.commentDisabled ? "cursor-not-allowed text-text-disabled" : "cursor-pointer text-text-secondary"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tiktokAllowComment && !tiktokCreatorInfo.commentDisabled}
+                        disabled={tiktokCreatorInfo.commentDisabled}
+                        onChange={(e) => onChange({ tiktokAllowComment: e.target.checked })}
+                        className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                      />
+                      Allow Comment
+                    </label>
+                    {tiktokCreatorInfo.commentDisabled && (
+                      <p className="mt-0.5 pl-5.5 text-[11px] text-text-disabled">
+                        Comments are disabled for this account in the TikTok app.
+                      </p>
+                    )}
+                  </div>
+
+                  {!isPhoto && (
+                    <>
+                      <div>
+                        <label
+                          className={`flex items-center gap-2 text-xs ${tiktokCreatorInfo.duetDisabled ? "cursor-not-allowed text-text-disabled" : "cursor-pointer text-text-secondary"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={tiktokAllowDuet && !tiktokCreatorInfo.duetDisabled}
+                            disabled={tiktokCreatorInfo.duetDisabled}
+                            onChange={(e) => onChange({ tiktokAllowDuet: e.target.checked })}
+                            className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                          />
+                          Allow Duet
+                        </label>
+                        {tiktokCreatorInfo.duetDisabled && (
+                          <p className="mt-0.5 pl-5.5 text-[11px] text-text-disabled">
+                            Duets are disabled for this account in the TikTok app.
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label
+                          className={`flex items-center gap-2 text-xs ${tiktokCreatorInfo.stitchDisabled ? "cursor-not-allowed text-text-disabled" : "cursor-pointer text-text-secondary"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={tiktokAllowStitch && !tiktokCreatorInfo.stitchDisabled}
+                            disabled={tiktokCreatorInfo.stitchDisabled}
+                            onChange={(e) => onChange({ tiktokAllowStitch: e.target.checked })}
+                            className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                          />
+                          Allow Stitch
+                        </label>
+                        {tiktokCreatorInfo.stitchDisabled && (
+                          <p className="mt-0.5 pl-5.5 text-[11px] text-text-disabled">
+                            Stitches are disabled for this account in the TikTok app.
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={discloseOpen}
+                    onChange={(e) => {
+                      const open = e.target.checked;
+                      onChange(
+                        open
+                          ? { tiktokDiscloseOpen: true }
+                          : { tiktokDiscloseOpen: false, tiktokBrandOrganicToggle: false, tiktokBrandContentToggle: false },
+                      );
+                    }}
+                    className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                  />
+                  Disclose video content
+                </label>
+
+                {discloseOpen && (
+                  <div className="mt-2 space-y-2 pl-5.5">
+                    <div>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={tiktokBrandOrganicToggle}
+                          onChange={(e) => onChange({ tiktokBrandOrganicToggle: e.target.checked })}
+                          className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                        />
+                        Your Brand
+                      </label>
+                      <p className="mt-0.5 text-[11px] text-text-disabled">
+                        You&apos;re promoting yourself or your own business — labeled as &ldquo;Promotional
+                        content&rdquo;.
+                      </p>
+                    </div>
+                    <div>
+                      <label
+                        className={`flex items-center gap-2 text-xs ${isSelfOnly ? "cursor-not-allowed text-text-disabled" : "cursor-pointer text-text-secondary"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={tiktokBrandContentToggle}
+                          disabled={isSelfOnly}
+                          onChange={(e) => onChange({ tiktokBrandContentToggle: e.target.checked })}
+                          className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                        />
+                        Branded Content
+                      </label>
+                      <p className="mt-0.5 text-[11px] text-text-disabled">
+                        You&apos;re promoting another brand or a third party — labeled as &ldquo;Paid
+                        partnership&rdquo;.
+                      </p>
+                    </div>
+                    {isSelfOnly && (
+                      <p className="text-[11px] text-text-disabled">
+                        Branded content must be public — unavailable while privacy is &ldquo;Only me&rdquo;.
+                      </p>
+                    )}
+                    {!tiktokBrandOrganicToggle && !tiktokBrandContentToggle && (
+                      <p role="alert" className="text-[11px] text-warning">
+                        You need to indicate if your content promotes yourself, a third party, or both.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1432,6 +1813,11 @@ interface ScheduleCardProps {
   tiktokPrivacyLevel: string | null;
   tiktokBrandOrganicToggle: boolean;
   tiktokBrandContentToggle: boolean;
+  tiktokDiscloseOpen: boolean;
+  tiktokAllowComment: boolean;
+  tiktokAllowDuet: boolean;
+  tiktokAllowStitch: boolean;
+  tiktokConsentChecked: boolean;
   onPlatformPatch: (patch: PlatformPatch) => void;
   // Persists the result of the deferred upload (see handleSubmit) into the
   // parent's item state — a distinct, narrower prop from onPlatformPatch so
@@ -1440,7 +1826,7 @@ interface ScheduleCardProps {
     patch: Partial<Pick<VideoItem, "videoUrl" | "storagePath" | "photoUrls" | "file" | "uploadStatus">>,
   ) => void;
   tiktokConnected: boolean;
-  tiktokPrivacyOptions: string[];
+  tiktokCreatorInfo: TikTokCreatorInfoState;
   // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
   // contentType is derived from what was dropped/picked (UploadCard + the
   // top-level handlers), never set from within ScheduleCard itself.
@@ -1470,17 +1856,22 @@ function ScheduleCard({
   tiktokPrivacyLevel,
   tiktokBrandOrganicToggle,
   tiktokBrandContentToggle,
+  tiktokDiscloseOpen,
+  tiktokAllowComment,
+  tiktokAllowDuet,
+  tiktokAllowStitch,
+  tiktokConsentChecked,
   onPlatformPatch,
   onMediaUploaded,
   tiktokConnected,
-  tiktokPrivacyOptions,
+  tiktokCreatorInfo,
   contentType,
   photoUrls,
 }: ScheduleCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const today = new Date().toISOString().split("T")[0];
-  const [form, setForm] = useState<ScheduleForm>({ date: today, time: "18:00" });
+  const [form, setForm] = useState<ScheduleForm>(() => nextScheduleSlot());
   const [submitting, setSubmitting] = useState(false);
   // Distinct from `submitting` only for button copy — the upload (deferred
   // until this click) happens before the actual schedule POST, and a large
@@ -1489,14 +1880,29 @@ function ScheduleCard({
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [confirmEmptyCaption, setConfirmEmptyCaption] = useState(false);
 
+  // TikTok-only gates — each is vacuously true when TikTok isn't a selected
+  // platform, so they never affect a YouTube-only schedule.
+  const tiktokTargeted = platforms.includes("tiktok");
+  const tiktokNotBlocked = !tiktokTargeted || !tiktokCreatorInfo.postingBlocked;
+  const tiktokDurationOk =
+    !tiktokTargeted ||
+    !videoDuration ||
+    !tiktokCreatorInfo.maxVideoPostDurationSec ||
+    videoDuration <= tiktokCreatorInfo.maxVideoPostDurationSec;
+  // TikTok's own guideline: disable publish if the disclosure section is
+  // open but neither "Your Brand" nor "Branded Content" is chosen.
+  const tiktokDiscloseComplete =
+    !tiktokTargeted || !tiktokDiscloseOpen || tiktokBrandOrganicToggle || tiktokBrandContentToggle;
+  const tiktokConsentOk = !tiktokTargeted || tiktokConsentChecked;
+
   const set = (key: keyof ScheduleForm) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
-  const handleBestTime = () => setForm((prev) => ({ ...prev, date: today, time: "18:00" }));
+  const handleBestTime = () => setForm((prev) => ({ ...prev, ...bestTimeSlot() }));
 
   const resetForm = () => {
-    setForm({ date: today, time: "18:00" });
+    setForm(nextScheduleSlot());
     onTitleChange("");
     onTagsChange("");
     setConfirmEmptyCaption(false);
@@ -1510,7 +1916,10 @@ function ScheduleCard({
     // click) counts as "has media" too, alongside an already-resolved ref.
     const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
 
-    if (!hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0) {
+    if (
+      !hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0 ||
+      !tiktokNotBlocked || !tiktokDurationOk || !tiktokDiscloseComplete || !tiktokConsentOk
+    ) {
       return;
     }
 
@@ -1594,6 +2003,14 @@ function ScheduleCard({
                     tiktok_privacy_level: tiktokPrivacyLevel,
                     tiktok_brand_organic_toggle: tiktokBrandOrganicToggle,
                     tiktok_brand_content_toggle: tiktokBrandContentToggle,
+                    tiktok_disable_comment: !tiktokAllowComment,
+                    // Duet/Stitch are not a photo-post concept — forced
+                    // disabled here regardless of the stored toggle state,
+                    // matching the server-side derivation in
+                    // app/api/posts/route.ts and lib/tiktok.ts's
+                    // initPhotoPost hardcoding them too.
+                    tiktok_disable_duet: isPhoto ? true : !tiktokAllowDuet,
+                    tiktok_disable_stitch: isPhoto ? true : !tiktokAllowStitch,
                   }
                 : {}),
             }),
@@ -1648,18 +2065,23 @@ function ScheduleCard({
     }
   };
 
-  // Duration no longer blocks scheduling — only the essentials gate the button.
-  // A TikTok-targeted post additionally requires a chosen privacy level (never
+  // The general Shorts-format duration warning below is advisory-only and
+  // never blocks scheduling. TikTok's own max_video_post_duration_sec check
+  // (tiktokDurationOk) is different — TikTok's guideline requires it to
+  // actually block, since a too-long video would just fail on their end.
+  // A TikTok-targeted post also requires a chosen privacy level (never
   // defaulted — see design.md Decision 4).
   const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
   const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
   const isReady =
     hasMedia && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
     pendingPlatforms.length > 0 &&
-    (!platforms.includes("tiktok") || !!tiktokPrivacyLevel);
+    (!platforms.includes("tiktok") || !!tiktokPrivacyLevel) &&
+    tiktokNotBlocked && tiktokDurationOk && tiktokDiscloseComplete && tiktokConsentOk;
 
   // Advisory (non-blocking) warnings for Shorts only.
   const shortWarn = formatWarning(format, videoDuration, videoAspect);
+  const bestTime = bestTimeSlot();
 
   return (
     <Card className="sticky top-20">
@@ -1674,37 +2096,19 @@ function ScheduleCard({
           tiktokPrivacyLevel={tiktokPrivacyLevel}
           tiktokBrandOrganicToggle={tiktokBrandOrganicToggle}
           tiktokBrandContentToggle={tiktokBrandContentToggle}
+          tiktokDiscloseOpen={tiktokDiscloseOpen}
+          tiktokAllowComment={tiktokAllowComment}
+          tiktokAllowDuet={tiktokAllowDuet}
+          tiktokAllowStitch={tiktokAllowStitch}
           onChange={onPlatformPatch}
           tiktokConnected={tiktokConnected}
-          tiktokPrivacyOptions={tiktokPrivacyOptions}
+          tiktokCreatorInfo={tiktokCreatorInfo}
           contentType={contentType}
+          videoDurationSec={videoDuration}
+          format={format}
+          onFormatChange={onFormatChange}
+          shortWarn={shortWarn}
         />
-
-        {/* Format — YouTube-only concept (Short vs regular Video + #Shorts tag) */}
-        {platforms.includes("youtube") && (
-          <>
-            <div>
-              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-                Format
-                <PlatformTag platform="youtube" />
-              </label>
-              <FormatToggle value={format} onChange={onFormatChange} />
-              <p className="mt-1 text-xs text-text-disabled">
-                {format === "short"
-                  ? "Vertical, ≤ 3 min · publishes as a YouTube Short (#Shorts added)"
-                  : "Any aspect ratio or length · publishes as a regular video"}
-              </p>
-            </div>
-
-            {/* Advisory warnings (Short only; never blocks) */}
-            {shortWarn && (
-              <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-3">
-                <AlertCircle className="mt-px h-4 w-4 shrink-0 text-warning" />
-                <p className="text-xs text-warning">{shortWarn}</p>
-              </div>
-            )}
-          </>
-        )}
 
         {/* Title */}
         <div>
@@ -1765,7 +2169,7 @@ function ScheduleCard({
         <button type="button" onClick={handleBestTime}
           className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm font-medium text-warning transition-all duration-200 hover:border-warning/50 hover:bg-warning/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning">
           <Zap className="h-4 w-4" />
-          Use Best Time · 6:00 PM today
+          Use Best Time · 6:00 PM {bestTime.isToday ? "today" : "tomorrow"}
         </button>
 
         <div className="border-t border-white/10 pt-1" />
@@ -1779,6 +2183,15 @@ function ScheduleCard({
               or write a caption above.
             </p>
           </div>
+        )}
+
+        {/* TikTok's required pre-publish declaration + express consent */}
+        {tiktokTargeted && !tiktokCreatorInfo.postingBlocked && (
+          <TikTokConsentDeclaration
+            brandContentToggle={tiktokBrandContentToggle}
+            checked={tiktokConsentChecked}
+            onCheckedChange={(checked) => onPlatformPatch({ tiktokConsentChecked: checked })}
+          />
         )}
 
         {/* Submit */}
@@ -1798,6 +2211,10 @@ function ScheduleCard({
         <p className="text-center text-xs text-text-disabled">
           {!hasMedia ? (contentType === "photo" ? "Add a photo to enable scheduling" : "Add a video to enable scheduling")
             : !title.trim() ? "Add a title to schedule"
+            : tiktokTargeted && !tiktokNotBlocked ? "This TikTok account can't publish right now"
+            : tiktokTargeted && !tiktokDurationOk ? "Video is too long for TikTok"
+            : tiktokTargeted && !tiktokDiscloseComplete ? "Choose how this content is disclosed on TikTok"
+            : tiktokTargeted && !tiktokConsentOk ? "Agree to TikTok's terms to schedule"
             : ""}
         </p>
       </div>
@@ -1810,6 +2227,7 @@ function ScheduleCard({
 const STATUS_CFG = {
   scheduled:  { label: "Scheduled",  badge: "border-info/30 bg-info/10 text-info",       dot: "bg-info"   },
   overdue:    { label: "Overdue",    badge: "border-warning/30 bg-warning/10 text-warning",    dot: "bg-warning"  },
+  retrying:   { label: "Retrying",   badge: "border-info/30 bg-info/10 text-info",       dot: "bg-info"   },
   publishing: { label: "Publishing", badge: "border-white/20 bg-white/10 text-text-secondary", dot: "bg-white/70" },
   published:  { label: "Published",  badge: "border-success/30 bg-success/10 text-success",     dot: "bg-success"  },
   failed:     { label: "Failed",     badge: "border-error/30 bg-error/10 text-error",           dot: "bg-error"    },
@@ -1856,8 +2274,11 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-N900">{post.title}</p>
                 <p className="mt-0.5 text-xs text-text-disabled">{fmtScheduledTime(post.scheduled_time)}</p>
-                {post.status === "failed" && post.last_error && (
-                  <p className="mt-1 truncate text-xs text-error/80" title={post.last_error}>
+                {post.last_error && (post.status === "failed" || post.status === "scheduled") && (
+                  <p
+                    className={`mt-1 truncate text-xs ${post.status === "failed" ? "text-error/80" : "text-info/80"}`}
+                    title={post.last_error}
+                  >
                     {post.last_error}
                   </p>
                 )}
@@ -1938,6 +2359,11 @@ function useCaptionAI() {
       tags: string;
       videoUrl: string | null;
       storagePath?: string | null;
+      // Cover photo of a photo post — mutually exclusive with videoUrl/
+      // storagePath above. The API already supports vision-based captioning
+      // from this field (see app/api/generate-caption/route.ts); this was the
+      // one piece that never sent it.
+      photoStoragePath?: string | null;
       format?: VideoFormat;
     }): Promise<string> => {
       setBusy("generate");
@@ -1954,6 +2380,7 @@ function useCaptionAI() {
             tags: input.tags,
             videoUrl: input.videoUrl ?? undefined,
             storage_path: input.storagePath ?? undefined,
+            photo_storage_path: input.photoStoragePath ?? undefined,
             format: input.format ?? "short",
           }),
         });
@@ -2035,7 +2462,7 @@ function useCaptionAI() {
 // The textarea lives in the parent (per-card or shared box).
 interface CaptionControlsProps {
   ai: ReturnType<typeof useCaptionAI>;
-  hasVideo: boolean;
+  hasMedia: boolean;
   hasContent: boolean;
   hasTitle: boolean;
   generateLabel: string;
@@ -2044,19 +2471,27 @@ interface CaptionControlsProps {
   // Hint shown when there's nothing to generate from yet. `null` hides it
   // (e.g. the shared box renders its own helper text instead).
   emptyHint?: string | null;
+  // Busy state the caller manages itself — e.g. uploading a staged file
+  // (upload is deferred until Schedule) before the AI call can even start.
+  // ORed into ai.busy so the button stays disabled and shows a distinct
+  // label throughout, not just once the actual generate request begins.
+  extraBusy?: boolean;
+  extraBusyLabel?: string;
 }
 
 function CaptionControls({
   ai,
-  hasVideo,
+  hasMedia,
   hasContent,
   hasTitle,
   generateLabel,
   onGenerate,
   onPolish,
-  emptyHint = "Upload a video first to generate an AI caption",
+  emptyHint = "Upload a video or photo first to generate an AI caption",
+  extraBusy = false,
+  extraBusyLabel = "Uploading…",
 }: CaptionControlsProps) {
-  const isBusy = ai.busy !== null;
+  const isBusy = ai.busy !== null || extraBusy;
 
   return (
     <div className="space-y-2">
@@ -2084,10 +2519,15 @@ function CaptionControls({
         <button
           type="button"
           onClick={onGenerate}
-          disabled={isBusy || !hasVideo}
+          disabled={isBusy || !hasMedia}
           className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-2.5 text-sm font-medium text-text-static-black transition-all duration-200 hover:bg-N800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {ai.busy === "generate" ? (
+          {extraBusy ? (
+            <>
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              {extraBusyLabel}
+            </>
+          ) : ai.busy === "generate" ? (
             <>
               <RefreshCw className="h-4 w-4 animate-spin" />
               Generating…
@@ -2119,13 +2559,17 @@ function CaptionControls({
         )}
       </div>
 
-      {ai.busy && (
+      {(ai.busy || extraBusy) && (
         <p className="text-center text-xs text-text-disabled">
-          {ai.busy === "generate" ? "🎙️ Transcribing & writing…" : "✍️ Polishing your caption…"}
+          {extraBusy
+            ? extraBusyLabel
+            : ai.busy === "generate"
+              ? "🎙️ Transcribing & writing…"
+              : "✍️ Polishing your caption…"}
         </p>
       )}
 
-      {!ai.busy && !hasContent && !hasVideo && emptyHint && (
+      {!ai.busy && !hasContent && !hasMedia && emptyHint && (
         <p className="text-center text-xs text-text-disabled">{emptyHint}</p>
       )}
 
@@ -2162,15 +2606,17 @@ interface BulkVideoCardProps {
   onUpdate: (patch: Partial<VideoItem>) => void;
   onRemove: () => void;
   tiktokConnected: boolean;
-  tiktokPrivacyOptions: string[];
+  tiktokCreatorInfo: TikTokCreatorInfoState;
 }
 
-function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokPrivacyOptions }: BulkVideoCardProps) {
+function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokCreatorInfo }: BulkVideoCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const today = new Date().toISOString().split("T")[0];
   const ai = useCaptionAI();
+  const [uploadingForCaption, setUploadingForCaption] = useState(false);
+  const tiktokTargeted = item.platforms.includes("tiktok");
   // Choice-first "add more photos" flow (mirrors UploadCard's single-mode
   // photo picker) — collapsed to one button, only reveals the upload-vs-library
   // choice, then the relevant UI, once asked for.
@@ -2225,10 +2671,10 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
     setPreviewUrl(item.videoUrl);
   }, [item.file, item.storagePath, item.videoUrl]);
 
-  // Clear the transcript warning when this card's video changes
+  // Clear the transcript warning when this card's media changes
   useEffect(() => {
     ai.resetWarning();
-  }, [item.videoUrl, item.storagePath, ai.resetWarning]);
+  }, [item.videoUrl, item.storagePath, item.photoUrls, ai.resetWarning]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
@@ -2246,13 +2692,51 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
 
   const handleGenerate = async () => {
     try {
-      const caption = await ai.generate({
-        title: item.title,
-        tags: item.tags,
-        videoUrl: item.videoUrl,
-        storagePath: item.storagePath,
-        format: item.format,
-      });
+      const isPhoto = item.contentType === "photo";
+      let effectiveVideoUrl = item.videoUrl;
+      let effectiveStoragePath = item.storagePath;
+      let effectivePhotoStoragePath = item.photoUrls[0] ?? null;
+
+      // Upload is deferred until "Schedule All" is clicked — a just-picked
+      // file has neither a hosted URL nor a photoUrls entry yet, only
+      // `item.file`. Generate needs real bytes on a server the model can
+      // fetch, so it uploads on demand here rather than staying disabled
+      // for as long as the file sits unscheduled.
+      if (item.file && !effectiveStoragePath && !effectiveVideoUrl && !effectivePhotoStoragePath) {
+        setUploadingForCaption(true);
+        try {
+          const uploaded = await signAndUploadFile(item.file, isPhoto ? "image" : "video");
+          if (isPhoto) {
+            effectivePhotoStoragePath = uploaded.storagePath;
+            onUpdate({ photoUrls: [uploaded.storagePath, ...item.photoUrls], file: null, uploadStatus: "done" });
+          } else {
+            effectiveVideoUrl = uploaded.url;
+            effectiveStoragePath = uploaded.storagePath;
+            onUpdate({ videoUrl: uploaded.url, storagePath: uploaded.storagePath, file: null, uploadStatus: "done" });
+          }
+        } finally {
+          setUploadingForCaption(false);
+        }
+      }
+
+      const caption = await ai.generate(
+        isPhoto
+          ? {
+              title: item.title,
+              tags: item.tags,
+              videoUrl: null,
+              storagePath: null,
+              photoStoragePath: effectivePhotoStoragePath,
+              format: item.format,
+            }
+          : {
+              title: item.title,
+              tags: item.tags,
+              videoUrl: effectiveVideoUrl,
+              storagePath: effectiveStoragePath,
+              format: item.format,
+            },
+      );
       onUpdate({ caption });
     } catch {
       // error surfaced by the hook
@@ -2586,11 +3070,24 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             tiktokPrivacyLevel={item.tiktokPrivacyLevel}
             tiktokBrandOrganicToggle={item.tiktokBrandOrganicToggle}
             tiktokBrandContentToggle={item.tiktokBrandContentToggle}
+            tiktokDiscloseOpen={item.tiktokDiscloseOpen}
+            tiktokAllowComment={item.tiktokAllowComment}
+            tiktokAllowDuet={item.tiktokAllowDuet}
+            tiktokAllowStitch={item.tiktokAllowStitch}
             onChange={onUpdate}
             tiktokConnected={tiktokConnected}
-            tiktokPrivacyOptions={tiktokPrivacyOptions}
+            tiktokCreatorInfo={tiktokCreatorInfo}
             contentType={item.contentType}
+            videoDurationSec={item.duration}
           />
+
+          {tiktokTargeted && !tiktokCreatorInfo.postingBlocked && (
+            <TikTokConsentDeclaration
+              brandContentToggle={item.tiktokBrandContentToggle}
+              checked={item.tiktokConsentChecked}
+              onCheckedChange={(checked) => onUpdate({ tiktokConsentChecked: checked })}
+            />
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2640,12 +3137,17 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
           {captionMode === "individual" && (
             <CaptionControls
               ai={ai}
-              hasVideo={!!(item.storagePath || item.videoUrl)}
+              hasMedia={
+                item.contentType === "photo"
+                  ? item.photoUrls.length > 0 || !!item.file
+                  : !!(item.storagePath || item.videoUrl || item.file)
+              }
               hasContent={!!item.caption.trim()}
               hasTitle={!!item.title.trim()}
               generateLabel="Generate Caption"
               onGenerate={handleGenerate}
               onPolish={handlePolish}
+              extraBusy={uploadingForCaption}
             />
           )}
         </div>
@@ -2825,9 +3327,9 @@ export default function SchedulerDashboardPage() {
   );
   const noop = useCallback(() => {}, []);
 
-  // ── TikTok connection + privacy options (Decisions 4, 7) ──
+  // ── TikTok connection + creator info (Decisions 4, 7) ──
   const [tiktokConnected, setTiktokConnected] = useState(false);
-  const [tiktokPrivacyOptions, setTiktokPrivacyOptions] = useState<string[]>([]);
+  const [tiktokCreatorInfo, setTiktokCreatorInfo] = useState<TikTokCreatorInfoState>(DEFAULT_TIKTOK_CREATOR_INFO);
 
   useEffect(() => {
     fetch("/api/connections/status")
@@ -2838,13 +3340,15 @@ export default function SchedulerDashboardPage() {
 
   useEffect(() => {
     if (!tiktokConnected) {
-      setTiktokPrivacyOptions([]);
+      setTiktokCreatorInfo(DEFAULT_TIKTOK_CREATOR_INFO);
       return;
     }
     fetch("/api/connections/tiktok/creator-info")
-      .then((res) => (res.ok ? res.json() : { privacyLevelOptions: [] }))
-      .then((data: { privacyLevelOptions?: string[] }) => setTiktokPrivacyOptions(data.privacyLevelOptions ?? []))
-      .catch(() => setTiktokPrivacyOptions([]));
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((data: Partial<TikTokCreatorInfoState>) =>
+        setTiktokCreatorInfo({ ...DEFAULT_TIKTOK_CREATOR_INFO, ...data }),
+      )
+      .catch(() => setTiktokCreatorInfo(DEFAULT_TIKTOK_CREATOR_INFO));
   }, [tiktokConnected]);
 
   // ── Bulk caption state (Prompt 2) ──
@@ -3111,13 +3615,20 @@ export default function SchedulerDashboardPage() {
   // ScheduleCard.isReady), a title, and a date/time. Duration no longer gates
   // scheduling.
   const itemReady = useCallback(
-    (i: VideoItem) =>
+    (i: VideoItem) => {
       // A staged raw file (not yet uploaded — upload is deferred until
       // Schedule All is clicked) counts as "has media" too.
-      (i.contentType === "photo" ? (i.photoUrls.length > 0 || !!i.file) : !!(i.storagePath || i.videoUrl || i.file)) &&
-      !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0 &&
-      (!i.platforms.includes("tiktok") || !!i.tiktokPrivacyLevel),
-    [],
+      const hasMedia = i.contentType === "photo" ? (i.photoUrls.length > 0 || !!i.file) : !!(i.storagePath || i.videoUrl || i.file);
+      const essentialsOk = hasMedia && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0;
+      if (!essentialsOk) return false;
+      if (!i.platforms.includes("tiktok")) return true;
+
+      const durationOk =
+        !i.duration || !tiktokCreatorInfo.maxVideoPostDurationSec || i.duration <= tiktokCreatorInfo.maxVideoPostDurationSec;
+      const discloseComplete = !i.tiktokDiscloseOpen || i.tiktokBrandOrganicToggle || i.tiktokBrandContentToggle;
+      return !!i.tiktokPrivacyLevel && !tiktokCreatorInfo.postingBlocked && durationOk && discloseComplete && i.tiktokConsentChecked;
+    },
+    [tiktokCreatorInfo],
   );
 
   // Targets = ready cards not already scheduled (so a re-run retries failures too).
@@ -3245,6 +3756,9 @@ export default function SchedulerDashboardPage() {
                     tiktok_privacy_level: it.tiktokPrivacyLevel,
                     tiktok_brand_organic_toggle: it.tiktokBrandOrganicToggle,
                     tiktok_brand_content_toggle: it.tiktokBrandContentToggle,
+                    tiktok_disable_comment: !it.tiktokAllowComment,
+                    tiktok_disable_duet: isPhoto ? true : !it.tiktokAllowDuet,
+                    tiktok_disable_stitch: isPhoto ? true : !it.tiktokAllowStitch,
                   }
                 : {}),
             }),
@@ -3343,7 +3857,11 @@ export default function SchedulerDashboardPage() {
                 tags={item0.tags}
                 videoUrl={item0.videoUrl}
                 storagePath={item0.storagePath}
+                contentType={item0.contentType}
+                photoUrls={item0.photoUrls}
                 format={item0.format}
+                file={item0.file}
+                onMediaUploaded={handleItem0PlatformPatch}
               />
             </div>
 
@@ -3370,10 +3888,15 @@ export default function SchedulerDashboardPage() {
                 tiktokPrivacyLevel={item0.tiktokPrivacyLevel}
                 tiktokBrandOrganicToggle={item0.tiktokBrandOrganicToggle}
                 tiktokBrandContentToggle={item0.tiktokBrandContentToggle}
+                tiktokDiscloseOpen={item0.tiktokDiscloseOpen}
+                tiktokAllowComment={item0.tiktokAllowComment}
+                tiktokAllowDuet={item0.tiktokAllowDuet}
+                tiktokAllowStitch={item0.tiktokAllowStitch}
+                tiktokConsentChecked={item0.tiktokConsentChecked}
                 onPlatformPatch={handleItem0PlatformPatch}
                 onMediaUploaded={handleItem0PlatformPatch}
                 tiktokConnected={tiktokConnected}
-                tiktokPrivacyOptions={tiktokPrivacyOptions}
+                tiktokCreatorInfo={tiktokCreatorInfo}
                 contentType={item0.contentType}
                 photoUrls={item0.photoUrls}
               />
@@ -3442,7 +3965,7 @@ export default function SchedulerDashboardPage() {
 
                   <CaptionControls
                     ai={sharedAi}
-                    hasVideo={hasCaptionContext}
+                    hasMedia={hasCaptionContext}
                     hasContent={!!sharedCaption.trim()}
                     hasTitle
                     generateLabel="✨ Generate General Caption"
@@ -3481,7 +4004,7 @@ export default function SchedulerDashboardPage() {
                   onUpdate={(patch) => updateItem(it.id, patch)}
                   onRemove={() => removeItem(it.id)}
                   tiktokConnected={tiktokConnected}
-                  tiktokPrivacyOptions={tiktokPrivacyOptions}
+                  tiktokCreatorInfo={tiktokCreatorInfo}
                 />
               ))}
             </div>

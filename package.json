@@ -21,6 +21,7 @@
     "test:aspect-ratio": "npx tsx lib/aspect-ratio-match.ts",
     "test:active-generations": "npx tsx lib/active-generations-pure.ts",
     "test:replicate-output-url": "npx tsx lib/replicate-output-url-self-check.ts",
+    "test:tiktok-creator-info": "npx tsx lib/tiktok-creator-info-pure.ts",
     "test:generation-workflows": "npx tsx lib/generation-workflows/control-policy-self-check.ts && npx tsx lib/generation-workflows/stop-settlement-self-check.ts && npx tsx lib/generation-workflows/submission-fence-self-check.ts && npx tsx lib/generation-workflows/submission-recovery-self-check.ts && npx tsx lib/generation-workflows/webhook-token-self-check.ts && npx tsx lib/generation-workflows/polling-self-check.ts && npx tsx lib/generation-workflows/finalization-self-check.ts",
     "admin:probe-monitoring": "npx tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "npx tsx scripts/probe-signed-url-cache.ts",
