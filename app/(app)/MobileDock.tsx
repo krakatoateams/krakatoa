@@ -40,7 +40,7 @@ function isToolActive(pathname: string, href: string, exact?: boolean) {
 
 function DockCircle({ children }: { children: ReactNode }) {
   return (
-    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/20 text-text-primary">
+    <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-white/20 text-text-primary">
       {children}
     </span>
   );
@@ -102,7 +102,7 @@ export default function MobileDock({
       <nav
         ref={popRef}
         aria-label="Primary"
-        className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 md:hidden"
+        className="fixed inset-x-0 bottom-4 z-[60] flex items-center justify-center gap-2 md:hidden"
       >
         {open ? (
           <div className="absolute bottom-[calc(100%+12px)] left-1/2 w-[min(22.5rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-2xl border border-white/10 bg-N50 p-3 shadow-2xl shadow-black/50">
@@ -144,14 +144,14 @@ export default function MobileDock({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-3 rounded-full border border-white/15 bg-N0/60 px-2.5 py-1.5 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150">
+        <div className="flex shrink-0 items-center gap-3 rounded-full border border-white/15 bg-N0/60 px-2.5 py-1.5 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150">
           <Link
             href="/dashboard"
             aria-label="Home"
             className={
               homeActive
-                ? "flex h-11 items-center gap-2 rounded-full bg-white pl-1.5 pr-3.5 text-N50 shadow-sm"
-                : "rounded-full"
+                ? "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white py-0 pl-1.5 pr-4 text-N50 shadow-sm"
+                : "shrink-0 rounded-full"
             }
           >
             {homeActive ? (
@@ -163,7 +163,7 @@ export default function MobileDock({
                   height={28}
                   className="h-7 w-7 shrink-0 object-contain"
                 />
-                <span className="text-sm font-semibold">Home</span>
+                <span className="text-sm font-semibold leading-none">Home</span>
               </>
             ) : (
               <DockCircle>
@@ -184,14 +184,14 @@ export default function MobileDock({
             title="Library"
             className={
               libraryActive
-                ? "flex h-11 items-center gap-2 rounded-full bg-white px-3.5 text-N50 shadow-sm"
-                : "rounded-full"
+                ? "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-3.5 py-0 text-N50 shadow-sm"
+                : "shrink-0 rounded-full"
             }
           >
             {libraryActive ? (
               <>
                 <Images className="h-[18px] w-[18px] text-N50" />
-                <span className="text-sm font-semibold">Library</span>
+                <span className="text-sm font-semibold leading-none">Library</span>
               </>
             ) : (
               <DockCircle>
@@ -206,14 +206,14 @@ export default function MobileDock({
             title="Calendar"
             className={`${comingSoon("calendar") ? "opacity-50" : ""} ${
               calendarActive
-                ? "flex h-11 items-center gap-2 rounded-full bg-white px-3.5 text-N50 shadow-sm"
-                : "rounded-full"
+                ? "flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-3.5 py-0 text-N50 shadow-sm"
+                : "shrink-0 rounded-full"
             }`}
           >
             {calendarActive ? (
               <>
                 <CalendarDays className="h-[18px] w-[18px] text-N50" />
-                <span className="text-sm font-semibold">Calendar</span>
+                <span className="text-sm font-semibold leading-none">Calendar</span>
               </>
             ) : (
               <DockCircle>
@@ -229,11 +229,11 @@ export default function MobileDock({
           aria-haspopup="dialog"
           aria-label={open ? "Close tools" : "Open tools"}
           onClick={() => setOpen((value) => !value)}
-          className={`relative flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-N0/60 shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 ${
-            createActive && !open ? "ring-2 ring-white/25" : ""
+          className={`relative flex size-14 shrink-0 items-center justify-center rounded-full border border-white/15 bg-N0/60 p-0 leading-none shadow-lg shadow-black/40 backdrop-blur-xl backdrop-saturate-150 ${
+            createActive && !open ? "ring-2 ring-white/25 ring-offset-0" : ""
           }`}
         >
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-N50">
+          <span className="flex size-11 items-center justify-center rounded-full bg-white text-N50">
             {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
           </span>
           {createGenerating ? (

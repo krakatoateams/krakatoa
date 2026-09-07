@@ -67,7 +67,7 @@ export default function MobileAppHeader() {
 
   return (
     <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-N50/95 px-4 backdrop-blur-md md:hidden">
-      <Link href="/" aria-label="Kelolako home" className="flex min-w-0 items-center gap-2">
+      <Link href="/dashboard" aria-label="Kelolako dashboard" className="flex min-w-0 items-center gap-2">
         <Image
           src="/Logo White transparent.svg"
           alt=""

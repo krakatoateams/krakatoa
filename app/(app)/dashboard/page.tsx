@@ -1,13 +1,12 @@
 "use client";
 
 import { Suspense, useEffect, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { ResetPasswordModal } from "@/components/auth/ResetPasswordModal";
 import { Video, Camera, CalendarClock, CalendarDays } from "lucide-react";
-import DashboardHero from "./DashboardHero";
-import RecentCreations from "./RecentCreations";
 import TrendingTemplates, { VideoTemplateCarousels } from "./TrendingTemplates";
 import StatsRow from "./StatsRow";
 import ToolCard from "./ToolCard";
@@ -16,8 +15,10 @@ import PageContainer from "./PageContainer";
 import PageHeader from "./PageHeader";
 import PromoOfferModal from "@/components/PromoOfferModal";
 import SkillComposer from "@/app/(app)/tools/skills/SkillComposer";
+import { SkillsCatalogProvider } from "@/app/(app)/tools/skills/SkillsCatalogProvider";
 import { PROMO_DEADLINE, isPromoLive } from "@/lib/promo-offer";
 import { useToolAvailabilityMap } from "@/lib/use-tool-availability";
+import { useDesktopMedia } from "@/lib/use-desktop-media";
 
 type ToolDef = {
   name: string;
@@ -31,6 +32,9 @@ type ToolDef = {
   thumbMediaType?: "image" | "video";
   thumbOutlined?: boolean;
 };
+
+const DashboardHero = dynamic(() => import("./DashboardHero"), { ssr: false });
+const RecentCreations = dynamic(() => import("./RecentCreations"), { ssr: false });
 
 const TOOLS: ToolDef[] = [
   {
@@ -101,6 +105,7 @@ export default function DashboardPage() {
   const firstName = name?.split(" ")[0];
   const [promoOpen, setPromoOpen] = useState(false);
   const { map: toolAvailability } = useToolAvailabilityMap();
+  const desktop = useDesktopMedia();
   // "Scheduler activity" (StatsRow: scheduled/published/failed post counts)
   // reads on both Schedule and Calendar being finished — showing live stats
   // for a feature area that's still being built reads as misleading, not
@@ -137,7 +142,8 @@ export default function DashboardPage() {
   };
 
   return (
-    <PageContainer className="max-md:pt-4">
+    <PageContainer>
+      <SkillsCatalogProvider>
       <Suspense fallback={null}>
         <AuthRequiredModalTrigger />
       </Suspense>
@@ -148,12 +154,15 @@ export default function DashboardPage() {
         className="max-md:hidden"
       />
 
-      <DashboardHero />
+      {desktop ? <DashboardHero /> : null}
 
-      <section className="mb-16">
-        <h1 className="mb-10 mt-8 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-[clamp(1.75rem,7vw,2.5rem)] font-bold leading-[1.1] tracking-tight text-transparent md:hidden">
+      <div className="mb-8 md:hidden">
+        <h1 className="mb-3 bg-gradient-to-b from-N900 to-N500 bg-clip-text font-display text-4xl font-bold tracking-tight text-transparent">
           Start creating today
         </h1>
+      </div>
+
+      <section className="mb-8 md:mb-16">
         <Suspense fallback={null}>
           <SkillComposer embed />
         </Suspense>
@@ -162,7 +171,7 @@ export default function DashboardPage() {
       {/* Stats + recent creations need a real account — no point showing an
           all-zero/empty state to a logged-out visitor. */}
       {isAuthenticated && schedulerActivityReady && (
-        <section className="mb-16">
+        <section className="mb-8 md:mb-16">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
             Scheduler activity
           </h2>
@@ -171,7 +180,7 @@ export default function DashboardPage() {
       )}
 
       {/* Tools */}
-      <section className="mb-16">
+      <section className="mb-8 md:mb-16">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-disabled">
           Your tools
         </h2>
@@ -197,9 +206,10 @@ export default function DashboardPage() {
       <TrendingTemplates />
       <VideoTemplateCarousels />
 
-      {isAuthenticated && <RecentCreations />}
+      {isAuthenticated && desktop ? <RecentCreations /> : null}
 
       <PromoOfferModal open={promoOpen} onClose={closePromo} />
+      </SkillsCatalogProvider>
     </PageContainer>
   );
 }
