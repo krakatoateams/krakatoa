@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AuthModalShell } from "./AuthModalShell";
+import { AuthPromoPanel } from "./AuthPromoPanel";
 import { SignInForm } from "./SignInForm";
 import { SignUpForm } from "./SignUpForm";
 import { ForgotPasswordForm } from "./ForgotPasswordForm";
@@ -36,7 +37,12 @@ export function SignInModal({
   }, [open, initialView]);
 
   return (
-    <AuthModalShell open={open} onClose={onClose} ariaLabel={ARIA_LABELS[view]}>
+    <AuthModalShell
+      open={open}
+      onClose={onClose}
+      ariaLabel={ARIA_LABELS[view]}
+      promoPanel={<AuthPromoPanel mode={view} />}
+    >
       {view === "signin" ? (
         <SignInForm
           next={next}

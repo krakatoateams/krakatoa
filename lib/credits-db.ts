@@ -108,6 +108,27 @@ function handleError(error: { message: string } | null, fallback: string): void 
   throw new Error(error.message || fallback);
 }
 
+/**
+ * Whether a credit transaction with this exact idempotency key has already
+ * been applied — a read-only pre-check before an on-demand grant (e.g. the
+ * welcome-video claim), so eligibility can be reported (GET) without
+ * mutating anything. The actual grant call is separately idempotent via the
+ * same key, so this is a UX check, not the correctness guarantee.
+ */
+export async function hasCreditTransaction(
+  profileId: string,
+  idempotencyKey: string
+): Promise<boolean> {
+  const { count, error } = await supabaseServer
+    .from(TRANSACTIONS_TABLE)
+    .select("id", { head: true, count: "exact" })
+    .eq("profile_id", profileId)
+    .eq("idempotency_key", idempotencyKey);
+
+  handleError(error, "Failed to check credit transaction history.");
+  return (count ?? 0) > 0;
+}
+
 /** Fetch a profile's wallet, or null if it does not exist yet. */
 export async function getWallet(profileId: string): Promise<CreditWallet | null> {
   const { data, error } = await supabaseServer
