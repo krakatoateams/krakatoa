@@ -14,6 +14,7 @@ import ToolCardThumbnail from "./ToolCardThumbnail";
 import PageContainer from "./PageContainer";
 import PageHeader from "./PageHeader";
 import PromoOfferModal from "@/components/PromoOfferModal";
+import WelcomeVideoOfferCard from "@/components/WelcomeVideoOfferCard";
 import SkillComposer from "@/app/(app)/tools/skills/SkillComposer";
 import { SkillsCatalogProvider } from "@/app/(app)/tools/skills/SkillsCatalogProvider";
 import { PROMO_DEADLINE, isPromoLive } from "@/lib/promo-offer";
@@ -161,6 +162,8 @@ export default function DashboardPage() {
           Start creating today
         </h1>
       </div>
+
+      {isAuthenticated && <WelcomeVideoOfferCard />}
 
       <section className="mb-8 md:mb-16">
         <Suspense fallback={null}>

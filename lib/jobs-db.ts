@@ -45,6 +45,22 @@ function handleError(error: { message: string } | null, fallback: string): void 
   throw new Error(error.message || fallback);
 }
 
+/**
+ * Whether this profile has ever created a single job — the "new user, never
+ * generated anything" signal for the welcome-video offer. Cheaper than
+ * SELECT: head:true + count:"exact" asks Postgres for the count only, no
+ * rows returned.
+ */
+export async function hasAnyJobs(profileId: string): Promise<boolean> {
+  const { count, error } = await supabaseServer
+    .from(JOBS_TABLE)
+    .select("id", { head: true, count: "exact" })
+    .eq("profile_id", profileId);
+
+  handleError(error, "Failed to check job history.");
+  return (count ?? 0) > 0;
+}
+
 /** Fetch a single job (ownership-checked). */
 export async function getJob(profileId: string, jobId: string): Promise<Job | null> {
   const { data, error } = await supabaseServer

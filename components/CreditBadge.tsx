@@ -21,7 +21,7 @@ export default function CreditBadge({
   iconClassName?: string;
   variant?: "default" | "topup";
 }) {
-  const { balance, loading } = useCreditBalance();
+  const { balance, loading, announcedDelta } = useCreditBalance();
   const [open, setOpen] = useState(false);
 
   if (balance === null) {
@@ -44,37 +44,48 @@ export default function CreditBadge({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setOpen(true);
-        }}
-        aria-label="Top up credits"
-        title="Top up credits"
-        className={
-          variant === "topup"
-            ? "inline-flex h-8 items-center gap-1.5 rounded-full bg-O100 pl-2 pr-0.5 transition-colors hover:bg-O200"
-            : (className ??
-              "inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-N700 transition-colors hover:bg-white/15")
-        }
-      >
-        {variant === "topup" ? (
-          <>
-            <Coins className="h-3.5 w-3.5 text-brand-primary" />
-            <span className="text-sm font-bold tabular-nums text-brand-primary">{balance}</span>
-            <span className="inline-flex h-7 items-center rounded-full bg-brand-primary px-2.5 text-[11px] font-bold leading-none text-text-on-solid">
-              Top up
-            </span>
-          </>
-        ) : (
-          <>
-            <Coins className={iconClassName ?? "h-3 w-3"} />
-            {balance} credits
-          </>
+      <span className="relative inline-flex">
+        {announcedDelta !== null && (
+          <span
+            aria-hidden
+            className="animate-credit-gain-pop pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold text-success"
+          >
+            +{announcedDelta}
+          </span>
         )}
-      </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(true);
+          }}
+          aria-label="Top up credits"
+          title="Top up credits"
+          className={
+            (variant === "topup"
+              ? "inline-flex h-8 items-center gap-1.5 rounded-full bg-O100 pl-2 pr-0.5 transition-colors hover:bg-O200"
+              : (className ??
+                "inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-N700 transition-colors hover:bg-white/15")) +
+            (announcedDelta !== null ? " animate-credit-gain-glow" : "")
+          }
+        >
+          {variant === "topup" ? (
+            <>
+              <Coins className="h-3.5 w-3.5 text-brand-primary" />
+              <span className="text-sm font-bold tabular-nums text-brand-primary">{balance}</span>
+              <span className="inline-flex h-7 items-center rounded-full bg-brand-primary px-2.5 text-[11px] font-bold leading-none text-text-on-solid">
+                Top up
+              </span>
+            </>
+          ) : (
+            <>
+              <Coins className={iconClassName ?? "h-3 w-3"} />
+              {balance} credits
+            </>
+          )}
+        </button>
+      </span>
       <AddCreditsModal open={open} onClose={() => setOpen(false)} />
     </>
   );

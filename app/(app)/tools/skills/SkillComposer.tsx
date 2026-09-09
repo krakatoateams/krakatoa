@@ -309,11 +309,23 @@ function SkillOmniInner({
     }
   }, [allowedDurations, duration]);
 
+  // A skill can pin a specific resolution (e.g. the welcome-offer skill needs
+  // 480p specifically to land on its advertised credit cost) — every catalog
+  // model's own defaultResolution is 720p/1080p, so pinning modelId alone
+  // isn't enough. Falls back to the existing default-snap when unpinned.
   useEffect(() => {
+    const pinned =
+      skill?.resolution && videoModel.resolutions.includes(skill.resolution)
+        ? skill.resolution
+        : undefined;
+    if (pinned) {
+      if (videoResolution !== pinned) setVideoResolution(pinned);
+      return;
+    }
     if (!videoModel.resolutions.includes(videoResolution) && videoModel.resolutions[0]) {
       setVideoResolution(videoModel.resolutions[0]);
     }
-  }, [videoModel, videoResolution]);
+  }, [videoModel, videoResolution, skill?.resolution]);
 
   useEffect(() => {
     if (!videoModel.aspectRatios.includes(videoAspect) && videoModel.aspectRatios[0]) {
