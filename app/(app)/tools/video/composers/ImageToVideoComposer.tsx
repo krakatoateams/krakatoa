@@ -5,7 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Layers, Loader2, Maximize2 } from "lucide-react";
 import MentionTextarea from "@/components/MentionTextarea";
 import PhotoLibraryPicker, { type LibraryImage, type PhotoLibrarySource } from "@/components/PhotoLibraryPicker";
-import { nearestAspectRatio } from "@/lib/aspect-ratio-match";
+import {
+  reconcileFrameAspectRatio,
+  reconcileSupportedAspectRatio,
+} from "@/lib/aspect-ratio-match";
 import type { MentionAsset } from "@/lib/mention-assets";
 import {
   ChipDropdown,
@@ -24,12 +27,13 @@ import {
 } from "@/components/studio";
 
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
+import { STUDIO_GENERATION_RECOVERABLE_FALLBACK } from "@/lib/studio-generation-response";
 
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft } from "@/lib/pending-form-draft";
+import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
 
 import {
   IMAGE_TO_VIDEO_MODELS,
@@ -54,6 +58,8 @@ import {
   GenerationRecoverableBanner,
 } from "./shared";
 import type { VideoCreationTypeOption } from "./types";
+
+const DRAFT_OWNER = "video:image-to-video";
 
 export default function ImageToVideoComposer({
   initialStartImageCreationId,
@@ -118,25 +124,34 @@ export default function ImageToVideoComposer({
   useEffect(() => {
     const m = getVideoModel(modelId);
     setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
-    setAspectRatio((a) => (m.aspectRatios.includes(a) ? a : m.defaultAspectRatio));
+    setAspectRatio((current) =>
+      reconcileSupportedAspectRatio(current, m.aspectRatios, m.defaultAspectRatio),
+    );
     if (!m.references.lastFrame) setEndLibraryImage(null);
   }, [modelId]);
 
   // Restore what was typed before a gated Generate click sent the visitor
   // through sign-in — see lib/pending-form-draft.ts.
   useEffect(() => {
-    const draft = consumePendingDraft<{
+    const draft = consumePendingDraftForOwner<{
+      draftOwner?: string;
+      modelId?: VideoModelId;
       prompt?: string;
       duration?: number;
       resolution?: VideoResolution;
       aspectRatio?: VideoAspectRatio;
+      ratioTouched?: boolean;
       hadMedia?: boolean;
-    }>(window.location.pathname);
+    }>(window.location.pathname, DRAFT_OWNER);
     if (!draft) return;
+    if (draft.modelId && IMAGE_TO_VIDEO_MODELS.some((item) => item.id === draft.modelId)) {
+      setModelId(draft.modelId);
+    }
     if (draft.prompt) setPrompt(draft.prompt);
     if (draft.duration) setDuration(draft.duration);
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    ratioTouchedRef.current = draft.ratioTouched === true;
     // Any uploaded start/end frame image can't survive the round trip (see
     // lib/pending-form-draft.ts) — only warn about it if one was actually
     // attached (hadMedia), not on every restore.
@@ -203,13 +218,20 @@ export default function ImageToVideoComposer({
   // shape isn't stored on the creation, so this also works for older photos.
   // An explicit ratio pick always wins — see ratioTouchedRef.
   useEffect(() => {
-    if (!startImageUrl || ratioTouchedRef.current) return;
+    if (!startImageUrl) return;
     let active = true;
     const probe = new window.Image();
     probe.onload = () => {
       if (!active) return;
-      const next = nearestAspectRatio(probe.naturalWidth, probe.naturalHeight, model.aspectRatios);
-      if (next) setAspectRatio(next);
+      setAspectRatio((current) =>
+        reconcileFrameAspectRatio({
+          width: probe.naturalWidth,
+          height: probe.naturalHeight,
+          allowed: model.aspectRatios,
+          current,
+          manuallySelected: ratioTouchedRef.current,
+        }),
+      );
     };
     // Read the shape off a 64 px thumbnail from the Next optimizer instead of the
     // original: resizing preserves the ratio, and downloading a multi-megabyte PNG
@@ -222,7 +244,7 @@ export default function ImageToVideoComposer({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startImageUrl]);
+  }, [startImageUrl, modelId]);
 
   const pricingKey = model.pricingKey({ resolution });
   const cost = devBlank ? 0 : videoCredits(pricingKey, duration);
@@ -256,10 +278,13 @@ export default function ImageToVideoComposer({
     if (!canGenerate) return;
     if (status !== "authenticated") {
       openSignInModal(undefined, {
+        draftOwner: DRAFT_OWNER,
+        modelId,
         prompt,
         duration,
         resolution,
         aspectRatio,
+        ratioTouched: ratioTouchedRef.current,
         hadMedia: startReady || endReady,
       });
       return;
@@ -577,9 +602,9 @@ export default function ImageToVideoComposer({
         </div>
       </StudioForm>
 
-      {recoverableJobId && error && (
+      {recoverableJobId && (
         <GenerationRecoverableBanner
-          message={error}
+          message={error ?? STUDIO_GENERATION_RECOVERABLE_FALLBACK}
           loading={loading}
           onResume={resumeRecoverable}
         />

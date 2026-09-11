@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, videosUserTempRefPath } from "@/lib/storage-buckets";
+import {
+  STORAGE_BUCKET,
+  videosUserTempRefPath,
+} from "@/lib/storage-buckets";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 
 /**
@@ -118,6 +121,58 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to sign upload.";
     console.error("[upload/ref/sign] Unexpected error:", err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/** Delete an uploaded reference that was cancelled before generation started. */
+export async function DELETE(req: NextRequest) {
+  try {
+    let userId: string;
+    try {
+      const profile = await requireCurrentProfile();
+      userId = profile.user_id;
+    } catch (authErr: unknown) {
+      const message =
+        authErr instanceof Error ? authErr.message : "Authentication required.";
+      const isAuth = /sign in|not authenticated|unauthorized|session/i.test(message);
+      return NextResponse.json(
+        { error: isAuth ? "Please sign in to delete references." : message },
+        { status: isAuth ? 401 : 500 },
+      );
+    }
+
+    const body = await req.json().catch(() => null);
+    const storagePath =
+      body && typeof body === "object"
+        ? String((body as Record<string, unknown>).path ?? "").trim()
+        : "";
+    const ownerPrefix = videosUserTempRefPath(userId, "");
+    const filename = storagePath.startsWith(ownerPrefix)
+      ? storagePath.slice(ownerPrefix.length)
+      : "";
+    if (!filename || filename.includes("/")) {
+      return NextResponse.json(
+        { error: "Invalid reference path." },
+        { status: 400 },
+      );
+    }
+
+    const { error } = await supabaseServer.storage
+      .from(STORAGE_BUCKET)
+      .remove([storagePath]);
+    if (error) {
+      console.error("[upload/ref/sign] remove error:", error.message);
+      return NextResponse.json(
+        { error: "Failed to delete reference." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ deleted: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to delete reference.";
+    console.error("[upload/ref/sign] Unexpected delete error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

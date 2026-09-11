@@ -55,6 +55,33 @@ export function nearestAspectRatio(
   return best;
 }
 
+export function reconcileFrameAspectRatio({
+  width,
+  height,
+  allowed,
+  current,
+  manuallySelected,
+}: {
+  width: number;
+  height: number;
+  allowed: readonly VideoAspectRatio[];
+  current: VideoAspectRatio;
+  manuallySelected: boolean;
+}): VideoAspectRatio {
+  if (manuallySelected) return current;
+  return nearestAspectRatio(width, height, allowed) ?? current;
+}
+
+export function reconcileSupportedAspectRatio(
+  current: VideoAspectRatio,
+  allowed: readonly VideoAspectRatio[],
+  fallback: VideoAspectRatio,
+): VideoAspectRatio {
+  if (allowed.includes(current)) return current;
+  if (allowed.includes(fallback)) return fallback;
+  return allowed[0] ?? current;
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
 }
@@ -102,6 +129,34 @@ export function aspectRatioMatchSelfCheck(): void {
   assert(
     nearestAspectRatio(1024, 1024, ["16:9", "9:16"]) === "16:9",
     "a square photo is equally far from both, so catalog order decides"
+  );
+  assert(
+    reconcileFrameAspectRatio({
+      width: 1024,
+      height: 1024,
+      allowed: ["16:9", "9:16"],
+      current: "1:1",
+      manuallySelected: false,
+    }) === "16:9",
+    "an untouched ratio must rematch when the selected model changes",
+  );
+  assert(
+    reconcileFrameAspectRatio({
+      width: 1024,
+      height: 1024,
+      allowed: ["16:9", "9:16"],
+      current: "9:16",
+      manuallySelected: true,
+    }) === "9:16",
+    "a manual ratio must survive automatic frame matching",
+  );
+  assert(
+    reconcileSupportedAspectRatio("1:1", ["16:9", "9:16", "1:1"], "9:16") === "1:1",
+    "a manual ratio supported by the new model must be preserved",
+  );
+  assert(
+    reconcileSupportedAspectRatio("21:9", ["16:9", "9:16", "1:1"], "9:16") === "9:16",
+    "an unsupported manual ratio must fall back to a valid model ratio",
   );
 
   assert(nearestAspectRatio(0, 1024, SEEDANCE) === null, "a zero dimension has no match");

@@ -37,7 +37,12 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft } from "@/lib/pending-form-draft";
+import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
+import {
+  buildReelsPendingDraft,
+  VIDEO_COMPOSER_DRAFT_OWNER,
+  type ReelsPendingDraft,
+} from "@/lib/video-composer-attempt-contracts";
 
 import {
   reelsPricingKey,
@@ -352,16 +357,10 @@ export default function ReelsCreatorComposer({
   // Restore what was typed before a gated Generate click sent the visitor
   // through sign-in — see lib/pending-form-draft.ts.
   useEffect(() => {
-    const draft = consumePendingDraft<{
-      theme?: string;
-      engine?: ReelsEngine;
-      veoMode?: ReelsVeoMode;
-      numScenes?: number;
-      durationPerScene?: number;
-      resolution?: SeedanceResolution;
-      veoDuration?: 4 | 6 | 8;
-      veoResolution?: VeoResolution;
-    }>(window.location.pathname);
+    const draft = consumePendingDraftForOwner<ReelsPendingDraft>(
+      window.location.pathname,
+      VIDEO_COMPOSER_DRAFT_OWNER.reels,
+    );
     if (!draft) return;
     if (draft.theme) setTheme(draft.theme);
     if (draft.engine) setEngine(draft.engine);
@@ -371,6 +370,12 @@ export default function ReelsCreatorComposer({
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.veoDuration) setVeoDuration(draft.veoDuration);
     if (draft.veoResolution) setVeoResolution(draft.veoResolution);
+    if (draft.singlePromptScenes) setSinglePromptScenes(draft.singlePromptScenes);
+    if (draft.veoNumScenes) setVeoNumScenes(draft.veoNumScenes);
+    if (draft.voiceId) setVoiceId(draft.voiceId);
+    if (draft.emotion) setEmotion(draft.emotion);
+    if (draft.captionStyle) setCaptionStyle(draft.captionStyle);
+    onDevBlankChange(draft.devBlank);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -399,7 +404,7 @@ export default function ReelsCreatorComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, {
+      openSignInModal(undefined, buildReelsPendingDraft({
         theme,
         engine,
         veoMode,
@@ -408,7 +413,13 @@ export default function ReelsCreatorComposer({
         resolution,
         veoDuration,
         veoResolution,
-      });
+        singlePromptScenes,
+        veoNumScenes,
+        voiceId,
+        emotion,
+        captionStyle,
+        devBlank,
+      }));
       return;
     }
 

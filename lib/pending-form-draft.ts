@@ -28,7 +28,7 @@ const PREFIX = "kelolako:pending-draft:";
 const URL_FALLBACK_PARAM = "kdraft";
 // Keeps the redirect URL comfortably short — every draft payload observed in
 // this app (prompt/settings text, never a File) fits well under this.
-const URL_FALLBACK_MAX_CHARS = 1500;
+const URL_FALLBACK_MAX_CHARS = 4096;
 
 // Set right before a sign-in attempt (SignInForm, both Google and
 // email/password) and checked by AuthModalProvider once `status` flips to
@@ -58,13 +58,30 @@ export function savePendingDraft(path: string, data: Record<string, unknown>): v
  * OAuth round trip — see SignInForm.handleGoogleSignIn) and strips it from
  * the visible URL afterward without a navigation.
  */
-export function consumePendingDraft<T = Record<string, unknown>>(path: string): T | null {
+function stripDraftFromUrl(): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has(URL_FALLBACK_PARAM)) return;
+  params.delete(URL_FALLBACK_PARAM);
+  const query = params.toString();
+  const cleanUrl =
+    window.location.pathname + (query ? `?${query}` : "") + window.location.hash;
+  window.history.replaceState(null, "", cleanUrl);
+}
+
+function consumePendingDraftMatching<T>(
+  path: string,
+  accepts: (draft: unknown) => boolean,
+): T | null {
   try {
     const key = PREFIX + path;
     const raw = sessionStorage.getItem(key);
     if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!accepts(parsed)) return null;
       sessionStorage.removeItem(key);
-      return JSON.parse(raw) as T;
+      stripDraftFromUrl();
+      return parsed as T;
     }
   } catch (e) {
     console.warn("[pending-form-draft] consume (sessionStorage) failed:", e);
@@ -75,17 +92,41 @@ export function consumePendingDraft<T = Record<string, unknown>>(path: string): 
     const params = new URLSearchParams(window.location.search);
     const raw = params.get(URL_FALLBACK_PARAM);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as T;
-    params.delete(URL_FALLBACK_PARAM);
-    const query = params.toString();
-    const cleanUrl =
-      window.location.pathname + (query ? `?${query}` : "") + window.location.hash;
-    window.history.replaceState(null, "", cleanUrl);
-    return parsed;
+    if (raw.length > URL_FALLBACK_MAX_CHARS) {
+      stripDraftFromUrl();
+      return null;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!accepts(parsed)) return null;
+    stripDraftFromUrl();
+    return parsed as T;
   } catch (e) {
     console.warn("[pending-form-draft] consume (URL fallback) failed:", e);
     return null;
   }
+}
+
+export function consumePendingDraft<T = Record<string, unknown>>(path: string): T | null {
+  return consumePendingDraftMatching(path, () => true);
+}
+
+/**
+ * Consume a pathname-scoped draft only when it belongs to this form.
+ *
+ * Several video composers can mount on the same pathname. The owner marker
+ * prevents an earlier sibling effect from taking another composer's draft.
+ */
+export function consumePendingDraftForOwner<T = Record<string, unknown>>(
+  path: string,
+  owner: string,
+): T | null {
+  return consumePendingDraftMatching(
+    path,
+    (draft) =>
+      !!draft &&
+      typeof draft === "object" &&
+      (draft as Record<string, unknown>).draftOwner === owner,
+  );
 }
 
 /**
@@ -103,6 +144,29 @@ export function consumePendingDraft<T = Record<string, unknown>>(path: string): 
 export function hasPendingDraft(path: string): boolean {
   try {
     return sessionStorage.getItem(PREFIX + path) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Non-consuming owner check, including the Google OAuth URL fallback. */
+export function hasPendingDraftForOwner(path: string, owner: string): boolean {
+  try {
+    const raw = sessionStorage.getItem(PREFIX + path);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return parsed?.draftOwner === owner;
+    }
+  } catch {
+    // Fall through to the URL copy when storage is unavailable or malformed.
+  }
+
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = new URLSearchParams(window.location.search).get(URL_FALLBACK_PARAM);
+    if (!raw || raw.length > URL_FALLBACK_MAX_CHARS) return false;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed?.draftOwner === owner;
   } catch {
     return false;
   }

@@ -21,11 +21,13 @@ import {
 
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { STUDIO_GENERATION_RECOVERABLE_FALLBACK } from "@/lib/studio-generation-response";
+import { reconcileSupportedAspectRatio } from "@/lib/aspect-ratio-match";
 
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
 
 import {
   VIRAL_TEMPLATE_MODELS,
@@ -53,6 +55,8 @@ import {
   GenerationRecoverableBanner,
 } from "./shared";
 import type { CharacterSource, LibraryCharacter, VideoCreationTypeOption } from "./types";
+
+const DRAFT_OWNER = "video:viral-template";
 
 export default function ViralTemplateComposer({
   initialTemplate,
@@ -108,14 +112,44 @@ export default function ViralTemplateComposer({
     model.aspectRatios.includes("9:16") ? "9:16" : model.defaultAspectRatio
   );
   const ratioTouchedRef = useRef(false);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const m = getVideoModel(modelId);
     setResolution((r) => (m.resolutions.includes(r) ? r : m.defaultResolution));
-    if (!ratioTouchedRef.current) {
-      setAspectRatio(m.aspectRatios.includes("9:16") ? "9:16" : m.defaultAspectRatio);
-    }
+    const preferredRatio = m.aspectRatios.includes("9:16") ? "9:16" : m.defaultAspectRatio;
+    setAspectRatio((current) =>
+      ratioTouchedRef.current
+        ? reconcileSupportedAspectRatio(current, m.aspectRatios, preferredRatio)
+        : preferredRatio,
+    );
   }, [modelId]);
+
+  useEffect(() => {
+    const draft = consumePendingDraftForOwner<{
+      draftOwner?: string;
+      modelId?: VideoModelId;
+      duration?: number;
+      resolution?: VideoResolution;
+      aspectRatio?: VideoAspectRatio;
+      ratioTouched?: boolean;
+      hadMedia?: boolean;
+    }>(window.location.pathname, DRAFT_OWNER);
+    if (!draft) return;
+    if (draft.modelId && VIRAL_TEMPLATE_MODELS.some((item) => item.id === draft.modelId)) {
+      setModelId(draft.modelId);
+    }
+    if (draft.duration) setDuration(draft.duration);
+    if (draft.resolution) setResolution(draft.resolution);
+    if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    ratioTouchedRef.current = draft.ratioTouched === true;
+    if (draft.hadMedia) {
+      setRestoreNotice(
+        "Signed in — your settings were saved. Please re-select your character image.",
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const m = getVideoModel(modelId);
@@ -171,7 +205,15 @@ export default function ViralTemplateComposer({
     e.preventDefault();
     if (!canGenerate || !templateStartFramePath) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { duration, resolution, aspectRatio });
+      openSignInModal(undefined, {
+        draftOwner: DRAFT_OWNER,
+        modelId,
+        duration,
+        resolution,
+        aspectRatio,
+        ratioTouched: ratioTouchedRef.current,
+        hadMedia: charReady,
+      });
       return;
     }
 
@@ -466,6 +508,13 @@ export default function ViralTemplateComposer({
           loading={loading}
           onResume={resumeRecoverable}
         />
+      )}
+
+      {restoreNotice && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{restoreNotice}</span>
+        </div>
       )}
 
       {loading && (

@@ -22,7 +22,7 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft } from "@/lib/pending-form-draft";
+import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { STUDIO_GENERATION_RECOVERABLE_FALLBACK } from "@/lib/studio-generation-response";
 import {
@@ -69,6 +69,8 @@ import {
   VIDEO_ACCEPT,
 } from "./shared";
 import { CREATION_TYPES, type VideoCreationTypeOption } from "./types";
+
+const DRAFT_OWNER = "video:text-to-video";
 
 export default function TextToVideoComposer({
   initialPrompt,
@@ -126,6 +128,7 @@ export default function TextToVideoComposer({
   const [resolution, setResolution] = useState<VideoResolution>(model.defaultResolution);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>(model.defaultAspectRatio);
   const [generateAudio, setGenerateAudio] = useState<boolean>(model.defaultGenerateAudio);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
   // When the model changes, keep the parameters valid for the newly-selected model
   // (e.g. switching away from Seedance 2 — which supports 1080p — back to the Fast
@@ -140,17 +143,30 @@ export default function TextToVideoComposer({
   // Restore what was typed before a gated Generate click sent the visitor
   // through sign-in — see lib/pending-form-draft.ts.
   useEffect(() => {
-    const draft = consumePendingDraft<{
+    const draft = consumePendingDraftForOwner<{
+      draftOwner?: string;
+      modelId?: VideoModelId;
       prompt?: string;
       duration?: number;
       resolution?: VideoResolution;
       aspectRatio?: VideoAspectRatio;
-    }>(window.location.pathname);
+      generateAudio?: boolean;
+      hadMedia?: boolean;
+    }>(window.location.pathname, DRAFT_OWNER);
     if (!draft) return;
+    if (draft.modelId && TEXT_TO_VIDEO_MODELS.some((item) => item.id === draft.modelId)) {
+      setModelId(draft.modelId);
+    }
     if (draft.prompt) setPrompt(draft.prompt);
     if (draft.duration) setDuration(draft.duration);
     if (draft.resolution) setResolution(draft.resolution);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+    if (typeof draft.generateAudio === "boolean") setGenerateAudio(draft.generateAudio);
+    if (draft.hadMedia) {
+      setRestoreNotice(
+        "Signed in — your settings were saved. Please re-attach your reference media.",
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -272,7 +288,21 @@ export default function TextToVideoComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { prompt, duration, resolution, aspectRatio });
+      openSignInModal(undefined, {
+        draftOwner: DRAFT_OWNER,
+        modelId,
+        prompt,
+        duration,
+        resolution,
+        aspectRatio,
+        generateAudio,
+        hadMedia:
+          hasFrames ||
+          hasRefImages ||
+          refVideos.items.length > 0 ||
+          refAudios.items.length > 0 ||
+          mentions.length > 0,
+      });
       return;
     }
 
@@ -698,6 +728,13 @@ export default function TextToVideoComposer({
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {restoreNotice && (
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{restoreNotice}</span>
         </div>
       )}
 

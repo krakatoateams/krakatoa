@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   AlertCircle,
@@ -42,7 +42,24 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft, savePendingDraft, hasPendingDraft } from "@/lib/pending-form-draft";
+import {
+  consumePendingDraftForOwner,
+  hasPendingDraftForOwner,
+} from "@/lib/pending-form-draft";
+import {
+  buildStoryboardImportPendingDraft,
+  buildStoryboardVideoPendingDraft,
+  createStoryboardImportPreparationGate,
+  isStoryboardVideoReady,
+  resolveLoadedStoryboardSelection,
+  resolveStoryboardDraftValue,
+  storyboardImportAttemptSignature,
+  storyboardVideoAttemptSignature,
+  VIDEO_COMPOSER_DRAFT_OWNER,
+  type StoryboardImportPreparationGate,
+  type StoryboardImportPendingDraft,
+  type StoryboardVideoPendingDraft,
+} from "@/lib/video-composer-attempt-contracts";
 
 import {
   STORYBOARD_VIDEO_MODEL_IDS,
@@ -77,11 +94,6 @@ import {
 import { creationTypeChipOptions, GenerationRecoverableBanner } from "./shared";
 import type { StoryboardListItem, VideoCreationTypeOption } from "./types";
 
-
-function IMPORT_STORYBOARD_DRAFT_KEY(): string {
-  return window.location.pathname + ":import-storyboard";
-}
-
 function storyboardVideoPricingKey(
   modelId: StoryboardVideoModelId,
   resolution: "480p" | "720p"
@@ -110,8 +122,16 @@ function ImportStoryboardModal({
   const [style, setStyle] = useState<StoryboardStyleKey>(DEFAULT_STORYBOARD_STYLE);
   const [fileError, setFileError] = useState<string | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
+  const [preparingUpload, setPreparingUpload] = useState(false);
+  const [preparingCancelRequested, setPreparingCancelRequested] = useState(false);
+  const mountedRef = useRef(true);
+  const preparationGateRef = useRef<StoryboardImportPreparationGate | null>(null);
+  const uploadedFileRef = useRef<{
+    file: File;
+    promise: ReturnType<typeof uploadRefFile>;
+  } | null>(null);
   const {
-    loading: busy,
+    loading: submitLoading,
     error: submitError,
     submit,
     cancel: cancelSubmit,
@@ -123,6 +143,7 @@ function ImportStoryboardModal({
     refreshHistory: () => {},
     openPreviewFromResponse: () => {},
   });
+  const busy = preparingUpload || submitLoading;
   const error = submitError ?? fileError;
 
   const cost = imageCredits("storyboard_import_vision_per_image", 1);
@@ -133,25 +154,28 @@ function ImportStoryboardModal({
     };
   }, [previewUrl]);
 
-  // Restore what was typed before a gated Analyze click sent the visitor
-  // through sign-in — see lib/pending-form-draft.ts. Keyed separately from
-  // the page's bare pathname (see IMPORT_STORYBOARD_DRAFT_KEY) since this
-  // modal's fields are unrelated to StoryboardToVideoComposer's own state;
-  // StoryboardToVideoComposer itself peeks the same key to decide whether to
-  // re-open this modal on mount (it would otherwise be closed, and this
-  // restore would have nothing to show).
   useEffect(() => {
-    const draft = consumePendingDraft<{
-      description?: string;
-      aspect?: StoryboardAspectRatio;
-      language?: StoryboardLanguageId;
-      style?: StoryboardStyleKey;
-    }>(IMPORT_STORYBOARD_DRAFT_KEY());
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      preparationGateRef.current?.cancel();
+    };
+  }, []);
+
+  // Restore what was typed before a gated Analyze click sent the visitor
+  // through sign-in — see lib/pending-form-draft.ts. The owner marker keeps
+  // this modal's fields separate from the main storyboard-video form while
+  // still allowing Google's pathname-based URL fallback to carry the draft.
+  useEffect(() => {
+    const draft = consumePendingDraftForOwner<StoryboardImportPendingDraft>(
+      window.location.pathname,
+      VIDEO_COMPOSER_DRAFT_OWNER.storyboardImport,
+    );
     if (!draft) return;
     if (draft.description) setDescription(draft.description);
-    if (draft.aspect) setAspect(draft.aspect);
+    if (draft.aspectRatio) setAspect(draft.aspectRatio);
     if (draft.language) setLanguage(draft.language);
-    if (draft.style) setStyle(draft.style);
+    if (draft.storyboardStyle) setStyle(draft.storyboardStyle);
     // The image itself can't survive the round trip (see
     // lib/pending-form-draft.ts) — say so explicitly.
     setRestoreNotice("Signed in — your details were saved. Please re-select the storyboard image.");
@@ -166,6 +190,7 @@ function ImportStoryboardModal({
     }
     setFileError(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    uploadedFileRef.current = null;
     setFile(f);
     setPreviewUrl(URL.createObjectURL(f));
   };
@@ -173,48 +198,100 @@ function ImportStoryboardModal({
   const analyze = async () => {
     if (!file || busy) return;
     if (status !== "authenticated") {
-      savePendingDraft(IMPORT_STORYBOARD_DRAFT_KEY(), { description, aspect, language, style });
-      openSignInModal();
+      openSignInModal(undefined, buildStoryboardImportPendingDraft({
+        description,
+        aspectRatio: aspect,
+        language,
+        storyboardStyle: style,
+      }));
       return;
     }
-    await submit(
-      `storyboard-import:${Date.now()}:${Math.random()}`,
-      async (idempotencyKey) => {
-        const { path } = await uploadRefFile(file);
-        return fetch("/api/storyboards/import", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify({
-            imagePath: path,
-            description: description.trim(),
-            aspectRatio: aspect,
-            language,
-            storyboardStyle: style,
+    const preparationGate = createStoryboardImportPreparationGate();
+    preparationGateRef.current = preparationGate;
+    setPreparingCancelRequested(false);
+    setPreparingUpload(true);
+    let pendingUpload = uploadedFileRef.current;
+    if (!pendingUpload || pendingUpload.file !== file) {
+      pendingUpload = { file, promise: uploadRefFile(file) };
+      uploadedFileRef.current = pendingUpload;
+    }
+    try {
+      const { path } = await pendingUpload.promise;
+      if (!preparationGate.canSubmit()) {
+        if (uploadedFileRef.current === pendingUpload) uploadedFileRef.current = null;
+        await fetch("/api/upload/ref/sign", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        }).catch(() => null);
+        return;
+      }
+      if (mountedRef.current) setPreparingUpload(false);
+      if (preparationGateRef.current === preparationGate) {
+        preparationGateRef.current = null;
+      }
+      const requestBody = {
+        imagePath: path,
+        description: description.trim(),
+        aspectRatio: aspect,
+        language,
+        storyboardStyle: style,
+      };
+      await submit(
+        storyboardImportAttemptSignature(requestBody),
+        (idempotencyKey) =>
+          fetch("/api/storyboards/import", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": idempotencyKey,
+            },
+            body: JSON.stringify(requestBody),
           }),
-        });
-      },
-      {
-        fallbackCost: cost,
-        errorFallback: "Couldn't import the storyboard.",
-        unexpectedErrorFallback: "An unexpected error occurred.",
-        skipSuccessEffects: true,
-        onSuccess: (data) => {
-          onImported({
-            id: String(data.storyboardId),
-            storyboardUrl: String(data.storyboardUrl),
-            theme: description.trim() || "Imported storyboard",
-            hasVideo: false,
-            aspectRatio: resolveStoryboardAspectRatio(String(data.aspectRatio ?? "")),
-            language: resolveStoryboardLanguage(String(data.language ?? "")),
-            seedancePrompt: typeof data.seedancePrompt === "string" ? data.seedancePrompt : "",
-            source: "uploaded",
-          });
+        {
+          fallbackCost: cost,
+          errorFallback: "Couldn't import the storyboard.",
+          unexpectedErrorFallback: "An unexpected error occurred.",
+          skipSuccessEffects: true,
+          onSuccess: (data) => {
+            onImported({
+              id: String(data.storyboardId),
+              storyboardUrl: String(data.storyboardUrl),
+              theme: description.trim() || "Imported storyboard",
+              hasVideo: false,
+              aspectRatio: resolveStoryboardAspectRatio(String(data.aspectRatio ?? "")),
+              language: resolveStoryboardLanguage(String(data.language ?? "")),
+              seedancePrompt: typeof data.seedancePrompt === "string" ? data.seedancePrompt : "",
+              source: "uploaded",
+            });
+          },
         },
-      },
-    );
+      );
+    } catch (uploadError: unknown) {
+      if (uploadedFileRef.current === pendingUpload) uploadedFileRef.current = null;
+      if (preparationGate.canSubmit() && mountedRef.current) {
+        setFileError(
+          uploadError instanceof Error ? uploadError.message : "Couldn't upload the storyboard.",
+        );
+      }
+    } finally {
+      if (preparationGateRef.current === preparationGate) {
+        preparationGateRef.current = null;
+      }
+      if (mountedRef.current) {
+        setPreparingUpload(false);
+        setPreparingCancelRequested(false);
+      }
+    }
+  };
+
+  const cancelImport = () => {
+    if (preparingUpload) {
+      preparationGateRef.current?.cancel();
+      setPreparingCancelRequested(true);
+      return;
+    }
+    void cancelSubmit();
   };
 
   return (
@@ -362,9 +439,9 @@ function ImportStoryboardModal({
           </p>
           <GenerationCancelButton
             visible={busy}
-            cancelling={cancelling}
-            cancelAllowed={cancelAllowed}
-            onCancel={() => cancelSubmit()}
+            cancelling={cancelling || preparingCancelRequested}
+            cancelAllowed={preparingUpload || cancelAllowed}
+            onCancel={cancelImport}
           />
           <CreditActionButton
             type="button"
@@ -416,6 +493,7 @@ export default function StoryboardToVideoComposer({
   const [items, setItems] = useState<StoryboardListItem[]>([]);
   const [listState, setListState] = useState<"loading" | "loaded" | "error">("loading");
   const [selectedId, setSelectedId] = useState<string | null>(initialStoryboardId);
+  const requestedStoryboardIdRef = useRef<string | null>(initialStoryboardId);
   const [videoModelId, setVideoModelId] = useState<StoryboardVideoModelId>(
     DEFAULT_STORYBOARD_VIDEO_MODEL_ID
   );
@@ -438,6 +516,30 @@ export default function StoryboardToVideoComposer({
   // Language defaults to the storyboard's language but stays EDITABLE — the user
   // can re-voice the same storyboard in another language at video time.
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
+  const pendingPromptDraftRef = useRef<StoryboardVideoPendingDraft | null>(null);
+
+  useEffect(() => {
+    const draft = consumePendingDraftForOwner<StoryboardVideoPendingDraft>(
+      window.location.pathname,
+      VIDEO_COMPOSER_DRAFT_OWNER.storyboardVideo,
+    );
+    if (!draft) return;
+    pendingPromptDraftRef.current = draft;
+    if (draft.selectedId) {
+      requestedStoryboardIdRef.current = draft.selectedId;
+      setSelectedId(draft.selectedId);
+    }
+    if (STORYBOARD_VIDEO_MODEL_IDS.some((id) => id === draft.videoModelId)) {
+      setVideoModelId(draft.videoModelId);
+    }
+    if (draft.resolution === "480p" || draft.resolution === "720p") {
+      setResolution(draft.resolution);
+    }
+    setAspect(resolveStoryboardAspectRatio(draft.aspectRatio));
+    setLanguage(resolveStoryboardLanguage(draft.language));
+    onDevBlankChange(draft.devBlank);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const {
     loading,
@@ -454,15 +556,21 @@ export default function StoryboardToVideoComposer({
     refreshHistory: onGenerated,
     openPreviewFromResponse,
   });
-  // "Upload your own storyboard" modal. Opens after mount if there's a pending
-  // draft — i.e. a gated Analyze click sent the visitor through sign-in while
-  // this modal was open; without this it would restore ImportStoryboardModal's
-  // fields into a modal nobody can see. Don't read sessionStorage during
+  // "Upload your own storyboard" modal. Opens after mount if an owner-scoped
+  // draft says a gated Analyze click sent the visitor through sign-in while
+  // this modal was open. Don't read browser state during
   // useState init: server HTML would be closed, the client would open, and
   // React hydrates with "Text content does not match server-rendered HTML".
   const [showUpload, setShowUpload] = useState(false);
   useEffect(() => {
-    if (hasPendingDraft(IMPORT_STORYBOARD_DRAFT_KEY())) setShowUpload(true);
+    if (
+      hasPendingDraftForOwner(
+        window.location.pathname,
+        VIDEO_COMPOSER_DRAFT_OWNER.storyboardImport,
+      )
+    ) {
+      setShowUpload(true);
+    }
   }, []);
   // Advanced: review/edit the Seedance prompt before rendering. Draft is synced
   // to the selected storyboard; only sent (and persisted) when actually changed.
@@ -499,10 +607,13 @@ export default function StoryboardToVideoComposer({
           }));
         setItems(list);
         setListState("loaded");
-        setSelectedId((cur) => {
-          if (cur && list.some((s) => s.id === cur)) return cur;
-          return list[0]?.id ?? null;
-        });
+        setSelectedId((cur) =>
+          resolveLoadedStoryboardSelection({
+            currentId: cur,
+            requestedId: requestedStoryboardIdRef.current,
+            availableIds: list.map((s) => s.id),
+          }),
+        );
       })
       .catch(() => {
         if (!cancelled) setListState("error");
@@ -516,7 +627,10 @@ export default function StoryboardToVideoComposer({
   const pricingKey = storyboardVideoPricingKey(videoModelId, resolution);
   const cost = devBlank ? 0 : videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
   const selected = items.find((s) => s.id === selectedId) ?? null;
-  const canGenerate = !loading && !!selectedId;
+  const selectedLoaded = selected !== null;
+  const canGenerate = isStoryboardVideoReady({ loading, selectedLoaded });
+  const selectedLanguage = selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE;
+  const storedPrompt = selected?.seedancePrompt ?? "";
   // When the selected storyboard carries an orientation, the video MUST match it
   // (lock the chip). Legacy boards without one let the user choose.
   const aspectLocked = !!selected?.aspectRatio;
@@ -529,16 +643,35 @@ export default function StoryboardToVideoComposer({
   // selection or its stored language changes. Manual overrides persist until the
   // board changes again, since neither dependency moves on a user edit.
   useEffect(() => {
-    setLanguage(selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE);
-  }, [selectedId, selected?.language]);
+    const pending = pendingPromptDraftRef.current;
+    const resolved = resolveStoryboardDraftValue({
+      draftSelectedId: pending?.selectedId ?? null,
+      selectedId,
+      selectedLoaded,
+      draftValue: pending?.language ?? DEFAULT_STORYBOARD_LANGUAGE,
+      storedValue: selectedLanguage,
+    });
+    if (resolved.kind === "value") setLanguage(resolved.value);
+  }, [selectedId, selectedLanguage, selectedLoaded]);
 
   // Reset the editable prompt draft to the selected storyboard's stored prompt
   // when the selection changes (keyed on id so a user edit isn't clobbered).
   useEffect(() => {
-    setPromptDraft(selected?.seedancePrompt ?? "");
-  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const pending = pendingPromptDraftRef.current;
+    const resolved = resolveStoryboardDraftValue({
+      draftSelectedId: pending?.selectedId ?? null,
+      selectedId,
+      selectedLoaded,
+      draftValue: pending?.promptDraft ?? "",
+      storedValue: storedPrompt,
+    });
+    if (resolved.kind === "wait") return;
+    if (pending && (resolved.consumeDraft || listState === "loaded")) {
+      pendingPromptDraftRef.current = null;
+    }
+    setPromptDraft(resolved.value);
+  }, [listState, selectedId, selectedLoaded, storedPrompt]);
 
-  const storedPrompt = selected?.seedancePrompt ?? "";
   const promptDirty = !!selectedId && promptDraft.trim() !== storedPrompt.trim() && promptDraft.trim().length > 0;
 
   // Splice a freshly imported storyboard into the list and select it.
@@ -552,18 +685,27 @@ export default function StoryboardToVideoComposer({
     e.preventDefault();
     if (!canGenerate || !selectedId) return;
     if (status !== "authenticated") {
-      openSignInModal();
+      openSignInModal(undefined, buildStoryboardVideoPendingDraft({
+        selectedId,
+        videoModelId,
+        resolution,
+        aspectRatio: aspect,
+        language,
+        promptDraft,
+        devBlank,
+      }));
       return;
     }
 
     const editedPrompt = promptDirty ? promptDraft.trim() : undefined;
-    const signature = JSON.stringify({
+    const signature = storyboardVideoAttemptSignature({
       storyboardId: selectedId,
       videoModelId,
       resolution,
       aspectRatio: aspect,
       language,
       promptOverride: editedPrompt ?? null,
+      devBlank,
     });
     await submit(signature, (idempotencyKey) =>
       fetch("/api/generate-storyboard-video", {
