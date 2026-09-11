@@ -2,6 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
+import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
+
+function authRedirect(url: string): NextResponse {
+  return NextResponse.redirect(url, {
+    headers: SUPABASE_AUTH_CACHE_HEADERS,
+  });
+}
 
 /**
  * Handles Supabase Auth's PKCE OAuth callback.
@@ -39,10 +46,12 @@ export async function GET(request: NextRequest) {
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet, headersToSet) {
+            void headersToSet;
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
             );
+            // authRedirect applies the equivalent private/no-store headers.
           },
         },
       },
@@ -50,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return authRedirect(`${origin}${next}`);
     }
   }
 
@@ -61,10 +70,10 @@ export async function GET(request: NextRequest) {
   // moved into a modal (app/reset-password/page.tsx stays as a fallback for
   // those), or /dashboard?resetPassword=1 for anything sent after.
   if (next.startsWith("/reset-password") || next.includes("resetPassword=")) {
-    return NextResponse.redirect(`${origin}/forgot-password?error=expired`);
+    return authRedirect(`${origin}/forgot-password?error=expired`);
   }
 
   // Everything else (OAuth, signup confirmation) — go to login with an
   // error hint (surfaced by app/login/page.tsx's `callbackError`).
-  return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
+  return authRedirect(`${origin}/login?error=auth_callback_failed`);
 }

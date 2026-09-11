@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { forwardSupabaseAuthUpdates } from "@/lib/supabase-auth-response";
 
 // Routes browsable without a session — the page itself gates individual
 // actions (generate, schedule, save, ...) client-side via useAuthModal()
@@ -21,6 +22,7 @@ export async function middleware(request: NextRequest) {
   // refreshed session cookies are forwarded to both the browser and the
   // downstream Server Component render — critical for session continuity.
   let supabaseResponse = NextResponse.next({ request });
+  let applyLatestAuthUpdates = (response: NextResponse) => response;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,16 +32,25 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet, headersToSet) {
           // Step 1: reflect cookies onto the mutated request (for Server Components).
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          // Step 2: create a new response carrying the updated request headers.
-          supabaseResponse = NextResponse.next({ request });
-          // Step 3: write cookies onto the response so the browser receives them.
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
+          applyLatestAuthUpdates = (response) => {
+            forwardSupabaseAuthUpdates(
+              cookiesToSet,
+              headersToSet,
+              ({ name, value, options }) =>
+                response.cookies.set(name, value, options),
+              (name, value) => response.headers.set(name, value),
+            );
+            return response;
+          };
+          // Step 2: create a response carrying the updated request headers.
+          // Step 3: forward cookies and anti-cache headers to the browser.
+          supabaseResponse = applyLatestAuthUpdates(
+            NextResponse.next({ request }),
           );
         },
       },
@@ -68,7 +79,7 @@ export async function middleware(request: NextRequest) {
     url.pathname = "/dashboard";
     url.searchParams.set("authRequired", "1");
     url.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(url);
+    return applyLatestAuthUpdates(NextResponse.redirect(url));
   }
 
   // Return supabaseResponse (not a fresh NextResponse.next()) so the

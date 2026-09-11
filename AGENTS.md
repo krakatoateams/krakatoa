@@ -11,7 +11,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Icons**: Lucide React
 - **Language**: TypeScript
 - **Storage/Database**: Supabase (Storage + Postgres where used)
-- **Auth**: NextAuth.js (Google provider) for scheduler/dashboard flows
+- **Auth**: Supabase Auth via `@supabase/ssr` (Google OAuth + email/password)
 - **AI/Model Provider**: Replicate
 - **Google APIs**: `googleapis` (OAuth, Calendar, YouTube) where scheduler features need them
 - **Video Processing**: Rendi API (Cloud FFmpeg)
@@ -31,12 +31,12 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 ## Project Structure
 - `app/`: Next.js App Router root.
   - `page.tsx`: Main Krakatoa landing page.
-  - `dashboard/`: Authenticated hub (uses NextAuth + Supabase patterns as implemented).
+  - `dashboard/`: Authenticated hub (uses the shared Supabase Auth context).
   - `api/generate-reels/route.ts`: Unified Reels Creator AI video pipeline — dispatches by engine (`seedance` | `veo`) and Veo mode (`single` | `perScene`) over the shared `lib/reels-pipeline/` modules (`maxDuration = 300`). Replaces the legacy `api/generate` (Seedance) + `api/generate-veo` (Veo) routes.
   - `api/test-stitch/route.ts`: Developer utility to test Whisper → Rendi stitching from existing Replicate prediction IDs (`maxDuration = 300`).
   - `api/generate-photo/route.ts`: Product Photo generation.
   - `api/generate-caption/route.ts`: Short-form caption helper (Llama 3 8B on Replicate).
-  - `api/auth/[...nextauth]/route.ts`: NextAuth handler.
+  - `api/auth/signin/route.ts`, `auth/callback/route.ts`: password and OAuth session entry points.
   - `api/cron/route.ts`, `api/posts/`, `api/product-photo/`: Scheduling and product-photo support routes.
   - `api/upload/route.ts`: MP4 upload endpoint (verify bucket/path against your Supabase setup).
   - `tools/video/page.tsx`: Thin Suspense entry for Video Studio.
@@ -57,7 +57,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 Krakatoa's product identity, observability, and billing primitives live in seven Postgres tables that all in-scope generation routes read/write through typed helpers in `lib/`. Ownership boundary is `profile_id`; server routes use the service role and enforce ownership in application code (RLS is enabled on every table as deny-by-default).
 
 ### Tables (live)
-- **profiles** — Krakatoa product identity (1:1 with NextAuth `users` via `user_id`).
+- **profiles** — Krakatoa product identity (1:1 with Supabase `auth.users` via `user_id`).
 - **projects** — generic container for user work.
 - **jobs** — every generation job (queued / running / succeeded / failed / cancelled), with `cost_credits` as a display snapshot.
 - **job_steps** — queryable pipeline-step diary attached to a job.
@@ -238,7 +238,7 @@ Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-mon
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Public anon key if you use a browser Supabase client (see `README.md`); server pipelines here rely on the service role for Storage.
    - `SUPABASE_SERVICE_ROLE_KEY` — Server-side Storage/DB (used by generation routes and server helpers).
    - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
-   - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` — NextAuth session security and canonical site URL.
+   - `NEXTAUTH_URL` — legacy-named canonical site URL; `NEXTAUTH_SECRET` is only a non-production fallback for setup/webhook secrets, not session auth.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
    - `CRON_SECRET` — Bearer token untuk semua `GET /api/cron/*` (lihat [`docs/ops/cron-jobs.md`](docs/ops/cron-jobs.md)).
  - `DOKU_CLIENT_ID`, `DOKU_SECRET_KEY` — DOKU Checkout credentials (credit purchases).

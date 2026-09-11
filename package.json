@@ -27,6 +27,7 @@
     "test:creation-item-actions": "npx tsx lib/use-creation-item-actions.ts",
     "test:studio-submit": "npx tsx lib/idempotent-submit-state-self-check.ts && npx tsx lib/studio-generation-response-self-check.ts && npx tsx lib/studio-generation-submit-self-check.ts",
     "test:video-studio": "npx tsx lib/video-studio-deep-link.ts && npx tsx lib/video-studio-composer-selection-self-check.ts && npx tsx lib/pending-form-draft-self-check.ts && npx tsx lib/video-composer-attempt-contracts-self-check.ts",
+    "test:auth": "npx tsx lib/auth-session-self-check.ts",
     "test:replicate-output-url": "npx tsx lib/replicate-output-url-self-check.ts",
     "test:tiktok-creator-info": "npx tsx lib/tiktok-creator-info-pure.ts",
     "test:generation-workflows": "npx tsx lib/generation-workflows/control-policy-self-check.ts && npx tsx lib/generation-workflows/stop-settlement-self-check.ts && npx tsx lib/generation-workflows/submission-fence-self-check.ts && npx tsx lib/generation-workflows/submission-recovery-self-check.ts && npx tsx lib/generation-workflows/webhook-token-self-check.ts && npx tsx lib/generation-workflows/polling-self-check.ts && npx tsx lib/generation-workflows/finalization-self-check.ts && npx tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",

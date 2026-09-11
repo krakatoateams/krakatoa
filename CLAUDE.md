@@ -7,7 +7,7 @@ keeps only the rules needed on most engineering tasks.
 ## Stack
 
 - Next.js App Router, React 18, TypeScript, Tailwind CSS
-- NextAuth.js with Google OAuth
+- Supabase Auth via `@supabase/ssr` with Google OAuth and email/password
 - Supabase Postgres and private Storage
 - Replicate for AI models and Rendi for cloud FFmpeg
 - Vercel Functions and Workflow

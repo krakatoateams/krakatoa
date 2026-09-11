@@ -6,10 +6,9 @@ import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
  * After the NextAuth → Supabase Auth migration, auth.users.id IS the stable
  * user identifier — no separate `users` table lookup needed.
  *
- * Used by legacy API routes that reference user_id directly
- * (product-photo/history, storyboards, creations/*). After the deferred
- * cleanup SQL runs and all FKs point to auth.users, the returned id will
- * match correctly for existing rows.
+ * Used by legacy-named API routes that still reference user_id directly
+ * (product-photo/history, storyboards, creations/*). Production completed
+ * the one-time ID cutover, so those rows now use auth.users.id too.
  */
 export async function getSessionUserId(): Promise<string | null> {
   const supabase = createSupabaseAuthServer();

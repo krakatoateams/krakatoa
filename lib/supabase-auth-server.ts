@@ -21,7 +21,8 @@ export function createSupabaseAuthServer() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet, headersToSet) {
+          void headersToSet;
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
@@ -30,6 +31,9 @@ export function createSupabaseAuthServer() {
             // Server Component context — cookie writes are a no-op here.
             // Middleware handles session refresh for these requests.
           }
+          // next/headers cannot mutate response headers here. Calling
+          // cookies() makes these consumers dynamic; auth entry routes also
+          // attach explicit private/no-store response headers.
         },
       },
     },

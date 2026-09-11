@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { CheckCircle2 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { savePendingDraft, JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
+import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { SignInModal } from "./SignInModal";
 
 type AuthModalContextValue = {
@@ -51,7 +52,7 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
         savePendingDraft(window.location.pathname, draft);
       }
       setInitialView(view);
-      setNext(resolvedNext);
+      setNext(sanitizeNextPath(resolvedNext));
       setIsOpen(true);
     },
     [],

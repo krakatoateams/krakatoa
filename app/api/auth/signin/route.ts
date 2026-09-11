@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { checkLoginLock, recordFailedLoginAttempt, clearLoginAttempts } from "@/lib/login-attempts-db";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
+
+function authJson(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: SUPABASE_AUTH_CACHE_HEADERS,
+  });
+}
 
 /**
  * POST /api/auth/signin
@@ -32,7 +40,7 @@ export async function POST(req: NextRequest) {
   // and DB-backed, since this in-memory limiter doesn't survive across
   // serverless instances.
   if (!checkRateLimit(ip)) {
-    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    return authJson({ error: "Too many requests" }, 429);
   }
 
   let email: string;
@@ -45,19 +53,19 @@ export async function POST(req: NextRequest) {
       typeof body.password !== "string" ||
       !body.password
     ) {
-      return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
+      return authJson({ error: "Email and password are required." }, 400);
     }
     email = body.email.trim();
     password = body.password;
   } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return authJson({ error: "Invalid request body." }, 400);
   }
 
   const lockState = await checkLoginLock(email);
   if (lockState.locked) {
-    return NextResponse.json(
+    return authJson(
       { error: "Too many failed attempts.", code: "too_many_attempts", retryAfterSec: lockState.retryAfterSec },
-      { status: 429 },
+      429,
     );
   }
 
@@ -67,21 +75,21 @@ export async function POST(req: NextRequest) {
   if (error) {
     const afterFail = await recordFailedLoginAttempt(email);
     if (afterFail.locked) {
-      return NextResponse.json(
+      return authJson(
         { error: "Too many failed attempts.", code: "too_many_attempts", retryAfterSec: afterFail.retryAfterSec },
-        { status: 429 },
+        429,
       );
     }
-    return NextResponse.json(
+    return authJson(
       {
         error: error.message,
         code: (error as { code?: string }).code ?? null,
         attemptsRemaining: afterFail.attemptsRemaining,
       },
-      { status: 401 },
+      401,
     );
   }
 
   await clearLoginAttempts(email);
-  return NextResponse.json({ success: true });
+  return authJson({ success: true });
 }

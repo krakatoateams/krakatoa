@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
 import { JUST_SIGNED_IN_FLAG, peekPendingDraftRaw } from "@/lib/pending-form-draft";
+import { navigateAfterPasswordSignIn } from "@/lib/safe-redirect";
 
 function flagJustSignedIn() {
   try {
@@ -99,7 +99,6 @@ export function SignInForm({
    */
   onSwitchToSignUp?: () => void;
 }) {
-  const router = useRouter();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState<LoginError | null>(null);
@@ -166,13 +165,12 @@ export function SignInForm({
     const data = await res.json().catch(() => ({}));
 
     if (res.ok) {
-      // The route set fresh session cookies server-side — force the browser
-      // client to re-read them so useCurrentUser() picks up the new session.
-      await supabase.auth.getSession();
       flagJustSignedIn();
       onSuccess?.();
-      // Keep loading=true — redirect is in flight
-      router.push(next);
+      // The route wrote the session cookies outside the browser client, so
+      // use a full navigation to remount AuthProvider with the new session.
+      // The helper also rejects user-controlled external destinations.
+      navigateAfterPasswordSignIn(next);
       return;
     }
 

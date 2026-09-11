@@ -23,8 +23,8 @@ Work risk-first. Skip a recently audited area only when its recorded commit is a
 ancestor of `HEAD` and no later change touched that area.
 
 1. **Identity and authorization**
-   - NextAuth configuration, session resolution, auth callbacks, middleware, and
-     `requireCurrentProfile`.
+   - Supabase Auth configuration, session resolution, auth callbacks,
+     middleware, and `requireCurrentProfile`.
    - Admin guards on pages and API routes.
    - Owner-scoped reads and writes when using the Supabase service role.
    - Expected outcomes for unauthenticated, non-admin, wrong-owner, and valid
