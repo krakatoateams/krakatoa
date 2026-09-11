@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  AlertCircle,
   Clock,
   Cpu,
   Crop,
@@ -20,6 +19,7 @@ import {
   STUDIO_CHIP_ROW_CLASS,
   StudioForm,
   StudioFormCard,
+  StudioGenerationFeedback,
   StudioFormHeader,
   StudioGenerationPreviewProvider,
   StudioModelPanel,
@@ -69,7 +69,11 @@ import {
 } from "@/lib/video-composer-features";
 import {
   isAgentSkill,
+  normalizeSkillUserPrompt,
+  SKILL_PHOTO_PROMPT_MAX_CHARS,
+  SKILL_VIDEO_PROMPT_MAX_CHARS,
   skillHref,
+  skillPhotoAttemptSignature,
   skillPhotoMode,
   type SkillId,
 } from "@/lib/skills";
@@ -99,7 +103,9 @@ function SkillOmniInner({
     loading,
     error,
     clearError,
+    recoverableJobId,
     submit,
+    resumeRecoverable,
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
@@ -362,10 +368,14 @@ function SkillOmniInner({
     }
 
     if (isVideo) {
+      const normalizedPrompt = normalizeSkillUserPrompt(
+        prompt,
+        videoModel.promptMaxChars ?? SKILL_VIDEO_PROMPT_MAX_CHARS,
+      );
       const body = {
         skillId: skill.id,
         modelId: videoModel.id,
-        prompt: prompt.trim(),
+        prompt: normalizedPrompt,
         duration,
         resolution: videoResolution,
         aspectRatio: videoAspect,
@@ -388,16 +398,27 @@ function SkillOmniInner({
       return;
     }
 
-    const signature = [
-      skill.id,
-      prompt.trim(),
+    const normalizedPrompt = normalizeSkillUserPrompt(
+      prompt,
+      SKILL_PHOTO_PROMPT_MAX_CHARS,
+    );
+    const photoMode = skillPhotoMode(skill) ?? "image";
+    const signature = skillPhotoAttemptSignature({
+      skillId: skill.id,
+      mode: photoMode,
+      prompt: normalizedPrompt,
+      poseId: DEFAULT_MODEL_POSE,
+      styleId: DEFAULT_PHOTO_STYLE,
       modelTier,
+      resolution: tier.hasResolution ? resolution : null,
       aspectRatio,
-      resolution,
-      subject.file?.name ?? "",
-      scene.file?.name ?? "",
-      character.file?.name ?? "",
-    ].join("|");
+      imageCount: 1,
+      devBlank: false,
+      productFile: photoMode === "product" ? scene.file : null,
+      characterFile: photoMode === "product" ? character.file : null,
+      referenceFile:
+        photoMode === "product" ? null : subject.file ?? character.file,
+    });
     await submit(signature, (idempotencyKey) => {
       const formData = new FormData();
       formData.append("skillId", skill.id);
@@ -406,8 +427,7 @@ function SkillOmniInner({
       formData.append("modelTier", modelTier);
       formData.append("aspectRatio", aspectRatio);
       if (tier.hasResolution) formData.append("resolution", resolution);
-      if (prompt.trim()) formData.append("prompt", prompt.trim());
-      const photoMode = skillPhotoMode(skill) ?? "image";
+      if (normalizedPrompt) formData.append("prompt", normalizedPrompt);
       formData.append("mode", photoMode);
       if (photoMode === "product") {
         if (scene.file) formData.append("image", scene.file);
@@ -748,12 +768,12 @@ function SkillOmniInner({
         ) : null}
       </StudioForm>
 
-      {error && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-error/20 bg-error/10 p-4 text-sm text-error">
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
+      <StudioGenerationFeedback
+        error={error}
+        recoverableJobId={recoverableJobId}
+        loading={loading}
+        onResume={resumeRecoverable}
+      />
 
       {loading && skill && (
         <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">

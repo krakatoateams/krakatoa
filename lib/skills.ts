@@ -131,6 +131,60 @@ export function defaultSkillInputs(mediaType: SkillMediaType): SkillInputSlot[] 
 }
 
 export type SkillPhotoMode = "image" | "product" | "character";
+export const SKILL_PHOTO_PROMPT_MAX_CHARS = 1_500;
+export const SKILL_VIDEO_PROMPT_MAX_CHARS = 4_000;
+
+export function normalizeSkillUserPrompt(prompt: string, maxChars: number): string {
+  return prompt.trim().slice(0, maxChars);
+}
+
+export type SkillFileIdentity = {
+  name: string;
+  size: number;
+  lastModified: number;
+};
+
+export type SkillPhotoAttemptSignatureInput = {
+  skillId: string;
+  mode: SkillPhotoMode;
+  prompt: string;
+  poseId: string;
+  styleId: string;
+  modelTier: string;
+  resolution: string | null;
+  aspectRatio: string;
+  imageCount: number;
+  devBlank: boolean;
+  productFile?: SkillFileIdentity | null;
+  characterFile?: SkillFileIdentity | null;
+  referenceFile?: SkillFileIdentity | null;
+};
+
+function skillFileIdentitySignature(file?: SkillFileIdentity | null): string {
+  return file ? `${file.name}/${file.size}/${file.lastModified}` : "";
+}
+
+/** Compact client fingerprint for the fields sent by a photo Skill attempt. */
+export function skillPhotoAttemptSignature(
+  input: SkillPhotoAttemptSignatureInput,
+): string {
+  return [
+    "skills:photo",
+    input.skillId,
+    input.mode,
+    normalizeSkillUserPrompt(input.prompt, SKILL_PHOTO_PROMPT_MAX_CHARS),
+    input.poseId,
+    input.styleId,
+    input.modelTier,
+    input.resolution ?? "",
+    input.aspectRatio,
+    String(input.imageCount),
+    input.devBlank ? "blank" : "live",
+    skillFileIdentitySignature(input.productFile),
+    skillFileIdentitySignature(input.characterFile),
+    skillFileIdentitySignature(input.referenceFile),
+  ].join("|");
+}
 
 export type Skill = {
   id: SkillId;
@@ -841,6 +895,72 @@ export function skillsSelfCheck(): void {
     assembleSkillPrompt("ai-animations", "a cat dances").length > "a cat dances".length,
     "animation prompt wraps the user text"
   );
+
+  const photoAttempt = {
+    skillId: "change-background",
+    mode: "image" as const,
+    prompt: "marble lobby",
+    poseId: "none",
+    styleId: "none",
+    modelTier: "balanced",
+    resolution: "2K",
+    aspectRatio: "1:1",
+    imageCount: 1,
+    devBlank: false,
+    referenceFile: {
+      name: "subject.png",
+      size: 1_024,
+      lastModified: 1_725_000_000_000,
+    },
+  };
+  const photoAttemptSignature = skillPhotoAttemptSignature(photoAttempt);
+  assert(
+    skillPhotoAttemptSignature({ ...photoAttempt }) === photoAttemptSignature,
+    "identical photo skill attempts must keep the same signature",
+  );
+  assert(
+    skillPhotoAttemptSignature({
+      ...photoAttempt,
+      referenceFile: { ...photoAttempt.referenceFile, name: "other.png" },
+    }) !== photoAttemptSignature,
+    "photo skill file name must rotate the signature",
+  );
+  assert(
+    skillPhotoAttemptSignature({
+      ...photoAttempt,
+      referenceFile: { ...photoAttempt.referenceFile, size: 2_048 },
+    }) !== photoAttemptSignature,
+    "photo skill file size must rotate the signature",
+  );
+  assert(
+    skillPhotoAttemptSignature({
+      ...photoAttempt,
+      referenceFile: { ...photoAttempt.referenceFile, lastModified: 1_725_000_000_001 },
+    }) !== photoAttemptSignature,
+    "photo skill file lastModified must rotate the signature",
+  );
+  const maxServerPrompt = "x".repeat(1_500);
+  assert(
+    skillPhotoAttemptSignature({ ...photoAttempt, prompt: maxServerPrompt }) ===
+      skillPhotoAttemptSignature({
+        ...photoAttempt,
+        prompt: `${maxServerPrompt} ignored by the server`,
+      }),
+    "photo skill signature must use the server-normalized prompt",
+  );
+  for (const changed of [
+    { ...photoAttempt, mode: "character" as const },
+    { ...photoAttempt, modelTier: "pro" },
+    { ...photoAttempt, resolution: "4K" },
+    { ...photoAttempt, aspectRatio: "2:3" },
+    { ...photoAttempt, imageCount: 2 },
+    { ...photoAttempt, devBlank: true },
+  ]) {
+    assert(
+      skillPhotoAttemptSignature(changed) !== photoAttemptSignature,
+      "every server-hashed photo skill field must rotate the signature",
+    );
+  }
 }
 
 if (require.main === module) {

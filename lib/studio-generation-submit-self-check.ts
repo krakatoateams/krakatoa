@@ -1,3 +1,6 @@
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StudioGenerationFeedback } from "../components/studio/StudioGenerationFeedback";
 import {
   STUDIO_GENERATION_RECOVERABLE_FALLBACK,
 } from "./studio-generation-response";
@@ -10,6 +13,10 @@ import {
   type StudioGenerationSubmitAttempt,
   type StudioGenerationSubmitEffects,
 } from "./studio-generation-submit-core";
+
+// tsx executes this self-check with tsconfig's JSX preserve mode, so expose the
+// classic JSX runtime expected by imported TSX components.
+(globalThis as typeof globalThis & { React: typeof React }).React = React;
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`studio-generation-submit self-check: ${message}`);
@@ -63,6 +70,35 @@ function collectEffects(): StudioGenerationSubmitEffects & {
 
 /** ponytail: pure injected runner — no React, no network. */
 export async function studioGenerationSubmitSelfCheck(): Promise<void> {
+  {
+    const recoverableMarkup = renderToStaticMarkup(
+      React.createElement(StudioGenerationFeedback, {
+        error: "Final upload needs retry",
+        recoverableJobId: "job-recoverable",
+        loading: false,
+        onResume: () => {},
+      }),
+    );
+    assert(
+      recoverableMarkup.includes("Final upload needs retry") &&
+        recoverableMarkup.includes("Try again"),
+      "recoverable feedback exposes the resume action",
+    );
+
+    const terminalMarkup = renderToStaticMarkup(
+      React.createElement(StudioGenerationFeedback, {
+        error: "Generation failed",
+        recoverableJobId: null,
+        loading: false,
+        onResume: () => {},
+      }),
+    );
+    assert(
+      terminalMarkup.includes("Generation failed") && !terminalMarkup.includes("Try again"),
+      "terminal feedback does not expose the resume action",
+    );
+  }
+
   {
     const lock = createStudioGenerationSubmitLock();
     assert(lock.acquire(), "resume lock acquires synchronously");

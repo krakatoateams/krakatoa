@@ -7,6 +7,7 @@ export {
   CANCEL_BTN_CLASS,
 } from "./CreditButton";
 export { GenerationCancelButton } from "./GenerationCancelButton";
+export { StudioGenerationFeedback } from "./StudioGenerationFeedback";
 export { DevBlankTestToggle } from "./DevBlankTestToggle";
 export {
   StudioForm,
