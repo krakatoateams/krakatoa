@@ -1,9 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Coins } from "lucide-react";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import AddCreditsModal from "@/components/AddCreditsModal";
+
+/**
+ * Animates `value` counting up/down from its previous value instead of
+ * jumping straight to the new one, e.g. 0 -> 10 rolling over ~900ms rather
+ * than an instant swap. Skips the animation on the very first real value
+ * (loading -> N) so a page load never shows a pointless "count up from 0".
+ */
+function useRollingNumber(value: number | null, durationMs = 900) {
+  const [display, setDisplay] = useState<number | null>(value);
+  const prevRef = useRef<number | null>(value);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (value === null) {
+      prevRef.current = null;
+      setDisplay(null);
+      return;
+    }
+    const from = prevRef.current;
+    prevRef.current = value;
+
+    if (from === null || from === value) {
+      setDisplay(value);
+      return;
+    }
+
+    const start = performance.now();
+    const delta = value - from;
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic: fast start, gentle landing
+      setDisplay(Math.round(from + delta * eased));
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [value, durationMs]);
+
+  return { display: display ?? value, rolling: display !== value };
+}
 
 /**
  * Credit balance control. Reads the shared CreditBalanceContext —
@@ -23,6 +67,7 @@ export default function CreditBadge({
 }) {
   const { balance, loading, announcedDelta } = useCreditBalance();
   const [open, setOpen] = useState(false);
+  const { display, rolling } = useRollingNumber(balance);
 
   if (balance === null) {
     if (loading) {
@@ -42,13 +87,19 @@ export default function CreditBadge({
     return null;
   }
 
+  // While the number is actively rolling, scale it up and tint it so a
+  // change is unmistakable, not just a fast blur of digits.
+  const numberClass = `inline-block tabular-nums transition-all duration-300 ${
+    rolling ? "scale-[1.75] text-brand-primary" : "scale-100"
+  }`;
+
   return (
     <>
       <span className="relative inline-flex">
         {announcedDelta !== null && (
           <span
             aria-hidden
-            className="animate-credit-gain-pop pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold text-success"
+            className="animate-credit-gain-pop pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-bold text-brand-primary"
           >
             +{announcedDelta}
           </span>
@@ -73,7 +124,11 @@ export default function CreditBadge({
           {variant === "topup" ? (
             <>
               <Coins className="h-3.5 w-3.5 text-brand-primary" />
-              <span className="text-sm font-bold tabular-nums text-brand-primary">{balance}</span>
+              <span
+                className={`text-sm font-bold ${numberClass} ${rolling ? "" : "text-brand-primary"}`}
+              >
+                {display}
+              </span>
               <span className="inline-flex h-7 items-center rounded-full bg-brand-primary px-2.5 text-[11px] font-bold leading-none text-text-on-solid">
                 Top up
               </span>
@@ -81,7 +136,7 @@ export default function CreditBadge({
           ) : (
             <>
               <Coins className={iconClassName ?? "h-3 w-3"} />
-              {balance} credits
+              <span className={numberClass}>{display}</span> credits
             </>
           )}
         </button>
