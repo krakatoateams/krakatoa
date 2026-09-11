@@ -168,6 +168,75 @@
     animation: credit-nudge 2.4s ease-in-out infinite;
   }
 
+  @keyframes credit-gain-pop {
+    0% {
+      opacity: 0;
+      transform: translateY(4px) scale(0.9);
+    }
+    15% {
+      opacity: 1;
+      transform: translateY(0) scale(1.05);
+    }
+    30% {
+      transform: translateY(0) scale(1);
+    }
+    75% {
+      opacity: 1;
+      transform: translateY(-2px) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-16px) scale(1);
+    }
+  }
+
+  .animate-credit-gain-pop {
+    animation: credit-gain-pop 2.2s ease-out forwards;
+  }
+
+  @keyframes credit-gain-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(var(--credit-gain-glow-rgb, 242, 101, 34),0);
+    }
+    30% {
+      box-shadow: 0 0 0 5px rgba(var(--credit-gain-glow-rgb, 242, 101, 34),0.35);
+    }
+  }
+
+  .animate-credit-gain-glow {
+    animation: credit-gain-glow 2.2s ease-out;
+  }
+
+  @keyframes pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.92) translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .animate-pop-in {
+    animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes gift-bounce {
+    0%,
+    100% {
+      transform: translateY(0) rotate(0deg);
+    }
+    50% {
+      transform: translateY(-5px) rotate(-4deg);
+    }
+  }
+
+  .animate-gift-bounce {
+    animation: gift-bounce 2.4s ease-in-out infinite;
+  }
+
   .liquid-glass {
     background: rgba(255, 255, 255, 0.01);
     backdrop-filter: blur(4px);

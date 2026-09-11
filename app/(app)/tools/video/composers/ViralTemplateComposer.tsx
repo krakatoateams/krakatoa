@@ -427,7 +427,7 @@ export default function ViralTemplateComposer({
           </div>
         </StudioModelPanel>
 
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}

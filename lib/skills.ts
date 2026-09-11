@@ -7,6 +7,8 @@
  * Animate hand-off stay valid.
  */
 
+import type { VideoResolution } from "@/lib/video-models";
+
 export const SKILL_IDS = [
   "high-quality-film",
   "video-clone",
@@ -40,9 +42,19 @@ export const SKILL_IDS = [
   "social-thumbnail",
   "lookbook",
   "headshot",
+  "welcome-video",
 ] as const;
 
 export type BuiltinSkillId = (typeof SKILL_IDS)[number];
+
+/**
+ * Deep-link target for the new-signup "claim your free video" offer (see
+ * WelcomeVideoOfferCard + /api/welcome-video-offer). Pinned to the cheapest
+ * live video config (Seedance 1 Pro Fast, 480p, 5s, no audio — 2 credits/sec
+ * = 10 credits) so it costs exactly what the welcome-bonus grant covers.
+ */
+export const WELCOME_VIDEO_SKILL_ID: BuiltinSkillId = "welcome-video";
+
 /** Runtime catalog id — a builtin slug or an admin-created slug. */
 export type SkillId = string;
 
@@ -135,6 +147,16 @@ export type Skill = {
   /** Open another studio instead of the Agent omni form. */
   openHref?: string;
   badge?: "new";
+  /** Admin-pinned Photo tier or Video model. Absent = catalog default. */
+  modelId?: string;
+  /**
+   * Pin the video resolution too (video skills only). Absent = the model's
+   * own default resolution. Every catalog video model defaults to 720p or
+   * 1080p, so a skill that wants a specific cheap resolution (e.g. the
+   * welcome-offer skill's 480p) has to say so explicitly — pinning modelId
+   * alone isn't enough.
+   */
+  resolution?: VideoResolution;
 };
 
 export const SKILL_CATEGORIES: { id: SkillCategoryId; title: string }[] = [
@@ -538,6 +560,20 @@ export const SKILLS: Skill[] = [
     promptRequired: true,
     inputs: [{ key: "subject", label: "Person", required: false }],
   },
+  {
+    id: "welcome-video",
+    title: "Golden Hour Coffee",
+    description: "A cinematic coffee moment — ready to go, no typing required.",
+    category: "storytelling",
+    mediaType: "video",
+    icon: "sparkles",
+    thumb: thumb("welcome-video"),
+    promptPlaceholder: "Optional — add your own idea, or just hit Generate",
+    promptRequired: false,
+    inputs: [],
+    modelId: "seedance1_pro_fast",
+    resolution: "480p",
+  },
 ];
 
 const SKILL_BY_ID: Record<string, Skill> = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
@@ -706,6 +742,11 @@ const SKILL_RECIPE_DEFAULTS: Record<BuiltinSkillId, string> = {
     "Fashion lookbook still.\nEditorial lighting, full outfit readable, strong pose and styling, magazine-quality crop, fabric texture, not a messy fitting-room mirror selfie.\nLook: {prompt}\nIf a reference image is attached, keep that garment or person.",
   headshot:
     "Professional portrait headshot.\nSharp eyes, flattering light (window or soft key), clean or softly blurred backdrop, natural skin, shoulders-up crop, press-ready, not a selfie, not a character turnaround sheet.\nSubject: {prompt}\nIf a reference image is attached, keep that exact person's face and identity.",
+  // Deliberately has NO {prompt} token — this is the one recipe meant to run
+  // with zero user input (promptRequired: false above). A fully fixed scene,
+  // not a template, so the free first generation needs no typing at all.
+  "welcome-video":
+    "A warm, cinematic five-second everyday moment: golden-hour light spilling across a minimalist wooden table, a steaming ceramic cup of coffee catching the light as gentle steam curls upward, slow camera push-in, shallow depth of field, soft warm color grade, gentle ambient motion. Inviting, aspirational, photorealistic.",
 };
 
 export function defaultSkillRecipe(id: string): string {

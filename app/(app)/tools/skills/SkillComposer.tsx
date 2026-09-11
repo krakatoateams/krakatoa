@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, startTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -43,6 +43,7 @@ import {
   PHOTO_ASPECT_RATIOS,
   PRODUCT_PHOTO_TIERS,
   getProductPhotoTier,
+  isValidProductPhotoTier,
   tierSupportsMultiReference,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
@@ -52,9 +53,20 @@ import {
   DEFAULT_VIDEO_MODEL_ID,
   getAllowedDurations,
   getVideoModel,
+  IMAGE_TO_VIDEO_MODELS,
+  TEXT_TO_VIDEO_MODELS,
+  isValidVideoModelId,
   type VideoAspectRatio,
+  type VideoModelId,
   type VideoResolution,
 } from "@/lib/video-models";
+import {
+  filterEnabledCatalog,
+  mapVideoComposerEnablement,
+  snapToEnabledModel,
+  type VideoComposerEnablement,
+  type VideoComposerKey,
+} from "@/lib/video-composer-features";
 import {
   isAgentSkill,
   skillHref,
@@ -65,7 +77,8 @@ import FeaturedSkillsRow from "./FeaturedSkillsRow";
 import SkillPicker from "./SkillPicker";
 import { SkillsCatalogProvider, useSkillsCatalog } from "./SkillsCatalogProvider";
 
-const AGENT_PLACEHOLDER = "Share your idea with me, or pick a skill to get started quickly.";
+const AGENT_PLACEHOLDER = "Pick a skill to get started.";
+const SKILL_PROMPT_FALLBACK = "Describe what you want to create.";
 
 function SkillOmniInner({
   onHistoryRefresh,
@@ -77,6 +90,7 @@ function SkillOmniInner({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { imageCredits, videoCredits } = usePricing();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openPreviewFromResponse } = useStudioGenerationPreview();
@@ -94,7 +108,6 @@ function SkillOmniInner({
     refreshHistory: onHistoryRefresh,
     openPreviewFromResponse,
   });
-  const { imageCredits, videoCredits } = usePricing();
 
   const { skillById } = useSkillsCatalog();
   const skillFromUrl = skillById(searchParams.get("skill") ?? "");
@@ -102,6 +115,7 @@ function SkillOmniInner({
     skillFromUrl && isAgentSkill(skillFromUrl) ? skillFromUrl.id : null
   );
   const skill = skillId ? skillById(skillId) : undefined;
+  const ignoreUrlSkillRef = useRef<string | null>(null);
 
   const [prompt, setPrompt] = useState("");
 
@@ -110,20 +124,39 @@ function SkillOmniInner({
       const next = skillById(id);
       if (!next || !isAgentSkill(next)) return;
       clearError();
+      if (skillId === id) {
+        ignoreUrlSkillRef.current = id;
+        setSkillId(null);
+        startTransition(() => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("skill");
+          const qs = params.toString();
+          router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
+        });
+        return;
+      }
+      ignoreUrlSkillRef.current = null;
       setSkillId(id);
       startTransition(() => {
         router.replace(skillHref(id), { scroll: false });
       });
     },
-    [clearError, router, skillById]
+    [clearError, router, searchParams, skillById, skillId]
   );
 
   useEffect(() => {
     const next = searchParams.get("skill");
+    if (ignoreUrlSkillRef.current) {
+      if (next === ignoreUrlSkillRef.current) return;
+      ignoreUrlSkillRef.current = null;
+    }
     const fromUrl = next ? skillById(next) : undefined;
-    if (fromUrl && isAgentSkill(fromUrl) && fromUrl.id !== skillId) setSkillId(fromUrl.id);
-    else if (skillId && !skillById(skillId)) setSkillId(null);
-  }, [searchParams, skillId, skillById]);
+    if (fromUrl && isAgentSkill(fromUrl)) {
+      setSkillId(fromUrl.id);
+      return;
+    }
+    setSkillId(null);
+  }, [searchParams, skillById]);
 
   const subject = useImageUpload();
   const scene = useImageUpload();
@@ -136,12 +169,14 @@ function SkillOmniInner({
   const needsSubject = !!skill?.inputs.some((slot) => slot.key === "subject" && slot.required);
   const needsScene = !!skill?.inputs.some((slot) => slot.key === "scene" && slot.required);
   const needsStartFrame = !!skill?.inputs.some((slot) => slot.key === "startFrame" && slot.required);
-  const showSubjectTile = !skill || (!isVideo && hasSlot("subject"));
+  const showSubjectTile = Boolean(skill) && !isVideo && hasSlot("subject");
   const showStartFrame = isVideo && hasSlot("startFrame");
   const showScene = hasSlot("scene");
   const showCharacter = hasSlot("character");
   const subjectLabel =
     skill?.inputs.find((slot) => slot.key === "subject")?.label ?? "Ref";
+  const mobileSubjectLabel =
+    subjectLabel === "Ref" ? "Add reference" : subjectLabel;
   const startFrameLabel =
     skill?.inputs.find((slot) => slot.key === "startFrame")?.label ?? "Start frame";
 
@@ -156,6 +191,10 @@ function SkillOmniInner({
     photoTiers.find((t) => t.id === DEFAULT_PRODUCT_PHOTO_TIER)?.id ??
     photoTiers[0]?.id ??
     DEFAULT_PRODUCT_PHOTO_TIER;
+  const designatedPhotoTier =
+    !isVideo && skill?.modelId && isValidProductPhotoTier(skill.modelId)
+      ? photoTiers.find((t) => t.id === skill.modelId)
+      : undefined;
 
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(defaultPhotoTier);
   const [resolution, setResolution] = useState<ProductPhotoResolution>(
@@ -165,10 +204,14 @@ function SkillOmniInner({
 
   const tier = getProductPhotoTier(modelTier);
   useEffect(() => {
+    if (designatedPhotoTier) {
+      if (modelTier !== designatedPhotoTier.id) setModelTier(designatedPhotoTier.id);
+      return;
+    }
     if (!photoTiers.some((t) => t.id === modelTier) && photoTiers[0]) {
       setModelTier(photoTiers[0].id);
     }
-  }, [modelTier, photoTiers]);
+  }, [designatedPhotoTier, modelTier, photoTiers]);
 
   useEffect(() => {
     if (!tier.hasResolution) return;
@@ -177,7 +220,73 @@ function SkillOmniInner({
     }
   }, [tier, resolution]);
 
-  const videoModel = getVideoModel(DEFAULT_VIDEO_MODEL_ID);
+  const [composerEnablement, setComposerEnablement] = useState<Record<
+    VideoComposerKey,
+    VideoComposerEnablement
+  > | null>(null);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let active = true;
+    fetch("/api/tools/video/features")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data?.composers) return;
+        const raw = {} as Record<
+          VideoComposerKey,
+          { enabledTiers: string[]; defaultTier: string }
+        >;
+        for (const c of data.composers) {
+          if (c.key) {
+            raw[c.key as VideoComposerKey] = {
+              enabledTiers: c.enabledModelIds ?? [],
+              defaultTier: c.defaultModelId ?? "",
+            };
+          }
+        }
+        setComposerEnablement(mapVideoComposerEnablement(raw));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
+  const useImageToVideo = startFrame.done.length > 0;
+  const videoComposerKey: VideoComposerKey = useImageToVideo ? "image2video" : "text2video";
+  const videoCatalog = useImageToVideo ? IMAGE_TO_VIDEO_MODELS : TEXT_TO_VIDEO_MODELS;
+  const enabledVideoModels = filterEnabledCatalog(
+    videoCatalog,
+    videoComposerKey,
+    composerEnablement
+  );
+
+  const [videoModelId, setVideoModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
+  const videoModel = getVideoModel(videoModelId);
+
+  useEffect(() => {
+    if (enabledVideoModels.length === 0) return;
+    const designated =
+      skill?.modelId && isValidVideoModelId(skill.modelId)
+        ? enabledVideoModels.find((m) => m.id === skill.modelId)
+        : undefined;
+    const next = designated
+      ? designated.id
+      : (snapToEnabledModel(
+          videoModelId,
+          enabledVideoModels,
+          videoComposerKey,
+          composerEnablement
+        ) as VideoModelId);
+    if (next !== videoModelId) setVideoModelId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    enabledVideoModels.map((m) => m.id).join(","),
+    composerEnablement,
+    videoComposerKey,
+    skill?.modelId,
+  ]);
+
   const [duration, setDuration] = useState(videoModel.defaultDuration);
   const [videoResolution, setVideoResolution] = useState<VideoResolution>(
     videoModel.defaultResolution
@@ -190,6 +299,30 @@ function SkillOmniInner({
       setDuration(allowedDurations[0]);
     }
   }, [allowedDurations, duration]);
+
+  // A skill can pin a specific resolution (e.g. the welcome-offer skill needs
+  // 480p specifically to land on its advertised credit cost) — every catalog
+  // model's own defaultResolution is 720p/1080p, so pinning modelId alone
+  // isn't enough. Falls back to the existing default-snap when unpinned.
+  useEffect(() => {
+    const pinned =
+      skill?.resolution && videoModel.resolutions.includes(skill.resolution)
+        ? skill.resolution
+        : undefined;
+    if (pinned) {
+      if (videoResolution !== pinned) setVideoResolution(pinned);
+      return;
+    }
+    if (!videoModel.resolutions.includes(videoResolution) && videoModel.resolutions[0]) {
+      setVideoResolution(videoModel.resolutions[0]);
+    }
+  }, [videoModel, videoResolution, skill?.resolution]);
+
+  useEffect(() => {
+    if (!videoModel.aspectRatios.includes(videoAspect) && videoModel.aspectRatios[0]) {
+      setVideoAspect(videoModel.aspectRatios[0]);
+    }
+  }, [videoModel, videoAspect]);
 
   const photoPricingKey = tier.hasResolution
     ? tier.resolutions.find((r) => r.id === resolution)?.pricingKey ??
@@ -343,6 +476,16 @@ function SkillOmniInner({
           onChange={character.onChange}
         />
 
+        {embed ? (
+          <StudioFormHeader className="w-full min-w-0 !flex-nowrap lg:hidden">
+            <FeaturedSkillsRow
+              activeSkillId={skillId}
+              onSelectSkill={selectSkill}
+              className="min-w-0 flex-1"
+            />
+          </StudioFormHeader>
+        ) : null}
+
         {!isVideo && skill ? (
           <StudioFormHeader className="hidden lg:flex">
             <ChipDropdown
@@ -352,16 +495,16 @@ function SkillOmniInner({
               activeId={modelTier}
               options={photoModelOptions}
               onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
-              disabled={loading}
+              disabled={loading || Boolean(designatedPhotoTier)}
             />
           </StudioFormHeader>
         ) : null}
 
             {showUploads && (
-              <div className="mb-3 flex items-stretch gap-3 lg:hidden">
+              <div className="flex items-stretch gap-3 lg:hidden">
                 {showSubjectTile && (
                   <UploadTile
-                    label={subjectLabel}
+                    label={mobileSubjectLabel}
                     upload={subject}
                     disabled={loading}
                     fluid
@@ -380,6 +523,7 @@ function SkillOmniInner({
                     group={startFrame}
                     disabled={loading}
                     bare
+                    fluid
                   />
                 )}
               </div>
@@ -416,7 +560,11 @@ function SkillOmniInner({
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={loading}
                 rows={3}
-                placeholder={skill?.promptPlaceholder ?? AGENT_PLACEHOLDER}
+                placeholder={
+                  skill
+                    ? skill.promptPlaceholder || SKILL_PROMPT_FALLBACK
+                    : AGENT_PLACEHOLDER
+                }
                 className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
               />
             </div>
@@ -567,13 +715,13 @@ function SkillOmniInner({
                 activeId={modelTier}
                 options={photoModelOptions}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
-                disabled={loading}
+                disabled={loading || Boolean(designatedPhotoTier)}
               />
             </div>
           </StudioModelPanel>
         ) : null}
 
-            <div className="mt-3 flex items-center gap-3 lg:hidden">
+            <div className="flex items-center gap-3 lg:hidden">
               <CreditActionButton
                 balance={balance}
                 cost={cost}
@@ -594,6 +742,7 @@ function SkillOmniInner({
           <FeaturedSkillsRow
             activeSkillId={skillId}
             onSelectSkill={selectSkill}
+            className="mt-4 hidden lg:flex"
           />
         ) : null}
       </StudioForm>

@@ -16,9 +16,11 @@ type DivProps = {
   className?: string;
 };
 
-export const STUDIO_FORM_CLASS = "relative z-20 mt-0 py-[50px] lg:mt-10 lg:py-0";
+export const STUDIO_FORM_CLASS = "relative z-20 mt-0 py-0 lg:mt-10";
 
 const STUDIO_FORM_HEADER = "StudioFormHeader";
+const STUDIO_FORM_CARD = "StudioFormCard";
+const STUDIO_MODEL_PANEL = "StudioModelPanel";
 
 // Chip row that sits above the omni card. StudioForm places it in the same
 // grid as the mode rail so the rail top-aligns with the card, not the chips.
@@ -33,6 +35,36 @@ function isStudioFormHeader(
   child: React.ReactNode
 ): child is React.ReactElement<{ children?: React.ReactNode; className?: string }> {
   return isValidElement(child) && child.type === StudioFormHeader;
+}
+
+function isStudioFormCard(child: React.ReactNode): child is React.ReactElement {
+  return isValidElement(child) && child.type === StudioFormCard;
+}
+
+function isStudioModelPanel(child: React.ReactNode): child is React.ReactElement {
+  return isValidElement(child) && child.type === StudioModelPanel;
+}
+
+// Keep the prompt card and the mobile model row as one flex item so the
+// parent `gap-3` does not split them. The panel overlaps the card by 12px.
+function groupCardAndModelPanel(nodes: React.ReactNode[]): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const next = nodes[i + 1];
+    if (isStudioFormCard(node) && isStudioModelPanel(next)) {
+      out.push(
+        <div key={`card-model-${i}`} className="min-w-0">
+          {node}
+          {next}
+        </div>
+      );
+      i += 1;
+      continue;
+    }
+    out.push(node);
+  }
+  return out;
 }
 
 // The <form> wrapper. Always renders the Agent / Image / Video rail in one grid
@@ -51,13 +83,19 @@ export function StudioForm({
   return (
     <form onSubmit={onSubmit} className={`${STUDIO_FORM_CLASS} ${className}`}>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
-        {hasHeader ? <div className="lg:col-start-2">{headers}</div> : null}
+        {hasHeader ? (
+          <div className="lg:col-start-2 max-lg:has-[>:not(.hidden)]:contents max-lg:[&:not(:has(>:not(.hidden)))]:hidden">
+            {headers}
+          </div>
+        ) : null}
         <StudioModeRail
           active={mode}
           className={hasHeader ? "max-lg:order-first lg:col-start-1 lg:row-start-2" : ""}
         />
-        <div className={`min-w-0 ${hasHeader ? "lg:col-start-2 lg:row-start-2" : ""}`}>
-          {rest}
+        <div
+          className={`flex min-w-0 flex-col gap-3 ${hasHeader ? "lg:col-start-2 lg:row-start-2" : ""}`}
+        >
+          {groupCardAndModelPanel(rest)}
         </div>
       </div>
     </form>
@@ -87,6 +125,7 @@ export function StudioFormCard({ children, className = "" }: DivProps) {
     </BorderGlow>
   );
 }
+StudioFormCard.displayName = STUDIO_FORM_CARD;
 
 // Canonical horizontally-scrollable chip row style (scrolls on mobile, wraps on
 // lg+). Exposed as a class constant so pages can apply it to an existing element
@@ -103,12 +142,13 @@ export function StudioChipRow({ children, className = "" }: DivProps) {
 export function StudioModelPanel({ children, className = "" }: DivProps) {
   return (
     <div
-      className={`-mt-3 mb-6 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden ${className}`}
+      className={`-mt-3 rounded-b-radius-xl bg-white/[0.04] px-4 pb-4 pt-6 backdrop-blur-sm lg:hidden ${className}`}
     >
       {children}
     </div>
   );
 }
+StudioModelPanel.displayName = STUDIO_MODEL_PANEL;
 
 // The result / output card shown after a successful generation.
 export function StudioResultCard({ children, className = "" }: DivProps) {

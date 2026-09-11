@@ -99,6 +99,18 @@ export async function PATCH(
   // original failure could otherwise cause that cleanup to delete storage
   // out from under an actively-retried post.
   if (status !== undefined) {
+    // Only a retry (re-arm to "scheduled") or a cancel are legitimate
+    // client-triggered transitions here — "published"/"failed"/"draft" are
+    // cron/system-only and must never be settable through this user-facing
+    // route. Reject outright rather than silently dropping (unlike `format`
+    // above): a caller expecting their cancel/retry to apply must not get a
+    // false "success" back.
+    if (status !== "scheduled" && status !== "canceled") {
+      return NextResponse.json(
+        { error: 'status must be "scheduled" or "canceled".' },
+        { status: 400 },
+      );
+    }
     updates.status = status;
     if (status === "scheduled") {
       updates.publish_attempts = 0;

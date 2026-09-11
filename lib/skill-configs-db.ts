@@ -20,12 +20,14 @@ import {
   type SkillInputSlot,
   type SkillMediaType,
 } from "@/lib/skills";
+import { isValidProductPhotoTier } from "@/lib/product-photo";
+import { isValidVideoModelId } from "@/lib/video-models";
 
 const TABLE = "skill_configs";
 const CACHE_TTL_MS = 60_000;
 export const MAX_USER_SKILLS = 24;
 const SELECT_COLS =
-  "skill_id, title, description, prompt_placeholder, recipe, thumb_path, category, badge, prompt_required, origin, media_type, inputs, icon, hidden, owner_profile_id";
+  "skill_id, title, description, prompt_placeholder, recipe, thumb_path, category, badge, prompt_required, origin, media_type, inputs, icon, hidden, owner_profile_id, model_id";
 
 const SKILL_ICONS: SkillIconName[] = [
   "scroll",
@@ -72,6 +74,7 @@ export type SkillConfigOverride = {
   icon: SkillIconName | null;
   hidden: boolean;
   ownerProfileId: string | null;
+  modelId: string | null;
 };
 
 export type CatalogSkill = Skill & {
@@ -94,6 +97,7 @@ export type SkillConfigPatch = {
   inputs?: SkillInputSlot[] | null;
   icon?: SkillIconName | null;
   hidden?: boolean;
+  modelId?: string | null;
   revert?: boolean;
 };
 
@@ -108,6 +112,7 @@ export type CreateCustomSkillInput = {
   mediaType: SkillMediaType;
   inputs: SkillInputSlot[];
   icon?: SkillIconName;
+  modelId?: string | null;
 };
 
 type SkillConfigRow = {
@@ -126,6 +131,7 @@ type SkillConfigRow = {
   icon?: string | null;
   hidden?: boolean | null;
   owner_profile_id?: string | null;
+  model_id?: string | null;
 };
 
 let cache: { byId: Map<SkillId, SkillConfigOverride>; expiresAt: number } = {
@@ -168,6 +174,28 @@ export function parseSkillInputs(raw: unknown, mediaType: SkillMediaType): Skill
     out.push({ key, label, required: rec.required === true });
   }
   return out;
+}
+
+export function parseSkillModelId(
+  value: unknown,
+  mediaType: SkillMediaType
+): { error: string } | { modelId: string | null } {
+  if (value === null || value === "") return { modelId: null };
+  if (typeof value !== "string") return { error: "Invalid model." };
+  const id = value.trim();
+  if (!id) return { modelId: null };
+  if (mediaType === "image") {
+    if (!isValidProductPhotoTier(id)) return { error: "Unknown image model." };
+    return { modelId: id };
+  }
+  if (!isValidVideoModelId(id)) return { error: "Unknown video model." };
+  return { modelId: id };
+}
+
+function acceptedModelId(raw: unknown, mediaType: SkillMediaType | null): string | null {
+  if (!mediaType) return null;
+  const parsed = parseSkillModelId(raw ?? null, mediaType);
+  return "modelId" in parsed ? parsed.modelId : null;
 }
 
 export function parseCustomSkillBody(
@@ -255,6 +283,7 @@ function mapRow(row: SkillConfigRow): SkillConfigOverride | null {
     icon: isIconName(row.icon) ? row.icon : null,
     hidden: row.hidden === true,
     ownerProfileId: row.owner_profile_id || null,
+    modelId: acceptedModelId(row.model_id, mediaType),
   };
 }
 
@@ -355,6 +384,7 @@ export function mergeSkill(
     thumb: thumbUrl || base.thumb,
     origin: override.origin === "custom" ? "custom" : "overlay",
     hidden: override.hidden,
+    modelId: override.modelId ?? undefined,
   };
 }
 
@@ -382,6 +412,7 @@ function customSkillFromOverride(
     origin: "custom",
     hidden: override.hidden,
     owned: Boolean(override.ownerProfileId),
+    modelId: override.modelId ?? undefined,
   };
 }
 
@@ -460,6 +491,7 @@ function patchToRow(skillId: string, patch: SkillConfigPatch, updatedByProfileId
   if ("inputs" in patch) row.inputs = patch.inputs;
   if ("icon" in patch) row.icon = patch.icon;
   if ("hidden" in patch) row.hidden = patch.hidden;
+  if ("modelId" in patch) row.model_id = patch.modelId;
   if (updatedByProfileId !== undefined) row.updated_by_profile_id = updatedByProfileId;
   return row;
 }
@@ -603,6 +635,7 @@ export async function createCustomSkill(
     inputs: input.inputs,
     icon: input.icon ?? (input.mediaType === "video" ? "video" : "spark"),
     owner_profile_id: ownerProfileId,
+    model_id: ownerProfileId ? null : (input.modelId ?? null),
   };
   if (updatedByProfileId !== undefined) row.updated_by_profile_id = updatedByProfileId;
 

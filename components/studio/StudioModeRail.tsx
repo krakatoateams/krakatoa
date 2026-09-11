@@ -11,7 +11,7 @@ const MODES: {
   href: string;
   icon: typeof Sparkles;
 }[] = [
-  { id: "agent", label: "Agent", href: "/dashboard", icon: Sparkles },
+  { id: "agent", label: "Skills", href: "/dashboard", icon: Sparkles },
   { id: "image", label: "Image", href: "/tools/photo-v2", icon: ImageIcon },
   { id: "video", label: "Video", href: "/tools/video", icon: Video },
 ];

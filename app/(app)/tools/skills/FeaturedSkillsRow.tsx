@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import {
@@ -18,9 +19,11 @@ const PILL =
 export default function FeaturedSkillsRow({
   activeSkillId,
   onSelectSkill,
+  className = "",
 }: {
   activeSkillId: SkillId | null;
   onSelectSkill: (id: SkillId) => void;
+  className?: string;
 }) {
   const { featured, skillById } = useSkillsCatalog();
   const { ids: favoriteIds } = useSkillFavorites();
@@ -43,7 +46,7 @@ export default function FeaturedSkillsRow({
   }, [favoriteIds, featured, skillById]);
 
   return (
-    <div className="mt-4 flex flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className={`flex flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}>
       {chips.map((skill) => (
         <FeaturedSkillChip
           key={skill.id}
@@ -83,14 +86,25 @@ function FeaturedSkillChip({
     <>
       <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg bg-white/5">
         {skill.thumb ? (
-          <img
-            key={skill.thumb}
-            src={skill.thumb}
-            alt=""
-            width={32}
-            height={32}
-            className="h-8 w-8 object-cover"
-          />
+          skill.thumb.startsWith("/") ? (
+            <Image
+              src={skill.thumb}
+              alt=""
+              width={32}
+              height={32}
+              className="h-8 w-8 object-cover"
+            />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={skill.thumb}
+              src={skill.thumb}
+              alt=""
+              width={32}
+              height={32}
+              className="h-8 w-8 object-cover"
+            />
+          )
         ) : null}
         {skill.badge === "new" ? (
           <span className="absolute left-0.5 top-0.5 rounded bg-N50 px-1 py-px text-[8px] font-bold uppercase leading-none text-N900">

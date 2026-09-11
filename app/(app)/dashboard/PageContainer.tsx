@@ -11,7 +11,7 @@ export default function PageContainer({
   className?: string;
 }) {
   return (
-    <div className={`relative z-10 mx-auto max-w-5xl px-6 py-10 ${className}`}>
+    <div className={`relative z-10 mx-auto max-w-5xl px-6 pb-10 pt-6 md:py-10 ${className}`}>
       {children}
     </div>
   );

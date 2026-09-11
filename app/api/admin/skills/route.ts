@@ -4,6 +4,7 @@ import {
   createCustomSkill,
   listCatalogSkills,
   parseSkillInputs,
+  parseSkillModelId,
   type CreateCustomSkillInput,
 } from "@/lib/skill-configs-db";
 import {
@@ -81,6 +82,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid input slots." }, { status: 400 });
     }
 
+    const parsedModel = parseSkillModelId(body.modelId ?? null, mediaType as SkillMediaType);
+    if ("error" in parsedModel) {
+      return NextResponse.json({ error: parsedModel.error }, { status: 400 });
+    }
+
     const input: CreateCustomSkillInput = {
       title,
       description,
@@ -91,6 +97,7 @@ export async function POST(req: Request) {
       promptRequired,
       mediaType,
       inputs: parsedInputs ?? defaultSkillInputs(mediaType),
+      modelId: parsedModel.modelId,
     };
 
     try {

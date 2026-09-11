@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -22,7 +22,7 @@ import {
  */
 export default function TrendingTemplates() {
   return (
-    <section className="mb-16 grid grid-cols-1 gap-6 md:grid-cols-2">
+    <section className="mb-8 grid grid-cols-1 gap-6 md:mb-16 md:grid-cols-2">
       <TemplateCarousel
         title="Photo try-on"
         templates={VIRTUAL_PRODUCT_TRYON_TEMPLATES}
@@ -45,7 +45,8 @@ export default function TrendingTemplates() {
 
 export function VideoTemplateCarousels() {
   return (
-    <section className="mb-16 grid grid-cols-1 gap-6 md:grid-cols-2">
+    <LazyWhenVisible className="mb-8 md:mb-16" minHeight="32rem">
+    <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
       <div className="min-w-0">
         <TemplateCarousel
           title="Product review templates"
@@ -61,6 +62,41 @@ export function VideoTemplateCarousels() {
         />
       </div>
     </section>
+    </LazyWhenVisible>
+  );
+}
+
+function LazyWhenVisible({
+  children,
+  className = "",
+  minHeight,
+}: {
+  children: ReactNode;
+  className?: string;
+  minHeight: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setShow(true);
+        io.disconnect();
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={className}>
+      {show ? children : <div style={{ minHeight }} aria-hidden />}
+    </div>
   );
 }
 
@@ -111,13 +147,13 @@ function TemplateCarousel({
       </div>
 
       {templates.length === 0 ? (
-        <p className="flex min-h-[17.75rem] items-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-sm text-text-disabled">
+        <p className="flex min-h-[14.25rem] items-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-sm text-text-disabled sm:min-h-[17.75rem]">
           Templates coming soon.
         </p>
       ) : (
         <div
           ref={scrollerRef}
-          className="flex min-h-[17.75rem] snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-h-[14.25rem] snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] sm:min-h-[17.75rem] sm:gap-4 [&::-webkit-scrollbar]:hidden"
         >
           {templates.map((template) => (
             <TemplateCard
@@ -155,7 +191,31 @@ function TemplateCard({
   onUse: () => void;
 }) {
   const thumbs = templateThumbUrls(template);
+  const cardRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    if (!template.videoUrl) return;
+    const el = cardRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setInView(entry.isIntersecting),
+      { rootMargin: "80px", threshold: 0.2 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [template.videoUrl]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (inView) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  }, [inView]);
 
   const handlePreviewEnter = () => {
     const el = videoRef.current;
@@ -172,27 +232,39 @@ function TemplateCard({
 
   return (
     <div
-      className="group relative aspect-[9/16] w-40 shrink-0 snap-start overflow-hidden rounded-xl bg-white/[0.04] sm:w-44"
+      ref={cardRef}
+      className="group relative aspect-[9/16] w-32 shrink-0 snap-start overflow-hidden rounded-xl bg-white/[0.04] sm:w-40 md:w-44"
       onMouseEnter={template.videoUrl ? handlePreviewEnter : undefined}
       onMouseLeave={template.videoUrl ? handlePreviewLeave : undefined}
     >
       {template.videoUrl ? (
-        <video
-          ref={videoRef}
-          src={template.videoUrl}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          aria-label="Trending template preview"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+        inView ? (
+          <video
+            ref={videoRef}
+            src={template.videoUrl}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            poster={template.imageUrl}
+            aria-label="Trending template preview"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : template.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={template.imageUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : null
       ) : template.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={template.imageUrl}
           alt=""
+          loading="lazy"
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : null}
@@ -218,7 +290,7 @@ function TemplateCard({
         <button
           type="button"
           onClick={onUse}
-          className="flex h-10 w-full items-center justify-center rounded-xl bg-bg-static-white px-3 text-sm font-bold capitalize tracking-normal text-text-static-black shadow-lg shadow-N0/20 transition-all hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-9 w-full items-center justify-center whitespace-nowrap rounded-xl bg-bg-static-white px-2 text-[11px] font-bold capitalize tracking-normal text-text-static-black shadow-lg shadow-N0/20 transition-all hover:brightness-95 sm:h-10 sm:px-3 sm:text-sm disabled:cursor-not-allowed disabled:opacity-40"
         >
           Use template
         </button>

@@ -550,7 +550,7 @@ export default function ImageToVideoComposer({
         </StudioModelPanel>
 
         {/* Generate (mobile — below the form card) */}
-        <div className="mt-3 flex flex-col gap-3 lg:hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
           <DevBlankTestToggle
             isAdmin={isAdmin}
             enabled={devBlank}

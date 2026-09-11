@@ -208,6 +208,7 @@ export function RefGroup({
   disabled,
   disabledReason,
   bare = false,
+  fluid = false,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -219,13 +220,17 @@ export function RefGroup({
   disabledReason?: string;
   /** Render without the card wrapper / header / count — for inline use beside a prompt. */
   bare?: boolean;
+  /** Full-width empty button on mobile; uploaded tiles stay compact. */
+  fluid?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const full = group.items.length >= group.max;
   const addDisabled = disabled || full;
+  const emptyFluid = fluid && group.items.length === 0;
+  const addLabel = /^add /i.test(label) ? label : `Add ${label.toLowerCase()}`;
 
   return (
-    <div className={bare ? "" : "rounded-2xl bg-white/[0.03] p-3"}>
+    <div className={bare ? (fluid ? "min-w-0 w-full flex-1" : "") : "rounded-2xl bg-white/[0.03] p-3"}>
       {!bare && (
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-text-secondary sm:text-sm">
@@ -246,7 +251,7 @@ export function RefGroup({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className={`flex flex-wrap gap-2 ${emptyFluid ? "w-full" : ""}`}>
         {group.items.map((it) => (
           <RefTile key={it.id} item={it} onRemove={() => group.remove(it.id)} />
         ))}
@@ -255,11 +260,24 @@ export function RefGroup({
             type="button"
             disabled={addDisabled}
             onClick={() => inputRef.current?.click()}
-            title={disabled ? disabledReason : bare ? hint ?? `Add ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
-            className="group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
+            title={disabled ? disabledReason : emptyFluid ? addLabel : bare ? hint ?? addLabel : addLabel}
+            className={
+              emptyFluid
+                ? "group flex h-16 w-full flex-1 flex-row items-center justify-center gap-2 rounded-radius-xl bg-white/5 text-xs font-semibold normal-case tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
+                : "group flex h-16 w-20 shrink-0 flex-col items-start justify-between rounded-radius-sm bg-white/5 p-2 text-left text-xs font-semibold normal-case leading-tight tracking-wide text-text-secondary transition-colors hover:bg-white/10 hover:text-N900 disabled:cursor-not-allowed disabled:opacity-30"
+            }
           >
-            {bare ? <span className="text-text-secondary">{icon}</span> : <Plus className="h-4 w-4" />}
-            <span>{bare ? label : "Add"}</span>
+            {emptyFluid ? (
+              <>
+                <Plus className="h-5 w-5" />
+                <span>{addLabel}</span>
+              </>
+            ) : (
+              <>
+                {bare ? <span className="text-text-secondary">{icon}</span> : <Plus className="h-4 w-4" />}
+                <span>{bare ? label : "Add"}</span>
+              </>
+            )}
           </button>
         )}
       </div>
