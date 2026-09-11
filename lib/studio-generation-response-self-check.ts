@@ -107,6 +107,9 @@ export async function studioGenerationResponseSelfCheck(): Promise<void> {
   const success = classifyStudioGenerationResponse(200, { videoUrl: "https://x/v.mp4" });
   assert(success.kind === "success" && success.data.videoUrl === "https://x/v.mp4", "200 → success");
 
+  const deferred = classifyStudioGenerationResponse(202, { status: "processing" });
+  assert(deferred.kind === "in_progress", "202 processing stays non-terminal");
+
   assert(classifyStudioGenerationResponse(409, { code: "GENERATION_CANCELLED" }).kind === "cancelled", "cancelled");
 
   const credits = classifyStudioGenerationResponse(402, { currentBalance: 1 }, { fallbackCost: 16 });

@@ -121,8 +121,8 @@ export function classifyStudioGenerationResponse(
   data: StudioGenerationResponseData,
   options: ClassifyStudioGenerationOptions = {},
 ): StudioGenerationOutcome {
-  if (status >= 200 && status < 300) {
-    return { kind: "success", data };
+  if (status === 202 || data.status === "processing") {
+    return { kind: "in_progress", message: STUDIO_GENERATION_IN_PROGRESS_MESSAGE };
   }
 
   if (data.code === "GENERATION_CANCELLED") {
@@ -165,6 +165,10 @@ export function classifyStudioGenerationResponse(
       kind: "idempotency_key_required",
       message: describeStudioIdempotencyError(status, data)!,
     };
+  }
+
+  if (status >= 200 && status < 300) {
+    return { kind: "success", data };
   }
 
   const fallback = options.errorFallback ?? STUDIO_GENERATION_ERROR_FALLBACK;

@@ -1,4 +1,7 @@
-import { STUDIO_GENERATION_RECOVERABLE_FALLBACK } from "./studio-generation-response";
+import {
+  STUDIO_GENERATION_IN_PROGRESS_MESSAGE,
+  STUDIO_GENERATION_RECOVERABLE_FALLBACK,
+} from "./studio-generation-response";
 import {
   applyStudioGenerationOutcome,
   runStudioGenerationResume,
@@ -29,15 +32,21 @@ function collectEffects(): StudioGenerationSubmitEffects & {
   previewCalls: unknown[];
   historyCalls: number;
   creditCalls: number;
+  clearErrorCalls: number;
 } {
   const effects: StudioGenerationSubmitEffects & {
     previewCalls: unknown[];
     historyCalls: number;
     creditCalls: number;
+    clearErrorCalls: number;
   } = {
     previewCalls: [],
     historyCalls: 0,
     creditCalls: 0,
+    clearErrorCalls: 0,
+    clearError() {
+      effects.clearErrorCalls += 1;
+    },
     refetchCredits() {
       effects.creditCalls += 1;
     },
@@ -85,6 +94,7 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
     );
     assert(result.kind === "cancelled", "cancelled outcome");
     assert(attempt.settled === false, "cancelled settles false");
+    assert(effects.clearErrorCalls === 1, "cancelled clears stale errors");
     assert(effects.creditCalls === 1, "cancelled refetches credits");
     assert(effects.previewCalls.length === 0, "cancelled skips preview");
   }
@@ -160,6 +170,67 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
     assert(polled, "202 triggers awaitCompletion");
     assert(result.kind === "success", "202 completion → success");
     assert(attempt.settled === true, "202 completion settles true");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(202, JSON.stringify({ status: "processing" })),
+      "key-without-poller",
+      attempt,
+      effects,
+    );
+    assert(
+      result.kind === "error" && result.message === STUDIO_GENERATION_IN_PROGRESS_MESSAGE,
+      "202 without poller remains in progress",
+    );
+    assert(attempt.settled === false, "202 without poller settles false");
+    assert(effects.previewCalls.length === 0, "202 without poller skips preview");
+    assert(effects.historyCalls === 0, "202 without poller skips history refresh");
+    assert(effects.creditCalls === 0, "202 without poller skips credit refresh");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(202, JSON.stringify({ status: "processing" })),
+      "key-recoverable-poll",
+      attempt,
+      effects,
+      {
+        awaitCompletion: async () => ({
+          recoverable: true,
+          jobId: "job-after-poll",
+          error: "Final upload needs retry",
+        }),
+      },
+    );
+    assert(
+      result.kind === "recoverable" && result.jobId === "job-after-poll",
+      "polled recoverable payload is classified",
+    );
+    assert(attempt.settled === false, "polled recoverable settles false");
+    assert(effects.previewCalls.length === 0, "polled recoverable skips success effects");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(202, JSON.stringify({ status: "processing" })),
+      "key-cancelled-poll",
+      attempt,
+      effects,
+      {
+        awaitCompletion: async () => ({ code: "GENERATION_CANCELLED" }),
+      },
+    );
+    assert(result.kind === "cancelled", "polled cancellation is classified");
+    assert(attempt.settled === false, "polled cancellation settles false");
+    assert(effects.clearErrorCalls === 1, "polled cancellation clears stale errors");
+    assert(effects.creditCalls === 1, "polled cancellation refreshes credits");
   }
 
   {

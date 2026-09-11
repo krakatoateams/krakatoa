@@ -11,7 +11,7 @@ import {
   type StudioGenerationSubmitOptions,
 } from "@/lib/studio-generation-submit-core";
 
-export type UseStudioGenerationSubmitConfig = StudioGenerationSubmitEffects & {
+export type UseStudioGenerationSubmitConfig = Omit<StudioGenerationSubmitEffects, "clearError"> & {
   resumeStillFailingMessage?: string;
 };
 
@@ -35,11 +35,12 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
   const effects = useMemo<StudioGenerationSubmitEffects>(
     () => ({
+      clearError,
       refetchCredits,
       refreshHistory,
       openPreviewFromResponse,
     }),
-    [refetchCredits, refreshHistory, openPreviewFromResponse],
+    [clearError, refetchCredits, refreshHistory, openPreviewFromResponse],
   );
 
   const submit: StudioGenerationSubmitFn = useCallback(
@@ -74,6 +75,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
       } catch (err: unknown) {
         if (isStudioGenerationCancelledError(err)) {
           attempt.settle(false);
+          effects.clearError();
           refetchCredits();
           return false;
         }

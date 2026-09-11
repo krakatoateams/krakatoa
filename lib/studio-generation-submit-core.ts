@@ -9,6 +9,7 @@ import {
 } from "./studio-generation-response";
 
 export type StudioGenerationSubmitEffects = {
+  clearError: () => void;
   refetchCredits: () => void;
   refreshHistory: () => void;
   openPreviewFromResponse: (data: unknown) => void | Promise<void>;
@@ -97,6 +98,7 @@ export async function applyStudioGenerationOutcome(
       return applyTerminalSuccess(data, attempt, effects, options);
     case "cancelled":
       attempt.settle(false);
+      effects.clearError();
       effects.refetchCredits();
       return { kind: "cancelled" };
     case "recoverable":
@@ -129,14 +131,14 @@ export async function runStudioGenerationSubmit(
 ): Promise<StudioGenerationSubmitResult> {
   const data = await parseStudioGenerationResponse(response);
   const status = response.status;
+  const isDeferred = status === 202 || data.status === "processing";
 
-  if (
-    response.ok &&
-    options.awaitCompletion &&
-    (status === 202 || data.status === "processing")
-  ) {
-    const completed = await options.awaitCompletion(data, idempotencyKey);
-    return applyTerminalSuccess(completed, attempt, effects, options);
+  if (response.ok && isDeferred) {
+    if (options.awaitCompletion) {
+      const completed = await options.awaitCompletion(data, idempotencyKey);
+      return applyStudioGenerationOutcome(200, completed, attempt, effects, options);
+    }
+    return applyStudioGenerationOutcome(status, data, attempt, effects, options);
   }
 
   if (!response.ok) {
