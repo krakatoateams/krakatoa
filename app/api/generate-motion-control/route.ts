@@ -56,6 +56,7 @@ import { resolveExecutionBackendForJobType } from "@/lib/generation-workflows/fe
 import { attachWorkflowRun } from "@/lib/generation-workflows/workflow-db";
 import { motionControlGenerationWorkflow } from "@/lib/generation-workflows/motion-control-workflow";
 import type { MotionControlWorkflowParams } from "@/lib/generation-workflows/motion-control-workflow-types";
+import { settleMotionControlRouteFailure } from "@/lib/generation-workflows/motion-control-route-failure";
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
 export const maxDuration = 300;
@@ -84,6 +85,8 @@ export async function POST(req: Request) {
   let metered: MeteredAttemptHandle | null = null;
   let predictionStarted = false;
   let workflowStarted = false;
+  let workflowStartAttempted = false;
+  let executionBackend: ReturnType<typeof resolveExecutionBackendForJobType> = "legacy";
   const tempRefPaths: string[] = [];
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
@@ -253,7 +256,7 @@ export async function POST(req: Request) {
       image: imageRef.url,
       video: videoRef.url,
     });
-    const executionBackend = resolveExecutionBackendForJobType("video_motion_control");
+    executionBackend = resolveExecutionBackendForJobType("video_motion_control");
     const isWorkflowBackend = executionBackend === "workflow";
     const requiredCredits = devBlank
       ? 0
@@ -503,8 +506,9 @@ export async function POST(req: Request) {
         `[Motion Control] Starting durable workflow (mode=${mode}, orientation=${characterOrientation})...`,
       );
 
-      const run = await start(motionControlGenerationWorkflow, [workflowParams]);
+      workflowStartAttempted = true;
       workflowStarted = true;
+      const run = await start(motionControlGenerationWorkflow, [workflowParams]);
       try {
         await attachWorkflowRun({
           profileId: profileId!,
@@ -573,21 +577,67 @@ export async function POST(req: Request) {
         : null);
     if (handle) {
       if (videoAssetId) handle.assetIds = [videoAssetId];
-      const finished = await finishMeteredAttempt(handle, {
-        kind: "terminal",
-        cancelled,
-        pricingMissing,
-        rawMessage,
-        currentStepId,
-        clearCurrentStep: () => {
-          currentStepId = null;
-        },
-        genericClientError: pricingMissing
-          ? undefined
-          : "Motion control generation failed.",
-      });
-      if (finished.http) {
-        return NextResponse.json(finished.http.body, { status: finished.http.status });
+      if (executionBackend === "workflow") {
+        if (handle.userId && handle.jobId && handle.generationRequestId) {
+          try {
+            const settled = await settleMotionControlRouteFailure({
+              executionBackend: "workflow",
+              workflowStartAttempted,
+              workflowFailure: {
+                profileId: handle.profileId,
+                userId: handle.userId,
+                jobId: handle.jobId,
+                generationRequestId: handle.generationRequestId,
+                errorJson: { message: rawMessage },
+              },
+              finishLegacy: async () => {
+                throw new Error("Workflow backend cannot use legacy settlement.");
+              },
+            });
+            if (settled.kind === "workflow_start_ambiguous") {
+              return NextResponse.json(
+                {
+                  status: "processing",
+                  code: "WORKFLOW_START_STATE_UNKNOWN",
+                  jobId: handle.jobId,
+                },
+                { status: 202 },
+              );
+            }
+          } catch (settlementError) {
+            console.error(
+              "[motion-control] canonical workflow failure settlement failed:",
+              settlementError,
+            );
+          }
+        } else {
+          console.error(
+            "[motion-control] workflow failure is missing canonical settlement identifiers.",
+          );
+        }
+      } else {
+        const settled = await settleMotionControlRouteFailure({
+          executionBackend: "legacy",
+          finishLegacy: () =>
+            finishMeteredAttempt(handle, {
+              kind: "terminal",
+              cancelled,
+              pricingMissing,
+              rawMessage,
+              currentStepId,
+              clearCurrentStep: () => {
+                currentStepId = null;
+              },
+              genericClientError: pricingMissing
+                ? undefined
+                : "Motion control generation failed.",
+            }),
+        });
+        if (settled.kind === "legacy" && settled.result.http) {
+          return NextResponse.json(settled.result.http.body, {
+            status: settled.result.http.status,
+          });
+        }
       }
     }
     return NextResponse.json(
