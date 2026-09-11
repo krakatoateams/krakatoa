@@ -11,25 +11,12 @@ quality gate passes. It pauses for the stop conditions in the runbook.
 
 ## Active slice
 
-- Queue item: Identity
-- Slice: NextAuth configuration and session resolution
-- Base: `abbf1496dd7b7038aecf276b9ffa87683e10d8bb`
-- Branch: `audit-repo/identity-session-resolution`
-- Status: paused before finding classification and fixes
-- Blocker: Supabase MCP denied both `execute_sql` and `list_migrations` for
-  project `ybfmllqcvvexldsteuaw`; live FK targets and legacy-ID remap state
-  cannot be verified against the repository's deferred migration script.
-- Review checkpoint: Standards and behavior reviews completed. Pending
-  validation covers password-sign-in client resynchronization and redirect
-  sanitization, middleware redirect cookie propagation, case-insensitive
-  migration matching, and repository/live identity-FK alignment.
-- Resume: grant the configured Supabase MCP account read access to the project,
-  then run `/audit-repo Identity`.
+None.
 
 ## Queue
 
-- [ ] Identity: authentication and session resolution
-  - [ ] Supabase Auth session lifecycle and product-profile resolution
+- [x] Identity: authentication and session resolution
+  - [x] Supabase Auth session lifecycle and product-profile resolution
 - [ ] Authorization: admin guards and service-role ownership checks
 - [ ] Credits: ledger, pricing, bonus offers, and refund policy
 - [ ] Payments: DOKU checkout, callbacks, signatures, and replay handling
@@ -38,6 +25,9 @@ quality gate passes. It pauses for the stop conditions in the runbook.
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
 - [ ] Database: RLS, RPC grants, constraints, and security advisors
+  - [ ] Reconcile the live Supabase Auth FK cutover with an idempotent
+    `supabase/migrations/` record; production is aligned but migration `003`
+    and the deferred script do not reproduce that final state safely.
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
@@ -53,6 +43,33 @@ quality gate passes. It pauses for the stop conditions in the runbook.
 - Verification: focused generation/studio tests, lint, production build, and
   repeated security reviews.
 - Result: no unresolved blocking Standards, Spec, or security finding in scope.
+
+### Identity: Supabase Auth session and profile resolution
+
+- Date: 2026-09-11
+- Base: `abbf1496dd7b7038aecf276b9ffa87683e10d8bb`
+- Final commit: `7c6893edfa9e881f1fbbbf3bdc928947aaf8917f`
+- Scope: Supabase browser/server clients, auth context, password and OAuth entry
+  routes, middleware session refresh, safe redirects, session-user and product
+  profile resolution, login lockout evidence, and live identity-ID alignment.
+- Findings: fixed password sign-in auth-context desynchronization; blocked
+  protocol-relative and backslash-normalized external redirects; preserved
+  Supabase auth cookies and anti-cache headers on middleware redirects; marked
+  auth entry responses private/no-store; corrected stale NextAuth documentation.
+- Accepted risks: `createSupabaseAuthServer()` cannot attach response headers
+  directly, but its current readers are dynamic through `cookies()` and the
+  session-establishing routes explicitly use private/no-store. Provider
+  enumeration and fail-open lockout storage remain documented, rate-limited
+  product tradeoffs.
+- Follow-up: formalize the already-live `auth.users` FK cutover during the
+  Database audit; live read-only checks found 21/21 profiles and 158/158
+  creations aligned, no legacy-ID rows, and no case-only/duplicate profile
+  emails.
+- Verification: `npm run test:auth`, `npm run test:video-studio`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ## Deferred
 
