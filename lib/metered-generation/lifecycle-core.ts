@@ -491,7 +491,7 @@ export async function finishMeteredAttemptWithOps(
     hasProfileId: true,
     hasJobId: !!handle.jobId,
     jobId: handle.jobId,
-    hasJobType: true,
+    hasJobType: !!handle.refundJobType,
     hasGenerationRequestId: !!handle.generationRequestId,
     hasAsset: handle.assetIds.length > 0,
     skipFailAsset: terminal ? outcome.skipFailAsset : false,

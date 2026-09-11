@@ -3,6 +3,7 @@ import {
   finishMeteredAttemptWithOps,
   type MeteredLifecycleOps,
 } from "./lifecycle-core";
+import { resolveMeteredSettlement } from "./settlement-pure";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -272,6 +273,60 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
   assert(
     terminalLog.join(",") === "resolveMeteredSettlement,persistMeteredSettlementLegacy",
     `terminal finish: ${terminalLog.join(",")}`,
+  );
+
+  const missingJobTypeCapture: {
+    refundEligible?: boolean;
+    refundJobType?: unknown;
+  } = {};
+  const missingJobTypeOps = makeFakeOps([]);
+  missingJobTypeOps.resolveMeteredSettlement = resolveMeteredSettlement;
+  missingJobTypeOps.persistMeteredSettlementLegacy = async (plan, ctx) => {
+    missingJobTypeCapture.refundEligible = plan.refundEligible;
+    missingJobTypeCapture.refundJobType = ctx.refundJobType;
+  };
+  await finishMeteredAttemptWithOps(
+    { ...handle, refundJobType: "" },
+    {
+      kind: "terminal",
+      cancelled: false,
+      rawMessage: "boom",
+      settlementOptions: { requireJobTypeForRefund: true },
+    },
+    missingJobTypeOps,
+  );
+  assert(
+    missingJobTypeCapture.refundEligible === false,
+    "production finish path blocks refund without job type",
+  );
+
+  const validJobTypeCapture: {
+    refundEligible?: boolean;
+    refundJobType?: unknown;
+  } = {};
+  const validJobTypeOps = makeFakeOps([]);
+  validJobTypeOps.resolveMeteredSettlement = resolveMeteredSettlement;
+  validJobTypeOps.persistMeteredSettlementLegacy = async (plan, ctx) => {
+    validJobTypeCapture.refundEligible = plan.refundEligible;
+    validJobTypeCapture.refundJobType = ctx.refundJobType;
+  };
+  await finishMeteredAttemptWithOps(
+    handle,
+    {
+      kind: "terminal",
+      cancelled: false,
+      rawMessage: "boom",
+      settlementOptions: { requireJobTypeForRefund: true },
+    },
+    validJobTypeOps,
+  );
+  assert(
+    validJobTypeCapture.refundEligible === true,
+    "production finish path allows refund with job type",
+  );
+  assert(
+    validJobTypeCapture.refundJobType === "product_photo",
+    "production finish path preserves the refund idempotency namespace",
   );
 
   const deferred = await finishMeteredAttemptWithOps(handle, { kind: "deferred" }, makeFakeOps([]));

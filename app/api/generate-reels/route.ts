@@ -692,7 +692,7 @@ export async function POST(req: Request) {
             creditsSpent,
             creditsAmount,
             assetIds: finalAssetId ? [finalAssetId] : [],
-            refundJobType: jobType ?? "reels",
+            refundJobType: jobType ?? "",
           }
         : null);
     if (handle) {
