@@ -46,13 +46,44 @@ function ModelMarquee() {
  * between modes — passed in rather than duplicating the video/marquee
  * markup per mode.
  */
-function PromoVisual({ title, subtitle }: { title: string; subtitle: string }) {
+/**
+ * Splits `title` on the first occurrence of `accent` and wraps that piece in
+ * the brand color, so the headline carries one colored hook phrase instead
+ * of being a single flat color throughout — the same technique the Buzzy
+ * reference used on its own brand name.
+ */
+function AccentedTitle({ title, accent }: { title: string; accent?: string }) {
+  const i = accent ? title.indexOf(accent) : -1;
+  if (i < 0) return <>{title}</>;
+  return (
+    <>
+      {title.slice(0, i)}
+      <span className="text-brand-primary">{title.slice(i, i + accent!.length)}</span>
+      {title.slice(i + accent!.length)}
+    </>
+  );
+}
+
+function PromoVisual({
+  title,
+  titleAccent,
+  subtitle,
+}: {
+  title: string;
+  titleAccent?: string;
+  subtitle: string;
+}) {
   return (
     <div className="relative h-full min-h-[320px] w-full overflow-hidden">
-      <VideoBackdrop srcs={SHOWREEL_SRCS} overlayClassName="bg-N0/15" />
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-N0/95 via-N0/60 to-transparent px-6 pb-6 pt-24">
-        <h2 className="font-display text-xl font-semibold text-N900 sm:text-2xl">{title}</h2>
-        <p className="mt-1 text-body-3 text-N900/70">{subtitle}</p>
+      <VideoBackdrop srcs={SHOWREEL_SRCS} overlayClassName="bg-N0/30" />
+      {/* Darker, taller gradient than a typical scrim: the showreel is busy
+          footage, and title/subtitle need to read clearly over any frame of
+          it, not just the darkest ones. */}
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-N0 via-N0/85 to-transparent px-6 pb-6 pt-32">
+        <h2 className="font-display text-2xl font-bold leading-tight tracking-tight text-N900 sm:text-3xl">
+          <AccentedTitle title={title} accent={titleAccent} />
+        </h2>
+        <p className="mt-1.5 text-body-3 text-N900/85">{subtitle}</p>
         <div className="mt-4">
           <ModelMarquee />
         </div>
@@ -61,22 +92,28 @@ function PromoVisual({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
-const COPY: Record<"signin" | "signup" | "forgot-password", { title: string; subtitle: string }> = {
+const COPY: Record<
+  "signin" | "signup" | "forgot-password",
+  { title: string; titleAccent?: string; subtitle: string }
+> = {
   signup: {
     title: "Sign up and generate for free",
+    titleAccent: "for free",
     subtitle: "New accounts get one free video generation, no typing needed, on us.",
   },
   signin: {
     title: "See what Kelolako can make",
+    titleAccent: "Kelolako",
     subtitle: "From script to a finished, captioned video: real output, real models.",
   },
   "forgot-password": {
     title: "See what Kelolako can make",
+    titleAccent: "Kelolako",
     subtitle: "From script to a finished, captioned video: real output, real models.",
   },
 };
 
 export function AuthPromoPanel({ mode }: { mode: "signin" | "signup" | "forgot-password" }) {
-  const { title, subtitle } = COPY[mode];
-  return <PromoVisual title={title} subtitle={subtitle} />;
+  const { title, titleAccent, subtitle } = COPY[mode];
+  return <PromoVisual title={title} titleAccent={titleAccent} subtitle={subtitle} />;
 }
