@@ -22,6 +22,14 @@ export function composerKeyForCreationType(id: VideoCreationType): VideoComposer
   return id as VideoComposerKey;
 }
 
+/** Select exactly one composer factory so inactive modes stay unmounted. */
+export function selectActiveVideoComposer<T>(
+  activeType: VideoCreationType,
+  composers: Readonly<Record<VideoCreationType, T>>
+): T {
+  return composers[activeType];
+}
+
 export type CharacterSource = "upload" | "library";
 export type LibraryCharacter = { id: string; url: string; title: string };
 

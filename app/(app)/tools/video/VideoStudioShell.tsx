@@ -20,7 +20,11 @@ import MotionControlComposer from "./composers/MotionControlComposer";
 import StoryboardToVideoComposer from "./composers/StoryboardToVideoComposer";
 import ReelsCreatorComposer from "./composers/ReelsCreatorComposer";
 import { loadMentionAssetsFromApi } from "./composers/shared";
-import { CREATION_TYPES, composerKeyForCreationType } from "./composers/types";
+import {
+  CREATION_TYPES,
+  composerKeyForCreationType,
+  selectActiveVideoComposer,
+} from "./composers/types";
 
 export default function VideoStudioShell({
   historyRefreshKey,
@@ -151,6 +155,84 @@ export default function VideoStudioShell({
     refetchCredits();
   }, [onHistoryRefresh, refetchCredits]);
 
+  const renderActiveComposer = selectActiveVideoComposer(creationType, {
+    text2video: () => (
+      <TextToVideoComposer
+        initialPrompt={initialType === "text2video" ? initialPrompt : null}
+        mentionAssets={mentionAssets}
+        creationTypes={availableCreationTypes}
+        isAdmin={isAdmin}
+        devBlank={devBlank}
+        onDevBlankChange={setDevBlank}
+        composerEnablement={composerEnablement}
+        onSelectCreation={handleCreationType}
+        onGenerated={onGenerated}
+      />
+    ),
+    viral_template: () => (
+      <ViralTemplateComposer
+        initialTemplate={initialViralTemplate}
+        creationTypes={availableCreationTypes}
+        isAdmin={isAdmin}
+        devBlank={devBlank}
+        onDevBlankChange={setDevBlank}
+        composerEnablement={composerEnablement}
+        onSelectCreation={handleCreationType}
+        onGenerated={onGenerated}
+      />
+    ),
+    image2video: () => (
+      <ImageToVideoComposer
+        initialStartImageCreationId={initialStartImageCreationId}
+        initialPrompt={initialPrompt}
+        mentionAssets={mentionAssets}
+        creationTypes={availableCreationTypes}
+        isAdmin={isAdmin}
+        devBlank={devBlank}
+        onDevBlankChange={setDevBlank}
+        composerEnablement={composerEnablement}
+        onSelectCreation={handleCreationType}
+        onGenerated={onGenerated}
+      />
+    ),
+    motion_control: () => (
+      <MotionControlComposer
+        initialTemplateVideo={initialTemplateVideo}
+        creationTypes={availableCreationTypes}
+        isAdmin={isAdmin}
+        devBlank={devBlank}
+        onDevBlankChange={setDevBlank}
+        composerEnablement={composerEnablement}
+        onSelectCreation={handleCreationType}
+        onGenerated={onGenerated}
+      />
+    ),
+    storyboard: () => (
+      <StoryboardToVideoComposer
+        initialStoryboardId={initialStoryboardId}
+        creationTypes={availableCreationTypes}
+        isAdmin={isAdmin}
+        devBlank={devBlank}
+        onDevBlankChange={setDevBlank}
+        composerEnablement={composerEnablement}
+        onSelectCreation={handleCreationType}
+        onGenerated={onGenerated}
+      />
+    ),
+    "reels-creator": () =>
+      isAdmin ? (
+        <ReelsCreatorComposer
+          creationTypes={availableCreationTypes}
+          isAdmin={isAdmin}
+          devBlank={devBlank}
+          onDevBlankChange={setDevBlank}
+          composerEnablement={composerEnablement}
+          onSelectCreation={handleCreationType}
+          onGenerated={onGenerated}
+        />
+      ) : null,
+  });
+
   return (
     <div className="min-h-screen text-text-primary selection:bg-white/20">
       <div className="relative z-10 mx-auto max-w-5xl px-6 pb-10 pt-6 md:py-10">
@@ -160,85 +242,7 @@ export default function VideoStudioShell({
           </h1>
         </div>
 
-        <div className={creationType === "text2video" ? undefined : "hidden"}>
-          <TextToVideoComposer
-            initialPrompt={initialType === "text2video" ? initialPrompt : null}
-            mentionAssets={mentionAssets}
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        </div>
-
-        {creationType === "viral_template" && (
-          <ViralTemplateComposer
-            initialTemplate={initialViralTemplate}
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        )}
-
-        {creationType === "image2video" && (
-          <ImageToVideoComposer
-            initialStartImageCreationId={initialStartImageCreationId}
-            initialPrompt={initialPrompt}
-            mentionAssets={mentionAssets}
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        )}
-
-        {creationType === "motion_control" && (
-          <MotionControlComposer
-            initialTemplateVideo={initialTemplateVideo}
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        )}
-
-        {creationType === "storyboard" && (
-          <StoryboardToVideoComposer
-            initialStoryboardId={initialStoryboardId}
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        )}
-
-        {creationType === "reels-creator" && isAdmin && (
-          <ReelsCreatorComposer
-            creationTypes={availableCreationTypes}
-            isAdmin={isAdmin}
-            devBlank={devBlank}
-            onDevBlankChange={setDevBlank}
-            composerEnablement={composerEnablement}
-            onSelectCreation={handleCreationType}
-            onGenerated={onGenerated}
-          />
-        )}
+        {renderActiveComposer()}
 
         {status === "authenticated" && (
           <div className="mt-0 lg:mt-[120px]">
