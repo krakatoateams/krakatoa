@@ -97,6 +97,7 @@ keeps only the rules needed on most engineering tasks.
 
 ## Key references
 
+- Code/security audits: run `/audit-repo`; see `docs/agents/code-security-audit-runbook.md`.
 - Generation lifecycle: `docs/generation/`
 - Supabase egress: `docs/ops/supabase-egress.md`
 - Admin configuration: `docs/admin/admin-config-v2-plan.md`
