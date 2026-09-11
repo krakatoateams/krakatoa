@@ -3,15 +3,13 @@ import { createReplicateClient, createPredictionWithRetry } from "@/lib/replicat
 import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, failJobStep } from "@/lib/job-steps-db";
-import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
+import { createJob, startJob } from "@/lib/jobs-db";
+import { createJobStep } from "@/lib/job-steps-db";
 import {
-  spendCredits,
-  refundCredits,
-  getWallet,
-  InsufficientCreditsError,
-} from "@/lib/credits-db";
+  beginMeteredAttempt,
+  finishMeteredAttempt,
+  type MeteredAttemptHandle,
+} from "@/lib/metered-generation/lifecycle";
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
@@ -49,9 +47,7 @@ import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
-  beginGenerationRequest,
   attachGenerationRequestJob,
-  finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { motionControlGenerationVideoUrl } from "@/lib/trending-templates";
@@ -85,6 +81,7 @@ export async function POST(req: Request) {
   let creditsSpent = false;
   let creditsAmount = 0;
   let generationRequestId: string | null = null;
+  let metered: MeteredAttemptHandle | null = null;
   let predictionStarted = false;
   let workflowStarted = false;
   const tempRefPaths: string[] = [];
@@ -256,122 +253,94 @@ export async function POST(req: Request) {
       image: imageRef.url,
       video: videoRef.url,
     });
-    const begin = await beginGenerationRequest({
-      profileId: profileId!,
-      idempotencyKey: idemKey,
-      routeKey: "generate_motion_control",
-      toolKey: "reels",
-      requestHash,
-    });
-    if (begin.action === "conflict") {
-      return NextResponse.json(
-        {
-          error: "This idempotency key was already used with a different request.",
-          code: "IDEMPOTENCY_CONFLICT",
-        },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "in_progress") {
-      return NextResponse.json(
-        { status: "processing", code: "GENERATION_IN_PROGRESS" },
-        { status: 202 },
-      );
-    }
-    if (begin.action === "replay") {
-      return NextResponse.json(begin.response);
-    }
-    generationRequestId = begin.id;
-
     const executionBackend = resolveExecutionBackendForJobType("video_motion_control");
     const isWorkflowBackend = executionBackend === "workflow";
-
-    // ---- Platform job (workflow requires persisted job+request before spend) ----
-    if (isWorkflowBackend) {
-      const job = await createJob({
-        profileId: profileId!,
-        tool: "reels",
-        jobType: "video_motion_control",
-        executionBackend,
-        provider: resolvedModel.provider,
-        model: resolvedModel.model,
-        input: {
-          modelId,
-          mode,
-          characterOrientation,
-          keepOriginalSound,
-          billedDuration,
-          pricingKey,
-          prompt,
-          provider: resolvedModel.provider,
-          providerModel: resolvedModel.model,
-          tempRefPaths: [...tempRefPaths],
-          generationRequestId: generationRequestId ?? undefined,
-        } satisfies MotionControlJobInput,
-      });
-      jobId = job.id;
-      await startJob(profileId!, jobId);
-      await attachGenerationRequestJob({
-        id: generationRequestId!,
-        profileId: profileId!,
-        jobId: job.id,
-      });
-    } else {
-      const job = await safe("createJob", () =>
-        createJob({
-          profileId: profileId!,
-          tool: "reels",
-          jobType: "video_motion_control",
-          executionBackend,
-          provider: resolvedModel.provider,
-          model: resolvedModel.model,
-          input: {
-            modelId,
-            mode,
-            characterOrientation,
-            keepOriginalSound,
-            billedDuration,
-            pricingKey,
-            prompt,
-            provider: resolvedModel.provider,
-            providerModel: resolvedModel.model,
-            tempRefPaths: [...tempRefPaths],
-            generationRequestId: generationRequestId ?? undefined,
-          } satisfies MotionControlJobInput,
-        }),
-      );
-      if (job) {
-        jobId = job.id;
-        await safe("startJob", () => startJob(profileId!, jobId!));
-        if (generationRequestId) {
-          await safe("attachJob", () =>
-            attachGenerationRequestJob({
-              id: generationRequestId!,
-              profileId: profileId!,
-              jobId: job.id,
-            }),
-          );
-        }
-      }
-    }
-
-    if (isWorkflowBackend && (!jobId || !generationRequestId)) {
-      throw new Error("Workflow motion control requires a persisted job and generation request.");
-    }
-
-    // ---- Credit spend (BUSINESS LOGIC — before any provider call) ----
     const requiredCredits = devBlank
       ? 0
       : await getVideoCredits({ pricingKey, durationSec: billedDuration });
-    if (!devBlank) {
-      try {
-        await spendCredits({
-        profileId: profileId!,
+    const beginResult = await beginMeteredAttempt({
+      profileId: profileId!,
+      userId,
+      idempotency: {
+        key: idemKey,
+        routeKey: "generate_motion_control",
+        toolKey: "reels",
+        requestHash,
+      },
+      earlyExits: {
+        inProgress: {
+          status: 202,
+          body: { status: "processing", code: "GENERATION_IN_PROGRESS" },
+        },
+      },
+      createJobFn: async (genReqId) => {
+        if (isWorkflowBackend) {
+          const job = await createJob({
+            profileId: profileId!,
+            tool: "reels",
+            jobType: "video_motion_control",
+            executionBackend,
+            provider: resolvedModel.provider,
+            model: resolvedModel.model,
+            input: {
+              modelId,
+              mode,
+              characterOrientation,
+              keepOriginalSound,
+              billedDuration,
+              pricingKey,
+              prompt,
+              provider: resolvedModel.provider,
+              providerModel: resolvedModel.model,
+              tempRefPaths: [...tempRefPaths],
+              generationRequestId: genReqId,
+            } satisfies MotionControlJobInput,
+          });
+          await startJob(profileId!, job.id);
+          await attachGenerationRequestJob({
+            id: genReqId,
+            profileId: profileId!,
+            jobId: job.id,
+          });
+          return job.id;
+        }
+        const job = await safe("createJob", () =>
+          createJob({
+            profileId: profileId!,
+            tool: "reels",
+            jobType: "video_motion_control",
+            executionBackend,
+            provider: resolvedModel.provider,
+            model: resolvedModel.model,
+            input: {
+              modelId,
+              mode,
+              characterOrientation,
+              keepOriginalSound,
+              billedDuration,
+              pricingKey,
+              prompt,
+              provider: resolvedModel.provider,
+              providerModel: resolvedModel.model,
+              tempRefPaths: [...tempRefPaths],
+              generationRequestId: genReqId,
+            } satisfies MotionControlJobInput,
+          }),
+        );
+        if (!job) return null;
+        await safe("startJob", () => startJob(profileId!, job.id));
+        await safe("attachJob", () =>
+          attachGenerationRequestJob({
+            id: genReqId,
+            profileId: profileId!,
+            jobId: job.id,
+          }),
+        );
+        return job.id;
+      },
+      spend: {
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:video_motion_control:${jobId}`
-          : `spend:video_motion_control:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        jobType: "video_motion_control",
         description: "Motion Control generation",
         metadata: {
           tool: "reels",
@@ -384,69 +353,41 @@ export async function POST(req: Request) {
           pricingKey,
           providerModel: resolvedModel.model,
         },
-      });
-      creditsSpent = true;
-      creditsAmount = requiredCredits;
-      } catch (e) {
-        if (e instanceof InsufficientCreditsError) {
-        const wallet = await getWallet(profileId!).catch(() => null);
-        const currentBalance = wallet?.balance ?? 0;
-        if (jobId) {
-          await safe("failJobInsufficient", () =>
-            failJob(profileId!, jobId!, {
-              code: "INSUFFICIENT_CREDITS",
-              message: "Insufficient credits.",
-              requiredCredits,
-              currentBalance,
-            })
-          );
-        }
-        if (generationRequestId) {
-          await safe("idemFailInsufficient", () =>
-            finishGenerationRequestFailure({
-              id: generationRequestId!,
-              profileId: profileId!,
-              jobId: jobId ?? null,
-              errorJson: {
-                code: "INSUFFICIENT_CREDITS",
-                message: "Insufficient credits.",
-                requiredCredits,
-                currentBalance,
-              },
-            })
-          );
-        }
-        return NextResponse.json(
-          { error: "Insufficient credits.", requiredCredits, currentBalance },
-          { status: 402 }
-        );
-      }
-      throw e;
-      }
+        skip: devBlank,
+      },
+      processingAssets: [
+        {
+          tool: "reels",
+          assetType: "video",
+          role: "video_motion_control",
+          provider: devBlank ? "dev_blank" : resolvedModel.provider,
+          model: devBlank ? "dev_blank" : resolvedModel.model,
+          metadata: {
+            modelId,
+            mode,
+            characterOrientation,
+            keepOriginalSound,
+            billedDuration,
+            pricingKey,
+            ...(devBlank ? devBlankJobTag() : {}),
+          },
+        },
+      ],
+    });
+    if (beginResult.kind === "early_exit") {
+      return NextResponse.json(beginResult.http.body, { status: beginResult.http.status });
+    }
+    metered = beginResult.handle;
+    jobId = metered.jobId;
+    generationRequestId = metered.generationRequestId;
+    creditsSpent = metered.creditsSpent;
+    creditsAmount = metered.creditsAmount;
+    videoAssetId = metered.assetIds[0] ?? null;
+
+    if (isWorkflowBackend && (!jobId || !generationRequestId)) {
+      throw new Error("Workflow motion control requires a persisted job and generation request.");
     }
 
-    // ---- Processing asset (created AFTER spend succeeds) ----
-    const asset = await safe("createAsset", () =>
-      createProcessingAsset({
-        profileId: profileId!,
-        jobId: jobId ?? undefined,
-        tool: "reels",
-        assetType: "video",
-        role: "video_motion_control",
-        provider: devBlank ? "dev_blank" : resolvedModel.provider,
-        model: devBlank ? "dev_blank" : resolvedModel.model,
-        metadata: {
-          modelId,
-          mode,
-          characterOrientation,
-          keepOriginalSound,
-          billedDuration,
-          pricingKey,
-          ...(devBlank ? devBlankJobTag() : {}),
-        },
-      })
-    );
-    if (asset) videoAssetId = asset.id;
     if (jobId) {
       await safe("patchJobInput", async () => {
         const { error } = await supabaseServer
@@ -611,77 +552,47 @@ export async function POST(req: Request) {
       { status: 202 },
     );
   } catch (error: unknown) {
-    // User cancellation is a normal outcome: job → 'cancelled' + refund (below).
     const cancelled = isCancellation(error);
-    const message = cancelled
-      ? "Generation cancelled."
-      : error instanceof Error
-        ? error.message
-        : String(error);
+    const pricingMissing = error instanceof PricingConfigError;
+    const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Motion Control] Cancelled by user.");
     else console.error("[Motion Control] Error:", error);
-    const pricingMissing = error instanceof PricingConfigError;
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
-
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    if (videoAssetId && profileId) {
-      await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
-    }
-    if (jobId && profileId) {
-      if (cancelled) {
-        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-      } else {
-        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
+    const handle =
+      metered ??
+      (profileId
+        ? {
+            profileId,
+            userId: null,
+            jobId,
+            generationRequestId,
+            creditsSpent,
+            creditsAmount,
+            assetIds: videoAssetId ? [videoAssetId] : [],
+            refundJobType: "video_motion_control",
+          }
+        : null);
+    if (handle) {
+      if (videoAssetId) handle.assetIds = [videoAssetId];
+      const finished = await finishMeteredAttempt(handle, {
+        kind: "terminal",
+        cancelled,
+        pricingMissing,
+        rawMessage,
+        currentStepId,
+        clearCurrentStep: () => {
+          currentStepId = null;
+        },
+        genericClientError: pricingMissing
+          ? undefined
+          : "Motion control generation failed.",
+      });
+      if (finished.http) {
+        return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-
-    // Best-effort refund. Fires on both failures and user cancellations.
-    if (creditsSpent && profileId && creditsAmount > 0) {
-      await safe("refundCredits", () =>
-        refundCredits({
-          profileId: profileId!,
-          amount: creditsAmount,
-          idempotencyKey: jobId
-            ? `refund:video_motion_control:${jobId}`
-            : `refund:video_motion_control:profile:${profileId}:${Date.now()}`,
-          jobId: jobId ?? null,
-          description: cancelled
-            ? "Refund after user cancellation"
-            : "Best-effort refund after generation failure",
-          metadata: { reason: cancelled ? "generation_cancelled" : "generation_failed", originalError: errJson },
-        })
-      );
-    }
-
-    if (generationRequestId) {
-      await safe("idemFailure", () =>
-        finishGenerationRequestFailure({
-          id: generationRequestId!,
-          profileId: profileId!,
-          jobId: jobId ?? null,
-          errorJson: errJson,
-        })
-      );
-    }
-
-    if (cancelled) {
-      return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
-        { status: 409 }
-      );
-    }
     return NextResponse.json(
-      pricingMissing
-        ? { error: message, code: "PRICING_CONFIG_MISSING" }
-        : { error: "Motion control generation failed." },
-      { status: 500 }
+      { error: "Motion control generation failed." },
+      { status: 500 },
     );
   } finally {
     if (tempRefPaths.length > 0 && !predictionStarted && !workflowStarted) {

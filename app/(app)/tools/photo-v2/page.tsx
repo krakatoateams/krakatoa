@@ -96,28 +96,8 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { consumePendingDraft } from "@/lib/pending-form-draft";
 import { isViralTemplateAssetPath } from "@/lib/trending-templates";
+import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
-import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
-import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
-
-function describeIdempotencyError(
-  status: number,
-  data: { code?: string; error?: string }
-): string | null {
-  if (status === 409 && data?.code === "GENERATION_CANCELLED") {
-    return null;
-  }
-  if (status === 409 && data?.code === "GENERATION_IN_PROGRESS") {
-    return "Generation already in progress, please wait.";
-  }
-  if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
-    return data?.error || "This request conflicts with a previous one.";
-  }
-  if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
-    return data?.error || "Missing idempotency key. Please retry.";
-  }
-  return null;
-}
 
 // Creation types surfaced in the top-left chip. Every type posts to
 // /api/generate-photo with a distinct `mode` (storyboard included).
@@ -134,11 +114,6 @@ type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
 // Social media post batch: how many alternatives one submit may generate. Each
 // one is a separate provider call and is charged separately.
 const BATCH_COUNTS = [1, 2, 3, 4] as const;
-
-/**
- * One image of the last generation batch (used while parsing the API response).
- */
-type BatchResult = { path: string; seed: string | null; id: string | null };
 
 // First reference-capable model — the default we snap to when the user enters a
 // mode that needs a product reference (Product Try-on) with a text-only model selected.
@@ -178,8 +153,18 @@ function StoryboardComposer({
   // storyboard and re-used as the default when generating the video.
   const [language, setLanguage] = useState<StoryboardLanguageId>(DEFAULT_STORYBOARD_LANGUAGE);
   const { openPreviewFromResponse } = useStudioGenerationPreview();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    loading,
+    error,
+    submit,
+    cancel: cancelSubmit,
+    cancelling,
+    cancelAllowed,
+  } = useStudioGenerationSubmit({
+    refetchCredits,
+    refreshHistory: onHistoryRefresh,
+    openPreviewFromResponse,
+  });
   // @-mentions: tag saved characters / storyboards in the theme; their images are
   // passed to the storyboard image model as references.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
@@ -187,9 +172,6 @@ function StoryboardComposer({
   // Optional visual theme reference (mood, palette, aesthetic) — same pattern as
   // Photo studio's reference upload tile.
   const themeReference = useImageUpload();
-  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
-  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
 
   // Load the assets that can be @-mentioned: saved characters + storyboards.
   const loadMentionAssets = useCallback(async () => {
@@ -251,12 +233,7 @@ function StoryboardComposer({
       mentions.map((m) => m.id).join(","),
       devBlank ? "blank" : "live",
     ].join("|");
-    const attempt = beginSubmit(signature);
-    if (!attempt) return;
-
-    setLoading(true);
-    setError(null);
-    try {
+    await submit(signature, (idempotencyKey) => {
       const formData = new FormData();
       formData.append("mode", "storyboard");
       formData.append("theme", theme.trim());
@@ -272,38 +249,15 @@ function StoryboardComposer({
       if (devBlank) {
         formData.append("devBlank", "true");
       }
-
-      const response = await fetch("/api/generate-photo", {
+      return fetch("/api/generate-photo", {
         method: "POST",
-        headers: { "Idempotency-Key": attempt.key },
+        headers: { "Idempotency-Key": idempotencyKey },
         body: formData,
       });
-      const data = await response.json();
-      if (!response.ok) {
-        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
-          attempt.settle(false);
-          refetchCredits();
-          return;
-        }
-        if (response.status === 402) {
-          throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? cost}, current: ${data.currentBalance ?? 0}.`
-          );
-        }
-        const idemMsg = describeIdempotencyError(response.status, data);
-        if (idemMsg) throw new Error(idemMsg);
-        throw new Error(data.error || "Failed to generate storyboard");
-      }
-      attempt.settle(true);
-      onHistoryRefresh();
-      void openPreviewFromResponse(data);
-      refetchCredits();
-    } catch (err: unknown) {
-      attempt.settle(false);
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
-    } finally {
-      setLoading(false);
-    }
+    }, {
+      fallbackCost: cost,
+      errorFallback: "Failed to generate storyboard",
+    });
   };
 
   return (
@@ -500,7 +454,6 @@ function PhotoOmniPage({
   historyRefreshKey: number;
   onHistoryRefresh: () => void;
 }) {
-  const { openPreviewFromResponse } = useStudioGenerationPreview();
   const searchParams = useSearchParams();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
@@ -572,9 +525,21 @@ function PhotoOmniPage({
   // Social media post can ask for a batch of alternatives in one submit; every
   // other mode always produces a single image.
   const [batchCount, setBatchCount] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const { openPreviewFromResponse } = useStudioGenerationPreview();
+  const { balance, refetch: refetchCredits } = useCreditBalance();
+  const {
+    loading,
+    error,
+    submit,
+    cancel: cancelSubmit,
+    cancelling,
+    cancelAllowed,
+  } = useStudioGenerationSubmit({
+    refetchCredits,
+    refreshHistory: onHistoryRefresh,
+    openPreviewFromResponse,
+  });
 
   // Restore what was filled in before a gated Generate click sent the
   // visitor through sign-in — see the matching note in StoryboardComposer
@@ -635,10 +600,6 @@ function PhotoOmniPage({
   // sent as references and their names are woven into the prompt.
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
   const [mentions, setMentions] = useState<MentionAsset[]>([]);
-  // Double-submit / double-charge guard (see lib/use-idempotent-submit.ts).
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
-  const { cancelAllowed } = useGenerationStatusPoll(activeKey);
-  const { balance, refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
 
   const tier = getProductPhotoTier(modelTier);
@@ -867,14 +828,8 @@ function PhotoOmniPage({
       String(requestedImageCount),
       devBlank ? "blank" : "live",
     ].join("|");
-    const attempt = beginSubmit(signature);
-    if (!attempt) return;
-
-    setLoading(true);
-    setError(null);
     setWarning(null);
-
-    try {
+    await submit(signature, (idempotencyKey) => {
       const formData = new FormData();
       formData.append("mode", mode);
       if (requiresProduct && product.file) {
@@ -894,11 +849,9 @@ function PhotoOmniPage({
       formData.append("poseId", poseId);
       formData.append("styleId", styleId);
       formData.append("modelTier", modelTier);
-      // Character creation has no aspect chip — it always uses a 2:3 portrait sheet.
       formData.append("aspectRatio", isCharacterMode ? "2:3" : aspectRatio);
       if (requestedImageCount > 1) formData.append("imageCount", String(requestedImageCount));
       if (prompt.trim()) formData.append("prompt", prompt.trim());
-      // @-mentioned assets (saved characters / storyboards) → reference images.
       if (mentions.length) {
         formData.append("referenceCreationIds", mentions.map((m) => m.id).join(","));
       }
@@ -908,75 +861,35 @@ function PhotoOmniPage({
       if (devBlank) {
         formData.append("devBlank", "true");
       }
-
-      const response = await fetch("/api/generate-photo", {
+      return fetch("/api/generate-photo", {
         method: "POST",
-        headers: { "Idempotency-Key": attempt.key },
+        headers: { "Idempotency-Key": idempotencyKey },
         body: formData,
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        if (response.status === 409 && data.code === "GENERATION_CANCELLED") {
-          attempt.settle(false);
-          refetchCredits();
-          return;
+    }, {
+      fallbackCost: totalCost,
+      onSuccess: (data) => {
+        if (typeof data.warning === "string" && data.warning) {
+          setWarning(data.warning);
         }
-        if (response.status === 402) {
-          throw new Error(
-            `Insufficient credits. Required: ${data.requiredCredits ?? totalCost}, current: ${data.currentBalance ?? 0}.`
+        if (typeof data.failedImageCount === "number" && data.failedImageCount > 0) {
+          const batchLen = Array.isArray(data.images)
+            ? (
+                data.images as Array<{
+                  storagePath?: string | null;
+                  historyItem?: { storagePath?: string } | null;
+                  imageUrl?: string | null;
+                }>
+              ).filter((image) => pickGenerateStoragePath(image)).length
+            : data.historyItem || data.storagePath || data.imageUrl
+              ? 1
+              : 0;
+          setWarning(
+            `${data.failedImageCount} of ${data.requestedImageCount} images couldn't be generated — you were only charged for the ${batchLen} that worked.`,
           );
         }
-        const idemMsg = describeIdempotencyError(response.status, data);
-        if (idemMsg) throw new Error(idemMsg);
-        throw new Error(data.error || "Generation failed");
-      }
-
-      attempt.settle(true);
-      // A batch comes back as `images`; single generations only have the legacy
-      // top-level fields. Either way the first image becomes the selected one.
-      const batch: BatchResult[] = Array.isArray(data.images)
-        ? (
-            data.images as Array<{
-              imageUrl?: string | null;
-              storagePath?: string | null;
-              historyItem?: { id?: string; storagePath?: string } | null;
-            }>
-          )
-            .map((img) => ({
-              path: pickGenerateStoragePath(img),
-              seed: img.imageUrl ?? null,
-              id: img.historyItem?.id ?? null,
-            }))
-            .flatMap((r) => (r.path ? [{ path: r.path, seed: r.seed, id: r.id }] : []))
-        : [];
-      const primaryPath = batch[0]?.path ?? pickGenerateStoragePath(data);
-      // Legacy single-image response shape (no `images`): keep the one result in
-      // the batch anyway so the Animate hand-off can still find its creation id.
-      if (!batch.length && primaryPath) {
-        batch.push({
-          path: primaryPath,
-          seed: data.imageUrl ?? null,
-          id: data.historyItem?.id ?? null,
-        });
-      }
-      if (data.warning) setWarning(data.warning);
-      // Partial batch: the missing images were refunded server-side.
-      if (typeof data.failedImageCount === "number" && data.failedImageCount > 0) {
-        setWarning(
-          `${data.failedImageCount} of ${data.requestedImageCount} images couldn't be generated — you were only charged for the ${batch.length} that worked.`
-        );
-      }
-      onHistoryRefresh();
-      void openPreviewFromResponse(data);
-      refetchCredits();
-    } catch (err: unknown) {
-      attempt.settle(false);
-      const message = err instanceof Error ? err.message : "An unexpected error occurred";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
+      },
+    });
   };
 
   return (

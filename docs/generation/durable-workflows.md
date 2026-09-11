@@ -14,6 +14,22 @@ Status: Motion Control pilot implemented; disabled by default pending a real-pro
   - after provider commit: stop and clean staging, without a refund.
 - Failed/cancelled rows are soft-dismissed from the active UI; audit and ledger rows remain.
 
+## Shared lifecycle boundary
+
+`lib/metered-generation/` now owns the route-level contract that is common to
+legacy and workflow entry points: request idempotency, job creation, spending
+before provider work, processing-asset creation, and response settlement.
+Motion Control chooses `execution_backend` before `beginMeteredAttempt`, which
+persists that choice on the job; the route then either returns the legacy
+prediction `202` or starts its durable run.
+
+The shared terminal adapter applies only to legacy attempts. Workflow Stop,
+provider commit, failure, takeover, and finalization continue through the atomic
+RPCs in `lib/generation-workflows/`; do not replace those calls with legacy
+refund/job writes. The Motion Control composer consumes both `202` variants
+through `useStudioGenerationSubmit` and keeps the same
+`MOTION_CONTROL_MAX_RUNTIME_MS` polling ceiling.
+
 ## Motion Control canary
 
 The pilot is controlled by:

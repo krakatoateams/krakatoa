@@ -39,12 +39,15 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
   - `api/auth/[...nextauth]/route.ts`: NextAuth handler.
   - `api/cron/route.ts`, `api/posts/`, `api/product-photo/`: Scheduling and product-photo support routes.
   - `api/upload/route.ts`: MP4 upload endpoint (verify bucket/path against your Supabase setup).
-  - `tools/video/`: Video studio frontend — hosts the **Reels Creator** subtool (Seedance + Veo) plus Text-to-Video, Motion Control, and Storyboard-to-Video.
+  - `tools/video/page.tsx`: Thin Suspense entry for Video Studio.
+  - `tools/video/VideoStudioShell.tsx`: Cross-mode shell (mount-once deep links, admin/model gates, shared history); six mode owners live in `tools/video/composers/`.
   - `tools/photo/`: Product Photo frontend.
   - `tools/scheduler/`, `tools/scheduler/calendar/`: Scheduler UI.
   - `tools/ig/`: Instagram-related tool surface.
 - `lib/`: Shared utilities (`supabase.ts`, `supabase-server.ts`, `storage-buckets.ts`, `auth.ts`, `youtube.ts`, etc.).
   - **Reels Creator pipeline**: `reels-models.ts` (engine/schema registry + `validateReelsRequest`), `reels-pipeline/` (shared `llm`, `tts-whisper`, `ass`, `rendi-stitch`, `storage`, `seedance`, `veo`, `types`).
+  - **Metered generation lifecycle**: `metered-generation/` owns idempotency → job → spend → processing asset and terminal settlement for legacy routes. Provider work and workflow atomic RPCs stay with their route/workflow.
+  - **Studio client seams**: `studio-generation-submit.ts` owns Video/Photo/Skill submit, resume, cancel and response classification; `use-creation-item-actions.ts` owns shared preview mutations.
   - **Platform/credits**: `profiles-db.ts`, `projects-db.ts`, `jobs-db.ts`, `job-steps-db.ts`, `assets-db.ts`, `asset-relations-db.ts`, `credits-db.ts`, `usage-events-db.ts`, `credit-costs.ts`.
 - `supabase/migrations/`: Idempotent, additive SQL migrations applied by `npm run db:setup` (currently up to `060_signed_url_cache.sql`).
 - `public/`: Static assets (images, fonts, icons).
@@ -94,8 +97,11 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 
 `credit_transactions` is the billing source of truth. `jobs.cost_credits` and `assets.cost_credits` are display snapshots only. `usage_events` is analytics-only and must never affect billing/response.
 
+### Metered lifecycle ownership
+Charged legacy routes call `beginMeteredAttempt` only after route-specific parsing, validation, profile resolution, pricing, and model selection. The helper performs the shared order: idempotency gate → best-effort job/start/attach → credit spend → processing asset. Provider execution, commit points, lineage, history, and tool cleanup remain local. Routes close success/deferred/recoverable/terminal outcomes through `finishMeteredAttempt`; terminal persistence delegates to `settlement.ts`. Workflow-backed attempts keep using the atomic RPCs in `lib/generation-workflows/` and are not reimplemented by this adapter. Checks: `npm run test:metered-generation`.
+
 ### Generation cancel (in-flight v1)
-Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested`, `generation_predictions`, `cancel_allowed`, `assertNotCancelled`). The generate route owns refund + `cancelJob`; cancel endpoint never refunds in-flight attempts. After provider output is committed (`markProviderCommitted` in `lib/generation-commit.ts` flips `cancel_allowed=false`), cancel API returns 409 `CANCEL_NOT_ALLOWED` and post-commit user cancel does not refund. Recoverable jobs (`pipeline-recovery/`, status `recoverable`): credits held for **Try again**; refund only on genuine delivery failure (`lib/pipeline-recovery/refund-policy-pure.ts` — resume exhausted, terminal resume error, TTL after at least one resume attempt). Abandon recoverable (`cancel` + `jobId`) does not refund. Commit points: first Reels scene / Veo clip, video/image generation success, storyboard import vision LLM. Client: `useIdempotentSubmit().cancel()` + `useGenerationStatusPoll` + `GenerationCancelButton` (shows “Finalizing…” when locked). Stuck runs: `GET /api/cron/generation-reconcile`. Plans: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md), [`docs/generation/no-refund-after-replicate-plan.md`](docs/generation/no-refund-after-replicate-plan.md).
+Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested`, `generation_predictions`, `cancel_allowed`, `assertNotCancelled`). The generate route owns refund + `cancelJob`; cancel endpoint never refunds in-flight attempts. After provider output is committed (`markProviderCommitted` in `lib/generation-commit.ts` flips `cancel_allowed=false`), cancel API returns 409 `CANCEL_NOT_ALLOWED` and post-commit user cancel does not refund. Recoverable jobs (`pipeline-recovery/`, status `recoverable`): credits held for **Try again**; refund only on genuine delivery failure (`lib/pipeline-recovery/refund-policy-pure.ts` — resume exhausted, terminal resume error, TTL after at least one resume attempt). Abandon recoverable (`cancel` + `jobId`) does not refund. Commit points: first Reels scene / Veo clip, video/image generation success, storyboard import vision LLM. Client: Video, Photo, and Skill compose `useIdempotentSubmit` + status polling through `useStudioGenerationSubmit`; Canvas and Editor intentionally retain their local flow. Stuck runs: `GET /api/cron/generation-reconcile`. Plans: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md), [`docs/generation/no-refund-after-replicate-plan.md`](docs/generation/no-refund-after-replicate-plan.md).
 
 ### Active generations (survive navigation)
 Composer `loading` state dies on unmount. In-flight work lives on `jobs` (`queued` / `running` / `recoverable`) plus recent `failed` rows. `GET /api/generations/active` lists those for the signed-in profile; `ActiveGenerationsProvider` in `app/(app)/layout.tsx` polls it and drives the layout banner, sidebar dots, and processing tiles in `CreationsHistory` (library-style views only — pickers stay finished-asset-only). The banner hides on the tool that already shows the composer. Mapping job_type → label/href/history tool is `lib/active-generations-pure.ts`. `generation_requests.job_id` is written at `createJob` (`attachGenerationRequestJob`) so cancel-from-tile keys the right attempt. Check: `npm run test:active-generations`.
@@ -120,7 +126,7 @@ Tools hand work to each other with **URL query params** — there is no shared c
 | Dashboard viral template | Image to video | `/tools/video?type=image2video&prompt=…` |
 | Dashboard product try-on template | Product try-on | `/tools/photo-v2?type=product-tryon&product=…` |
 
-`?type=` preselects a composer in `app/(app)/tools/video/page.tsx`; every param is read **once on mount** (see `initialType`), so switching modes in the UI never rewrites the URL.
+`?type=` preselects a composer through `lib/video-studio-deep-link.ts`; `VideoStudioShell` snapshots every param **once on mount**, so switching modes in the UI never rewrites or rereads the URL. Check: `npm run test:video-studio`.
 
 **Animate (photo → video).** [`lib/animate-handoff.ts`](lib/animate-handoff.ts) owns both halves of that contract — build the link with `animateVideoHref()` and gate the CTA with `canAnimateCreation()`; never inline the URL or re-derive the exclusions (videos, character turnaround sheets, storyboard sheets, trashed items). The CTA lives on the Photo result card and in the `CreationsHistory` preview modal, so it appears in Photo Studio history, `/dashboard/assets` and the dashboard — and stays hidden on Scheduler pickers, which render without `richUI`. Check: `npm run test:animate-handoff`.
 
@@ -156,7 +162,7 @@ The unified route `app/api/generate-reels/route.ts` owns the cross-cutting contr
 ### 3. Subtitles (ASS)
 - Word-level timestamps from Whisper are written to **Advanced SubStation Alpha** (`.ass`).
 - Timestamps are scaled by the final `audioSpeedFactor` (`atempo`) so on-screen text matches time-stretched audio.
-- **MarginV:** `Math.floor((marginV / 100) * (854 - (fontsize * 1.5)))` for 480×854 base (720p uses parallel target height in the Rendi filter graph). Must stay in sync with the Reels Creator live caption preview CSS (`bottom: calc(...)` in `app/(app)/tools/video/page.tsx`) for WYSIWYG. Implemented in `lib/reels-pipeline/ass.ts`.
+- **MarginV:** `Math.floor((marginV / 100) * (854 - (fontsize * 1.5)))` for 480×854 base (720p uses parallel target height in the Rendi filter graph). Must stay in sync with the Reels Creator live caption preview CSS (`bottom: calc(...)` in `app/(app)/tools/video/composers/ReelsCreatorComposer.tsx`) for WYSIWYG. Implemented in `lib/reels-pipeline/ass.ts`.
 
 ### 4. Rendi Cloud Stitching (FFmpeg)
 - Avoids local FFmpeg / Vercel timeout limits via **Rendi** (`https://api.rendi.dev/v1/run-ffmpeg-command`).

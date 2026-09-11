@@ -1,6 +1,6 @@
-import { failJob, cancelJob, getJob, type Job } from "@/lib/jobs-db";
-import { refundCredits } from "@/lib/credits-db";
-import { purgeResumableJobStorage } from "./storage";
+import { getJob, type Job } from "@/lib/jobs-db";
+import { persistMeteredSettlementLegacy } from "@/lib/metered-generation/settlement";
+import { resolveMeteredSettlement } from "@/lib/metered-generation/settlement-pure";
 import { parseRecoveryManifest } from "./manifest";
 import {
   shouldRefundRecoverableTerminal,
@@ -20,36 +20,38 @@ export async function terminalGenerationFailure(params: {
 }): Promise<void> {
   const errJson =
     typeof params.reason === "string" ? { message: params.reason } : params.reason;
+  const rawMessage =
+    typeof errJson.message === "string" ? errJson.message : String(params.reason);
 
-  if (params.purge) {
-    await purgeResumableJobStorage(params.userId, params.jobId);
-  }
+  const plan = resolveMeteredSettlement({
+    cancelled: !!params.cancelled,
+    recoverable: false,
+    pricingMissing: false,
+    rawMessage,
+    creditsSpent: !!params.refund,
+    creditsAmount: params.creditsAmount,
+    hasProfileId: true,
+    hasJobId: true,
+    hasGenerationRequestId: false,
+    options: { resumablePurge: !!params.purge },
+  });
 
-  if (params.cancelled) {
-    await cancelJob(params.profileId, params.jobId, errJson);
-  } else {
-    await failJob(params.profileId, params.jobId, errJson);
-  }
-
-  if (params.refund && params.creditsAmount > 0) {
-    try {
-      await refundCredits({
-        profileId: params.profileId,
-        amount: params.creditsAmount,
-        idempotencyKey: `refund:${params.jobType}:${params.jobId}`,
-        jobId: params.jobId,
-        description: params.cancelled
-          ? "Refund after user cancellation"
-          : "Refund after terminal generation failure",
-        metadata: {
-          reason: params.cancelled ? "generation_cancelled" : "generation_failed",
-          originalError: errJson,
-        },
-      });
-    } catch (e) {
-      console.warn("[pipeline-recovery] refund failed (non-fatal):", e);
-    }
-  }
+  await persistMeteredSettlementLegacy(
+    plan,
+    {
+      profileId: params.profileId,
+      userId: params.userId,
+      jobId: params.jobId,
+      creditsAmount: params.creditsAmount,
+      refundJobType: params.jobType,
+    },
+    {
+      errJson,
+      refundDescription: params.cancelled
+        ? "Refund after user cancellation"
+        : "Refund after terminal generation failure",
+    },
+  );
 }
 
 export async function abandonRecoverableJob(params: {

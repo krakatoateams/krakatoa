@@ -1,5 +1,8 @@
 # Pipeline recovery + resumable storage
 
+Status: implemented for Reels, generic Video, and Storyboard Video. Motion Control
+uses prediction/workflow finalization instead of resumable media checkpoints.
+
 Staging artifacts for video generation live outside canonical media trees:
 
 ```text
@@ -33,12 +36,13 @@ Canonical deliverables remain under `{userId}/videos/generated/…` and `{userId
 |-------|----------|
 | `generate-reels` | Full (scenes, audio, ASS, Rendi, resume) |
 | `generate-video` | Post-Replicate checkpoint + recoverable upload |
-| `storyboard-video` | (checkpoint planned; use reels pattern) |
-| `motion-control` | Poll finalize (future) |
+| `storyboard-video` | Post-provider checkpoint + recoverable Rendi/upload |
+| `motion-control` | Prediction or durable-workflow finalization; no resumable checkpoint |
 
 ## Code
 
 - `lib/pipeline-recovery/` — manifest, storage, handle, resume-reels, reconcile
+- `lib/metered-generation/` — shared begin/finish order and legacy terminal settlement
 - `lib/storage-buckets.ts` — `userResumablePrefix`, `isResumablePath`
 
-Apply migration: `supabase/migrations/054_job_recoverable_status.sql`
+Schema prerequisite (already live): `supabase/migrations/054_job_recoverable_status.sql`

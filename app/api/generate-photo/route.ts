@@ -33,31 +33,28 @@ import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
-import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import { finishJob } from "@/lib/jobs-db";
+import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
-  spendCredits,
+  beginMeteredAttempt,
+  finishMeteredAttempt,
+  type MeteredAttemptHandle,
+} from "@/lib/metered-generation/lifecycle";
+import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
+import {
   refundCredits,
-  getWallet,
-  InsufficientCreditsError,
 } from "@/lib/credits-db";
 import { getProductPhotoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getPhotoFeatureEnablement } from "@/lib/feature-model-configs-db";
 import { getPhotoFeature } from "@/lib/creation-features";
 import { getPhotoModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { buildMentionGuidanceSuffix } from "@/lib/mention-assets";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
-  beginGenerationRequest,
-  attachGenerationRequestJob,
-  finishGenerationRequestSuccess,
-  finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import {
   assertNotCancelled,
@@ -132,6 +129,7 @@ export async function POST(req: Request) {
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
   let generationRequestId: string | null = null;
+  let metered: MeteredAttemptHandle | null = null;
 
   // Best-effort wrapper: platform writes must NEVER crash generation or mask the
   // original error.
@@ -579,99 +577,48 @@ export async function POST(req: Request) {
       skillId: skillId ?? "",
       devBlank,
     });
-    const begin = await beginGenerationRequest({
-      profileId: profileId!,
-      idempotencyKey: idemKey,
-      routeKey: "generate_photo",
-      toolKey: "photo",
-      requestHash,
-    });
-    if (begin.action === "conflict") {
-      return NextResponse.json(
-        {
-          error: "This idempotency key was already used with a different request.",
-          code: "IDEMPOTENCY_CONFLICT",
-        },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "in_progress") {
-      return NextResponse.json(
-        { error: "Generation already in progress, please wait.", code: "GENERATION_IN_PROGRESS" },
-        { status: 409 }
-      );
-    }
-    if (begin.action === "replay") {
-      return NextResponse.json(begin.response);
-    }
-    generationRequestId = begin.id;
-
-    // ---- Platform job (best-effort observability) ----
-    // Created after all input validation so validation early-returns never leave
-    // a dangling job. The processing asset is intentionally deferred until AFTER
-    // the credit spend succeeds, so the assets table never carries a processing
-    // row for a request that was rejected for insufficient credits.
-    const job = await safe("createJob", () => createJob({
-      profileId: profileId!,
-      tool: "photo",
-      jobType: "product_photo",
-      provider: photoModel.provider,
-      model: photoModel.model,
-      // `prompt` is what the user typed; the assembled prompt actually sent to the
-      // model is recorded on the image_generation step, since it is built later.
-      input: {
-        poseId,
-        styleId,
-        modelTier,
-        resolution,
-        pricingKey,
-        mode,
-        imageCount,
-        ...(userPrompt ? { prompt: userPrompt } : {}),
-        ...(skillId ? { skillId } : {}),
-        ...(devBlank ? devBlankJobTag() : {}),
-      },
-    }));
-    if (job) {
-      jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: job.id,
-          }),
-        );
-      }
-    }
-
-    // ---- Credit spend (BUSINESS LOGIC — must not be safe-wrapped) ----
-    // Product Photo is priced by the selected model tier (+ resolution for
-    // balanced/pro) provider cost (v2.3). The debit MUST happen before any
-    // provider work below (createReplicateClient / uploadProductImageToReplicate
-    // / runWithRetry / Nano Banana). If the wallet is short we fail the job (if
-    // it exists) and return 402 — no processing asset, no provider call. A
-    // non-balance infra failure rethrows into the outer catch as a 500 (and
-    // `creditsSpent` stays false, so no refund is attempted).
-    //
-    // jobId-based idempotency prevents double-charges on retries WITHIN this
-    // request. A full HTTP retry by the client produces a NEW jobId and a NEW
-    // spend key — that double-charge risk is an accepted limitation of this
-    // dummy phase (future fix: client/request-level idempotency key).
-    // Batches are charged per image: N provider calls, N credit units, one ledger
-    // row. Images that fail are refunded below rather than silently absorbed.
     const perImageCredits = devBlank ? 0 : await getProductPhotoCredits({ modelTier, resolution });
     const requiredCredits = perImageCredits * imageCount;
-    if (!devBlank) {
-    try {
-      await spendCredits({
-        profileId: profileId!,
+    const assetMetadata = {
+      poseId,
+      styleId,
+      modelTier,
+      resolution,
+      pricingKey,
+      providerResolution,
+      ...(skillId ? { skillId } : {}),
+      ...(devBlank ? devBlankJobTag() : {}),
+    };
+    const beginResult = await beginMeteredAttempt({
+      profileId: profileId!,
+      userId,
+      idempotency: {
+        key: idemKey,
+        routeKey: "generate_photo",
+        toolKey: "photo",
+        requestHash,
+      },
+      job: {
+        tool: "photo",
+        jobType: "product_photo",
+        provider: photoModel.provider,
+        model: photoModel.model,
+        input: {
+          poseId,
+          styleId,
+          modelTier,
+          resolution,
+          pricingKey,
+          mode,
+          imageCount,
+          ...(userPrompt ? { prompt: userPrompt } : {}),
+          ...(skillId ? { skillId } : {}),
+          ...(devBlank ? devBlankJobTag() : {}),
+        },
+      },
+      spend: {
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:product_photo:${jobId}`
-          : `spend:product_photo:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        jobType: "product_photo",
         description: "Product Photo generation",
         metadata: {
           tool: "photo",
@@ -685,71 +632,28 @@ export async function POST(req: Request) {
           imageCount,
           perImageCredits,
         },
-      });
-      creditsSpent = true;
-      creditsAmount = requiredCredits;
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
-        const wallet = await getWallet(profileId!).catch(() => null);
-        const currentBalance = wallet?.balance ?? 0;
-        if (jobId) {
-          await safe("failJobInsufficient", () => failJob(profileId!, jobId!, {
-            code: "INSUFFICIENT_CREDITS",
-            message: "Insufficient credits.",
-            requiredCredits,
-            currentBalance,
-          }));
-        }
-        if (generationRequestId) {
-          await safe("idemFailInsufficient", () => finishGenerationRequestFailure({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: jobId ?? null,
-            errorJson: {
-              code: "INSUFFICIENT_CREDITS",
-              message: "Insufficient credits.",
-              requiredCredits,
-              currentBalance,
-            },
-          }));
-        }
-        return NextResponse.json(
-          { error: "Insufficient credits.", requiredCredits, currentBalance },
-          { status: 402 }
-        );
-      }
-      // Non-balance infra failure: bubble up to the outer catch as a 500.
-      throw e;
-    }
-    }
-
-    // ---- Processing assets (created AFTER spend succeeds) ----
-    // A batch gets one asset row per image so every generated file keeps its own
-    // record; single generations behave exactly as before.
-    const assetMetadata = {
-      poseId,
-      styleId,
-      modelTier,
-      resolution,
-      pricingKey,
-      providerResolution,
-      ...(skillId ? { skillId } : {}),
-      ...(devBlank ? devBlankJobTag() : {}),
-    };
-    for (let index = 0; index < imageCount; index += 1) {
-      const asset = await safe("createAsset", () => createProcessingAsset({
-        profileId: profileId!,
-        jobId: jobId ?? undefined,
+        skip: devBlank,
+      },
+      processingAssets: Array.from({ length: imageCount }, (_, index) => ({
         tool: "photo",
         assetType: "image",
         role: "product_photo",
         bucket: PRODUCT_PHOTO_BUCKET,
         provider: devBlank ? "dev_blank" : photoModel.provider,
         model: devBlank ? "dev_blank" : photoModel.model,
-        metadata: imageCount > 1 ? { ...assetMetadata, batchIndex: index, imageCount } : assetMetadata,
-      }));
-      if (asset) photoAssetIds.push(asset.id);
+        metadata:
+          imageCount > 1 ? { ...assetMetadata, batchIndex: index, imageCount } : assetMetadata,
+      })),
+    });
+    if (beginResult.kind === "early_exit") {
+      return NextResponse.json(beginResult.http.body, { status: beginResult.http.status });
     }
+    metered = beginResult.handle;
+    jobId = metered.jobId;
+    generationRequestId = metered.generationRequestId;
+    creditsSpent = metered.creditsSpent;
+    creditsAmount = metered.creditsAmount;
+    photoAssetIds.push(...metered.assetIds);
     photoAssetId = photoAssetIds[0] ?? null;
 
     const replicateHooks = makeReplicateCancelHooks({
@@ -1029,35 +933,7 @@ export async function POST(req: Request) {
       }));
     }
 
-    // Usage event — analytics only, NEVER affects billing/response. Wrapped in
-    // safe() so a failure here cannot fail the request.
-    await safe("recordUsage", () => recordUsageEvent({
-      profileId: profileId!,
-      jobId: jobId ?? null,
-      assetId: photoAssetId ?? null,
-      tool: "photo",
-      provider: photoModel.provider,
-      model: photoModel.model,
-      unitType: "image_count",
-      units: successes.length,
-      creditsCharged: creditsAmount,
-      metadata: {
-        jobType: "product_photo",
-        poseId,
-        styleId,
-        modelTier,
-        resolution,
-        pricingKey,
-        providerModel: photoModel.model,
-        providerResolution,
-        requestedImageCount: imageCount,
-        failedImageCount: failureCount,
-      },
-    }));
-
     const successResponse = {
-      // Primary image keeps the legacy single-image shape; `images` carries the
-      // full batch for clients that render alternatives.
       imageUrl: primary.publicUrl,
       storagePath: primary.storagePath,
       historyItem: primary.historyItem,
@@ -1070,101 +946,86 @@ export async function POST(req: Request) {
       failedImageCount: failureCount,
       savedToCloud: true,
     };
-    if (generationRequestId) {
-      await safe("idemSuccess", () => finishGenerationRequestSuccess({
-        id: generationRequestId!,
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: photoAssetId ?? null,
-        responseJson: successResponse,
-      }));
-    }
+    await finishMeteredAttempt(metered, {
+      kind: "success",
+      responseJson: successResponse,
+      primaryAssetId: photoAssetId,
+      usage: {
+        assetId: photoAssetId,
+        tool: "photo",
+        provider: photoModel.provider,
+        model: photoModel.model,
+        unitType: "image_count",
+        units: successes.length,
+        creditsCharged: creditsAmount,
+        metadata: {
+          jobType: "product_photo",
+          poseId,
+          styleId,
+          modelTier,
+          resolution,
+          pricingKey,
+          providerModel: photoModel.model,
+          providerResolution,
+          requestedImageCount: imageCount,
+          failedImageCount: failureCount,
+        },
+      },
+    });
     return NextResponse.json(successResponse);
   } catch (error: unknown) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
+    const pricingMissing = error instanceof PricingConfigError;
+    const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Product Photo] Cancelled by user.");
     else console.error("[Product Photo] Error:", error);
-    const pricingMissing = error instanceof PricingConfigError;
-    const message = cancelled
-      ? "Generation cancelled."
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : pricingMissing
-        ? { message, code: "PRICING_CONFIG_MISSING" }
-        : { message };
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-      currentStepId = null;
-    }
-    // Skipped once the success path has already resolved each asset, so a late
-    // failure can't flip a ready image back to failed.
-    if (profileId && !photoAssetsFinalized) {
-      for (const assetId of photoAssetIds) {
-        await safe("failAsset", () => markAssetFailed(profileId!, assetId, errJson));
-      }
-    }
-    if (jobId && profileId) {
-      if (cancelled) {
-        await safe("cancelJob", () => cancelJob(profileId!, jobId!, errJson));
-      } else {
-        await safe("failJob", () => failJob(profileId!, jobId!, errJson));
-      }
-    }
-
-    if (creditsSpent && profileId && creditsAmount > 0) {
-      await safe("refundCredits", () => refundCredits({
-        profileId: profileId!,
-        amount: creditsAmount,
-        idempotencyKey: jobId
-          ? `refund:product_photo:${jobId}`
-          : `refund:product_photo:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
-        description: cancelled
-          ? "Refund after user cancellation"
-          : "Best-effort refund after generation failure",
-        metadata: {
-          reason: cancelled ? "generation_cancelled" : "generation_failed",
-          originalError: errJson,
-        },
-      }));
-    }
-
-    if (generationRequestId) {
-      await safe("idemFailure", () => finishGenerationRequestFailure({
-        id: generationRequestId!,
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        errorJson: errJson,
-      }));
-    }
-
-    if (cancelled) {
-      return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
-        { status: 409 }
-      );
-    }
-
     const isNoImageProviderError =
       !pricingMissing &&
+      !cancelled &&
       /failed to generate image|did not return a valid image|prediction failed/i.test(
-        message
+        rawMessage,
       );
     const clientMessage = isNoImageProviderError
       ? "The AI couldn't generate an image from this request. Try a more descriptive prompt (and add a reference image if you have one)."
-      : message;
-
-    return NextResponse.json(
-      pricingMissing
-        ? { error: clientMessage, code: "PRICING_CONFIG_MISSING" }
-        : { error: clientMessage },
-      { status: 500 }
-    );
+      : rawMessage;
+    const handle =
+      metered ??
+      (profileId
+        ? {
+            profileId,
+            userId: null,
+            jobId,
+            generationRequestId,
+            creditsSpent,
+            creditsAmount,
+            assetIds: photoAssetIds,
+            refundJobType: "product_photo",
+          }
+        : null);
+    if (handle) {
+      handle.assetIds = photoAssetIds.length > 0 ? photoAssetIds : handle.assetIds;
+      // Partial batch refunds reduce the remaining amount a terminal catch may refund.
+      handle.creditsAmount = creditsAmount;
+      const finished = await finishMeteredAttempt(handle, {
+        kind: "terminal",
+        cancelled,
+        pricingMissing,
+        rawMessage,
+        currentStepId,
+        clearCurrentStep: () => {
+          currentStepId = null;
+        },
+        skipFailAsset: photoAssetsFinalized,
+        clientErrorOverride:
+          cancelled ? undefined : clientMessage,
+      });
+      if (finished.http) {
+        return NextResponse.json(finished.http.body, { status: finished.http.status });
+      }
+    }
+    return NextResponse.json({ error: clientMessage }, { status: 500 });
   }
 }
