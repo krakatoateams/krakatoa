@@ -25,7 +25,7 @@
     "test:active-generations": "npx tsx lib/active-generations-pure.ts",
     "test:metered-generation": "npx tsx lib/metered-generation/settlement-self-check.ts && npx tsx lib/metered-generation/lifecycle-self-check.ts",
     "test:creation-item-actions": "npx tsx lib/use-creation-item-actions.ts",
-    "test:studio-submit": "npx tsx lib/studio-generation-response-self-check.ts && npx tsx lib/studio-generation-submit-self-check.ts",
+    "test:studio-submit": "npx tsx lib/idempotent-submit-state-self-check.ts && npx tsx lib/studio-generation-response-self-check.ts && npx tsx lib/studio-generation-submit-self-check.ts",
     "test:video-studio": "npx tsx lib/video-studio-deep-link.ts",
     "test:replicate-output-url": "npx tsx lib/replicate-output-url-self-check.ts",
     "test:tiktok-creator-info": "npx tsx lib/tiktok-creator-info-pure.ts",

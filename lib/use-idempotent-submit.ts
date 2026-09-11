@@ -1,11 +1,28 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
+import {
+  clearPersistedIdempotentAttempt,
+  readPersistedIdempotentAttempt,
+  resolveIdempotentAttemptState,
+  writePersistedIdempotentAttempt,
+  type IdempotentAttemptState,
+  type IdempotentSubmitStorage,
+} from "@/lib/idempotent-submit-state";
 
 function emitGenerationChanged() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(GENERATION_CHANGED_EVENT));
+}
+
+function browserSessionStorage(): IdempotentSubmitStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -26,7 +43,9 @@ function emitGenerationChanged() {
  *   2. A STABLE idempotency key per logical attempt: reused across retries with
  *      identical inputs (so the server replays/blocks the duplicate instead of
  *      launching a second run) and rotated only when the inputs change or after a
- *      confirmed success.
+ *      confirmed success. The scoped key and a compact signature fingerprint
+ *      (never the raw prompt/input) live in sessionStorage so navigation/remount
+ *      cannot mint a second chargeable key for the same request.
  */
 export type IdempotentAttempt = {
   /** The Idempotency-Key header value to send for this attempt. */
@@ -42,14 +61,21 @@ export type IdempotentAttempt = {
   settle: (succeeded: boolean) => void;
 };
 
-export function useIdempotentSubmit() {
+export function useIdempotentSubmit(scope: string) {
+  const mountedRef = useRef(true);
   const inFlightRef = useRef(false);
-  const keyRef = useRef<string | null>(null);
-  const signatureRef = useRef<string | null>(null);
+  const attemptStateRef = useRef<IdempotentAttemptState | null>(null);
   // Reactive mirrors so the UI can render a Cancel button while an attempt is
   // in flight, and disable it once a cancel request has been sent.
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /**
    * Acquire an attempt for the given input `signature` (a stable string built
@@ -57,18 +83,22 @@ export function useIdempotentSubmit() {
    * already in flight — the caller MUST abort in that case.
    */
   const begin = useCallback((signature: string): IdempotentAttempt | null => {
-    if (inFlightRef.current) return null;
+    if (!mountedRef.current || inFlightRef.current) return null;
     inFlightRef.current = true;
 
-    // Mint a new key only when the inputs changed or the previous attempt
-    // succeeded (which nulled the key). Otherwise reuse the pending key so a
-    // retry of the SAME request is deduped by the server.
-    if (!keyRef.current || signatureRef.current !== signature) {
-      keyRef.current = crypto.randomUUID();
-      signatureRef.current = signature;
-    }
+    const storage = browserSessionStorage();
+    const previous =
+      attemptStateRef.current ?? readPersistedIdempotentAttempt(storage, scope);
+    const attemptState = resolveIdempotentAttemptState(
+      signature,
+      previous,
+      () => crypto.randomUUID(),
+      () => crypto.randomUUID(),
+    );
+    attemptStateRef.current = attemptState;
+    writePersistedIdempotentAttempt(storage, scope, attemptState);
 
-    const key = keyRef.current;
+    const key = attemptState.key;
     setActiveKey(key);
     setCancelling(false);
     emitGenerationChanged();
@@ -77,16 +107,20 @@ export function useIdempotentSubmit() {
       if (settled) return;
       settled = true;
       inFlightRef.current = false;
-      setActiveKey(null);
-      setCancelling(false);
+      if (mountedRef.current) {
+        setActiveKey(null);
+        setCancelling(false);
+      }
       emitGenerationChanged();
       if (succeeded) {
-        keyRef.current = null;
-        signatureRef.current = null;
+        clearPersistedIdempotentAttempt(storage, scope, attemptState);
+        if (attemptStateRef.current?.leaseId === attemptState.leaseId) {
+          attemptStateRef.current = null;
+        }
       }
     };
     return { key, settle };
-  }, []);
+  }, [scope]);
 
   /**
    * Cancel the in-flight attempt. Sends the attempt's Idempotency-Key to the
@@ -96,9 +130,9 @@ export function useIdempotentSubmit() {
    * request was accepted. Safe to call when nothing is in flight (no-op).
    */
   const cancel = useCallback(async (): Promise<boolean> => {
-    const key = keyRef.current;
+    const key = attemptStateRef.current?.key;
     if (!key || !inFlightRef.current) return false;
-    setCancelling(true);
+    if (mountedRef.current) setCancelling(true);
     try {
       const res = await fetch("/api/generations/cancel", {
         method: "POST",
@@ -108,18 +142,18 @@ export function useIdempotentSubmit() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         if (res.status === 409 && data?.code === "CANCEL_NOT_ALLOWED") {
-          setCancelling(false);
+          if (mountedRef.current) setCancelling(false);
           return false;
         }
         // Let the user try again; the generate request is still running.
-        setCancelling(false);
+        if (mountedRef.current) setCancelling(false);
         return false;
       }
       // Keep `cancelling` true: the in-flight generate fetch will resolve shortly
       // and settle() will reset the state.
       return true;
     } catch {
-      setCancelling(false);
+      if (mountedRef.current) setCancelling(false);
       return false;
     }
   }, []);

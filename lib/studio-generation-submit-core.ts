@@ -15,8 +15,72 @@ export type StudioGenerationSubmitEffects = {
   openPreviewFromResponse: (data: unknown) => void | Promise<void>;
 };
 
+export function guardStudioGenerationSubmitEffects(
+  isMounted: () => boolean,
+  effects: StudioGenerationSubmitEffects,
+): StudioGenerationSubmitEffects {
+  return {
+    clearError() {
+      if (isMounted()) effects.clearError();
+    },
+    refetchCredits() {
+      if (isMounted()) effects.refetchCredits();
+    },
+    refreshHistory() {
+      if (isMounted()) effects.refreshHistory();
+    },
+    openPreviewFromResponse(data) {
+      if (isMounted()) return effects.openPreviewFromResponse(data);
+    },
+  };
+}
+
 export type StudioGenerationSubmitAttempt = {
   settle: (succeeded: boolean) => void;
+};
+
+export type StudioGenerationSubmitLock = {
+  acquire: () => boolean;
+  release: () => void;
+};
+
+export function createStudioGenerationSubmitLock(): StudioGenerationSubmitLock {
+  let locked = false;
+  return {
+    acquire() {
+      if (locked) return false;
+      locked = true;
+      return true;
+    },
+    release() {
+      locked = false;
+    },
+  };
+}
+
+export type StudioGenerationPendingErrorCode =
+  | "STUDIO_GENERATION_AWAIT_COMPLETION_REQUIRED"
+  | "STUDIO_GENERATION_COMPLETION_NOT_TERMINAL";
+
+export class StudioGenerationPendingError extends Error {
+  constructor(
+    readonly code: StudioGenerationPendingErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "StudioGenerationPendingError";
+  }
+}
+
+export function isStudioGenerationPendingError(
+  error: unknown,
+): error is StudioGenerationPendingError {
+  return error instanceof StudioGenerationPendingError;
+}
+
+export type StudioGenerationCompletion = {
+  status: number;
+  data: StudioGenerationResponseData;
 };
 
 export type StudioGenerationSubmitOptions = {
@@ -24,11 +88,11 @@ export type StudioGenerationSubmitOptions = {
   errorFallback?: string;
   /** Fallback only for non-Error exceptions thrown by transport or callbacks. */
   unexpectedErrorFallback?: string;
-  /** Motion Control 202 / processing — poll until terminal payload. */
+  /** HTTP 202 / processing — poll until an explicit terminal status and payload. */
   awaitCompletion?: (
     initialData: StudioGenerationResponseData,
     idempotencyKey: string,
-  ) => Promise<StudioGenerationResponseData>;
+  ) => Promise<StudioGenerationCompletion>;
   previewData?: (data: StudioGenerationResponseData) => unknown;
   onSuccess?: (data: StudioGenerationResponseData) => void | Promise<void>;
   /** Override recoverable banner copy (e.g. Reels stitching failure). */
@@ -136,16 +200,30 @@ export async function runStudioGenerationSubmit(
   if (response.ok && isDeferred) {
     if (options.awaitCompletion) {
       const completed = await options.awaitCompletion(data, idempotencyKey);
-      return applyStudioGenerationOutcome(200, completed, attempt, effects, options);
+      if (
+        completed.status === 202 ||
+        completed.data.status === "processing"
+      ) {
+        throw new StudioGenerationPendingError(
+          "STUDIO_GENERATION_COMPLETION_NOT_TERMINAL",
+          "Completion polling returned before generation reached a terminal state.",
+        );
+      }
+      return applyStudioGenerationOutcome(
+        completed.status,
+        completed.data,
+        attempt,
+        effects,
+        options,
+      );
     }
-    return applyStudioGenerationOutcome(status, data, attempt, effects, options);
+    throw new StudioGenerationPendingError(
+      "STUDIO_GENERATION_AWAIT_COMPLETION_REQUIRED",
+      "Generation is still processing, but this client has no completion poller.",
+    );
   }
 
-  if (!response.ok) {
-    return applyStudioGenerationOutcome(status, data, attempt, effects, options);
-  }
-
-  return applyTerminalSuccess(data, attempt, effects, options);
+  return applyStudioGenerationOutcome(status, data, attempt, effects, options);
 }
 
 export type StudioGenerationResumeResult =

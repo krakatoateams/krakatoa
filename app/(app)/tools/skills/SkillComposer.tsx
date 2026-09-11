@@ -104,6 +104,7 @@ function SkillOmniInner({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "skills:composer",
     refetchCredits,
     refreshHistory: onHistoryRefresh,
     openPreviewFromResponse,

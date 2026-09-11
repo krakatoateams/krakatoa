@@ -315,7 +315,7 @@ export default function EditorWorkspace() {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
-  const { begin, cancel, cancelling } = useIdempotentSubmit();
+  const { begin, cancel, cancelling } = useIdempotentSubmit("editor:export");
 
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
   const [projectId, setProjectId] = useState<string | null>(null);

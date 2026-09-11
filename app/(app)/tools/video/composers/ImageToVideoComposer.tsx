@@ -175,6 +175,7 @@ export default function ImageToVideoComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:image-to-video",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,

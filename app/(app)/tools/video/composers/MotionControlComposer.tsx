@@ -22,6 +22,7 @@ import {
 
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { parseStudioGenerationResponse } from "@/lib/studio-generation-response";
+import type { StudioGenerationCompletion } from "@/lib/studio-generation-submit-core";
 
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
@@ -62,11 +63,9 @@ import {
 } from "./shared";
 import type { CharacterSource, LibraryCharacter, VideoCreationTypeOption } from "./types";
 
-async function pollMotionControlResult(idempotencyKey: string): Promise<{
-  videoUrl?: string;
-  storagePath?: string;
-  historyItem?: { storagePath?: string } | null;
-}> {
+async function pollMotionControlResult(
+  idempotencyKey: string,
+): Promise<StudioGenerationCompletion> {
   const pollMs = 3000;
   // The composer must never give up before the durable run itself does.
   const maxAttempts = Math.ceil(MOTION_CONTROL_MAX_RUNTIME_MS / pollMs);
@@ -77,11 +76,7 @@ async function pollMotionControlResult(idempotencyKey: string): Promise<{
     });
     const data = await parseStudioGenerationResponse(res);
     if (res.ok && data.videoUrl) {
-      return data as {
-        videoUrl?: string;
-        storagePath?: string;
-        historyItem?: { storagePath?: string } | null;
-      };
+      return { status: res.status, data };
     }
     if (res.status === 202) continue;
     if (data.code === "GENERATION_CANCELLED") {
@@ -178,6 +173,7 @@ export default function MotionControlComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:motion-control",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,

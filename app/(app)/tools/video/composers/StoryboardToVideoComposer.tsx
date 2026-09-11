@@ -118,6 +118,7 @@ function ImportStoryboardModal({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:storyboard-import",
     refetchCredits,
     refreshHistory: () => {},
     openPreviewFromResponse: () => {},
@@ -448,6 +449,7 @@ export default function StoryboardToVideoComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:storyboard-to-video",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,

@@ -1,9 +1,10 @@
 import {
-  STUDIO_GENERATION_IN_PROGRESS_MESSAGE,
   STUDIO_GENERATION_RECOVERABLE_FALLBACK,
 } from "./studio-generation-response";
 import {
   applyStudioGenerationOutcome,
+  createStudioGenerationSubmitLock,
+  guardStudioGenerationSubmitEffects,
   runStudioGenerationResume,
   runStudioGenerationSubmit,
   type StudioGenerationSubmitAttempt,
@@ -63,6 +64,32 @@ function collectEffects(): StudioGenerationSubmitEffects & {
 /** ponytail: pure injected runner — no React, no network. */
 export async function studioGenerationSubmitSelfCheck(): Promise<void> {
   {
+    const lock = createStudioGenerationSubmitLock();
+    assert(lock.acquire(), "resume lock acquires synchronously");
+    assert(!lock.acquire(), "resume lock rejects a same-tick second request");
+    lock.release();
+    assert(lock.acquire(), "resume lock can be acquired after release");
+  }
+
+  {
+    const effects = collectEffects();
+    let mounted = false;
+    const guarded = guardStudioGenerationSubmitEffects(() => mounted, effects);
+    guarded.clearError();
+    guarded.refetchCredits();
+    guarded.refreshHistory();
+    await guarded.openPreviewFromResponse({ id: "stale" });
+    assert(effects.clearErrorCalls === 0, "unmounted clear-error effect is skipped");
+    assert(effects.creditCalls === 0, "unmounted credit effect is skipped");
+    assert(effects.historyCalls === 0, "unmounted history effect is skipped");
+    assert(effects.previewCalls.length === 0, "unmounted preview effect is skipped");
+
+    mounted = true;
+    guarded.refetchCredits();
+    assert(effects.creditCalls === 1, "mounted effects still run");
+  }
+
+  {
     const attempt = collectAttempt();
     const effects = collectEffects();
     const result = await runStudioGenerationSubmit(
@@ -97,6 +124,20 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
     assert(effects.clearErrorCalls === 1, "cancelled clears stale errors");
     assert(effects.creditCalls === 1, "cancelled refetches credits");
     assert(effects.previewCalls.length === 0, "cancelled skips preview");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(200, JSON.stringify({ code: "GENERATION_CANCELLED" })),
+      "key-cancelled-body",
+      attempt,
+      effects,
+    );
+    assert(result.kind === "cancelled", "semantic cancellation wins over HTTP 200");
+    assert(attempt.settled === false, "200 cancellation body keeps idempotency key");
+    assert(effects.previewCalls.length === 0, "200 cancellation body skips success effects");
   }
 
   {
@@ -163,29 +204,43 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
       {
         awaitCompletion: async () => {
           polled = true;
-          return { videoUrl: "https://x/v.mp4" };
+          return {
+            status: 200,
+            data: { videoUrl: "https://x/v.mp4" },
+          };
         },
       },
     );
     assert(polled, "202 triggers awaitCompletion");
-    assert(result.kind === "success", "202 completion → success");
+    assert(
+      result.kind === "success" && result.data.videoUrl === "https://x/v.mp4",
+      "202 completion preserves terminal status and data",
+    );
     assert(attempt.settled === true, "202 completion settles true");
   }
 
   {
     const attempt = collectAttempt();
     const effects = collectEffects();
-    const result = await runStudioGenerationSubmit(
-      fakeResponse(202, JSON.stringify({ status: "processing" })),
-      "key-without-poller",
-      attempt,
-      effects,
-    );
+    let pendingError: unknown = null;
+    try {
+      await runStudioGenerationSubmit(
+        fakeResponse(202, JSON.stringify({ status: "processing" })),
+        "key-without-poller",
+        attempt,
+        effects,
+      );
+    } catch (error) {
+      pendingError = error;
+    }
     assert(
-      result.kind === "error" && result.message === STUDIO_GENERATION_IN_PROGRESS_MESSAGE,
-      "202 without poller remains in progress",
+      !!pendingError &&
+        typeof pendingError === "object" &&
+        "code" in pendingError &&
+        pendingError.code === "STUDIO_GENERATION_AWAIT_COMPLETION_REQUIRED",
+      "202 without poller throws a fail-closed configuration error",
     );
-    assert(attempt.settled === false, "202 without poller settles false");
+    assert(attempt.settled === null, "202 without poller keeps the in-flight lock");
     assert(effects.previewCalls.length === 0, "202 without poller skips preview");
     assert(effects.historyCalls === 0, "202 without poller skips history refresh");
     assert(effects.creditCalls === 0, "202 without poller skips credit refresh");
@@ -201,9 +256,12 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
       effects,
       {
         awaitCompletion: async () => ({
-          recoverable: true,
-          jobId: "job-after-poll",
-          error: "Final upload needs retry",
+          status: 503,
+          data: {
+            recoverable: true,
+            jobId: "job-after-poll",
+            error: "Final upload needs retry",
+          },
         }),
       },
     );
@@ -224,13 +282,70 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
       attempt,
       effects,
       {
-        awaitCompletion: async () => ({ code: "GENERATION_CANCELLED" }),
+        awaitCompletion: async () => ({
+          status: 409,
+          data: { code: "GENERATION_CANCELLED" },
+        }),
       },
     );
     assert(result.kind === "cancelled", "polled cancellation is classified");
     assert(attempt.settled === false, "polled cancellation settles false");
     assert(effects.clearErrorCalls === 1, "polled cancellation clears stale errors");
     assert(effects.creditCalls === 1, "polled cancellation refreshes credits");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(202, JSON.stringify({ status: "processing" })),
+      "key-credits-poll",
+      attempt,
+      effects,
+      {
+        awaitCompletion: async () => ({
+          status: 402,
+          data: { requiredCredits: 16, currentBalance: 3 },
+        }),
+      },
+    );
+    assert(
+      result.kind === "error" &&
+        result.message === "Insufficient credits. Required: 16, current: 3.",
+      "polled 402 keeps its terminal HTTP status",
+    );
+    assert(attempt.settled === false, "polled 402 keeps the idempotency key");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    let pendingError: unknown = null;
+    try {
+      await runStudioGenerationSubmit(
+        fakeResponse(202, JSON.stringify({ status: "processing" })),
+        "key-still-processing",
+        attempt,
+        effects,
+        {
+          awaitCompletion: async () => ({
+            status: 202,
+            data: { status: "processing" },
+          }),
+        },
+      );
+    } catch (error) {
+      pendingError = error;
+    }
+    assert(
+      !!pendingError &&
+        typeof pendingError === "object" &&
+        "code" in pendingError &&
+        pendingError.code === "STUDIO_GENERATION_COMPLETION_NOT_TERMINAL",
+      "non-terminal completion payload fails closed",
+    );
+    assert(attempt.settled === null, "non-terminal completion keeps the in-flight lock");
+    assert(effects.previewCalls.length === 0, "non-terminal completion skips success effects");
   }
 
   {

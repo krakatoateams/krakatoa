@@ -305,6 +305,7 @@ export default function ReelsCreatorComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:reels",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,

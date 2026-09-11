@@ -178,6 +178,7 @@ export default function TextToVideoComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:text-to-video",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,

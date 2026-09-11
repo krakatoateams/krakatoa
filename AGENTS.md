@@ -100,6 +100,8 @@ Centralized in [`lib/credit-costs.ts`](lib/credit-costs.ts) — never hardcode c
 ### Metered lifecycle ownership
 Charged legacy routes call `beginMeteredAttempt` only after route-specific parsing, validation, profile resolution, pricing, and model selection. The helper performs the shared order: idempotency gate → best-effort job/start/attach → credit spend → processing asset. Provider execution, commit points, lineage, history, and tool cleanup remain local. Routes close success/deferred/recoverable/terminal outcomes through `finishMeteredAttempt`; terminal persistence delegates to `settlement.ts`. Workflow-backed attempts keep using the atomic RPCs in `lib/generation-workflows/` and are not reimplemented by this adapter. Checks: `npm run test:metered-generation`.
 
+Client generation attempts persist a scoped idempotency key plus a compact input fingerprint (not the raw prompt/input) in session storage. Identical retries after navigation reuse the key; changed inputs or confirmed success rotate it. HTTP 202 remains locked until its completion poller returns an explicit terminal HTTP status and payload. Checks: `npm run test:studio-submit`.
+
 ### Generation cancel (in-flight v1)
 Metered routes honor user cancel via `POST /api/generations/cancel` + `lib/generation-cancel.ts` (`cancel_requested`, `generation_predictions`, `cancel_allowed`, `assertNotCancelled`). The generate route owns refund + `cancelJob`; cancel endpoint never refunds in-flight attempts. After provider output is committed (`markProviderCommitted` in `lib/generation-commit.ts` flips `cancel_allowed=false`), cancel API returns 409 `CANCEL_NOT_ALLOWED` and post-commit user cancel does not refund. Recoverable jobs (`pipeline-recovery/`, status `recoverable`): credits held for **Try again**; refund only on genuine delivery failure (`lib/pipeline-recovery/refund-policy-pure.ts` — resume exhausted, terminal resume error, TTL after at least one resume attempt). Abandon recoverable (`cancel` + `jobId`) does not refund. Commit points: first Reels scene / Veo clip, video/image generation success, storyboard import vision LLM. Client: Video, Photo, and Skill compose `useIdempotentSubmit` + status polling through `useStudioGenerationSubmit`; Canvas and Editor intentionally retain their local flow. Stuck runs: `GET /api/cron/generation-reconcile`. Plans: [`docs/generation/generation-cancel-hardening-plan.md`](docs/generation/generation-cancel-hardening-plan.md), [`docs/generation/no-refund-after-replicate-plan.md`](docs/generation/no-refund-after-replicate-plan.md).
 
@@ -109,7 +111,6 @@ Composer `loading` state dies on unmount. In-flight work lives on `jobs` (`queue
 ### Known limitations (intentional)
 - No Xendit / payment gateway / subscription plans yet.
 - No credit-balance UI yet.
-- Client/request-level idempotency is not implemented — a full HTTP retry produces a new `jobId` and therefore a new spend key (double-charge risk on retries is accepted for this phase).
 - `rls_auto_enable` review remains a separate backlog item; routes rely on the service role and enforce `profile_id` ownership in application code.
 
 ## Cross-tool hand-offs

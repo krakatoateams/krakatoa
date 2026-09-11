@@ -55,7 +55,8 @@ export default function PromptNode({
   const edges = useStore((s) => s.edges) as unknown as CanvasGraphEdge[];
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } = useIdempotentSubmit();
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } =
+    useIdempotentSubmit(`canvas:prompt:${id}`);
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { canvasTextCredits } = usePricing();

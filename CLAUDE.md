@@ -43,6 +43,8 @@ keeps only the rules needed on most engineering tasks.
 - Refund post-spend terminal failures best-effort without masking the original
   error. Never refund after provider commit unless the canonical policy says so.
 - Keep spend and refund idempotency keys stable.
+- Client generation keys are scoped per composer and persist across navigation;
+  reuse them for identical retries, rotating only after success or input changes.
 - Legacy charged routes use `lib/metered-generation/`; workflow-backed attempts
   use the atomic RPCs in `lib/generation-workflows/`.
 - Prompt capture stores user prompts on jobs and assembled model prompts on the
@@ -55,6 +57,8 @@ keeps only the rules needed on most engineering tasks.
 - Recoverable jobs retain credits for retry. Delegate terminal refund decisions
   to `shouldRefundRecoverableTerminal()`.
 - Durable jobs choose legacy or workflow execution once and never switch.
+- HTTP 202 is non-terminal and must keep the attempt locked until polling returns
+  an explicit terminal status and payload.
 - Provider submission fencing and signed webhook verification are mandatory.
 
 ### Storage and media

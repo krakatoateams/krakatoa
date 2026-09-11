@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import {
+  createStudioGenerationSubmitLock,
+  guardStudioGenerationSubmitEffects,
   isStudioGenerationCancelledError,
+  isStudioGenerationPendingError,
   runStudioGenerationResume,
   runStudioGenerationSubmit,
   type StudioGenerationSubmitEffects,
@@ -12,6 +15,7 @@ import {
 } from "@/lib/studio-generation-submit-core";
 
 export type UseStudioGenerationSubmitConfig = Omit<StudioGenerationSubmitEffects, "clearError"> & {
+  idempotencyScope: string;
   resumeStillFailingMessage?: string;
 };
 
@@ -22,24 +26,42 @@ export type StudioGenerationSubmitFn = (
 ) => Promise<boolean>;
 
 export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfig) {
-  const { refetchCredits, refreshHistory, openPreviewFromResponse, resumeStillFailingMessage } =
-    config;
+  const {
+    idempotencyScope,
+    refetchCredits,
+    refreshHistory,
+    openPreviewFromResponse,
+    resumeStillFailingMessage,
+  } = config;
 
-  const { begin, cancel, cancelling, activeKey } = useIdempotentSubmit();
+  const { begin, cancel, cancelling, activeKey } = useIdempotentSubmit(idempotencyScope);
   const { cancelAllowed, phase } = useGenerationStatusPoll(activeKey);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const resumeLockRef = useRef(createStudioGenerationSubmitLock());
   const clearError = useCallback(() => setError(null), []);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const effects = useMemo<StudioGenerationSubmitEffects>(
-    () => ({
-      clearError,
-      refetchCredits,
-      refreshHistory,
-      openPreviewFromResponse,
-    }),
+    () =>
+      guardStudioGenerationSubmitEffects(
+        () => mountedRef.current,
+        {
+          clearError,
+          refetchCredits,
+          refreshHistory,
+          openPreviewFromResponse,
+        },
+      ),
     [clearError, refetchCredits, refreshHistory, openPreviewFromResponse],
   );
 
@@ -54,47 +76,70 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
       try {
         const response = await execute(attempt.key);
+        const guardedOptions =
+          options.onSuccess
+            ? {
+                ...options,
+                onSuccess: async (data: Parameters<NonNullable<typeof options.onSuccess>>[0]) => {
+                  if (mountedRef.current) await options.onSuccess?.(data);
+                },
+              }
+            : options;
         const result = await runStudioGenerationSubmit(
           response,
           attempt.key,
           attempt,
           effects,
-          options,
+          guardedOptions,
         );
 
         if (result.kind === "recoverable") {
-          setRecoverableJobId(result.jobId);
-          setError(result.message);
+          if (mountedRef.current) {
+            setRecoverableJobId(result.jobId);
+            setError(result.message);
+          }
           return false;
         }
         if (result.kind === "error") {
-          setError(result.message);
+          if (mountedRef.current) setError(result.message);
           return false;
         }
         return result.kind === "success";
       } catch (err: unknown) {
+        if (isStudioGenerationPendingError(err)) {
+          if (mountedRef.current) setError(err.message);
+          return false;
+        }
         if (isStudioGenerationCancelledError(err)) {
           attempt.settle(false);
           effects.clearError();
-          refetchCredits();
+          effects.refetchCredits();
           return false;
         }
         attempt.settle(false);
-        setError(
-          err instanceof Error
-            ? err.message
-            : options.unexpectedErrorFallback ?? "An unexpected error occurred",
-        );
+        if (mountedRef.current) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : options.unexpectedErrorFallback ?? "An unexpected error occurred",
+          );
+        }
         return false;
       } finally {
-        setLoading(false);
+        if (mountedRef.current) setLoading(false);
       }
     },
-    [begin, effects, refetchCredits],
+    [begin, effects],
   );
 
   const resumeRecoverable = useCallback(async () => {
-    if (!recoverableJobId) return;
+    if (
+      !mountedRef.current ||
+      !recoverableJobId ||
+      !resumeLockRef.current.acquire()
+    ) {
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -109,18 +154,21 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
         resumeStillFailingMessage,
       );
       if (result.kind === "still_recoverable") {
-        setError(result.message);
+        if (mountedRef.current) setError(result.message);
         return;
       }
       if (result.kind === "error") {
-        setError(result.message);
+        if (mountedRef.current) setError(result.message);
         return;
       }
-      setRecoverableJobId(null);
+      if (mountedRef.current) setRecoverableJobId(null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Resume failed");
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : "Resume failed");
+      }
     } finally {
-      setLoading(false);
+      resumeLockRef.current.release();
+      if (mountedRef.current) setLoading(false);
     }
   }, [effects, recoverableJobId, resumeStillFailingMessage]);
 

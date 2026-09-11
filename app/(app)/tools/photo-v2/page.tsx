@@ -161,6 +161,7 @@ function StoryboardComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "photo:storyboard",
     refetchCredits,
     refreshHistory: onHistoryRefresh,
     openPreviewFromResponse,
@@ -536,6 +537,7 @@ function PhotoOmniPage({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "photo:studio",
     refetchCredits,
     refreshHistory: onHistoryRefresh,
     openPreviewFromResponse,

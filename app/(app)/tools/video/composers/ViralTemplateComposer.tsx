@@ -143,6 +143,7 @@ export default function ViralTemplateComposer({
     cancelling,
     cancelAllowed,
   } = useStudioGenerationSubmit({
+    idempotencyScope: "video:viral-template",
     refetchCredits,
     refreshHistory: onGenerated,
     openPreviewFromResponse,
