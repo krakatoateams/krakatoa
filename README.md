@@ -129,6 +129,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for an in-depth architecture description and the 
 | Topic | Path |
 | --- | --- |
 | Monorepo & pipelines | [`CLAUDE.md`](./CLAUDE.md) |
+| Code & security audit | Run `/audit-repo`; see the [`runbook`](./docs/agents/code-security-audit-runbook.md) and [`state`](./docs/agents/audit-state.md) |
 | Admin Config v2 (unified panel) | [`docs/admin/admin-config-v2-plan.md`](./docs/admin/admin-config-v2-plan.md) |
 | Admin Config v2 (ringkasan ID) | [`docs/admin/admin-config-v2-ringkasan.md`](./docs/admin/admin-config-v2-ringkasan.md) |
 | Pricing Config v2 | [`docs/billing/pricing-config-v2-plan.md`](./docs/billing/pricing-config-v2-plan.md) |
