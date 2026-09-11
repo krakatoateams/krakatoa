@@ -56,7 +56,10 @@ import { resolveExecutionBackendForJobType } from "@/lib/generation-workflows/fe
 import { attachWorkflowRun } from "@/lib/generation-workflows/workflow-db";
 import { motionControlGenerationWorkflow } from "@/lib/generation-workflows/motion-control-workflow";
 import type { MotionControlWorkflowParams } from "@/lib/generation-workflows/motion-control-workflow-types";
-import { settleMotionControlRouteFailure } from "@/lib/generation-workflows/motion-control-route-failure";
+import {
+  resolveMotionControlRouteFailureHttp,
+  settleMotionControlRouteFailure,
+} from "@/lib/generation-workflows/motion-control-route-failure";
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
 export const maxDuration = 300;
@@ -76,6 +79,7 @@ function parseRefAttachment(raw: unknown): RefAttachment | null {
 
 export async function POST(req: Request) {
   let profileId: string | null = null;
+  let userId: string | null = null;
   let jobId: string | null = null;
   let currentStepId: string | null = null;
   let videoAssetId: string | null = null;
@@ -119,11 +123,17 @@ export async function POST(req: Request) {
 
   try {
     // STRICT profile resolution (this route charges credits).
-    let userId: string | null = null;
     try {
       const profile = await requireCurrentProfile();
       profileId = profile.id;
       userId = profile.user_id;
+      if (!userId) {
+        console.error("[motion-control] profile is missing its user identity.");
+        return NextResponse.json(
+          { error: "Profile identity is unavailable. Please try again." },
+          { status: 500 },
+        );
+      }
     } catch (e) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -299,6 +309,8 @@ export async function POST(req: Request) {
               generationRequestId: genReqId,
             } satisfies MotionControlJobInput,
           });
+          jobId = job.id;
+          generationRequestId = genReqId;
           await startJob(profileId!, job.id);
           await attachGenerationRequestJob({
             id: genReqId,
@@ -566,7 +578,7 @@ export async function POST(req: Request) {
       (profileId
         ? {
             profileId,
-            userId: null,
+            userId,
             jobId,
             generationRequestId,
             creditsSpent,
@@ -578,38 +590,30 @@ export async function POST(req: Request) {
     if (handle) {
       if (videoAssetId) handle.assetIds = [videoAssetId];
       if (executionBackend === "workflow") {
-        if (handle.userId && handle.jobId && handle.generationRequestId) {
-          try {
-            const settled = await settleMotionControlRouteFailure({
-              executionBackend: "workflow",
-              workflowStartAttempted,
-              workflowFailure: {
-                profileId: handle.profileId,
-                userId: handle.userId,
-                jobId: handle.jobId,
-                generationRequestId: handle.generationRequestId,
-                errorJson: { message: rawMessage },
-              },
-              finishLegacy: async () => {
-                throw new Error("Workflow backend cannot use legacy settlement.");
-              },
-            });
-            if (settled.kind === "workflow_start_ambiguous") {
-              return NextResponse.json(
-                {
-                  status: "processing",
-                  code: "WORKFLOW_START_STATE_UNKNOWN",
-                  jobId: handle.jobId,
-                },
-                { status: 202 },
-              );
-            }
-          } catch (settlementError) {
+        const settlementUserId = handle.userId ?? userId;
+        if (settlementUserId && handle.jobId && handle.generationRequestId) {
+          const settled = await settleMotionControlRouteFailure({
+            executionBackend: "workflow",
+            workflowStartAttempted,
+            workflowFailure: {
+              profileId: handle.profileId,
+              userId: settlementUserId,
+              jobId: handle.jobId,
+              generationRequestId: handle.generationRequestId,
+              errorJson: { message: rawMessage },
+            },
+            finishLegacy: async () => {
+              throw new Error("Workflow backend cannot use legacy settlement.");
+            },
+          });
+          if (settled.kind === "workflow_settlement_pending") {
             console.error(
               "[motion-control] canonical workflow failure settlement failed:",
-              settlementError,
+              settled.error,
             );
           }
+          const http = resolveMotionControlRouteFailureHttp(settled, handle.jobId);
+          return NextResponse.json(http.body, { status: http.status });
         } else {
           console.error(
             "[motion-control] workflow failure is missing canonical settlement identifiers.",
