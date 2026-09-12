@@ -21,7 +21,10 @@ None.
   - [x] Admin guards (pages, `withAdmin`, feature gates)
   - [x] Unauthenticated service-role provider routes (`generate-caption`,
         `test-stitch`)
-  - [ ] Service-role `profile_id` ownership on user APIs
+  - [x] Service-role `profile_id` ownership on user APIs
+    - [x] Canvas and editor CRUD
+    - [x] Owned skills CRUD
+    - [x] Welcome-offer claim auth + posts PATCH ownership
   - [ ] Service-role `user_id` ownership (creations, connections; storage
         signing stays with the Storage queue item)
 - [ ] Credits: ledger, pricing, bonus offers, and refund policy
@@ -118,6 +121,27 @@ None.
 - Verification: `npm run test:provider-route-auth`, `npm run test:admin-auth`,
   `npm run test:auth`, `npm run lint` (0 errors; 11 pre-existing warnings),
   `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Authorization: profile_id ownership
+
+- Date: 2026-09-12
+- Base: `f4d338c186f2dcf4f82748b188377a2a11c2843d`
+- Final commit: `2bb774754cdcf8a619f353c24885fd1c8e0eb632`
+- Scope: canvas/editor/skills CRUD (review-only),
+  `app/api/welcome-video-offer/claim/route.ts`, `app/api/posts/[id]/route.ts`.
+- Findings: welcome-offer claim now returns 401 when unauthenticated; posts
+  PATCH owner-checks `profile_id` on read and on the update filter. Canvas,
+  editor, and owned skills already scoped every query by session `profile.id`.
+- Accepted risks: posts wrong-owner stays 403 after fetch-by-id (existence
+  leak of a UUID). Welcome GET still returns `{ eligible: false }` for
+  unauthenticated readers. Generation `profile_id` routes were already audited.
+- Follow-up: unauthenticated `POST /api/posts` without storage linkage, and
+  publish TOCTOU on PATCH vs cron claim, belong to Scheduler.
+- Verification: `npm run test:post-ownership`, `npm run test:canvas`,
+  `npm run test:editor`, `npm run test:skills`, `npm run lint` (0 errors;
+  11 pre-existing warnings), `npm run build`, and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
