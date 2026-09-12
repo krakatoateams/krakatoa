@@ -14,7 +14,18 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Admin Config v2 persistence layer
+- Base: `547cfd8ec38a01f2ef4f9ff3bb9b2d174f1874e7`
+- Branch: `audit-repo/admin-config-persistence`
+- Local implementation commit: `30699a9`
+- Status: blocked before delivery
+- Blocker: Supabase MCP `list_migrations` returned a definitive permission
+  denial, so migration `095_schedule_gpt5_model_config.sql` was not compared,
+  applied, or verified live. Applying it also requires explicit production-DB
+  approval under the audit runbook.
+- Resume: restore Supabase MCP access, approve the migration, then run
+  `/audit-repo Admin`.
 
 ## Queue
 
