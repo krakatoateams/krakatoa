@@ -90,7 +90,7 @@ None.
   - [x] Admin analytics: RPC aggregates and paginated user PII
   - [x] Admin metrics: cross-user dashboard reads
   - [x] Admin Config v2: PATCH validators and reset safety
-  - [ ] Admin Config v2: feature-model and catalog toggles
+  - [x] Admin Config v2: feature-model and catalog toggles
   - [ ] Admin Config v2: tree builder and UI read contract
   - [ ] Admin Config v2: persistence layer
   - [ ] Platform settings: expiry, welcome knobs, credit packs
@@ -1012,6 +1012,33 @@ None.
   passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted
   medium findings.
+
+### Admin: Config v2 feature-model and catalog toggles
+
+- Date: 2026-09-13
+- Base: `27efb4e625d037e1fda2a9dd981e7edc6720775c`
+- Final commit: `f156fe6`
+- Scope: feature-model and catalog admin APIs/DB readers, Video Studio
+  enablement helpers, `/api/generate-video`, motion-control and storyboard
+  generation gates, and every `/api/generate-video` client.
+- Findings: an explicitly empty composer no longer fell back to the full
+  catalog. Motion-control, storyboard, Viral template, Text to video, Image to
+  video, Canvas, and Skill requests now carry or resolve a composer and reject
+  admin-disabled models before spend/provider work. The composer discriminator
+  is included in idempotency hashes and job/usage metadata.
+- Accepted risks: Text to video intentionally supports optional first-frame and
+  reference inputs, so the shared route cannot classify every reference-bearing
+  request as Image to video; the validated client discriminator defines the
+  product flow. Default changes remain clear-then-set rather than transactional,
+  and reset cache invalidation is latent while the resolver TTL is `0`.
+- Verification: `npm run test:admin-config-toggles` (red then green),
+  `npm run test:video-studio`, `npm run test:canvas`, `npm run test:skills`,
+  `npm run test:studio-submit`, `npm run test:admin-auth`,
+  `npm run test:admin-config-validation`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, `git diff --check`, and edited-file
+  diagnostics passed.
+- Security: final review found 0 critical, 0 high, 0 medium, and one accepted
+  low finding for the intentional shared-route reference overlap.
 
 ## Deferred
 
