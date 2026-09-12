@@ -13,6 +13,16 @@ export function cronTokenLogSafe(token: {
   return { has_refresh_token: Boolean(token.refresh_token) };
 }
 
+/**
+ * Catch / share-URL logs — message only, never stack frames, and strip
+ * signed-URL query tokens if a provider string still embeds one.
+ */
+export function cronErrorLogSafe(err: unknown): string {
+  const message =
+    typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+  return message.replace(/https?:\/\/[^\s]+/gi, (url) => redactPublishMediaRef(url));
+}
+
 /** Processing log — keep path, strip signed-URL query tokens. */
 export function cronProcessingLogSafe(post: {
   id: unknown;
@@ -153,6 +163,24 @@ export function cronPublishSelfCheck(): void {
   assert(
     String(processing.video_url).includes("/u1/videos/clip.mp4"),
     "cron processing logs must keep the object path",
+  );
+
+  const publishErr = new Error(
+    "Could not fetch video from storage (HTTP 403): https://example.supabase.co/storage/v1/object/sign/krakatoa/u1/videos/clip.mp4?token=secret-jwt",
+  );
+  publishErr.stack = `${publishErr.message}\n    at uploadToYouTube (lib/youtube.ts:88:11)`;
+  const errorLogged = cronErrorLogSafe(publishErr);
+  assert(
+    !errorLogged.includes("at uploadToYouTube") && !errorLogged.includes("lib/youtube.ts"),
+    "cron error logs must not include stack frames",
+  );
+  assert(
+    !errorLogged.includes("secret-jwt") && !errorLogged.includes("token="),
+    "cron error logs must not include signed URL tokens",
+  );
+  assert(
+    errorLogged.includes("Could not fetch video from storage"),
+    "cron error logs must keep the failure reason",
   );
 }
 
