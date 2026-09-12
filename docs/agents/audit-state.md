@@ -61,6 +61,8 @@ None.
   - [x] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
 - [ ] Integrations: Instagram OAuth, callbacks, and token lifecycle
   (discovered; same `platform_tokens` / connections family)
+  - [x] Instagram OAuth, callbacks, and token lifecycle
+  - [ ] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
@@ -584,6 +586,27 @@ None.
   green), `npm run test:youtube-oauth`, `npm run test:tiktok-publish`,
   `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: Instagram OAuth and token lifecycle
+
+- Date: 2026-09-12
+- Base: `8ae3400ab00bef798b212e82db2c441c4727fa4c`
+- Final commit: `5f7b672`
+- Scope: `app/api/connections/instagram/{start,callback,route}`,
+  `lib/instagram.ts` token exchange, `lib/instagram-oauth-pure.ts`.
+- Findings: token-exchange errors no longer JSON-dump Meta payloads
+  (access_token leak). CSRF, eligibility-before-persist, and
+  `platform_user_id` already matched the spec.
+- Accepted risks: Phase 3 proactive long-lived refresh is still
+  unimplemented (60-day expiry). Disconnect is local-only. State cookie
+  is not bound to user id (same as TikTok/YouTube).
+- Follow-up: Instagram publish client still embeds full Graph `rawText`
+  in errors.
+- Verification: `npm run test:instagram-oauth` (red on token-in-error,
+  then green), `npm run test:youtube-oauth`, `npm run test:tiktok-oauth`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
