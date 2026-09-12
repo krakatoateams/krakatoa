@@ -59,10 +59,10 @@ None.
 - [x] Integrations: Google/YouTube OAuth, tokens, and publishing
   - [x] YouTube OAuth, callbacks, and token lifecycle
   - [x] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
-- [ ] Integrations: Instagram OAuth, callbacks, and token lifecycle
+- [x] Integrations: Instagram OAuth, callbacks, and token lifecycle
   (discovered; same `platform_tokens` / connections family)
   - [x] Instagram OAuth, callbacks, and token lifecycle
-  - [ ] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
+  - [x] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
@@ -601,10 +601,34 @@ None.
 - Accepted risks: Phase 3 proactive long-lived refresh is still
   unimplemented (60-day expiry). Disconnect is local-only. State cookie
   is not bound to user id (same as TikTok/YouTube).
-- Follow-up: Instagram publish client still embeds full Graph `rawText`
-  in errors.
+- Follow-up: none remaining for Instagram OAuth.
 - Verification: `npm run test:instagram-oauth` (red on token-in-error,
   then green), `npm run test:youtube-oauth`, `npm run test:tiktok-oauth`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: Instagram publish client
+
+- Date: 2026-09-12
+- Base: `7418c25e61e1582650b43af6a030a9facb4464a2`
+- Final commit: `703a64a`
+- Scope: `lib/instagram.ts` publish helpers (`createMediaContainer`,
+  `getContainerStatus`, `publishContainer`,
+  `ensureInstagramCompatibleImage`), `lib/instagram-publish-pure.ts`.
+  Cron claim lock stays Scheduler.
+- Findings: Graph errors now use `error.message` with signed URL tokens
+  stripped; non-JSON bodies fail closed as `unknown`; storage-check
+  paths are redacted. JPEG conversion and permanent-failure classifier
+  already matched the spec.
+- Accepted risks: helpers do not re-assert path ownership (cron does).
+  JPEG upload SDK messages stay unredacted (TikTok parity). Phase 3
+  token refresh remains unimplemented.
+- Follow-up: cron token-preview logs and claim/idempotency stay
+  Scheduler.
+- Verification: `npm run test:instagram-publish` (red on raw Graph
+  body, then on echoed token, then green), `npm run test:instagram-oauth`,
+  `npm run test:tiktok-publish`, `npm run test:post-ownership`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
