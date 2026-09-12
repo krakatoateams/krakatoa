@@ -12,6 +12,7 @@ import {
 } from "@/lib/storage-buckets";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { getSessionUserId } from "@/lib/resolve-user";
+import { requireResolvedSessionUserId } from "@/lib/provider-route-auth-pure";
 
 export const SIGN_TTL = {
   /**
@@ -257,9 +258,7 @@ export async function resolveSignedMediaUrl(params: {
 }
 
 export async function requireSessionUserId(): Promise<string> {
-  const userId = await getSessionUserId();
-  if (!userId) throw new Error("Not authenticated.");
-  return userId;
+  return requireResolvedSessionUserId(await getSessionUserId());
 }
 
 /** Cron / server publish: sign without session (path must already be validated). */

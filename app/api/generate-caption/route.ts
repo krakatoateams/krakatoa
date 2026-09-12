@@ -3,6 +3,7 @@ import type Replicate from "replicate";
 import { createReplicateClient, runWithRetry } from "@/lib/replicate-utils";
 import { extractAudioMp3 } from "@/lib/rendi";
 import { getSessionUserId } from "@/lib/resolve-user";
+import { unauthenticatedProviderHttp } from "@/lib/provider-route-auth-pure";
 import {
   assertPathOwnedByUser,
   resolveStoragePath,
@@ -263,6 +264,12 @@ function buildPolishPrompt(existingCaption: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const sessionUserId = await getSessionUserId();
+    if (!sessionUserId) {
+      const denied = unauthenticatedProviderHttp();
+      return NextResponse.json({ error: denied.error }, { status: denied.status });
+    }
+
     const body = await req.json();
     // Which surface is asking. Default "youtube" keeps the scheduler untouched;
     // "instagram" is the Photo Studio social post, which lives under the photo tool.
@@ -544,6 +551,10 @@ export async function POST(req: NextRequest) {
 
     const message =
       err instanceof Error ? err.message : "Unexpected error occurred.";
+    if (/not authenticated/i.test(message)) {
+      const denied = unauthenticatedProviderHttp();
+      return NextResponse.json({ error: denied.error }, { status: denied.status });
+    }
 
     return NextResponse.json({ error: message }, { status: 500 });
   }

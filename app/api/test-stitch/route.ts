@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
+import { withAdmin } from '@/lib/admin-api';
 import { supabase } from '@/lib/supabase';
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
@@ -95,6 +96,7 @@ function extractRendiOutputUrl(pollData: any, alias: string): string {
 }
 
 export async function POST(req: Request) {
+  return withAdmin(async () => {
   try {
     const body = await req.json().catch(() => ({}));
     const { audioPredictionId, videoPredictionId } = body;
@@ -363,4 +365,5 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     console.error('Test pipeline error:', error);
     return NextResponse.json({ error: error.message || String(error) }, { status: 500 });
   }
+  });
 }
