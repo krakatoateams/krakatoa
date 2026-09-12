@@ -99,6 +99,8 @@ None.
   - [x] Admin skills catalog
   - [x] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
+    - [x] Primary generation and shared pipelines
+    - [ ] Secondary generation and admin test route
   - [ ] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
@@ -1211,6 +1213,32 @@ None.
   edited-file diagnostics passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings; the
   accepted operator-visibility risks are recorded above.
+
+### Admin: primary generation and shared-pipeline log redaction
+
+- Date: 2026-09-13
+- Base: `606421da24e59e6c3ffb4e986f82641247f154d8`
+- Final commit: `350861f`
+- Scope: Photo/Video/Reels POSTs, metered settlement and idempotency replay,
+  status/active/resume owner surfaces, credit transaction serialization, Reels
+  LLM/TTS/storage logs, and shared Rendi/Replicate errors.
+- Findings: routes logged raw Error stacks, LLM/provider payloads, user-derived
+  output, and config names; first/replayed/polled/resumed failures returned
+  provider text; refund metadata exposed the same detail through the owner
+  ledger feed. Generation logs now keep only error name/code/status, all owner
+  error surfaces use allowlisted generic contracts, transaction metadata is
+  omitted from the client feed, and Rendi/Reels sources no longer embed raw
+  bodies, signed URLs, or creative output in logs/exceptions.
+- Accepted risks: owner success responses still return their signed deliverable
+  data. Detailed error text remains in owner-scoped jobs, steps, generation
+  requests, and ledger metadata for admin monitoring; public serializers and
+  logs do not expose it.
+- Verification: `npm run test:generation-log-redaction` (red then green),
+  `test:metered-generation`, `test:active-generations`, `test:prompt-capture`,
+  `test:studio-submit`, `test:admin-log-redaction`, `npm run lint` (0 errors;
+  11 pre-existing warnings), `npm run build`, `git diff --check`, and
+  edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings.
 
 ## Deferred
 

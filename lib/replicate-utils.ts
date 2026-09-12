@@ -12,7 +12,7 @@ export const runWithRetry = runReplicateWithRetry;
 export function createReplicateClient() {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) {
-    throw new Error("REPLICATE_API_TOKEN is not set.");
+    throw new Error("AI provider is not configured.");
   }
   return new Replicate({ auth: token });
 }

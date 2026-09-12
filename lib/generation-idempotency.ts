@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   LOCK_TTL_MS,
   type GenerationRequestRow,
@@ -267,7 +268,10 @@ export async function finishGenerationRequestsForJob(params: {
     .neq("status", "succeeded");
 
   if (error) {
-    console.warn("[generation-idempotency] finishGenerationRequestsForJob:", error.message);
+    console.warn(
+      "[generation-idempotency] finishGenerationRequestsForJob:",
+      generationErrorLogSafe(error)
+    );
   }
 }
 
@@ -292,6 +296,9 @@ export async function finishGenerationRequestsForJobSuccess(params: {
     .neq("status", "succeeded");
 
   if (error) {
-    console.warn("[generation-idempotency] finishGenerationRequestsForJobSuccess:", error.message);
+    console.warn(
+      "[generation-idempotency] finishGenerationRequestsForJobSuccess:",
+      generationErrorLogSafe(error)
+    );
   }
 }

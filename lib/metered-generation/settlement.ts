@@ -7,6 +7,7 @@ import {
   finishGenerationRequestFailure,
   finishGenerationRequestRecoverable,
 } from "@/lib/generation-idempotency";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import type { MeteredErrorJson, MeteredSettlementPlan } from "./types";
 
 export type MeteredSettlementLegacyContext = {
@@ -40,7 +41,10 @@ async function safeIo<T>(label: string, fn: () => Promise<T>): Promise<T | null>
   try {
     return await fn();
   } catch (e) {
-    console.warn(`[metered-settlement] ${label} failed:`, e);
+    console.warn(
+      `[metered-settlement] ${label} failed:`,
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 }

@@ -85,6 +85,7 @@ import {
   readBlankVideoBytes,
   requireDevBlankAccess,
 } from "@/lib/dev-blank-generation";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 // Vercel Hobby plan caps every Serverless Function at maxDuration=300. Raising
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
@@ -206,7 +207,7 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[video obs] ${label} failed:`, e);
+      console.warn(`[video obs] ${label} failed:`, generationErrorLogSafe(e));
       return null;
     }
   };
@@ -247,7 +248,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[video] profile resolution failed (non-auth):", e);
+      console.error(
+        "[video] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -264,7 +268,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[video] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[video] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -287,7 +294,10 @@ export async function POST(req: Request) {
             { status: 403 }
           );
         }
-        console.warn("[video] skills tool guard unexpected error (failing open):", e);
+        console.warn(
+          "[video] skills tool guard unexpected error (failing open):",
+          generationErrorLogSafe(e)
+        );
       }
     }
     const skillId = liveSkill?.id;
@@ -964,7 +974,7 @@ export async function POST(req: Request) {
     const rawMessage =
       error instanceof Error ? error.message : String(error);
     if (cancelled) console.log(`[${jobLabel}] Cancelled by user.`);
-    else console.error(`[${jobLabel}] Error:`, error);
+    else console.error(`[${jobLabel}] Error:`, generationErrorLogSafe(error));
     const handle =
       metered ??
       (profileId
@@ -1008,7 +1018,10 @@ export async function POST(req: Request) {
         return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-    return NextResponse.json({ error: rawMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: "Video generation failed." },
+      { status: 500 }
+    );
   } finally {
     // Clean up the transient reference uploads regardless of outcome
     // (success / failure / insufficient credits). The 24h videos/temp/ sweep is
@@ -1017,7 +1030,10 @@ export async function POST(req: Request) {
       try {
         await supabaseServer.storage.from(STORAGE_BUCKET).remove(tempRefPaths);
       } catch (e) {
-        console.warn("[video] temp reference cleanup failed:", e);
+        console.warn(
+          "[video] temp reference cleanup failed:",
+          generationErrorLogSafe(e)
+        );
       }
     }
   }

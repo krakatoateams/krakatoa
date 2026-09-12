@@ -4,8 +4,14 @@ import type {
   MeteredSettlementKind,
   MeteredSettlementPlan,
 } from "./types";
+import {
+  CANCELLED_GENERATION_CLIENT_ERROR,
+  GENERIC_GENERATION_CLIENT_ERROR,
+  PRICING_GENERATION_CLIENT_ERROR,
+  RECOVERABLE_GENERATION_CLIENT_ERROR,
+} from "@/lib/generation-client-error";
 
-const CANCELLED_MESSAGE = "Generation cancelled.";
+const CANCELLED_MESSAGE = CANCELLED_GENERATION_CLIENT_ERROR;
 
 export function resolveMeteredSettlementKind(input: {
   cancelled: boolean;
@@ -46,7 +52,13 @@ function resolveHttp(
   message: string,
   input: MeteredSettlementInput,
 ): Pick<MeteredSettlementPlan, "httpStatus" | "httpBody"> {
-  const clientError = input.genericClientError ?? message;
+  const clientError =
+    input.genericClientError ??
+    (kind === "recoverable"
+      ? RECOVERABLE_GENERATION_CLIENT_ERROR
+      : kind === "pricing_missing"
+        ? PRICING_GENERATION_CLIENT_ERROR
+        : GENERIC_GENERATION_CLIENT_ERROR);
   switch (kind) {
     case "cancelled":
       return {
@@ -63,7 +75,7 @@ function resolveHttp(
         httpBody: {
           recoverable: true,
           jobId: input.jobId ?? null,
-          error: message,
+          error: clientError,
           code: "PIPELINE_RECOVERABLE",
           refunded: false,
         },

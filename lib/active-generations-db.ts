@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   describeJob,
   FAILED_LOOKBACK_MS,
@@ -94,10 +95,16 @@ export async function listActiveGenerations(profileId: string): Promise<ActiveGe
   ]);
 
   if (linkedRes.error) {
-    console.warn("[active-generations] generation_requests:", linkedRes.error.message);
+    console.warn(
+      "[active-generations] generation_requests:",
+      generationErrorLogSafe(linkedRes.error)
+    );
   }
   if (stepRes.error) {
-    console.warn("[active-generations] job_steps:", stepRes.error.message);
+    console.warn(
+      "[active-generations] job_steps:",
+      generationErrorLogSafe(stepRes.error)
+    );
   }
 
   const requests: MatchableRequest[] = ((linkedRes.data ?? []) as RequestRow[]).map((row) => ({

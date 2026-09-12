@@ -66,7 +66,7 @@ Return ONLY raw JSON, nothing else.`;
     const emo = String(styleData.narrator_emotion || "").toLowerCase().trim();
     llmSuggestedEmotion = VALID_EMOTIONS.includes(emo) ? emo : "auto";
   } catch {
-    console.warn("Failed to parse style JSON, using fallbacks:", styleRawJson);
+    console.warn("Failed to parse style JSON; using fallbacks.");
     styleAnchor = "photorealistic, highly detailed, cinematic lighting, 9:16 vertical";
     negativePrompt = "blurry, low quality, distorted, watermark";
   }
@@ -175,17 +175,13 @@ export async function generateScenes(
       );
     } catch {
       console.warn(
-        `[reels scene breakdown attempt ${attempt}] JSON parse failed:`,
-        lastRaw.slice(0, 300)
+        `[reels scene breakdown attempt ${attempt}] JSON parse failed`
       );
     }
   }
 
   if (!Array.isArray(scenes) || scenes.length !== sceneCount) {
-    console.error(
-      "Failed to get correct scene count after 3 attempts. Last raw output:",
-      lastRaw
-    );
+    console.error("Failed to get correct scene count after 3 attempts.");
     throw new Error(`LLM did not return exactly ${sceneCount} scene(s) after 3 attempts.`);
   }
 

@@ -10,6 +10,10 @@ import {
   isWorkflowHeartbeatStale,
 } from "./generation-workflows/stop-settlement-pure";
 import type { ExecutionBackend } from "./generation-workflows/types";
+import {
+  GENERIC_GENERATION_CLIENT_ERROR,
+  generationClientErrorMessage,
+} from "./generation-client-error";
 
 /**
  * User-facing view of an in-flight / recently-failed generation job.
@@ -152,10 +156,7 @@ export function photoLabel(mode: unknown): string {
 }
 
 export function errorMessageOf(error: Record<string, unknown> | null | undefined): string | null {
-  if (!error) return null;
-  if (typeof error.message === "string" && error.message.trim()) return error.message.trim();
-  if (typeof error.code === "string" && error.code.trim()) return error.code.trim();
-  return null;
+  return generationClientErrorMessage(error);
 }
 
 export type MatchableRequest = {
@@ -372,7 +373,10 @@ export function activeGenerationsSelfCheck(): void {
     createdAt: "2026-08-14T00:00:00.000Z",
     error: { message: "Seedance timed out" },
   });
-  assert(failed?.errorMessage === "Seedance timed out", "failed jobs surface the error message");
+  assert(
+    failed?.errorMessage === GENERIC_GENERATION_CLIENT_ERROR,
+    "failed jobs surface a generic client-safe error message"
+  );
 
   const filtered = filterActiveGenerations(
     [i2v!, veo!, photo!],

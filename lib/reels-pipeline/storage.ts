@@ -5,6 +5,7 @@
  * under `videos/{userId}/generated/video/{mode}/`.
  */
 import { uploadToResumable } from "@/lib/pipeline-recovery/storage";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
@@ -47,7 +48,10 @@ export async function uploadAssCaptions(
       upsert: false,
     });
   if (error) {
-    console.error("Supabase caption upload error:", error);
+    console.error(
+      "Supabase caption upload error:",
+      generationErrorLogSafe(error)
+    );
     throw new Error("Failed to upload captions to storage");
   }
   const srtUrl = await signStoragePathForPipeline(srtFilename, userId);
@@ -63,7 +67,7 @@ export async function downloadAndStoreFinal(
 ): Promise<{ storagePath: string; publicUrl: string; signedUrl: string }> {
   const resp = await fetch(rendiUrl);
   if (!resp.ok) {
-    throw new Error(`Failed to download video from Rendi: ${resp.statusText}`);
+    throw new Error(`Failed to download video from Rendi (${resp.status}).`);
   }
   const buffer = await resp.arrayBuffer();
   const storagePath = videosGeneratedVideoPath(userId, mode, filename);
@@ -75,7 +79,11 @@ export async function downloadAndStoreFinal(
       upsert: false,
     });
   if (error) {
-    throw new Error(`Failed to upload final video to Supabase: ${error.message}`);
+    console.error(
+      "Supabase final video upload error:",
+      generationErrorLogSafe(error)
+    );
+    throw new Error("Failed to upload final video to storage.");
   }
   const signedUrl = await signStoragePathForPipeline(storagePath, userId);
   return { storagePath, publicUrl: signedUrl, signedUrl };
@@ -86,6 +94,9 @@ export async function cleanupCaptions(srtFilename: string): Promise<void> {
   try {
     await supabaseServer.storage.from(STORAGE_BUCKET).remove([srtFilename]);
   } catch (e) {
-    console.warn("[reels-pipeline] caption cleanup (non-fatal):", e);
+    console.warn(
+      "[reels-pipeline] caption cleanup (non-fatal):",
+      generationErrorLogSafe(e)
+    );
   }
 }
