@@ -38,6 +38,22 @@ const CREATION_FIELDS: FieldDef[] = [
 ];
 
 type FormState = Record<FieldKey, string>;
+type CreditExpiryRunResult = {
+  lots_expired: number;
+  credits_expired: number;
+  asOf: string;
+};
+type CreationExpiryRunResult = {
+  skipped: boolean;
+  scanned: number;
+  deletedRows: number;
+  days: number | null;
+  asOf: string;
+  cutoff: string | null;
+  partial: boolean;
+  remaining: number;
+  maxDeletes: number;
+};
 
 function toForm(settings: ExpirySettings): FormState {
   const one = (v: number | null) => (v === null ? "" : String(v));
@@ -119,28 +135,87 @@ export default function AdminExpiryPage() {
   };
 
   const runNow = async (target: "credits" | "photo" | "video", label: string) => {
+    if (dirty) {
+      setError("Save or discard expiry setting changes before running expiry.");
+      return;
+    }
     setRunningTarget(target);
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch("/api/admin/expiry/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      const requestRun = async (
+        dryRun: boolean,
+        checkpoint?: CreditExpiryRunResult | CreationExpiryRunResult
+      ) => {
+        const checkpointBody =
+          !dryRun && checkpoint
+            ? target === "credits"
+              ? { asOf: (checkpoint as CreditExpiryRunResult).asOf }
+              : {
+                  asOf: (checkpoint as CreationExpiryRunResult).asOf,
+                  expectedDays: (checkpoint as CreationExpiryRunResult).days,
+                }
+            : {};
+        const res = await fetch("/api/admin/expiry/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target, dryRun, ...checkpointBody }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error ?? `Request failed (${res.status})`);
+        }
+        return data as { result: CreditExpiryRunResult | CreationExpiryRunResult };
+      };
+
+      const preview = await requestRun(true);
       if (target === "credits") {
-        const r = data.result as { lots_expired: number; credits_expired: number };
+        const r = preview.result as CreditExpiryRunResult;
+        if (r.lots_expired === 0) {
+          setNotice("Credit expiry preview: nothing is currently due.");
+          return;
+        }
+        if (
+          !window.confirm(
+            `Expire ${r.lots_expired} credit lot(s) totaling ${r.credits_expired} credit(s)? This writes permanent ledger entries.`
+          )
+        ) {
+          setNotice("Credit expiry cancelled after preview.");
+          return;
+        }
+        const live = (await requestRun(false, r))
+          .result as CreditExpiryRunResult;
         setNotice(
-          `Credit expiry ran: ${r.lots_expired} lot(s), ${r.credits_expired} credit(s) expired.`
+          `Credit expiry ran: ${live.lots_expired} lot(s), ${live.credits_expired} credit(s) expired.`
         );
       } else {
-        const r = data.result as { skipped: boolean; deletedRows: number; days: number | null };
+        const r = preview.result as CreationExpiryRunResult;
+        if (r.skipped || r.scanned === 0) {
+          setNotice(
+            r.skipped
+              ? `${label}: no expiry configured — nothing deleted.`
+              : `${label} expiry preview: nothing is currently due.`
+          );
+          return;
+        }
+        if (
+          !window.confirm(
+            `Permanently delete ${
+              Math.min(r.scanned, r.maxDeletes)
+            } of ${r.scanned} expired ${label.toLowerCase()} creation(s) and their storage objects?`
+          )
+        ) {
+          setNotice(`${label} expiry cancelled after preview.`);
+          return;
+        }
+        const live = (await requestRun(false, r))
+          .result as CreationExpiryRunResult;
         setNotice(
-          r.skipped
+          live.skipped
             ? `${label}: no expiry configured — nothing deleted.`
-            : `${label} expiry ran: ${r.deletedRows} deleted (older than ${r.days} days).`
+            : live.partial
+              ? `${label} expiry ran: ${live.deletedRows} deleted; ${live.remaining} remain for the next run.`
+              : `${label} expiry ran: ${live.deletedRows} deleted (older than ${live.days} days).`
         );
       }
     } catch (e) {
@@ -208,7 +283,8 @@ export default function AdminExpiryPage() {
           </h2>
           <button
             type="button"
-            disabled={runningTarget !== null}
+            disabled={runningTarget !== null || dirty}
+            title={dirty ? "Save or discard changes before running expiry" : undefined}
             onClick={() => runNow("credits", "Credits")}
             className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
           >
@@ -227,7 +303,8 @@ export default function AdminExpiryPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={runningTarget !== null}
+              disabled={runningTarget !== null || dirty}
+              title={dirty ? "Save or discard changes before running expiry" : undefined}
               onClick={() => runNow("photo", "Photos")}
               className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
             >
@@ -235,7 +312,8 @@ export default function AdminExpiryPage() {
             </button>
             <button
               type="button"
-              disabled={runningTarget !== null}
+              disabled={runningTarget !== null || dirty}
+              title={dirty ? "Save or discard changes before running expiry" : undefined}
               onClick={() => runNow("video", "Videos")}
               className="rounded-md border border-white/10 px-3 py-1 text-xs text-gray-300 transition-colors hover:border-white/30 hover:text-white disabled:opacity-50"
             >

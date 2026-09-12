@@ -63,10 +63,14 @@ function mapRow(row: ExpirySettingsRow): ExpirySettings {
   };
 }
 
-/** Effective expiry settings. Cached for 60s; safe all-null defaults on miss. */
-export async function getExpirySettings(): Promise<ExpirySettings> {
+/** Effective settings. Cached for 60s unless `fresh` is required for a run. */
+export async function getExpirySettings(options?: {
+  fresh?: boolean;
+}): Promise<ExpirySettings> {
   const now = Date.now();
-  if (cache.settings && now < cache.expiresAt) return cache.settings;
+  if (!options?.fresh && cache.settings && now < cache.expiresAt) {
+    return cache.settings;
+  }
 
   try {
     const { data, error } = await supabaseServer

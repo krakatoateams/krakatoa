@@ -93,9 +93,9 @@ None.
   - [x] Admin Config v2: feature-model and catalog toggles
   - [x] Admin Config v2: tree builder and UI read contract
   - [x] Admin Config v2: persistence layer
-  - [ ] Platform settings: expiry, welcome knobs, credit packs
+  - [x] Platform settings: expiry, welcome knobs, credit packs
     - [x] Credit packs and welcome controls
-    - [ ] Expiry settings and manual enforcement
+    - [x] Expiry settings and manual enforcement
   - [ ] Admin skills catalog
   - [ ] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
@@ -1129,6 +1129,33 @@ None.
   state remained 4 total / 4 active.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings; the accepted low TOCTOU is recorded above.
+
+### Admin: expiry settings and manual enforcement
+
+- Date: 2026-09-13
+- Base: `4b16235370d07df0eb7d7c51f804f1a7abdc25a2`
+- Final commit: `345964d`
+- Scope: expiry settings reads, manual admin preview/live actions, creation
+  expiry batching, daily creation-expiry cron progress, and dependent
+  asset/storage cleanup order.
+- Findings: creation expiry stopped at the PostgREST row cap, removed storage
+  before durable rows, offered one-click permanent deletion, could ignore
+  unsaved settings, and let photo backlogs starve video processing. Dry-run now
+  uses exact counts; live work drains bounded batches, deletes library rows
+  first, reports remaining work, and gives each cron target a budget. Manual
+  live runs reuse a non-future preview timestamp, bind fresh retention settings,
+  reject policy drift, and require explicit confirmation.
+- Accepted risks: direct authenticated-admin API calls may intentionally omit a
+  preview checkpoint. Asset/storage cleanup remains best-effort after row
+  deletion, so failed cleanup can leave an orphan but not a visible broken
+  library row. Large backlogs drain incrementally (400 rows per media target per
+  cron invocation); `CRON_SECRET` remains mandatory in production.
+- Verification: `npm run test:creation-expiry` (red then green),
+  `test:storage-sweep`, `test:storage-sign-ownership`, `test:admin-auth`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  `git diff --check`, and edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings; the
+  direct-admin and best-effort-cleanup risks are accepted above.
 
 ## Deferred
 

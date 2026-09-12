@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
     for (const r of results) {
       console.log(
         `[creation-expiry] target=${r.target} dryRun=${dryRun} skipped=${r.skipped} ` +
-          `days=${r.days} scanned=${r.scanned} deleted=${r.deletedRows}`
+          `days=${r.days} scanned=${r.scanned} deleted=${r.deletedRows} ` +
+          `partial=${r.partial} remaining=${r.remaining}`
       );
     }
     return NextResponse.json({ dryRun, results });
