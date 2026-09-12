@@ -61,11 +61,11 @@ None.
     `supabase/migrations/` record; production is aligned but migration `003`
     and the deferred script do not reproduce that final state safely.
   - [x] RPC EXECUTE grants (PUBLIC default vs service_role-only)
-  - [ ] Legacy / untracked tables (RLS + schema lineage for posts,
+  - [x] Legacy / untracked tables (RLS + schema lineage for posts,
         platform_tokens, storyboards, users_deprecated)
   - [ ] Migration catalog integrity (duplicate prefixes, stale `FROM users`
         backfills, 001–003 bootstrap)
-  - [ ] Live Supabase security advisors
+  - [x] Live Supabase security advisors
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
@@ -439,6 +439,30 @@ None.
   (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed. MCP applied `krakatoa_rpc_grants`; every
   `krakatoa_*` function is service_role-only.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Database: legacy RLS policies and security advisors
+
+- Date: 2026-09-12
+- Base: `5b929670a21b5241eddd8d69c44711df3dcb139c`
+- Final commit: `f24159925beb5c43323273a8ff12d3fe67c46cba`
+- Scope: `supabase/migrations/093_deny_by_default_legacy_policies.sql`,
+  `lib/deny-by-default-rls-self-check.ts`.
+- Findings: live `storyboards` had anon SELECT USING true; `posts` and
+  `platform_tokens` had own-row FOR ALL; `users_deprecated` had a leftover
+  NextAuth policy; `rls_auto_enable()` was SECURITY DEFINER + PUBLIC
+  EXECUTE. 093 drops those policies and locks the helper.
+- Accepted risks: INFO `rls_enabled_no_policy` on all public tables is the
+  deny-by-default model. WARN leaked-password protection is an Auth
+  dashboard setting (Public/deployment). CREATE TABLE lineage for
+  `platform_tokens` / `posts` / `storyboards` stays catalog work.
+- Verification: `npm run test:deny-by-default-rls` (red then green),
+  `npm run test:rpc-grants`, `npm run test:post-ownership`,
+  `npm run test:auth`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed. MCP applied
+  `deny_by_default_legacy_policies`; four tables have RLS + 0 policies;
+  `rls_auto_enable` is service_role-only; advisor WARN for that function
+  is gone.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
