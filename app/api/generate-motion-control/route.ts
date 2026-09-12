@@ -65,6 +65,7 @@ import {
   resolveMotionControlRouteFailureHttp,
   settleMotionControlRouteFailure,
 } from "@/lib/generation-workflows/motion-control-route-failure";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
 export const maxDuration = 300;
@@ -102,7 +103,10 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[motion-control obs] ${label} failed:`, e);
+      console.warn(
+        `[motion-control obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -143,7 +147,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[motion-control] profile resolution failed (non-auth):", e);
+      console.error(
+        "[motion-control] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -157,7 +164,10 @@ export async function POST(req: Request) {
       if (e instanceof ToolDisabledError) {
         return NextResponse.json({ error: e.message, code: "TOOL_DISABLED" }, { status: 403 });
       }
-      console.warn("[motion-control] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[motion-control] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -538,7 +548,7 @@ export async function POST(req: Request) {
       } catch (attachError) {
         console.warn(
           "[motion-control] attachWorkflowRun failed after workflow start (run already executing):",
-          attachError,
+          generationErrorLogSafe(attachError),
         );
       }
 
@@ -584,7 +594,12 @@ export async function POST(req: Request) {
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Motion Control] Cancelled by user.");
-    else console.error("[Motion Control] Error:", error);
+    else {
+      console.error(
+        "[Motion Control] Error:",
+        generationErrorLogSafe(error)
+      );
+    }
     const handle =
       metered ??
       (profileId
@@ -621,7 +636,7 @@ export async function POST(req: Request) {
           if (settled.kind === "workflow_settlement_pending") {
             console.error(
               "[motion-control] canonical workflow failure settlement failed:",
-              settled.error,
+              generationErrorLogSafe(settled.error),
             );
           }
           const http = resolveMotionControlRouteFailureHttp(settled, handle.jobId);

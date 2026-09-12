@@ -15,6 +15,7 @@ import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import { MEDIA_CACHE_CONTROL, STORAGE_BUCKET } from "@/lib/storage-buckets";
 import { supabaseServer } from "@/lib/supabase-server";
 import { assertTrustedReplicateOutputUrl } from "@/lib/replicate-output-url";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   classifyProviderSubmitError,
   type SubmitPredictionStepResult,
@@ -447,7 +448,10 @@ export async function deliverAndFinalizeCore(
       },
     });
   } catch (error) {
-    console.warn("[motion-control workflow] usage event failed:", error);
+    console.warn(
+      "[motion-control workflow] usage event failed:",
+      generationErrorLogSafe(error)
+    );
   }
 
   if (finalizeResult.responseJson) {

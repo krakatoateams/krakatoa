@@ -1,4 +1,5 @@
 import { listToolConfigs, type ToolConfig } from "@/lib/tool-configs-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 /**
  * Runtime tool-access guard (Admin Phase 2).
@@ -51,7 +52,10 @@ async function getToolMap(): Promise<Map<string, ToolConfig> | null> {
     cache = { map, expiresAt: now + CACHE_TTL_MS };
     return map;
   } catch (e) {
-    console.warn("[tool-access] DB read failed, failing open (tool treated as enabled):", e);
+    console.warn(
+      "[tool-access] DB read failed, failing open (tool treated as enabled):",
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 }

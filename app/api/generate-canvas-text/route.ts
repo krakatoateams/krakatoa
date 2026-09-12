@@ -40,6 +40,11 @@ import {
 import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 import { assertPathOwnedByUser } from "@/lib/storage-signed-url";
 import { uploadStoragePathToReplicate } from "@/lib/replicate-product-image";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import {
+  GENERIC_GENERATION_CLIENT_ERROR,
+  PRICING_GENERATION_CLIENT_ERROR,
+} from "@/lib/generation-client-error";
 
 export const maxDuration = 60;
 
@@ -126,7 +131,10 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[canvas-text obs] ${label} failed:`, e);
+      console.warn(
+        `[canvas-text obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -141,7 +149,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[canvas-text] profile resolution failed (non-auth):", e);
+      console.error(
+        "[canvas-text] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -157,7 +168,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[canvas-text] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[canvas-text] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -240,44 +254,34 @@ export async function POST(req: Request) {
     }
     generationRequestId = begin.id;
 
-    const job = await safe("createJob", () =>
-      createJob({
-        profileId: profileId!,
-        tool: "canvas",
-        jobType: "canvas_text",
-        provider: textModel.provider,
-        model: textModel.model,
-        input: {
-          prompt,
-          upstreamText: upstreamText || undefined,
-          imageCount: imageStoragePaths.length,
-          modelId: textModel.id,
-        },
-      })
-    );
-    if (job) {
-      jobId = job.id;
-      await safe("startJob", () => startJob(profileId!, jobId!));
-      if (generationRequestId) {
-        await safe("attachJob", () =>
-          attachGenerationRequestJob({
-            id: generationRequestId!,
-            profileId: profileId!,
-            jobId: job.id,
-          })
-        );
-      }
-    }
+    const job = await createJob({
+      profileId: profileId!,
+      tool: "canvas",
+      jobType: "canvas_text",
+      provider: textModel.provider,
+      model: textModel.model,
+      input: {
+        prompt,
+        upstreamText: upstreamText || undefined,
+        imageCount: imageStoragePaths.length,
+        modelId: textModel.id,
+      },
+    });
+    jobId = job.id;
+    await startJob(profileId!, jobId);
+    await attachGenerationRequestJob({
+      id: generationRequestId,
+      profileId: profileId!,
+      jobId,
+    });
 
     const requiredCredits = await getCanvasTextCredits();
     try {
       await spendCredits({
         profileId: profileId!,
         amount: requiredCredits,
-        idempotencyKey: jobId
-          ? `spend:canvas_text:${jobId}`
-          : `spend:canvas_text:profile:${profileId}:${Date.now()}`,
-        jobId: jobId ?? null,
+        idempotencyKey: `spend:canvas_text:${jobId}`,
+        jobId,
         description: "Canvas text generation",
         metadata: { tool: "canvas", jobType: "canvas_text", imageCount: imageStoragePaths.length },
       });
@@ -426,7 +430,9 @@ export async function POST(req: Request) {
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
     if (cancelled) console.log("[canvas-text] Cancelled by user.");
-    else console.error("[canvas-text] Error:", error);
+    else {
+      console.error("[canvas-text] Error:", generationErrorLogSafe(error));
+    }
     const pricingMissing = error instanceof PricingConfigError;
     const message = cancelled
       ? "Generation cancelled."
@@ -453,22 +459,19 @@ export async function POST(req: Request) {
     const commitLocked =
       Boolean(profileId && generationRequestId) &&
       (await isProviderCommitLocked(profileId!, generationRequestId!));
-    if (
-      shouldRefundSpentCreditsAfterFailure({
-        creditsSpent,
-        creditsAmount,
-        commitLocked,
-      }) &&
-      profileId
-    ) {
-      await safe("refundCredits", () =>
+    const refundEligible = shouldRefundSpentCreditsAfterFailure({
+      creditsSpent,
+      creditsAmount,
+      commitLocked,
+    });
+    let refunded = false;
+    if (refundEligible && profileId && jobId) {
+      const refundResult = await safe("refundCredits", () =>
         refundCredits({
           profileId: profileId!,
           amount: creditsAmount,
-          idempotencyKey: jobId
-            ? `refund:canvas_text:${jobId}`
-            : `refund:canvas_text:profile:${profileId}:${Date.now()}`,
-          jobId: jobId ?? null,
+          idempotencyKey: `refund:canvas_text:${jobId}`,
+          jobId,
           description: cancelled
             ? "Refund after user cancellation"
             : "Best-effort refund after generation failure",
@@ -478,6 +481,7 @@ export async function POST(req: Request) {
           },
         })
       );
+      refunded = refundResult !== null;
     }
 
     if (generationRequestId) {
@@ -493,13 +497,22 @@ export async function POST(req: Request) {
 
     if (cancelled) {
       return NextResponse.json(
-        { error: message, code: "GENERATION_CANCELLED", refunded: creditsSpent },
+        {
+          error: message,
+          code: "GENERATION_CANCELLED",
+          refunded,
+        },
         { status: 409 }
       );
     }
 
     return NextResponse.json(
-      pricingMissing ? { error: message, code: "PRICING_CONFIG_MISSING" } : { error: message },
+      pricingMissing
+        ? {
+            error: PRICING_GENERATION_CLIENT_ERROR,
+            code: "PRICING_CONFIG_MISSING",
+          }
+        : { error: GENERIC_GENERATION_CLIENT_ERROR },
       { status: 500 }
     );
   }

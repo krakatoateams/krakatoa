@@ -10,6 +10,7 @@ const baseSettlement = {
   pricingMissing: false,
   rawMessage: "provider failed token=secret-provider-token",
   creditsSpent: true,
+  commitLocked: false,
   creditsAmount: 10,
   hasProfileId: true,
   hasJobId: true,
@@ -69,8 +70,29 @@ for (const relativePath of [
   "../app/api/generate-reels/route.ts",
   "../app/api/generations/status/route.ts",
   "../app/api/generations/active/route.ts",
+  "../app/api/generate-storyboard-video/route.ts",
+  "../app/api/generate-motion-control/route.ts",
+  "../app/api/generate-motion-control/status/route.ts",
+  "../app/api/generate-canvas-text/route.ts",
+  "../app/api/render-editor/route.ts",
+  "../app/api/storyboards/import/route.ts",
+  "../app/api/generate-caption/route.ts",
+  "../app/api/test-stitch/route.ts",
+  "../app/api/generations/cancel/route.ts",
+  "../app/api/generations/dismiss/route.ts",
   "./active-generations-db.ts",
   "./generation-idempotency.ts",
+  "./generation-commit.ts",
+  "./generation-cancel.ts",
+  "./tool-access.ts",
+  "./pricing-resolver.ts",
+  "./model-resolver.ts",
+  "./feature-model-configs-db.ts",
+  "./photo-storyboard-generation.ts",
+  "./motion-control-finalize.ts",
+  "./generation-workflows/motion-control-workflow-core.ts",
+  "./generation-workflows/motion-control-workflow.ts",
+  "./pipeline-recovery/storage.ts",
   "./metered-generation/lifecycle-core.ts",
   "./metered-generation/settlement.ts",
   "./reels-pipeline/storage.ts",
@@ -152,6 +174,16 @@ assert.match(
   /message: RECOVERABLE_GENERATION_CLIENT_ERROR/,
   "recoverable replays must use the shared generic client message"
 );
+assert.match(
+  lifecycleSource,
+  /refunded: persisted\.refunded/,
+  "metered cancel responses must report the actual refund result"
+);
+assert.doesNotMatch(
+  lifecycleSource,
+  /spend:\$\{input\.spend\.jobType\}:profile:/,
+  "metered spends must require a stable job-scoped idempotency key"
+);
 
 const statusRoute = readFileSync(
   new URL("../app/api/generations/status/route.ts", import.meta.url),
@@ -196,6 +228,133 @@ assert.match(
   creditTransactionsRoute,
   /items\.map\(\(\{ metadata, \.\.\.item \}\) =>/,
   "owner ledger responses must omit internal originalError metadata"
+);
+
+const secondarySources = [
+  "../app/api/generate-storyboard-video/route.ts",
+  "../app/api/storyboards/import/route.ts",
+  "./photo-storyboard-generation.ts",
+  "../app/api/generate-canvas-text/route.ts",
+  "../app/api/render-editor/route.ts",
+  "../app/api/generate-caption/route.ts",
+  "../app/api/test-stitch/route.ts",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+for (const source of secondarySources) {
+  assert.doesNotMatch(
+    source,
+    /NextResponse\.json\(\{\s*error: (?:rawMessage|error\.message)/,
+    "secondary generation 500s must not expose provider errors"
+  );
+  assert.doesNotMatch(
+    source,
+    /REPLICATE_API_TOKEN is not configured|RENDI_API_KEY is not set/,
+    "secondary responses must not expose environment variable names"
+  );
+}
+
+const testStitchSource = secondarySources[secondarySources.length - 1];
+assert.doesNotMatch(
+  testStitchSource,
+  /Full SUCCESS response|Full response|Whisper done\. Result preview/,
+  "admin test generation logs must not dump provider output"
+);
+
+const generationCancelSource = readFileSync(
+  new URL("./generation-cancel.ts", import.meta.url),
+  "utf8"
+);
+assert.doesNotMatch(
+  generationCancelSource,
+  /console\.(?:warn|error)\([\s\S]{0,160}error\.message/,
+  "generation cancellation logs must not emit raw DB messages"
+);
+
+const motionStatusSource = readFileSync(
+  new URL(
+    "../app/api/generate-motion-control/status/route.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+assert.doesNotMatch(
+  motionStatusSource,
+  /failMotionControlAttempt\(motionCtx, errJson, \{ refund: true \}\)/,
+  "motion-control status must not refund unconditionally after provider commit"
+);
+assert.match(
+  motionStatusSource,
+  /isProviderCommitLocked\([\s\S]{0,180}failMotionControlAttempt\(motionCtx, errJson, \{ refund \}\)/,
+  "motion-control status refunds must honor the provider commit lock"
+);
+assert.doesNotMatch(
+  motionStatusSource,
+  /NextResponse\.json\(\{ error: errJson\.message \}/,
+  "motion-control status must not return internal failure text"
+);
+assert.doesNotMatch(
+  motionStatusSource,
+  /refunded:\s*failedCredits > 0/,
+  "motion-control replay must not infer refunds from the charged amount"
+);
+assert.match(
+  motionStatusSource,
+  /failedJob\s*\?\s*await hasSuccessfulRefund/,
+  "motion-control replay must report the actual ledger refund"
+);
+assert.match(
+  motionStatusSource,
+  /refunded: failure\.refunded/,
+  "live motion-control cancel responses must report the actual refund result"
+);
+
+const motionFinalizeSource = readFileSync(
+  new URL("./motion-control-finalize.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  motionFinalizeSource,
+  /options: \{ cancelled\?: boolean; refund: boolean \}/,
+  "motion failure callers must make an explicit refund decision"
+);
+assert.doesNotMatch(
+  motionFinalizeSource,
+  /refund:video_motion_control:profile:/,
+  "motion refunds must require the stable job-scoped idempotency key"
+);
+
+const canvasTextSource = readFileSync(
+  new URL("../app/api/generate-canvas-text/route.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  canvasTextSource,
+  /refunded = refundResult !== null[\s\S]{0,700}refunded,/,
+  "canvas cancel responses must report the actual refund result"
+);
+assert.doesNotMatch(
+  canvasTextSource,
+  /(?:spend|refund):canvas_text:profile:/,
+  "canvas billing must require stable job-scoped idempotency keys"
+);
+
+const photoGenerationSource = readFileSync(
+  new URL("../app/api/generate-photo/route.ts", import.meta.url),
+  "utf8"
+);
+assert.doesNotMatch(
+  photoGenerationSource,
+  /refund:product_photo:profile:/,
+  "partial photo refunds must use stable job-scoped idempotency keys"
+);
+
+const meteredSettlementSource = readFileSync(
+  new URL("./metered-generation/settlement.ts", import.meta.url),
+  "utf8"
+);
+assert.doesNotMatch(
+  meteredSettlementSource,
+  /refund:\$\{ctx\.refundJobType\}:profile:/,
+  "metered refunds must require a stable job-scoped idempotency key"
 );
 
 console.log("generation log redaction self-check passed");

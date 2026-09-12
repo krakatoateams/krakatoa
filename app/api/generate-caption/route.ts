@@ -11,9 +11,31 @@ import {
 } from "@/lib/storage-signed-url";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { getScheduleModels, replicateRef, type ReplicateModelRef } from "@/lib/model-resolver";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
+
+function captionMediaErrorResponse(error: unknown): NextResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /not authenticated/i.test(message)
+    ? 401
+    : /forbidden/i.test(message)
+      ? 403
+      : 400;
+  return NextResponse.json(
+    {
+      error:
+        status === 401
+          ? "Not authenticated."
+          : status === 403
+            ? "Forbidden."
+            : "Invalid media reference.",
+    },
+    { status }
+  );
+}
 
 function joinReplicateOutput(output: unknown): string {
   if (Array.isArray(output)) {
@@ -383,13 +405,7 @@ export async function POST(req: NextRequest) {
             storagePath: imageStoragePath,
           });
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          const status = /not authenticated/i.test(message)
-            ? 401
-            : /forbidden/i.test(message)
-              ? 403
-              : 400;
-          return NextResponse.json({ error: message }, { status });
+          return captionMediaErrorResponse(err);
         }
       }
 
@@ -440,13 +456,7 @@ export async function POST(req: NextRequest) {
           storagePath: photoStoragePath,
         });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        const status = /not authenticated/i.test(message)
-          ? 401
-          : /forbidden/i.test(message)
-            ? 403
-            : 400;
-        return NextResponse.json({ error: message }, { status });
+        return captionMediaErrorResponse(err);
       }
     }
 
@@ -469,20 +479,14 @@ export async function POST(req: NextRequest) {
         }
         sourceUrl = resolved;
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        const status = /not authenticated/i.test(message)
-          ? 401
-          : /forbidden/i.test(message)
-            ? 403
-            : 400;
-        return NextResponse.json({ error: message }, { status });
+        return captionMediaErrorResponse(err);
       }
       try {
         // Whisper is unreliable demuxing audio straight from a video container,
         // so extract a hosted MP3 via Rendi first, then transcribe that.
-        console.log("[generate-caption] extracting audio from:", sourceUrl.split("?")[0]);
+        console.log("[generate-caption] extracting source audio.");
         const audioUrl = await extractAudioMp3(sourceUrl);
-        console.log("[generate-caption] whisper audio url:", audioUrl);
+        console.log("[generate-caption] transcribing extracted audio.");
 
         const wRes = await runWithRetry(replicate, whisperModel, {
           input: {
@@ -509,7 +513,7 @@ export async function POST(req: NextRequest) {
         // as "failed" (not "no_audio") so the UI doesn't wrongly claim silence.
         console.warn(
           "[generate-caption] audio extraction or Whisper failed, continuing without transcript:",
-          err instanceof Error ? err.message : err,
+          generationErrorLogSafe(err)
         );
         transcript = null;
         transcriptStatus = "failed";
@@ -547,7 +551,7 @@ export async function POST(req: NextRequest) {
       usedImage: !!resolvedPhotoUrl,
     });
   } catch (err: unknown) {
-    console.error("[generate-caption]", err);
+    console.error("[generate-caption]", generationErrorLogSafe(err));
 
     const message =
       err instanceof Error ? err.message : "Unexpected error occurred.";
@@ -556,6 +560,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: denied.error }, { status: denied.status });
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: GENERIC_GENERATION_CLIENT_ERROR },
+      { status: 500 }
+    );
   }
 }

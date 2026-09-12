@@ -54,8 +54,9 @@ export async function persistMeteredSettlementLegacy(
   plan: MeteredSettlementPlan,
   ctx: MeteredSettlementLegacyContext,
   opts?: MeteredSettlementLegacyOpts,
-): Promise<void> {
+): Promise<{ refunded: boolean }> {
   const errJson = (opts?.errJson ?? plan.errorJson) as MeteredErrorJson;
+  let refunded = false;
 
   if (ctx.currentStepId) {
     await safeIo("failStep", () =>
@@ -104,16 +105,15 @@ export async function persistMeteredSettlementLegacy(
     );
   }
 
-  if (plan.refundEligible) {
+  const refundJobId = ctx.jobId;
+  if (plan.refundEligible && refundJobId) {
     const description = opts?.refundDescription ?? plan.refundDescription!;
-    await safeIo("refundCredits", () =>
+    const refundResult = await safeIo("refundCredits", () =>
       refundCredits({
         profileId: ctx.profileId,
         amount: ctx.creditsAmount,
-        idempotencyKey: ctx.jobId
-          ? `refund:${ctx.refundJobType}:${ctx.jobId}`
-          : `refund:${ctx.refundJobType}:profile:${ctx.profileId}:${Date.now()}`,
-        jobId: ctx.jobId ?? null,
+        idempotencyKey: `refund:${ctx.refundJobType}:${refundJobId}`,
+        jobId: refundJobId,
         description,
         metadata: {
           reason: plan.refundMetadataReason!,
@@ -121,6 +121,7 @@ export async function persistMeteredSettlementLegacy(
         },
       }),
     );
+    refunded = refundResult !== null;
   }
 
   if (ctx.generationRequestId) {
@@ -144,4 +145,5 @@ export async function persistMeteredSettlementLegacy(
       );
     }
   }
+  return { refunded };
 }

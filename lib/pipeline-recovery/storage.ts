@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   STORAGE_BUCKET,
   userResumablePath,
@@ -101,12 +102,18 @@ export async function purgeResumableJobStorage(userId: string, jobId: string): P
     if (paths.length === 0) return 0;
     const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(paths);
     if (error) {
-      console.warn("[pipeline-recovery] purge remove failed:", error.message);
+      console.warn(
+        "[pipeline-recovery] purge remove failed:",
+        generationErrorLogSafe(error)
+      );
       return 0;
     }
     return paths.length;
   } catch (e) {
-    console.warn("[pipeline-recovery] purge failed (non-fatal):", e);
+    console.warn(
+      "[pipeline-recovery] purge failed (non-fatal):",
+      generationErrorLogSafe(e)
+    );
     return 0;
   }
 }
@@ -118,7 +125,10 @@ export async function listUserResumableJobIds(userId: string): Promise<string[]>
     .from(STORAGE_BUCKET)
     .list(resumableRoot, { limit: 1000 });
   if (error) {
-    console.warn("[pipeline-recovery] list resumable root failed:", error.message);
+    console.warn(
+      "[pipeline-recovery] list resumable root failed:",
+      generationErrorLogSafe(error)
+    );
     return [];
   }
   return (data ?? [])

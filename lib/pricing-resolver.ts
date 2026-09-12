@@ -5,6 +5,7 @@ import {
   type CostUnit,
 } from "@/lib/pricing-configs-db";
 import { INITIAL_DUMMY_CREDITS, VIDEO_CREDITS_PER_SECOND } from "@/lib/credit-costs";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   type BillingSettings,
   type PricingRow,
@@ -96,7 +97,10 @@ async function getPricingMap(): Promise<Map<string, PricingConfig> | null> {
     cache = { map, expiresAt: now + CACHE_TTL_MS };
     return map;
   } catch (e) {
-    console.warn("[pricing-resolver] DB read failed, using built-in v2 defaults:", e);
+    console.warn(
+      "[pricing-resolver] DB read failed, using built-in v2 defaults:",
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 }
@@ -260,7 +264,10 @@ async function fixedCredits(pricingKey: string, fallback: number): Promise<numbe
     const amt = usableFixedAmount(cfg);
     if (amt !== null) return amt;
   } catch (e) {
-    console.warn(`[pricing-resolver] "${pricingKey}" fixed lookup failed, using fallback:`, e);
+    console.warn(
+      `[pricing-resolver] "${pricingKey}" fixed lookup failed, using fallback:`,
+      generationErrorLogSafe(e)
+    );
   }
   return fallback;
 }
@@ -317,7 +324,10 @@ export async function getRunCredits(params: {
     ]);
     return runCreditsFromRow(toRow(row), settings, params.fallbackConstant ?? 0);
   } catch (e) {
-    console.warn(`[pricing-resolver] run "${params.pricingKey}" failed, using constant:`, e);
+    console.warn(
+      `[pricing-resolver] run "${params.pricingKey}" failed, using constant:`,
+      generationErrorLogSafe(e)
+    );
     return Math.max(0, Math.ceil(params.fallbackConstant ?? 0));
   }
 }

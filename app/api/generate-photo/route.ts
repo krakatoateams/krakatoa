@@ -664,6 +664,7 @@ export async function POST(req: Request) {
         requestHash,
       },
       job: {
+        required: true,
         tool: "photo",
         jobType: "product_photo",
         provider: photoModel.provider,
@@ -946,15 +947,16 @@ export async function POST(req: Request) {
     // what the user actually got. `creditsAmount` follows so the display
     // snapshots below (and any later catch-block refund) stay honest.
     if (failureCount > 0) {
+      if (!jobId) {
+        throw new Error("Missing generation job for partial batch refund.");
+      }
       const failedCredits = perImageCredits * failureCount;
       console.warn(`[Product Photo] ${failureCount}/${imageCount} batch image(s) failed — refunding ${failedCredits} credits`);
       await safe("refundFailedBatchImages", () => refundCredits({
         profileId: profileId!,
         amount: failedCredits,
-        idempotencyKey: jobId
-          ? `refund:product_photo:${jobId}:partial`
-          : `refund:product_photo:profile:${profileId}:${batchTimestamp}:partial`,
-        jobId: jobId ?? null,
+        idempotencyKey: `refund:product_photo:${jobId}:partial`,
+        jobId,
         description: "Refund for failed batch images",
         metadata: { reason: "batch_image_failed", failureCount, imageCount, perImageCredits },
       }));

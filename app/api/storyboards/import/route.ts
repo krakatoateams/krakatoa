@@ -47,6 +47,7 @@ import {
   SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
   type StoryboardAspectRatio,
 } from "@/lib/storyboard-style";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -85,7 +86,10 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[storyboard-import obs] ${label} failed:`, e);
+      console.warn(
+        `[storyboard-import obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -101,7 +105,10 @@ export async function POST(req: Request) {
     try {
       await supabase.storage.from(STORAGE_BUCKET).remove([path]);
     } catch (e) {
-      console.warn("[storyboard-import] storage cleanup failed:", e);
+      console.warn(
+        "[storyboard-import] storage cleanup failed:",
+        generationErrorLogSafe(e)
+      );
     }
   };
 
@@ -118,7 +125,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[storyboard-import] profile resolution failed (non-auth):", e);
+      console.error(
+        "[storyboard-import] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -135,7 +145,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[storyboard-import] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[storyboard-import] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -163,7 +176,7 @@ export async function POST(req: Request) {
 
     if (!process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
-        { error: "REPLICATE_API_TOKEN is not configured." },
+        { error: "AI provider is temporarily unavailable." },
         { status: 500 }
       );
     }
@@ -213,6 +226,7 @@ export async function POST(req: Request) {
         inProgressMessage: "Import already in progress, please wait.",
       },
       job: {
+        required: true,
         tool: "storyboard",
         jobType: "storyboard_import",
         provider: sceneLlmModel.provider,
@@ -322,7 +336,10 @@ export async function POST(req: Request) {
         break;
       } catch (err) {
         if (attempt === MAX_JSON_ATTEMPTS) throw err;
-        console.warn("[storyboard-import] vision JSON parse failed, retrying:", err);
+        console.warn(
+          "[storyboard-import] vision JSON parse failed, retrying:",
+          generationErrorLogSafe(err)
+        );
       }
     }
     if (!analysis) throw new Error("Vision model did not return a usable storyboard analysis.");
@@ -383,7 +400,10 @@ export async function POST(req: Request) {
       .single();
 
     if (insertError || !inserted?.id) {
-      console.error("[storyboard-import] DB insert error:", insertError);
+      console.error(
+        "[storyboard-import] DB insert error:",
+        generationErrorLogSafe(insertError)
+      );
       throw new Error(insertError?.message || "Failed to save imported storyboard.");
     }
 
@@ -425,10 +445,13 @@ export async function POST(req: Request) {
         },
       });
     } catch (historyErr) {
-      console.warn("[storyboard-import] History log failed:", historyErr);
+      console.warn(
+        "[storyboard-import] History log failed:",
+        generationErrorLogSafe(historyErr)
+      );
     }
 
-    console.log("[storyboard-import] Done:", storyboardUrl, "id:", inserted.id);
+    console.log("[storyboard-import] Done.");
     const successResponse = {
       storyboardId: inserted.id,
       storyboardUrl,
@@ -470,7 +493,12 @@ export async function POST(req: Request) {
     const rawMessage =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     if (cancelled) console.log("[storyboard-import] Cancelled by user.");
-    else console.error("[storyboard-import] Error:", error);
+    else {
+      console.error(
+        "[storyboard-import] Error:",
+        generationErrorLogSafe(error)
+      );
+    }
     const handle =
       metered ??
       (profileId
@@ -503,7 +531,10 @@ export async function POST(req: Request) {
       }
     }
     await cleanupStorage();
-    return NextResponse.json({ error: rawMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: "Storyboard import failed." },
+      { status: 500 }
+    );
   }
 }
 

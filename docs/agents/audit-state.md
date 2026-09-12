@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Log redaction — secondary generation and admin test route
+- Base: `81e6f67342c698ed8acc0542fd1ae4a88085bfb9`
+- Branch: `audit-repo/secondary-generation-log-redaction`
 
 ## Queue
 
@@ -98,9 +101,9 @@ None.
     - [x] Expiry settings and manual enforcement
   - [x] Admin skills catalog
   - [x] Log redaction: admin API and ops crons
-  - [ ] Log redaction: generation route error logging
+  - [x] Log redaction: generation route error logging
     - [x] Primary generation and shared pipelines
-    - [ ] Secondary generation and admin test route
+    - [x] Secondary generation and admin test route
   - [ ] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
@@ -1238,6 +1241,33 @@ None.
   `test:studio-submit`, `test:admin-log-redaction`, `npm run lint` (0 errors;
   11 pre-existing warnings), `npm run build`, `git diff --check`, and
   edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings.
+
+### Admin: secondary generation and admin-test log redaction
+
+- Date: 2026-09-13
+- Base: `81e6f67342c698ed8acc0542fd1ae4a88085bfb9`
+- Final commit: `eeb2053`
+- Scope: secondary Canvas, Editor, caption, storyboard, motion-control, test
+  routes; cancellation/dismissal; metered/workflow settlement; recovery storage;
+  feature/model/pricing readers; and generation log-redaction self-checks.
+- Findings: raw Error stacks, provider/config details, and persisted terminal
+  messages could reach logs or owner HTTP surfaces. Some refund responses inferred
+  success instead of checking the ledger; post-commit terminal paths could still
+  request refunds; and Canvas/motion-control/photo fallbacks allowed unstable
+  non-job billing keys. Logs and owner errors are now redacted/allowlisted,
+  refunds honor the provider-commit lock and actual ledger result, and charged
+  attempts require a persisted job with stable job-scoped spend/refund keys.
+- Accepted risks: detailed errors remain in owner-scoped jobs and steps for admin
+  monitoring. Feature/model/pricing read failures retain their existing
+  code-default availability policy; charged routes still spend before provider
+  work. Concurrent motion-control finalization remains a pre-existing race, with
+  idempotent job-scoped ledger keys preventing duplicate refunds.
+- Verification: `npm run test:generation-log-redaction`,
+  `test:metered-generation`, `test:generation-commit`,
+  `test:generation-workflows`, `test:studio-submit`,
+  `test:active-generations`, `npm run lint` (0 errors; 11 pre-existing warnings),
+  `npm run build`, `git diff --check`, and edited-file diagnostics passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings.
 
 ## Deferred

@@ -9,6 +9,7 @@ import {
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { purgeResumableJobStorage } from "@/lib/pipeline-recovery/storage";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { resolveMeteredSettlement } from "./settlement-pure";
 import {
   persistMeteredSettlementLegacy,
@@ -72,6 +73,7 @@ const defaultOps: MeteredLifecycleOps = {
   purgeResumableJobStorage: async (userId, jobId) => {
     await purgeResumableJobStorage(userId, jobId);
   },
+  isProviderCommitLocked,
   persistMeteredSettlementLegacy: (plan, ctx, opts) =>
     persistMeteredSettlementLegacy(
       plan,

@@ -5,6 +5,8 @@ import { withAdmin } from '@/lib/admin-api';
 import { supabase } from '@/lib/supabase';
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 
 // Allow up to 5 minutes for this route (WhisperX + Rendi polling)
 export const maxDuration = 300;
@@ -31,7 +33,7 @@ async function runRendiCommand(
     output_files: outputFiles
   };
 
-  console.log('[Rendi] Submitting command:', ffmpegCommand);
+  console.log('[Rendi] Submitting command.');
 
   const response = await fetch("https://api.rendi.dev/v1/run-ffmpeg-command", {
     method: "POST",
@@ -43,9 +45,8 @@ async function runRendiCommand(
   });
 
   if (!response.ok) {
-    const errText = await response.text();
-    console.error(`Rendi API Error (${response.status}):`, errText);
-    throw new Error(`Rendi API request failed (${response.status}): ${errText || response.statusText}`);
+    console.error(`Rendi API Error (${response.status}).`);
+    throw new Error(`Rendi API request failed (${response.status}).`);
   }
 
   const { command_id } = await response.json();
@@ -65,10 +66,10 @@ async function runRendiCommand(
       console.log(`[Rendi] Poll status: ${status}`);
 
       if (status === 'SUCCESS' || status === 'COMPLETED') {
-        console.log('[Rendi] Full SUCCESS response:', JSON.stringify(pollData).substring(0, 1000));
+        console.log('[Rendi] Command completed.');
         return pollData;
       } else if (status === 'FAILED' || status === 'ERROR') {
-        throw new Error(`Rendi processing failed: ${JSON.stringify(pollData.error_message || pollData.error_status || pollData)}`);
+        throw new Error('Rendi processing failed.');
       }
     }
     attempts++;
@@ -87,11 +88,11 @@ function extractRendiOutputUrl(pollData: any, alias: string): string {
   }
 
   if (!url) {
-    console.error('[Rendi] Could not find output URL. Full response:', JSON.stringify(pollData).substring(0, 1000));
+    console.error('[Rendi] Could not find output URL.');
     throw new Error(`Rendi output "${alias}" URL not found in response.`);
   }
 
-  console.log(`[Rendi] Extracted URL for "${alias}": ${url}`);
+  console.log(`[Rendi] Extracted output "${alias}".`);
   return url;
 }
 
@@ -124,7 +125,7 @@ export async function POST(req: Request) {
 
     const rendiApiKey = process.env.RENDI_API_KEY;
     if (!rendiApiKey) {
-      throw new Error("RENDI_API_KEY is not set.");
+      throw new Error("Video processing is not configured.");
     }
 
     if (!audioPredictionId || !videoPredictionId) {
@@ -163,11 +164,10 @@ export async function POST(req: Request) {
     }
 
     if (!audioUrl || !videoUrl) {
-      throw new Error(`Failed to extract URLs from predictions. Audio URL: ${audioUrl}, Video URL: ${videoUrl}`);
+      throw new Error("Failed to extract media URLs from predictions.");
     }
 
-    console.log('[Test Step 1] Video URL:', videoUrl);
-    console.log('[Test Step 1] Audio URL:', audioUrl);
+    console.log('[Test Step 1] Prediction outputs resolved.');
 
     // Step 2: Run Whisper Timestamping
     console.log(`[Test Step 2] Running Whisper on audio URL...`);
@@ -182,7 +182,7 @@ export async function POST(req: Request) {
         }
       }
     );
-    console.log('[Test Step 2] Whisper done. Result preview:', JSON.stringify(whisperRes).substring(0, 300));
+    console.log('[Test Step 2] Whisper done.');
 
     // Step 3: Build ASS subtitle file
     console.log('[Test Step 3] Build ASS subtitle file...');
@@ -281,7 +281,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     const { url: srtUrl } = await createSignedStorageUrl(srtFilename, "pipeline");
-    console.log('[Test Step 4] SRT URL:', srtUrl);
+    console.log('[Test Step 4] Subtitle upload signed.');
 
     // Step 5a: Rendi - Merge video + audio and embed font into an MKV
     console.log('[Test Step 5a] Rendi: Merging video + audio + font...');
@@ -322,7 +322,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       { out_final: "final_video.mp4" }
     );
     const rendiVideoUrl = extractRendiOutputUrl(subtitleResult, 'out_final');
-    console.log('[Test Step 5b] Final video on Rendi:', rendiVideoUrl);
+    console.log('[Test Step 5b] Final Rendi output resolved.');
 
     // Step 6: Download from Rendi and upload to Supabase for permanent storage
     console.log('[Test Step 6] Downloading from Rendi and uploading to Supabase...');
@@ -347,23 +347,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     const { url: finalVideoUrl } = await createSignedStorageUrl(finalFilename, "ui");
-    console.log('[Test Step 6] Final Supabase URL:', finalVideoUrl);
+    console.log('[Test Step 6] Final video stored.');
 
     // Step 7: Cleanup intermediate SRT file
     console.log('[Test Step 7] Cleaning up intermediate files...');
     try {
       await supabase.storage.from(STORAGE_BUCKET).remove([srtFilename]);
     } catch (cleanupErr) {
-      console.warn('Cleanup warning (non-fatal):', cleanupErr);
+      console.warn(
+        'Cleanup warning (non-fatal):',
+        generationErrorLogSafe(cleanupErr)
+      );
     }
 
     console.log('=== Test Pipeline COMPLETE! ===');
-    console.log('Supabase Video URL:', finalVideoUrl);
     return NextResponse.json({ videoUrl: finalVideoUrl });
 
   } catch (error: any) {
-    console.error('Test pipeline error:', error);
-    return NextResponse.json({ error: error.message || String(error) }, { status: 500 });
+    console.error('Test pipeline error:', generationErrorLogSafe(error));
+    return NextResponse.json(
+      { error: GENERIC_GENERATION_CLIENT_ERROR },
+      { status: 500 }
+    );
   }
   });
 }

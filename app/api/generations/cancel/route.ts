@@ -24,6 +24,7 @@ import {
   getGenerationRequestForJob,
   requestWorkflowStop,
 } from "@/lib/generation-workflows/workflow-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { isLegacyJobForceStoppable } from "@/lib/generation-workflows/stop-settlement-pure";
 import {
   generationStopSettlementWorkflow,
@@ -43,7 +44,10 @@ async function cancelRecordedPredictions(
   try {
     ids = await listPredictionIds(profileId, generationRequestId);
   } catch (e) {
-    console.warn("[generations/cancel] listPredictionIds failed:", e);
+    console.warn(
+      "[generations/cancel] listPredictionIds failed:",
+      generationErrorLogSafe(e)
+    );
   }
 
   let cancelled = 0;
@@ -108,7 +112,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[generations/cancel] profile resolution failed (non-auth):", e);
+      console.error(
+        "[generations/cancel] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 },
@@ -342,7 +349,10 @@ export async function POST(req: Request) {
       cancelled: predictionResult.cancelled,
     });
   } catch (error: unknown) {
-    console.error("[generations/cancel] Error:", error);
+    console.error(
+      "[generations/cancel] Error:",
+      generationErrorLogSafe(error)
+    );
     return NextResponse.json({ error: "Failed to cancel generation." }, { status: 500 });
   }
 }

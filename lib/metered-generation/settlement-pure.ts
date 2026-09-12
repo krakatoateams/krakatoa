@@ -51,6 +51,7 @@ function resolveHttp(
   kind: MeteredSettlementKind,
   message: string,
   input: MeteredSettlementInput,
+  refundEligible: boolean,
 ): Pick<MeteredSettlementPlan, "httpStatus" | "httpBody"> {
   const clientError =
     input.genericClientError ??
@@ -66,7 +67,7 @@ function resolveHttp(
         httpBody: {
           error: message,
           code: "GENERATION_CANCELLED",
-          refunded: input.creditsSpent,
+          refunded: refundEligible,
         },
       };
     case "recoverable":
@@ -98,7 +99,6 @@ export function resolveMeteredSettlement(
   const kind = resolveMeteredSettlementKind(input);
   const message = resolveMeteredSettlementMessage(kind, input.rawMessage);
   const errorJson = resolveMeteredErrorJson(kind, message);
-  const { httpStatus, httpBody } = resolveHttp(kind, message, input);
 
   const recoverable = kind === "recoverable";
   const terminalFail = kind === "generic_failure" || kind === "pricing_missing";
@@ -118,10 +118,18 @@ export function resolveMeteredSettlement(
 
   const refundEligible =
     input.creditsSpent &&
+    !input.commitLocked &&
     input.hasProfileId &&
+    input.hasJobId &&
     input.creditsAmount > 0 &&
     !recoverable &&
     (!opts.requireJobTypeForRefund || !!input.hasJobType);
+  const { httpStatus, httpBody } = resolveHttp(
+    kind,
+    message,
+    input,
+    refundEligible
+  );
 
   const failureReason = opts.failureRefundReason ?? "generation_failed";
 

@@ -23,6 +23,7 @@ import {
   type CharacterOrientation,
 } from "@/lib/motion-control-models";
 import { devBlankJobTag } from "@/lib/dev-blank-generation";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 export type MotionControlSuccessResponse = {
   videoUrl: string;
@@ -54,7 +55,10 @@ const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> =
   try {
     return await fn();
   } catch (e) {
-    console.warn(`[motion-control finalize] ${label} failed:`, e);
+    console.warn(
+      `[motion-control finalize] ${label} failed:`,
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 };
@@ -64,7 +68,10 @@ export async function cleanupMotionControlTempRefs(paths: string[] | undefined):
   try {
     await supabaseServer.storage.from(STORAGE_BUCKET).remove(paths);
   } catch (e) {
-    console.warn("[motion-control] temp reference cleanup failed:", e);
+    console.warn(
+      "[motion-control] temp reference cleanup failed:",
+      generationErrorLogSafe(e)
+    );
   }
 }
 
@@ -195,10 +202,11 @@ export async function finalizeMotionControlSuccess(
 export async function failMotionControlAttempt(
   ctx: MotionControlFinalizeContext,
   errJson: Record<string, unknown>,
-  options: { cancelled?: boolean; refund?: boolean } = {},
-): Promise<void> {
+  options: { cancelled?: boolean; refund: boolean },
+): Promise<{ refunded: boolean }> {
   const cancelled = options.cancelled === true;
-  const refund = options.refund !== false;
+  const refund = options.refund;
+  let refunded = false;
 
   if (ctx.jobId) {
     if (cancelled) {
@@ -210,15 +218,13 @@ export async function failMotionControlAttempt(
   if (ctx.videoAssetId) {
     await safe("failAsset", () => markAssetFailed(ctx.profileId, ctx.videoAssetId!, errJson));
   }
-  if (refund && ctx.creditsAmount > 0) {
-    await safe("refundCredits", () =>
+  if (refund && ctx.creditsAmount > 0 && ctx.jobId) {
+    const refundResult = await safe("refundCredits", () =>
       refundCredits({
         profileId: ctx.profileId,
         amount: ctx.creditsAmount,
-        idempotencyKey: ctx.jobId
-          ? `refund:video_motion_control:${ctx.jobId}`
-          : `refund:video_motion_control:profile:${ctx.profileId}:${Date.now()}`,
-        jobId: ctx.jobId ?? null,
+        idempotencyKey: `refund:video_motion_control:${ctx.jobId}`,
+        jobId: ctx.jobId,
         description: cancelled
           ? "Refund after user cancellation"
           : "Best-effort refund after generation failure",
@@ -228,6 +234,7 @@ export async function failMotionControlAttempt(
         },
       }),
     );
+    refunded = refundResult !== null;
   }
   if (ctx.generationRequestId) {
     await safe("idemFailure", () =>
@@ -240,6 +247,7 @@ export async function failMotionControlAttempt(
     );
   }
   await cleanupMotionControlTempRefs(ctx.tempRefPaths);
+  return { refunded };
 }
 
 export async function endMotionControlStep(

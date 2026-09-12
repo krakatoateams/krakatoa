@@ -1,4 +1,5 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   getProductPhotoTier,
   type ProductPhotoModelTier,
@@ -60,7 +61,10 @@ async function getModelMap(): Promise<Map<string, ModelConfig> | null> {
     cache = { map, expiresAt: now + CACHE_TTL_MS };
     return map;
   } catch (e) {
-    console.warn("[model-resolver] DB read failed, using fallback model IDs:", e);
+    console.warn(
+      "[model-resolver] DB read failed, using fallback model IDs:",
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 }
@@ -98,7 +102,7 @@ export async function resolveModel(params: {
   } catch (e) {
     console.warn(
       `[model-resolver] '${params.toolKey}.${params.configKey}' lookup failed, using fallback:`,
-      e
+      generationErrorLogSafe(e)
     );
   }
   return params.fallback;
