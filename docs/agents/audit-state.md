@@ -56,14 +56,14 @@ None.
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
-- [ ] Database: RLS, RPC grants, constraints, and security advisors
+- [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
     `supabase/migrations/` record; production is aligned but migration `003`
     and the deferred script do not reproduce that final state safely.
   - [x] RPC EXECUTE grants (PUBLIC default vs service_role-only)
   - [x] Legacy / untracked tables (RLS + schema lineage for posts,
         platform_tokens, storyboards, users_deprecated)
-  - [ ] Migration catalog integrity (duplicate prefixes, stale `FROM users`
+  - [x] Migration catalog integrity (duplicate prefixes, stale `FROM users`
         backfills, 001–003 bootstrap)
   - [x] Live Supabase security advisors
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
@@ -463,6 +463,28 @@ None.
   `deny_by_default_legacy_policies`; four tables have RLS + 0 policies;
   `rls_auto_enable` is service_role-only; advisor WARN for that function
   is gone.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Database: migration catalog integrity
+
+- Date: 2026-09-12
+- Base: `065045f`
+- Final commit: `1f9e39f895b8929d8d5b6d5cc50ccee7e94acd97`
+- Scope: `002`/`003` identity FKs, removed duplicate
+  `076_tool_preview_access 2.sql`, `094_drop_legacy_credit_rpc_overload.sql`.
+- Findings: early CREATE still targeted `public.users`; an identical 076
+  file would re-apply via `db:setup`; a leftover 10-arg credit RPC
+  overload survived 050. Catalog now points identity FKs at `auth.users`
+  and keeps one lot-aware credit RPC.
+- Accepted risks: duplicate numeric prefixes remain (lexicographic apply
+  order). `001` still creates `product_photo_generations` only when
+  `public.users` exists. Untracked CREATE for `posts` / `platform_tokens`
+  / `storyboards` is historical — live tables already exist.
+- Verification: `npm run test:migration-catalog` (red then green),
+  `npm run test:auth-users-fk`, `npm run test:rpc-grants`, `npm run lint`
+  (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed. MCP applied `drop_legacy_credit_rpc_overload`;
+  only the 12-arg credit RPC remains, service_role-only.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred

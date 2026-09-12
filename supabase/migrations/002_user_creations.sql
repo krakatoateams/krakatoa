@@ -4,7 +4,7 @@
 create table if not exists user_creations (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
-  user_id uuid not null references users (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
   tool text not null,
   media_type text not null check (media_type in ('image', 'video')),
   media_url text not null,
@@ -31,7 +31,7 @@ begin
       and table_name = 'storyboards'
   ) then
     alter table storyboards
-      add column if not exists user_id uuid references users (id) on delete set null;
+      add column if not exists user_id uuid references auth.users (id) on delete set null;
 
     create index if not exists storyboards_user_created_idx
       on storyboards (user_id, created_at desc);
