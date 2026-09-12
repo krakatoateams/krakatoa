@@ -365,6 +365,7 @@ export async function POST(req: Request) {
       aspectRatio,
       language,
       promptOverride: promptEdited ? editedPrompt : null,
+      ...(devBlank ? { devBlank: true } : {}),
     });
     const pricingKey = videoModel.pricingKey({ resolution, hasReferenceVideo: false });
     const requiredCredits = devBlank
@@ -665,6 +666,7 @@ export async function POST(req: Request) {
           aspectRatio,
           language,
           style: storyboardStyle,
+          ...(devBlank ? devBlankJobTag() : {}),
         },
       }));
 
@@ -714,7 +716,9 @@ export async function POST(req: Request) {
           aspectRatio,
           language,
           videoModelId,
-          modelLabel: videoModel.modelLabel,
+          modelLabel: devBlank ? "Dev blank" : videoModel.modelLabel,
+          providerModel: devBlank ? "dev_blank" : resolvedVideoModel.model,
+          ...(devBlank ? devBlankJobTag() : {}),
           ...(row.theme
             ? { prompt: String(row.theme), userPrompt: String(row.theme) }
             : {}),
@@ -741,8 +745,8 @@ export async function POST(req: Request) {
       usage: {
         assetId: videoAssetId,
         tool: "storyboard",
-        provider: resolvedVideoModel.provider,
-        model: resolvedVideoModel.model,
+        provider: devBlank ? "dev_blank" : resolvedVideoModel.provider,
+        model: devBlank ? "dev_blank" : resolvedVideoModel.model,
         unitType: "video_seconds",
         units: durationSec,
         creditsCharged: creditsAmount,

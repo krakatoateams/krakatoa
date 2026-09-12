@@ -464,6 +464,7 @@ function PhotoOmniPage({
   useEffect(() => {
     if (status !== "authenticated") {
       setIsAdmin(false);
+      setDevBlank(false);
       return;
     }
     let active = true;
@@ -471,11 +472,14 @@ function PhotoOmniPage({
       .then((res) => (res.ok ? res.json() : { isAdmin: false }))
       .then((d: { isAdmin?: boolean }) => {
         if (!active) return;
-        setIsAdmin(Boolean(d.isAdmin));
+        const nextIsAdmin = Boolean(d.isAdmin);
+        setIsAdmin(nextIsAdmin);
+        if (!nextIsAdmin) setDevBlank(false);
       })
       .catch(() => {
         if (!active) return;
         setIsAdmin(false);
+        setDevBlank(false);
       });
     return () => {
       active = false;

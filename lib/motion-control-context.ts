@@ -12,6 +12,7 @@ export type MotionControlJobInput = {
   prompt?: string;
   provider?: string;
   providerModel?: string;
+  devBlank?: boolean;
   creditsAmount?: number;
   tempRefPaths?: string[];
   generationRequestId?: string;

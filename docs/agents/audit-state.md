@@ -104,7 +104,7 @@ the runbook.
   - [x] Log redaction: generation route error logging
     - [x] Primary generation and shared pipelines
     - [x] Secondary generation and admin test route
-  - [ ] Admin dev-blank generation
+  - [x] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
 ## Completed
@@ -1268,6 +1268,36 @@ the runbook.
   `test:generation-workflows`, `test:studio-submit`,
   `test:active-generations`, `npm run lint` (0 errors; 11 pre-existing warnings),
   `npm run build`, `git diff --check`, and edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings.
+
+### Admin: dev-blank generation
+
+- Date: 2026-09-13
+- Base: `f0c0f89e54e48942ae0f50314fc753692905087f`
+- Final commit: `10c2d0a`
+- Scope: admin-only blank request parsing/access, Photo and Video composer
+  controls, all six server generation paths, idempotency hashes, zero-credit
+  metered attempts, provider bypass, placeholder storage, and observability
+  metadata.
+- Findings: non-admin requests were already rejected before spend/provider work,
+  but Reels, Storyboard video, and Motion Control omitted blank mode from their
+  server request hash, allowing a reused admin key to replay the wrong mode.
+  Several job/asset/usage records attributed bundled placeholders to a live
+  provider, and a revoked/lost admin session could leave hidden blank state
+  enabled in the client. Hashes now separate live and blank attempts, persisted
+  provider/model metadata uses `dev_blank`, and clients clear blank state when
+  admin visibility is lost.
+- Accepted risks: bundled files under `public/dev/` are publicly readable test
+  assets; route authorization, owner-scoped upload paths, and metered persistence
+  remain server-side. Pending OAuth drafts do not preserve blank state on every
+  composer, but blank mode is only selectable after an authenticated admin check.
+- Verification: `npm run test:dev-blank` (red then green),
+  `test:video-studio`, `test:metered-generation`, `test:generation-commit`,
+  `test:generation-workflows`, `test:studio-submit`, `test:active-generations`,
+  `test:skills`, `test:admin-auth`, `test:admin-config-toggles`,
+  `test:generation-log-redaction`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, `git diff --check`, and edited-file diagnostics
+  passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings.
 
 ## Deferred
