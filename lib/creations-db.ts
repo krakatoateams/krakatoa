@@ -17,6 +17,9 @@ import type { PhotoStudioMode } from "@/lib/product-photo";
 import { VIDEO_STUDIO_TOOLS } from "@/lib/studio-product-tools";
 import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
+import { CreationNotFoundError } from "@/lib/creation-ownership-pure";
+
+export { CreationNotFoundError } from "@/lib/creation-ownership-pure";
 
 export type UserCreationRow = {
   id: string;
@@ -191,9 +194,9 @@ export async function updateUserCreation(params: {
     .single();
 
   if (selErr || !existing) {
-    const msg = selErr?.message || "Creation not found";
+    const msg = selErr?.message || "Creation not found.";
     if (tableMissingMessage(msg)) throw missingTableError();
-    throw new Error(msg);
+    throw new CreationNotFoundError();
   }
 
   const current = existing as UserCreationRow;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
+import { classifyCreationMutationError } from "@/lib/creation-ownership-pure";
 import {
   permanentlyDeleteUserCreation,
   restoreUserCreation,
@@ -52,9 +53,11 @@ export async function PATCH(
 
     return NextResponse.json({ item });
   } catch (error: unknown) {
-    console.error("[Creations PATCH]", error);
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const mapped = classifyCreationMutationError(error);
+    if (mapped.status === 500) {
+      console.error("[Creations PATCH]", error);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }
 
@@ -92,8 +95,10 @@ export async function DELETE(
     const item = await softDeleteUserCreation(userId, id);
     return NextResponse.json({ item });
   } catch (error: unknown) {
-    console.error("[Creations DELETE]", error);
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const mapped = classifyCreationMutationError(error);
+    if (mapped.status === 500) {
+      console.error("[Creations DELETE]", error);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }
