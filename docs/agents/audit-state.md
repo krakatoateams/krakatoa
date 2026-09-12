@@ -85,7 +85,7 @@ None.
   - [x] Monitoring: cross-user job reads and detail disclosure
   - [x] Monitoring: anomaly classification
   - [x] Prompt capture: primary generation routes
-  - [ ] Prompt capture: secondary / unmetered routes
+  - [x] Prompt capture: secondary / unmetered routes
   - [ ] Log redaction: publisher cron residuals
   - [ ] Admin analytics: RPC aggregates and paginated user PII
   - [ ] Admin metrics: cross-user dashboard reads
@@ -882,6 +882,27 @@ None.
   and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
+
+### Admin: prompt capture on secondary / unmetered routes
+
+- Date: 2026-09-13
+- Base: `9278f1778624f71c9b1d6a944e0a7143edd0f231`
+- Final commit: unchanged (review-only)
+- Scope: `app/api/generate-canvas-text/route.ts`,
+  `app/api/render-editor/route.ts`, `app/api/generate-caption/route.ts`.
+- Findings: none requiring a code change. Canvas already stores the user
+  instruction on the job and the assembled Gemini prompt on `canvas_text`;
+  system instruction stays provider-only. Editor uses a static
+  `Editor export` label (no user generation prompt). Caption has no job
+  and is excluded from the monitoring prompt surface.
+- Accepted risks: caption remains unmetered and invisible to monitoring.
+- Follow-up: Log redaction (publisher cron residuals) is next.
+- Verification: `npm run test:canvas`, `npm run test:editor`,
+  `npm run test:prompt-capture`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), and `git diff --check` passed. Product code unchanged from
+  `9278f17`, which already passed `npm run build`.
+- Security: review of the three routes found 0 critical, 0 high, and 0
+  unaccepted medium findings.
 
 ## Deferred
 
