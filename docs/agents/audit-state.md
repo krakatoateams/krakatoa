@@ -54,7 +54,13 @@ None.
   - [x] Creation expiry cleanup
   - [x] Platform skill thumbs
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
+  - [x] TikTok OAuth, callbacks, and token lifecycle
+  - [ ] TikTok publish client (`lib/tiktok.ts`; cron stays Scheduler)
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
+  - [ ] YouTube OAuth, callbacks, and token lifecycle
+  - [ ] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
+- [ ] Integrations: Instagram OAuth, callbacks, and token lifecycle
+  (discovered; same `platform_tokens` / connections family)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
@@ -485,6 +491,32 @@ None.
   (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed. MCP applied `drop_legacy_credit_rpc_overload`;
   only the 12-arg credit RPC remains, service_role-only.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: TikTok OAuth and token lifecycle
+
+- Date: 2026-09-12
+- Base: `cf710c7e7ef88ee03868ae48530ccd12511349f4`
+- Final commit: `47580a2`
+- Scope: `app/api/connections/tiktok/{start,callback,route,creator-info}`,
+  `app/api/connections/status`, `lib/tiktok.ts` token/creator-info helpers,
+  `lib/http.ts` `resolveOrigin`, `lib/tiktok-oauth-pure.ts`.
+- Findings: creator-info now fails closed (409 reconnect) when a TikTok
+  refresh succeeds but `platform_tokens` persist fails — matching cron.
+  CSRF/PKCE, session binding, disconnect, and status already matched
+  `openspec/changes/connect-tiktok`.
+- Accepted risks: `resolveOrigin` trusts `Host`/`X-Forwarded-Proto` (TikTok
+  portal still binds exact redirect URIs). Disconnect is local-only (no
+  TikTok revoke). Concurrent creator-info + cron refresh can race on TikTok's
+  rotating refresh (same as cron; lock would need a DB change). Refresh on
+  any generic creator-info error is a conservative retry.
+- Follow-up: TikTok publish client and cron claim stay queued; scheduler UI
+  swallows 409/502 on creator-info (Scheduler).
+- Verification: `npm run test:tiktok-oauth` (red on persist-proceed, then
+  green), `npm run test:tiktok-creator-info`,
+  `npm run test:tiktok-photo-proxy`, `npm run test:post-ownership`,
+  `npm run test:auth`, `npm run lint` (0 errors; 11 pre-existing warnings),
+  `npm run build`, and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
