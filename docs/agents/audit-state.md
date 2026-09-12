@@ -18,6 +18,10 @@ None.
 - [x] Identity: authentication and session resolution
   - [x] Supabase Auth session lifecycle and product-profile resolution
 - [ ] Authorization: admin guards and service-role ownership checks
+  - [x] Admin guards (pages, `withAdmin`, feature gates)
+  - [ ] Service-role `profile_id` ownership on user APIs
+  - [ ] Service-role `user_id` ownership (creations, connections; storage
+        signing stays with the Storage queue item)
 - [ ] Credits: ledger, pricing, bonus offers, and refund policy
 - [ ] Payments: DOKU checkout, callbacks, signatures, and replay handling
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
@@ -68,6 +72,32 @@ None.
 - Verification: `npm run test:auth`, `npm run test:video-studio`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Authorization: admin guards
+
+- Date: 2026-09-12
+- Base: `85afb7743b2b49b29eee73b13e4e8a979d41daf5`
+- Final commit: `000e3190fdf34df0ea02f7e1a7e3b3d0a94540df`
+- Scope: `lib/admin-auth.ts`, `lib/admin-api.ts`, `lib/admin-users-db.ts`,
+  `lib/admin-auth-pure.ts`, `app/(app)/admin/layout.tsx`, `app/api/admin/**`,
+  feature-level `getCurrentAdmin()` gates, and
+  `supabase/migrations/090_atomic_admin_revoke.sql`.
+- Findings: unknown-admin DELETE now returns 404 via `AdminNotFoundError`;
+  last-admin revoke is serialized by `krakatoa_revoke_admin` (applied live as
+  `atomic_admin_revoke`). All 36 mutating admin APIs already used `withAdmin()`;
+  `/api/admin/me` remains cosmetic.
+- Accepted risks: missing-RPC fallback still uses check-then-update (production
+  has the RPC). Admin identity is keyed on `profiles.email`; auth-email drift
+  is latent until an email-change flow exists. `owner` vs `admin` is display
+  only. Infra-null profile from `getCurrentProfile()` maps to 401, matching
+  Identity.
+- Follow-up: service-role `profile_id` and `user_id` ownership slices remain.
+- Verification: `npm run test:admin-auth`, `npm run test:auth`,
+  `npm run test:monitoring-flags`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed. Live RPC
+  `not_found` and service-role-only EXECUTE grants verified.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
