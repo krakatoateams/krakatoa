@@ -6,6 +6,12 @@
 import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { instagramTokenExchangeErrorDetail } from "@/lib/instagram-oauth-pure";
+
+export {
+  INSTAGRAM_CONTENT_PUBLISH_SCOPE,
+  hasBusinessContentPublishPermission,
+} from "@/lib/instagram-oauth-pure";
 
 const INSTAGRAM_CODE_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_LONG_LIVED_TOKEN_URL = "https://graph.instagram.com/access_token";
@@ -17,8 +23,6 @@ const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
 // Instagram Login" surface has no `account_type` field to check directly —
 // that field belongs to the deprecated Instagram Basic Display API (see
 // design.md Decision 12).
-export const INSTAGRAM_CONTENT_PUBLISH_SCOPE = "instagram_business_content_publish";
-
 export interface InstagramShortLivedTokenResponse {
   accessToken: string;
   userId: string;
@@ -92,7 +96,7 @@ export async function exchangeCodeForToken(
 
   if (!res.ok || !entry?.access_token || !entry?.user_id) {
     throw new Error(
-      `Instagram code-for-token exchange failed: HTTP ${res.status} ${JSON.stringify(json)}`,
+      `Instagram code-for-token exchange failed: HTTP ${res.status} ${instagramTokenExchangeErrorDetail(json)}`,
     );
   }
 
@@ -111,10 +115,6 @@ export async function exchangeCodeForToken(
  * on to detect an ineligible account — see design.md Decision 12 for why the
  * originally-assumed `account_type` field doesn't exist on this API surface.
  */
-export function hasBusinessContentPublishPermission(permissions: string[]): boolean {
-  return permissions.includes(INSTAGRAM_CONTENT_PUBLISH_SCOPE);
-}
-
 export interface InstagramLongLivedTokenResponse {
   accessToken: string;
   expiresIn: number;
@@ -147,7 +147,7 @@ export async function exchangeForLongLivedToken(
 
   if (!res.ok || !json.access_token || !json.expires_in) {
     throw new Error(
-      `Instagram long-lived token exchange failed: HTTP ${res.status} ${JSON.stringify(json)}`,
+      `Instagram long-lived token exchange failed: HTTP ${res.status} ${instagramTokenExchangeErrorDetail(json)}`,
     );
   }
 
