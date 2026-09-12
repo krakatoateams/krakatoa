@@ -44,10 +44,10 @@ None.
   - [x] Device upload signing
   - [x] Generation-ref upload signing
   - [x] Client egress (stable URLs, next/image)
-  - [ ] Cross-tool mention / creation-ID resolution
-  - [ ] History batch signing
-  - [ ] Pipeline server-side signing
-  - [ ] Publish/cron signing
+  - [x] Cross-tool mention / creation-ID resolution
+  - [x] History batch signing
+  - [x] Pipeline server-side signing
+  - [x] Publish/cron signing
   - [ ] Canonical path layout
   - [ ] Sweep / orphans
   - [ ] Resumable recovery staging
@@ -339,6 +339,30 @@ None.
 - Follow-up: remaining Storage signing and lifecycle slices.
 - Verification: review-only; repo grep found zero `unoptimized`.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Storage: mentions, history, pipeline, and publish signing
+
+- Date: 2026-09-12
+- Base: `e68e7bb93969a461f1c409628aaccd81188bb098`
+- Final commit: `f67316b`
+- Scope: `resolveMentionCreations`, `signCreationItemsMedia`, pipeline
+  `signStoragePathForPipeline` / `resolveRefForPipeline`, cron publish
+  signing, `POST /api/posts` `photo_urls`.
+- Findings: mentions, history, and pipeline already owner-scope before sign.
+  Photo posts could persist and publish-sign another user's path; schedule
+  now classifies + asserts ownership, and cron re-asserts before conversion
+  and `signOwnedStoragePathForPublish`.
+- Accepted risks: pipeline HTTP fallback after a missing owned object, and
+  raw http `video_url` publish, remain hosted-URL flows. Trashed own
+  creations can still be mentioned.
+- Follow-up: remaining Storage lifecycle slices (canonical, sweep,
+  resumable, expiry, skill thumbs).
+- Verification: `npm run test:storage-sign-ownership` (red then green),
+  `npm run test:post-ownership`, `npm run test:animate-handoff`,
+  `npm run test:creation-ownership`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium. Low cron-ordering
+  finding fixed in the same slice.
 
 ## Deferred
 
