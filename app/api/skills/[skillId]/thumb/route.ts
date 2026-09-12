@@ -7,7 +7,10 @@ import {
   platformSkillThumbPath,
 } from "@/lib/storage-buckets";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
-import { getOwnedSkillOverride, updateOwnedSkill } from "@/lib/skill-configs-db";
+import {
+  getOwnedSkillOverride,
+  replaceOwnedSkillThumb,
+} from "@/lib/skill-configs-db";
 import { isSkillSlug } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
@@ -54,10 +57,15 @@ export async function POST(
       upsert: false,
     });
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("[skills/thumb] upload failed:", error.message);
+      return NextResponse.json({ error: "Thumbnail upload failed." }, { status: 500 });
     }
 
-    const skill = await updateOwnedSkill(profile.id, params.skillId, { thumbPath: storagePath });
+    const skill = await replaceOwnedSkillThumb(
+      profile.id,
+      params.skillId,
+      storagePath
+    );
     const signed = await createSignedStorageUrl(storagePath, "ui");
     return NextResponse.json({ skill, thumb: signed.url });
   } catch (e) {
@@ -68,6 +76,10 @@ export async function POST(
     if (message === "Unknown skill.") {
       return NextResponse.json({ error: message }, { status: 404 });
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("[skills/thumb] persistence failed:", message);
+    return NextResponse.json(
+      { error: "Failed to upload thumbnail." },
+      { status: 500 }
+    );
   }
 }

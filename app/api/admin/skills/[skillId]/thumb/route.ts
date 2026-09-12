@@ -7,7 +7,10 @@ import {
   platformSkillThumbPath,
 } from "@/lib/storage-buckets";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
-import { listCatalogSkills, upsertSkillConfig } from "@/lib/skill-configs-db";
+import {
+  listCatalogSkills,
+  replaceCatalogSkillThumb,
+} from "@/lib/skill-configs-db";
 import { isSkillSlug } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
@@ -55,10 +58,15 @@ export async function POST(
       upsert: false,
     });
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("[admin/skills/thumb] upload failed:", error.message);
+      return NextResponse.json({ error: "Thumbnail upload failed." }, { status: 500 });
     }
 
-    await upsertSkillConfig(params.skillId, { thumbPath: storagePath }, ctx.profile.id);
+    await replaceCatalogSkillThumb(
+      params.skillId,
+      storagePath,
+      ctx.profile.id
+    );
     const signed = await createSignedStorageUrl(storagePath, "ui");
     const skills = await listCatalogSkills();
     const skill = skills.find((s) => s.id === params.skillId);

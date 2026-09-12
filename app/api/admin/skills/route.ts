@@ -104,8 +104,14 @@ export async function POST(req: Request) {
       const skill = await createCustomSkill(input, { updatedByProfileId: ctx.profile.id });
       return NextResponse.json({ skill }, { status: 201 });
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to create skill.";
-      return NextResponse.json({ error: message }, { status: 500 });
+      console.error(
+        "[admin/skills] create failed:",
+        e instanceof Error ? e.message : "unknown"
+      );
+      return NextResponse.json(
+        { error: "Failed to create skill." },
+        { status: 500 }
+      );
     }
   });
 }

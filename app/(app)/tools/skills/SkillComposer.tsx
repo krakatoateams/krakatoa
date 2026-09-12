@@ -174,7 +174,6 @@ function SkillOmniInner({
   const hasSlot = (key: string) => !!skill?.inputs.some((slot) => slot.key === key);
   const needsCharacter = !!skill?.inputs.some((slot) => slot.key === "character" && slot.required);
   const needsSubject = !!skill?.inputs.some((slot) => slot.key === "subject" && slot.required);
-  const needsScene = !!skill?.inputs.some((slot) => slot.key === "scene" && slot.required);
   const needsStartFrame = !!skill?.inputs.some((slot) => slot.key === "startFrame" && slot.required);
   const showSubjectTile = Boolean(skill) && !isVideo && hasSlot("subject");
   const showStartFrame = isVideo && hasSlot("startFrame");
@@ -187,13 +186,71 @@ function SkillOmniInner({
   const startFrameLabel =
     skill?.inputs.find((slot) => slot.key === "startFrame")?.label ?? "Start frame";
 
+  const photoMode = skill ? skillPhotoMode(skill) : null;
+  const [photoEnablement, setPhotoEnablement] = useState<Partial<
+    Record<"product" | "image" | "character", string[]>
+  > | null>(null);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let active = true;
+    fetch("/api/tools/photo/features")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!active || !Array.isArray(data?.features)) return;
+        const next: Partial<
+          Record<"product" | "image" | "character", string[]>
+        > = {};
+        for (const feature of data.features as Array<{
+          key?: unknown;
+          enabledTiers?: unknown;
+        }>) {
+          const key = feature.key;
+          if (
+            (key === "product" ||
+              key === "image" ||
+              key === "character") &&
+            Array.isArray(feature.enabledTiers)
+          ) {
+            next[key] = feature.enabledTiers.filter(
+              (tier): tier is string => typeof tier === "string"
+            );
+          }
+        }
+        setPhotoEnablement(next);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
   const photoTiers = useMemo(() => {
-    if (needsCharacter) return PRODUCT_PHOTO_TIERS.filter(tierSupportsMultiReference);
-    if (needsSubject || subject.file) {
-      return PRODUCT_PHOTO_TIERS.filter((t) => t.supportsReference);
+    let candidates = photoMode && photoEnablement?.[photoMode]
+      ? PRODUCT_PHOTO_TIERS.filter((tier) =>
+          photoEnablement[photoMode]?.includes(tier.id)
+        )
+      : PRODUCT_PHOTO_TIERS;
+    if (photoMode === "product" && (needsCharacter || character.file)) {
+      candidates = candidates.filter(tierSupportsMultiReference);
+    } else if (
+      photoMode === "product" ||
+      needsSubject ||
+      needsCharacter ||
+      subject.file ||
+      character.file
+    ) {
+      candidates = candidates.filter((tier) => tier.supportsReference);
     }
-    return PRODUCT_PHOTO_TIERS;
-  }, [needsCharacter, needsSubject, subject.file]);
+    return candidates;
+  }, [
+    needsCharacter,
+    needsSubject,
+    character.file,
+    photoEnablement,
+    photoMode,
+    subject.file,
+  ]);
   const defaultPhotoTier =
     photoTiers.find((t) => t.id === DEFAULT_PRODUCT_PHOTO_TIER)?.id ??
     photoTiers[0]?.id ??
@@ -270,15 +327,15 @@ function SkillOmniInner({
 
   const [videoModelId, setVideoModelId] = useState<VideoModelId>(DEFAULT_VIDEO_MODEL_ID);
   const videoModel = getVideoModel(videoModelId);
+  const designatedVideoModel =
+    skill?.modelId && isValidVideoModelId(skill.modelId)
+      ? enabledVideoModels.find((model) => model.id === skill.modelId)
+      : undefined;
 
   useEffect(() => {
     if (enabledVideoModels.length === 0) return;
-    const designated =
-      skill?.modelId && isValidVideoModelId(skill.modelId)
-        ? enabledVideoModels.find((m) => m.id === skill.modelId)
-        : undefined;
-    const next = designated
-      ? designated.id
+    const next = designatedVideoModel
+      ? designatedVideoModel.id
       : (snapToEnabledModel(
           videoModelId,
           enabledVideoModels,
@@ -290,6 +347,7 @@ function SkillOmniInner({
   }, [
     enabledVideoModels.map((m) => m.id).join(","),
     composerEnablement,
+    designatedVideoModel,
     videoComposerKey,
     skill?.modelId,
   ]);
@@ -301,11 +359,21 @@ function SkillOmniInner({
   const [videoAspect, setVideoAspect] = useState<VideoAspectRatio>(videoModel.defaultAspectRatio);
 
   const allowedDurations = getAllowedDurations(videoModel, videoResolution);
+  const pinnedVideoDuration =
+    designatedVideoModel &&
+    skill?.duration &&
+    allowedDurations.includes(skill.duration)
+      ? skill.duration
+      : undefined;
   useEffect(() => {
+    if (pinnedVideoDuration) {
+      if (duration !== pinnedVideoDuration) setDuration(pinnedVideoDuration);
+      return;
+    }
     if (!allowedDurations.includes(duration) && allowedDurations[0]) {
       setDuration(allowedDurations[0]);
     }
-  }, [allowedDurations, duration]);
+  }, [allowedDurations, duration, pinnedVideoDuration]);
 
   // A skill can pin a specific resolution (e.g. the welcome-offer skill needs
   // 480p specifically to land on its advertised credit cost) — every catalog
@@ -348,7 +416,7 @@ function SkillOmniInner({
     !!skill &&
     (!skill.promptRequired || prompt.trim().length > 0) &&
     (!needsSubject || !!subject.file) &&
-    (!needsScene || !!scene.file) &&
+    (photoMode !== "product" || !!scene.file) &&
     (!needsCharacter || !!character.file) &&
     photoTiers.length > 0;
   const canGenerateVideo =
@@ -403,10 +471,10 @@ function SkillOmniInner({
       prompt,
       SKILL_PHOTO_PROMPT_MAX_CHARS,
     );
-    const photoMode = skillPhotoMode(skill) ?? "image";
+    const resolvedPhotoMode = photoMode ?? "image";
     const signature = skillPhotoAttemptSignature({
       skillId: skill.id,
-      mode: photoMode,
+      mode: resolvedPhotoMode,
       prompt: normalizedPrompt,
       poseId: DEFAULT_MODEL_POSE,
       styleId: DEFAULT_PHOTO_STYLE,
@@ -415,10 +483,10 @@ function SkillOmniInner({
       aspectRatio,
       imageCount: 1,
       devBlank: false,
-      productFile: photoMode === "product" ? scene.file : null,
-      characterFile: photoMode === "product" ? character.file : null,
+      productFile: resolvedPhotoMode === "product" ? scene.file : null,
+      characterFile: resolvedPhotoMode === "product" ? character.file : null,
       referenceFile:
-        photoMode === "product" ? null : subject.file ?? character.file,
+        resolvedPhotoMode === "product" ? null : subject.file ?? character.file,
     });
     await submit(signature, (idempotencyKey) => {
       const formData = new FormData();
@@ -429,8 +497,8 @@ function SkillOmniInner({
       formData.append("aspectRatio", aspectRatio);
       if (tier.hasResolution) formData.append("resolution", resolution);
       if (normalizedPrompt) formData.append("prompt", normalizedPrompt);
-      formData.append("mode", photoMode);
-      if (photoMode === "product") {
+      formData.append("mode", resolvedPhotoMode);
+      if (resolvedPhotoMode === "product") {
         if (scene.file) formData.append("image", scene.file);
         if (character.file) formData.append("character", character.file);
       } else if (subject.file) {
@@ -668,7 +736,7 @@ function SkillOmniInner({
                       hint: `${videoCredits(videoPricingKey, d)}`,
                     }))}
                     onSelect={(id) => setDuration(Number(id))}
-                    disabled={loading}
+                    disabled={loading || Boolean(pinnedVideoDuration)}
                   />
                   <ChipDropdown
                     sheetTitle="Select resolution"

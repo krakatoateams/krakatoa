@@ -1,6 +1,9 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import {
+  STORAGE_BUCKET,
+  isPlatformSkillThumbPath,
+} from "@/lib/storage-buckets";
 import {
   SKILL_CATEGORIES,
   SKILL_INPUT_DEFAULTS,
@@ -166,12 +169,23 @@ export function parseSkillInputs(raw: unknown, mediaType: SkillMediaType): Skill
     if (!(SKILL_INPUT_KEYS as readonly string[]).includes(key) || seen.has(key)) return null;
     const meta = SKILL_INPUT_DEFAULTS[key as SkillInputKey];
     if (meta.mediaType !== mediaType) return null;
+    if (key === "scene" && rec.required !== true) return null;
     seen.add(key);
     const label =
       typeof rec.label === "string" && rec.label.trim()
         ? rec.label.trim().slice(0, 24)
         : meta.label;
     out.push({ key, label, required: rec.required === true });
+  }
+  // The photo composer has one general reference slot (`subject`) OR the
+  // product-mode pair (`scene` + optional `character`). Mixing subject with
+  // either product slot would render inputs that cannot all be submitted.
+  if (
+    mediaType === "image" &&
+    seen.has("subject") &&
+    (seen.has("scene") || seen.has("character"))
+  ) {
+    return null;
   }
   return out;
 }
@@ -320,6 +334,19 @@ export async function getSkillOverride(skillId: SkillId): Promise<SkillConfigOve
   return all.get(skillId) ?? null;
 }
 
+async function getGlobalSkillOverrideFresh(
+  skillId: SkillId
+): Promise<SkillConfigOverride | null> {
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .select(SELECT_COLS)
+    .eq("skill_id", skillId)
+    .is("owner_profile_id", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? mapRow(data as SkillConfigRow) : null;
+}
+
 async function getOwnedOverrides(ownerProfileId: string): Promise<SkillConfigOverride[]> {
   const { data, error } = await supabaseServer
     .from(TABLE)
@@ -384,7 +411,7 @@ export function mergeSkill(
     thumb: thumbUrl || base.thumb,
     origin: override.origin === "custom" ? "custom" : "overlay",
     hidden: override.hidden,
-    modelId: override.modelId ?? undefined,
+    modelId: override.modelId ?? base.modelId,
   };
 }
 
@@ -511,13 +538,14 @@ export async function upsertSkillConfig(
   }
 
   if (patch.revert) {
-    const existing = await getSkillOverride(skillId);
+    const existing = await getGlobalSkillOverrideFresh(skillId);
     if (existing?.hidden) {
       throw new Error("Deleted skills cannot be restored.");
     }
     const { error } = await supabaseServer.from(TABLE).delete().eq("skill_id", skillId);
     if (error) throw new Error(error.message);
     bustSkillConfigCache();
+    await removeSkillThumb(existing?.thumbPath);
     return null;
   }
 
@@ -535,8 +563,55 @@ export async function upsertSkillConfig(
 
 async function removeSkillThumb(path: string | null | undefined): Promise<void> {
   if (!path) return;
+  if (!isPlatformSkillThumbPath(path)) {
+    console.warn("[skill-configs] refusing unexpected thumb path");
+    return;
+  }
   const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove([path]);
   if (error) console.warn("[skill-configs] failed to remove thumb:", error.message);
+}
+
+export async function replaceCatalogSkillThumb(
+  skillId: SkillId,
+  newPath: string,
+  updatedByProfileId?: string | null
+): Promise<void> {
+  const previous = await getGlobalSkillOverrideFresh(skillId);
+  try {
+    await upsertSkillConfig(
+      skillId,
+      { thumbPath: newPath },
+      updatedByProfileId
+    );
+  } catch (e) {
+    await removeSkillThumb(newPath);
+    throw e;
+  }
+  if (previous?.thumbPath !== newPath) {
+    await removeSkillThumb(previous?.thumbPath);
+  }
+}
+
+export async function replaceOwnedSkillThumb(
+  ownerProfileId: string,
+  skillId: SkillId,
+  newPath: string
+): Promise<CatalogSkill> {
+  const previous = await getOwnedSkillOverride(ownerProfileId, skillId);
+  if (!previous) throw new Error("Unknown skill.");
+  let skill: CatalogSkill;
+  try {
+    skill = await updateOwnedSkill(ownerProfileId, skillId, {
+      thumbPath: newPath,
+    });
+  } catch (e) {
+    await removeSkillThumb(newPath);
+    throw e;
+  }
+  if (previous.thumbPath !== newPath) {
+    await removeSkillThumb(previous.thumbPath);
+  }
+  return skill;
 }
 
 /** Permanently remove a skill from the live catalog. Custom rows are deleted;
@@ -546,21 +621,26 @@ export async function deleteCatalogSkill(
   skillId: SkillId,
   updatedByProfileId?: string | null
 ): Promise<{ hidden: boolean }> {
-  const override = await getSkillOverride(skillId);
+  const override = await getGlobalSkillOverrideFresh(skillId);
   const builtin = isSkillId(skillId);
   if (!builtin && override?.origin !== "custom") {
     throw new Error("Unknown skill.");
   }
 
   if (!builtin) {
-    await removeSkillThumb(override?.thumbPath);
     const { error } = await supabaseServer.from(TABLE).delete().eq("skill_id", skillId);
     if (error) throw new Error(error.message);
     bustSkillConfigCache();
+    await removeSkillThumb(override?.thumbPath);
     return { hidden: false };
   }
 
-  await upsertSkillConfig(skillId, { hidden: true }, updatedByProfileId);
+  await upsertSkillConfig(
+    skillId,
+    { hidden: true, thumbPath: null },
+    updatedByProfileId
+  );
+  await removeSkillThumb(override?.thumbPath);
   return { hidden: true };
 }
 
@@ -675,11 +755,11 @@ export async function updateOwnedSkill(
 export async function deleteOwnedSkill(ownerProfileId: string, skillId: SkillId): Promise<void> {
   const existing = await getOwnedSkillOverride(ownerProfileId, skillId);
   if (!existing) throw new Error("Unknown skill.");
-  await removeSkillThumb(existing.thumbPath);
   const { error } = await supabaseServer
     .from(TABLE)
     .delete()
     .eq("skill_id", skillId)
     .eq("owner_profile_id", ownerProfileId);
   if (error) throw new Error(error.message);
+  await removeSkillThumb(existing.thumbPath);
 }
