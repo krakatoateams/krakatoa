@@ -43,7 +43,7 @@ None.
   - [x] TikTok photo proxy
   - [x] Device upload signing
   - [x] Generation-ref upload signing
-  - [ ] Client egress (stable URLs, next/image)
+  - [x] Client egress (stable URLs, next/image)
   - [ ] Cross-tool mention / creation-ID resolution
   - [ ] History batch signing
   - [ ] Pipeline server-side signing
@@ -322,6 +322,22 @@ None.
   skill thumbs).
 - Verification: review-only; neighboring `npm run test:storage-sign-ownership`
   and `npm run test:tiktok-photo-proxy` already green on `a318558`.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Storage: client egress
+
+- Date: 2026-09-12
+- Base: `9373229e6b118b2493e4b39ded87e481e269c77a`
+- Final commit: unchanged (review-only)
+- Scope: `lib/use-signed-media-url.ts`, `lib/storage-sign-client.ts`,
+  `next.config.mjs` image optimizer, `CreationsHistory` / `CreationPreviewModal`.
+- Findings: none. UI default TTL is cacheable `ui`; `MAX_REFRESH_MS` clamps
+  `setTimeout`; library/preview use `next/image` without `unoptimized`.
+- Accepted risks: scheduler post cards still use raw `<img>` (documented in
+  `docs/ops/supabase-egress.md`). History URLs are not client-refreshed for
+  tabs open longer than the 30-day UI TTL.
+- Follow-up: remaining Storage signing and lifecycle slices.
+- Verification: review-only; repo grep found zero `unoptimized`.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
