@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
+import { youtubeStorageFetchError } from "@/lib/youtube-publish-pure";
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
 
@@ -58,14 +59,11 @@ export async function uploadToYouTube(params: YouTubeUploadParams): Promise<stri
   if (!freshToken) {
     throw new Error("Failed to obtain a fresh access token from Google. The user may need to re-authorise.");
   }
-  console.log("[youtube] Fresh access token obtained:", freshToken.slice(0, 20) + "...");
 
   // ── Stream the video from storage ───────────────────────────────────────
   const videoRes = await fetch(videoUrl);
   if (!videoRes.ok || !videoRes.body) {
-    throw new Error(
-      `Could not fetch video from storage (HTTP ${videoRes.status}): ${videoUrl}`,
-    );
+    throw new Error(youtubeStorageFetchError(videoRes.status, videoUrl));
   }
 
   // Bridge the WHATWG ReadableStream returned by fetch to a Node.js Readable
