@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import {
   AdminNotFoundError,
@@ -224,6 +225,9 @@ export async function linkAdminProfile(
 
   // Non-fatal: linking is a convenience, not a security boundary.
   if (error) {
-    console.error("[admin-users] linkAdminProfile failed:", error.message);
+    console.error(
+      "[admin-users] linkAdminProfile failed:",
+      errorLogSafe(error)
+    );
   }
 }

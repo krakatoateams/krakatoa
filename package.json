@@ -36,6 +36,7 @@
     "test:migration-catalog": "npx tsx lib/migration-catalog-self-check.ts",
     "test:admin-auth": "npx tsx lib/admin-auth-self-check.ts",
     "test:admin-metrics": "npx tsx lib/admin-metrics-pure.ts",
+    "test:admin-log-redaction": "npx tsx lib/admin-log-redaction-self-check.ts",
     "test:admin-config-validation": "npx tsx lib/admin-config-validation.ts",
     "test:admin-config-toggles": "npx tsx lib/video-composer-features.ts",
     "test:admin-config-tree": "npx tsx lib/admin-config-tree-self-check.ts",

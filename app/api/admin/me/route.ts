@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/admin-auth";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Visibility-only endpoint for the client sidebar. It is NOT a security boundary
 // — the real gate is requireAdmin() on every admin page/API. Returns 200 with
@@ -19,7 +20,7 @@ export async function GET() {
       email: current.admin.email,
     });
   } catch (e) {
-    console.error("[admin/me] failed:", e);
+    console.error("[admin/me] failed:", errorLogSafe(e));
     return NextResponse.json({ isAdmin: false });
   }
 }

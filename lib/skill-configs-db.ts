@@ -4,6 +4,7 @@ import {
   STORAGE_BUCKET,
   isPlatformSkillThumbPath,
 } from "@/lib/storage-buckets";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import {
   SKILL_CATEGORIES,
   SKILL_INPUT_DEFAULTS,
@@ -312,7 +313,10 @@ export async function getSkillOverrides(): Promise<Map<SkillId, SkillConfigOverr
       .is("owner_profile_id", null);
 
     if (error) {
-      console.warn("[skill-configs] DB read failed, using catalog defaults:", error.message);
+      console.warn(
+        "[skill-configs] DB read failed, using catalog defaults:",
+        errorLogSafe(error)
+      );
       return emptyCache();
     }
 
@@ -324,7 +328,10 @@ export async function getSkillOverrides(): Promise<Map<SkillId, SkillConfigOverr
     cache = { byId, expiresAt: now + CACHE_TTL_MS };
     return byId;
   } catch (e) {
-    console.warn("[skill-configs] read threw, using catalog defaults:", e);
+    console.warn(
+      "[skill-configs] read threw, using catalog defaults:",
+      errorLogSafe(e)
+    );
     return emptyCache();
   }
 }
@@ -354,7 +361,7 @@ async function getOwnedOverrides(ownerProfileId: string): Promise<SkillConfigOve
     .eq("owner_profile_id", ownerProfileId)
     .eq("origin", "custom");
   if (error) {
-    console.warn("[skill-configs] owned read failed:", error.message);
+    console.warn("[skill-configs] owned read failed:", errorLogSafe(error));
     return [];
   }
   return (data ?? [])
@@ -383,7 +390,7 @@ async function signThumb(path: string | null | undefined): Promise<string | unde
     const signed = await createSignedStorageUrl(path, "ui");
     return signed.url;
   } catch (e) {
-    console.warn("[skill-configs] failed to sign thumb:", e);
+    console.warn("[skill-configs] failed to sign thumb:", errorLogSafe(e));
     return undefined;
   }
 }
@@ -568,7 +575,12 @@ async function removeSkillThumb(path: string | null | undefined): Promise<void> 
     return;
   }
   const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove([path]);
-  if (error) console.warn("[skill-configs] failed to remove thumb:", error.message);
+  if (error) {
+    console.warn(
+      "[skill-configs] failed to remove thumb:",
+      errorLogSafe(error)
+    );
+  }
 }
 
 export async function replaceCatalogSkillThumb(

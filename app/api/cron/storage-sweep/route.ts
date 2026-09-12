@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runStorageSweep, DEFAULT_SWEEP_MIN_AGE_HOURS } from "@/lib/storage-sweep";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Listing + reference scan + batched deletes — give it headroom.
 export const maxDuration = 120;
@@ -69,8 +70,10 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Storage sweep failed.";
-    console.error("[storage-sweep]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[storage-sweep]", errorLogSafe(err));
+    return NextResponse.json(
+      { error: "Storage sweep failed." },
+      { status: 500 }
+    );
   }
 }

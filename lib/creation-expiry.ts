@@ -4,6 +4,7 @@ import {
   type ExpirySettings,
   getExpirySettings,
 } from "@/lib/expiry-settings-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 /**
  * Creation expiry enforcement (Expiry Management).
@@ -193,7 +194,7 @@ export async function runCreationExpiry(
       if (assetError) {
         console.warn(
           "[creation-expiry] assets soft-delete failed:",
-          assetError.message
+          errorLogSafe(assetError)
         );
       }
     }
@@ -206,7 +207,7 @@ export async function runCreationExpiry(
       if (storageError) {
         console.warn(
           "[creation-expiry] storage remove failed:",
-          storageError.message
+          errorLogSafe(storageError)
         );
       }
     }

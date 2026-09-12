@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { expireCreditLots } from "@/lib/credits-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Ledger writes + wallet updates per expired lot — give it headroom.
 export const maxDuration = 120;
@@ -39,8 +40,10 @@ export async function GET(req: NextRequest) {
     );
     return NextResponse.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Credit expiry failed.";
-    console.error("[credit-expiry]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[credit-expiry]", errorLogSafe(err));
+    return NextResponse.json(
+      { error: "Credit expiry failed." },
+      { status: 500 }
+    );
   }
 }

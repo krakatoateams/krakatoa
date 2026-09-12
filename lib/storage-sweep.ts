@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 import {
   collectStorageReferences,
@@ -126,13 +127,23 @@ export async function runStorageSweep(opts?: {
         .from("signed_url_cache")
         .delete()
         .in("storage_path", paths.slice(i, i + 100));
-      if (error) console.warn("[storage-sweep] signed_url_cache purge failed:", error.message);
+      if (error) {
+        console.warn(
+          "[storage-sweep] signed_url_cache purge failed:",
+          errorLogSafe(error)
+        );
+      }
     }
     const { error } = await supabaseServer
       .from("signed_url_cache")
       .delete()
       .lt("expires_at", new Date().toISOString());
-    if (error) console.warn("[storage-sweep] signed_url_cache cleanup failed:", error.message);
+    if (error) {
+      console.warn(
+        "[storage-sweep] signed_url_cache cleanup failed:",
+        errorLogSafe(error)
+      );
+    }
   }
 
   return {
