@@ -82,6 +82,22 @@ None.
         backfills, 001–003 bootstrap)
   - [x] Live Supabase security advisors
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
+  - [x] Monitoring: cross-user job reads and detail disclosure
+  - [ ] Monitoring: anomaly classification
+  - [ ] Prompt capture: primary generation routes
+  - [ ] Prompt capture: secondary / unmetered routes
+  - [ ] Log redaction: publisher cron residuals
+  - [ ] Admin analytics: RPC aggregates and paginated user PII
+  - [ ] Admin metrics: cross-user dashboard reads
+  - [ ] Admin Config v2: PATCH validators and reset safety
+  - [ ] Admin Config v2: feature-model and catalog toggles
+  - [ ] Admin Config v2: tree builder and UI read contract
+  - [ ] Admin Config v2: persistence layer
+  - [ ] Platform settings: expiry, welcome knobs, credit packs
+  - [ ] Admin skills catalog
+  - [ ] Log redaction: admin API and ops crons
+  - [ ] Log redaction: generation route error logging
+  - [ ] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
 ## Completed
@@ -787,6 +803,35 @@ None.
   `npm run test:instagram-publish`, `npm run test:creation-ownership`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Admin: monitoring cross-user job reads and detail disclosure
+
+- Date: 2026-09-13
+- Base: `72b9893d0a64bde6e12d8700d199380578b80503`
+- Final commit: unchanged (review-only)
+- Scope: `lib/admin-monitoring-db.ts`, `GET /api/admin/monitoring`,
+  `GET /api/admin/monitoring/[jobId]`, `app/(app)/admin/monitoring/page.tsx`,
+  `scripts/probe-monitoring.ts`. Admin-only cross-user list/detail; prompts
+  detail-only; no signed-URL minting.
+- Findings: none requiring a code change. Both routes use `withAdmin()`;
+  list `MonitoringRow` omits `jobs.input`/`output`; detail `PromptSection`
+  reads only persisted fields; assets show `storage_path` only. Absent
+  `limit` no longer becomes `.limit(0)`.
+- Accepted risks: list JSON still includes full `jobs.error` and
+  `currentStep.error` (UI shows `errorCode`; possible prompt fragments in
+  provider messages). Detail returns ledger `metadata` and recovery
+  `replicateVideoUrl` beyond the table UI. `STEP_ROW_CAP=4000` can silently
+  truncate busy windows (same class as the documented 200-row list cap).
+  Live poll has no abort; stale overwrite is UX-only on a read-only panel.
+- Follow-up: `PromptSection` empty copy still says routes "never persist"
+  (stale vs post-11 Aug capture) — Prompt capture slice. Anomaly
+  classification stays the next Admin slice.
+- Verification: `npm run test:monitoring-flags`,
+  `npm run admin:probe-monitoring` (live 50-row/720h probe ok),
+  `npm run test:admin-auth`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
