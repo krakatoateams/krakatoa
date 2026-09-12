@@ -19,6 +19,8 @@ None.
   - [x] Supabase Auth session lifecycle and product-profile resolution
 - [ ] Authorization: admin guards and service-role ownership checks
   - [x] Admin guards (pages, `withAdmin`, feature gates)
+  - [x] Unauthenticated service-role provider routes (`generate-caption`,
+        `test-stitch`)
   - [ ] Service-role `profile_id` ownership on user APIs
   - [ ] Service-role `user_id` ownership (creations, connections; storage
         signing stays with the Storage queue item)
@@ -98,6 +100,24 @@ None.
   `npm run test:monitoring-flags`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed. Live RPC
   `not_found` and service-role-only EXECUTE grants verified.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Authorization: unauthenticated service-role provider routes
+
+- Date: 2026-09-12
+- Base: `1a9707fc702c66eb908ee74c56afb9455d9459e5`
+- Final commit: `75096cad12ef11afb50ecd35688de32ce198a4d6`
+- Scope: `app/api/generate-caption/route.ts`, `app/api/test-stitch/route.ts`,
+  `lib/provider-route-auth-pure.ts`.
+- Findings: caption `general`/`polish`/text-only modes now require a session
+  (401) before Replicate/Rendi; `test-stitch` is admin-gated via `withAdmin()`.
+- Accepted risks: caption remains unmetered for authenticated users.
+  Authenticated callers may still pass an external `videoUrl` to Rendi (scheduler
+  hosted-URL flow). Storage signing stays with the Storage queue item.
+- Verification: `npm run test:provider-route-auth`, `npm run test:admin-auth`,
+  `npm run test:auth`, `npm run lint` (0 errors; 11 pre-existing warnings),
+  `npm run build`, and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
