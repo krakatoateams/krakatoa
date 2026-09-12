@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile } from "@/lib/profiles-db";
+import { postOwnerDenied } from "@/lib/post-ownership-pure";
 
 // A claim newer than this means the cron is actively publishing the post right
 // now, so edits/cancels are refused. Mirrors lib/post-status.ts's window.
@@ -59,8 +60,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Post not found." }, { status: 404 });
   }
 
-  if (existing.profile_id !== profile.id) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  const ownerDenied = postOwnerDenied(existing.profile_id, profile.id);
+  if (ownerDenied) {
+    return NextResponse.json({ error: ownerDenied.error }, { status: ownerDenied.status });
   }
 
   // ── Editability guards ──────────────────────────────────────────────────────
@@ -131,6 +133,7 @@ export async function PATCH(
     .from("posts")
     .update(updates)
     .eq("id", id)
+    .eq("profile_id", profile.id)
     .select()
     .single();
 

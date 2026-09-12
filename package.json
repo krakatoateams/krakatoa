@@ -30,6 +30,7 @@
     "test:auth": "npx tsx lib/auth-session-self-check.ts",
     "test:admin-auth": "npx tsx lib/admin-auth-self-check.ts",
     "test:provider-route-auth": "npx tsx lib/provider-route-auth-self-check.ts",
+    "test:post-ownership": "npx tsx lib/post-ownership-self-check.ts",
     "test:replicate-output-url": "npx tsx lib/replicate-output-url-self-check.ts",
     "test:tiktok-creator-info": "npx tsx lib/tiktok-creator-info-pure.ts",
     "test:generation-workflows": "npx tsx lib/generation-workflows/control-policy-self-check.ts && npx tsx lib/generation-workflows/stop-settlement-self-check.ts && npx tsx lib/generation-workflows/submission-fence-self-check.ts && npx tsx lib/generation-workflows/submission-recovery-self-check.ts && npx tsx lib/generation-workflows/webhook-token-self-check.ts && npx tsx lib/generation-workflows/polling-self-check.ts && npx tsx lib/generation-workflows/finalization-self-check.ts && npx tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",

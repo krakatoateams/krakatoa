@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { addBonusCredits } from "@/lib/credits-db";
+import { unauthenticatedProviderHttp } from "@/lib/provider-route-auth-pure";
 import {
   getWelcomeVideoOfferEligibility,
   welcomeVideoClaimIdempotencyKey,
@@ -22,7 +23,17 @@ export const dynamic = "force-dynamic";
  * a double-grant, so this is safe to retry.
  */
 export async function POST() {
-  const profile = await requireCurrentProfile();
+  let profile;
+  try {
+    profile = await requireCurrentProfile();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (/not authenticated/i.test(message)) {
+      const denied = unauthenticatedProviderHttp();
+      return NextResponse.json({ error: denied.error }, { status: denied.status });
+    }
+    throw e;
+  }
 
   const { eligible, creditAmount } = await getWelcomeVideoOfferEligibility(profile.id);
   if (!eligible || creditAmount <= 0) {
