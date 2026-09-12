@@ -56,9 +56,9 @@ None.
 - [x] Integrations: TikTok OAuth, callbacks, tokens, and publishing
   - [x] TikTok OAuth, callbacks, and token lifecycle
   - [x] TikTok publish client (`lib/tiktok.ts`; cron stays Scheduler)
-- [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
+- [x] Integrations: Google/YouTube OAuth, tokens, and publishing
   - [x] YouTube OAuth, callbacks, and token lifecycle
-  - [ ] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
+  - [x] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
 - [ ] Integrations: Instagram OAuth, callbacks, and token lifecycle
   (discovered; same `platform_tokens` / connections family)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
@@ -559,10 +559,29 @@ None.
   YouTube still uses `request.url` origin, not `resolveOrigin`. Code
   exchange still happens before session check (TikTok binds first).
 - Follow-up: legacy `app/calendar/page.tsx` treats login as "YouTube
-  Connected" (Public/deployment or Scheduler). YouTube upload client
-  still embeds signed URLs in errors.
+  Connected" (Public/deployment or Scheduler).
 - Verification: `npm run test:youtube-oauth` (red on refresh wipe, then
   green), `npm run test:tiktok-oauth`, `npm run test:auth`,
+  `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: YouTube upload client
+
+- Date: 2026-09-12
+- Base: `be40b0df0b63ab659bc04e662c0e3927a9159b7d`
+- Final commit: `bbf006a`
+- Scope: `lib/youtube.ts` `uploadToYouTube`, `lib/youtube-publish-pure.ts`.
+  Cron claim lock stays Scheduler.
+- Findings: storage-fetch errors now redact signed URL tokens (shared
+  `redactPublishMediaRef`). Removed the access-token prefix log. In-memory
+  refresh and public privacy default were already correct.
+- Accepted risks: helper does not re-assert path ownership (cron does).
+  Hosted http `video_url` remains a cron-owned flow.
+- Follow-up: cron still logs OAuth token previews (Scheduler / Admin log
+  redaction). Google API error dumps in cron catch.
+- Verification: `npm run test:youtube-publish` (red on token-in-error, then
+  green), `npm run test:youtube-oauth`, `npm run test:tiktok-publish`,
   `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.

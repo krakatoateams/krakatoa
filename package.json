@@ -45,6 +45,7 @@
     "test:tiktok-oauth": "npx tsx lib/tiktok-oauth-pure.ts",
     "test:tiktok-publish": "npx tsx lib/tiktok-publish-pure.ts",
     "test:youtube-oauth": "npx tsx lib/youtube-oauth-pure.ts",
+    "test:youtube-publish": "npx tsx lib/youtube-publish-pure.ts",
     "test:generation-workflows": "npx tsx lib/generation-workflows/control-policy-self-check.ts && npx tsx lib/generation-workflows/stop-settlement-self-check.ts && npx tsx lib/generation-workflows/submission-fence-self-check.ts && npx tsx lib/generation-workflows/submission-recovery-self-check.ts && npx tsx lib/generation-workflows/webhook-token-self-check.ts && npx tsx lib/generation-workflows/polling-self-check.ts && npx tsx lib/generation-workflows/finalization-self-check.ts && npx tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",
     "admin:probe-monitoring": "npx tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "npx tsx scripts/probe-signed-url-cache.ts",
