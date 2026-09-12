@@ -68,7 +68,7 @@ None.
   - [x] Publisher cron: claim, idempotency, retries, concurrent runs
   - [x] Failed-post storage cleanup cron
   - [x] Scheduler composer UI: schedule, bulk retry, TikTok preflight
-  - [ ] In-app calendar UI: edit, cancel, drag-reschedule
+  - [x] In-app calendar UI: edit, cancel, drag-reschedule
   - [ ] Cross-tool handoff and dashboard reads
   - [ ] Legacy public calendar (`/calendar`)
 - [x] Database: RLS, RPC grants, constraints, and security advisors
@@ -639,6 +639,21 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: In-app calendar UI
+
+- Date: 2026-09-12
+- Base: `1d00e75f875d1b953db5a9442b985c2fea926db5`
+- Final commit: unchanged (review-only)
+- Scope: `CalendarPageClient.tsx`, `calendar/page.tsx`, `lib/post-status.ts`.
+- Findings: none requiring a code change. Edit/cancel/drag use owner-scoped
+  PATCH; `canEdit` locks published and active claims; server 409 is toasted.
+- Accepted risks: no dedicated Retry button (failed posts re-arm via edit or
+  drag). After 409 the modal is not auto-refreshed.
+- Follow-up: cross-tool handoff and legacy `/calendar` remain.
+- Verification: review-only; neighboring `npm run test:post-ownership` already
+  green on `1d00e75`.
+- Security: 0 critical, 0 high, 0 unaccepted medium (docs-only checkpoint).
 
 ### Scheduler: Composer UI TikTok preflight
 
