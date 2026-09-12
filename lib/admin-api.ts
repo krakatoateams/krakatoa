@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, type CurrentAdmin } from "@/lib/admin-auth";
 import { classifyAdminError } from "@/lib/admin-auth-pure";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 export { classifyAdminError } from "@/lib/admin-auth-pure";
 
@@ -19,7 +20,7 @@ export { classifyAdminError } from "@/lib/admin-auth-pure";
 export function adminErrorResponse(e: unknown): NextResponse {
   const mapped = classifyAdminError(e);
   if (mapped.status === 500) {
-    console.error("[admin-api] unexpected error:", e);
+    console.error("[admin-api] unexpected error:", errorLogSafe(e));
   }
   return NextResponse.json({ error: mapped.error }, { status: mapped.status });
 }

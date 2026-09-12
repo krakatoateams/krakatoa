@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runGenerationReconcile } from "@/lib/generation-reconcile";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 export const maxDuration = 120;
 
@@ -23,10 +24,15 @@ export async function GET(req: NextRequest) {
     console.log(
       `[generation-reconcile] staleJobs=${result.staleJobs} refunded=${result.refundedJobs} settledWorkflow=${result.settledWorkflowJobs} liveWorkflow=${result.liveWorkflowJobs} staleRequests=${result.staleRequests} expiredRecoverable=${result.expiredRecoverable} swept=${result.sweptResumableFolders}`
     );
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      errors: result.errors.map(errorLogSafe),
+    });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generation reconcile failed.";
-    console.error("[generation-reconcile]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[generation-reconcile]", errorLogSafe(err));
+    return NextResponse.json(
+      { error: "Generation reconcile failed." },
+      { status: 500 }
+    );
   }
 }

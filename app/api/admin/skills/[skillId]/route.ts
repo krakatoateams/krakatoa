@@ -194,12 +194,7 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     }
-    try {
-      const result = await deleteCatalogSkill(params.skillId, ctx.profile.id);
-      return NextResponse.json({ ok: true, ...result });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to delete skill.";
-      return NextResponse.json({ error: message }, { status: 400 });
-    }
+    const result = await deleteCatalogSkill(params.skillId, ctx.profile.id);
+    return NextResponse.json({ ok: true, ...result });
   });
 }

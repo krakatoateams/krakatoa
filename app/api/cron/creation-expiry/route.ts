@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runAllCreationExpiry } from "@/lib/creation-expiry";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Listing + batched storage/row deletes across photos + videos — headroom.
 export const maxDuration = 120;
@@ -43,8 +44,10 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ dryRun, results });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Creation expiry failed.";
-    console.error("[creation-expiry]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[creation-expiry]", errorLogSafe(err));
+    return NextResponse.json(
+      { error: "Creation expiry failed." },
+      { status: 500 }
+    );
   }
 }

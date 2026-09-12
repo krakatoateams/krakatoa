@@ -13,6 +13,7 @@ import {
   type SkillCategoryId,
   type SkillMediaType,
 } from "@/lib/skills";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -106,7 +107,7 @@ export async function POST(req: Request) {
     } catch (e) {
       console.error(
         "[admin/skills] create failed:",
-        e instanceof Error ? e.message : "unknown"
+        errorLogSafe(e)
       );
       return NextResponse.json(
         { error: "Failed to create skill." },

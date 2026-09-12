@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 /**
  * Expiry settings reader/updater (Expiry Management admin).
@@ -83,7 +84,10 @@ export async function getExpirySettings(options?: {
 
     if (error || !data) {
       if (error) {
-        console.warn("[expiry-settings] DB read failed, using defaults:", error.message);
+        console.warn(
+          "[expiry-settings] DB read failed, using defaults:",
+          errorLogSafe(error)
+        );
       }
       return DEFAULT_EXPIRY_SETTINGS;
     }
@@ -92,7 +96,10 @@ export async function getExpirySettings(options?: {
     cache = { settings, expiresAt: now + CACHE_TTL_MS };
     return settings;
   } catch (e) {
-    console.warn("[expiry-settings] read threw, using defaults:", e);
+    console.warn(
+      "[expiry-settings] read threw, using defaults:",
+      errorLogSafe(e)
+    );
     return DEFAULT_EXPIRY_SETTINGS;
   }
 }

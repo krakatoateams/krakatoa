@@ -1,6 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { removeStorageObjects } from "@/lib/creations-db";
 import { resolveStoragePath } from "@/lib/storage-signed-url";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import {
   POST_CLEANUP_RECLAIM_STATUSES,
   cleanupLogVideoRef,
@@ -31,7 +32,10 @@ export async function cleanupPostVideo(
     .select("id")
     .maybeSingle();
   if (claimErr) {
-    console.warn(`[post-cleanup] failed to null video_url for post ${postId}:`, claimErr.message);
+    console.warn(
+      `[post-cleanup] failed to null video_url for post ${postId}:`,
+      errorLogSafe(claimErr)
+    );
     return;
   }
   if (!abandoned) {
@@ -88,7 +92,10 @@ export async function cleanupPostPhotos(postId: string, photoUrls: string[] | nu
     .select("id")
     .maybeSingle();
   if (error) {
-    console.warn(`[post-cleanup] failed to update photo_urls for post ${postId}:`, error.message);
+    console.warn(
+      `[post-cleanup] failed to update photo_urls for post ${postId}:`,
+      errorLogSafe(error)
+    );
     return;
   }
   if (!abandoned) {

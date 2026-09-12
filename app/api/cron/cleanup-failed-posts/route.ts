@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Reads a small batch + a handful of storage deletes — comfortable headroom.
 export const maxDuration = 60;
@@ -57,39 +58,51 @@ export async function GET(req: NextRequest) {
 
   const cutoff = new Date(Date.now() - minDays * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: candidates, error: fetchErr } = await supabaseServer
-    .from("posts")
-    .select("id, video_url, photo_urls, asset_id, failed_at")
-    .eq("status", "failed")
-    .not("failed_at", "is", null)
-    .lt("failed_at", cutoff)
-    .limit(BATCH_LIMIT);
+  try {
+    const { data: candidates, error: fetchErr } = await supabaseServer
+      .from("posts")
+      .select("id, video_url, photo_urls, asset_id, failed_at")
+      .eq("status", "failed")
+      .not("failed_at", "is", null)
+      .lt("failed_at", cutoff)
+      .limit(BATCH_LIMIT);
 
-  if (fetchErr) {
-    console.error("[cleanup-failed-posts] failed to fetch candidates:", fetchErr.message);
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
-  }
+    if (fetchErr) throw fetchErr;
 
-  const posts = candidates ?? [];
-  console.log(`[cleanup-failed-posts] dryRun=${dryRun} minDays=${minDays} candidates=${posts.length}`);
+    const posts = candidates ?? [];
+    console.log(
+      `[cleanup-failed-posts] dryRun=${dryRun} minDays=${minDays} candidates=${posts.length}`
+    );
 
-  if (dryRun) {
+    if (dryRun) {
+      return NextResponse.json({
+        dryRun: true,
+        minDays,
+        candidateCount: posts.length,
+        candidates: posts.map((p) => ({ id: p.id, failed_at: p.failed_at })),
+      });
+    }
+
+    let cleaned = 0;
+    for (const post of posts) {
+      await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+      await cleanupPostPhotos(post.id, post.photo_urls);
+      cleaned++;
+    }
+
+    console.log(`[cleanup-failed-posts] cleaned=${cleaned}`);
+
     return NextResponse.json({
-      dryRun: true,
+      dryRun: false,
       minDays,
       candidateCount: posts.length,
-      candidates: posts.map((p) => ({ id: p.id, failed_at: p.failed_at })),
+      cleaned,
     });
+  } catch (error) {
+    console.error("[cleanup-failed-posts] failed:", errorLogSafe(error));
+    return NextResponse.json(
+      { error: "Failed-post cleanup failed." },
+      { status: 500 }
+    );
   }
-
-  let cleaned = 0;
-  for (const post of posts) {
-    await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-    await cleanupPostPhotos(post.id, post.photo_urls);
-    cleaned++;
-  }
-
-  console.log(`[cleanup-failed-posts] cleaned=${cleaned}`);
-
-  return NextResponse.json({ dryRun: false, minDays, candidateCount: posts.length, cleaned });
 }

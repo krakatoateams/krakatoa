@@ -7,6 +7,7 @@ import {
   platformSkillThumbPath,
 } from "@/lib/storage-buckets";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import {
   listCatalogSkills,
   replaceCatalogSkillThumb,
@@ -58,7 +59,10 @@ export async function POST(
       upsert: false,
     });
     if (error) {
-      console.error("[admin/skills/thumb] upload failed:", error.message);
+      console.error(
+        "[admin/skills/thumb] upload failed:",
+        errorLogSafe(error)
+      );
       return NextResponse.json({ error: "Thumbnail upload failed." }, { status: 500 });
     }
 
