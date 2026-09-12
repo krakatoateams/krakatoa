@@ -498,9 +498,6 @@ const MODEL_BUILDERS: Record<
     buildPhotoModels(map, settings, featureModels, modelCatalog),
 };
 
-/** Tools shown in config v2 (dashboard omitted — toggle-only elsewhere if needed). */
-const CONFIG_TOOL_ORDER = ["reels", "photo", "skills", "canvas", "editor", "schedule", "calendar", "virtual_creator"];
-
 export function buildAdminConfigTree(params: {
   tools: ToolConfigInput[];
   pricing: PricingConfigInput[];
@@ -509,26 +506,24 @@ export function buildAdminConfigTree(params: {
   modelConfigs: ModelConfigInput[];
   billingSettings: BillingSettings;
 }): AdminToolNode[] {
-  const toolByKey = new Map(params.tools.map((t) => [t.tool_key, t]));
   const pmap = pricingMap(params.pricing);
 
-  return CONFIG_TOOL_ORDER.flatMap((toolKey) => {
-    const tool = toolByKey.get(toolKey);
-    if (!tool) return [];
-
-    const buildModels = MODEL_BUILDERS[toolKey];
-    const models = buildModels
-      ? buildModels(pmap, params.billingSettings, params.featureModels, params.modelCatalog)
-      : [];
-
-    const pipelines =
-      toolKey === "reels" || toolKey === "photo" || toolKey === "schedule"
-        ? buildPipelineGroupsForTool(toolKey, params.modelConfigs, pmap, params.billingSettings)
+  return [...params.tools]
+    .sort((a, b) => a.sort_order - b.sort_order || a.tool_key.localeCompare(b.tool_key))
+    .map((tool) => {
+      const toolKey = tool.tool_key;
+      const buildModels = MODEL_BUILDERS[toolKey];
+      const models = buildModels
+        ? buildModels(pmap, params.billingSettings, params.featureModels, params.modelCatalog)
         : [];
 
-    return [
-      {
-        toolKey: tool.tool_key,
+      const pipelines =
+        toolKey === "reels" || toolKey === "photo" || toolKey === "schedule"
+          ? buildPipelineGroupsForTool(toolKey, params.modelConfigs, pmap, params.billingSettings)
+          : [];
+
+      return {
+        toolKey,
         label: tool.display_name,
         enabled: tool.enabled,
         visibleInSidebar: tool.visible_in_sidebar,
@@ -536,9 +531,8 @@ export function buildAdminConfigTree(params: {
         sortOrder: tool.sort_order,
         models,
         pipelines,
-      },
-    ];
-  });
+      };
+    });
 }
 
 export function suggestCreditsFromProvider(

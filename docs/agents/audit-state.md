@@ -91,7 +91,7 @@ None.
   - [x] Admin metrics: cross-user dashboard reads
   - [x] Admin Config v2: PATCH validators and reset safety
   - [x] Admin Config v2: feature-model and catalog toggles
-  - [ ] Admin Config v2: tree builder and UI read contract
+  - [x] Admin Config v2: tree builder and UI read contract
   - [ ] Admin Config v2: persistence layer
   - [ ] Platform settings: expiry, welcome knobs, credit packs
   - [ ] Admin skills catalog
@@ -1039,6 +1039,35 @@ None.
   diagnostics passed.
 - Security: final review found 0 critical, 0 high, 0 medium, and one accepted
   low finding for the intentional shared-route reference overlap.
+
+### Admin: Config v2 tree builder and UI read contract
+
+- Date: 2026-09-13
+- Base: `4ee07bb89875d2933357221fec4f0ec91b8821f4`
+- Final commit: `ce55174`
+- Scope: `lib/admin-config-tree.ts`, the Config v2 parallel GET/load contract,
+  tool/model/mode/variant/pipeline construction, legacy cutover/navigation,
+  and a new focused tree self-check.
+- Findings: the fixed tree allowlist omitted Dashboard and IG and ignored
+  persisted tool ordering; all `tool_configs` rows now render in `sort_order`.
+  Tool, pricing, feature-model, catalog, and model-config responses now fail
+  closed on HTTP or payload-shape errors instead of silently building a partial
+  tree. Failed refreshes clear stale editable data, and refresh refuses to
+  overwrite pending autosaves. Tests pin pricing fallback, pipeline placement,
+  duplicate-default normalization, and complete tool coverage.
+- Accepted risks: typed admin APIs remain the source of field types, so client
+  coercion could mis-render a hypothetical string boolean. Billing-settings
+  reads still fall back to code defaults because they affect Suggest only, not
+  runtime billing. OpenSpec still describes batch mode saves while the shipped
+  panel autosaves each row.
+- Verification: `npm run test:admin-config-tree` (red then green),
+  `npm run test:admin-config-toggles`, `npm run test:admin-auth`,
+  `npm run test:admin-config-validation`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, `git diff --check`, and edited-file
+  diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings; two
+  low observations were accepted as the typed-admin-API and Suggest-only
+  fallback contracts above.
 
 ## Deferred
 
