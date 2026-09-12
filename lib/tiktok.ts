@@ -7,6 +7,7 @@ import {
   storagePathFromPublicUrl,
   storagePathFromSignedUrl,
 } from "@/lib/storage-buckets";
+import { redactPublishMediaRef } from "@/lib/tiktok-publish-pure";
 
 /**
  * Thrown by getCreatorInfo when TikTok returns a non-"ok" error.code (still
@@ -435,7 +436,9 @@ export async function publishToTikTok(params: TikTokPublishParams): Promise<stri
 
   const videoRes = await fetch(params.videoUrl);
   if (!videoRes.ok || !videoRes.body) {
-    throw new Error(`Could not fetch video from storage (HTTP ${videoRes.status}): ${params.videoUrl}`);
+    throw new Error(
+      `Could not fetch video from storage (HTTP ${videoRes.status}): ${redactPublishMediaRef(params.videoUrl)}`,
+    );
   }
   // A plain Uint8Array backed by a real ArrayBuffer (not Node's Buffer, whose
   // .buffer is typed as the wider ArrayBufferLike) so .subarray() slices stay
@@ -549,7 +552,7 @@ function resolvePhotoStoragePath(urlOrPath: string): string {
     : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
   if (!path) {
     throw new Error(
-      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${urlOrPath}`,
+      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${redactPublishMediaRef(urlOrPath)}`,
     );
   }
   return path;
@@ -565,7 +568,7 @@ function toProxyPhotoUrl(storagePath: string, origin: string): string {
   const rest = photoStoragePathToProxyRest(storagePath);
   if (!rest) {
     throw new Error(
-      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${storagePath}`,
+      `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${redactPublishMediaRef(storagePath)}`,
     );
   }
   return `${origin}/api/tiktok-photos/${rest}`;
@@ -618,7 +621,9 @@ function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "webp" | "unknown
 async function ensureTikTokCompatiblePhoto(storagePath: string): Promise<string> {
   const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
   if (error || !data) {
-    throw new Error(`Could not read photo from storage for TikTok format check: ${storagePath}`);
+    throw new Error(
+      `Could not read photo from storage for TikTok format check: ${redactPublishMediaRef(storagePath)}`,
+    );
   }
 
   const bytes = new Uint8Array(await data.arrayBuffer());
