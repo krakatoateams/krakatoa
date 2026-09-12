@@ -21,11 +21,14 @@ the runbook.
 - Local implementation commit: `30699a9`
 - Status: blocked before delivery
 - Blocker: Supabase MCP `list_migrations` returned a definitive permission
-  denial, so migration `095_schedule_gpt5_model_config.sql` was not compared,
-  applied, or verified live. Applying it also requires explicit production-DB
-  approval under the audit runbook.
-- Resume: restore Supabase MCP access, approve the migration, then run
-  `/audit-repo Admin`.
+  denial. `.env.local` has API service-role access but no `DATABASE_URL`,
+  `SUPABASE_DB_PASSWORD`, or Management API token, and the migration ledger is
+  not exposed through PostgREST (`PGRST205`). The critical live row was
+  verified read-only as `schedule.llm = openai/gpt-5`, but migration
+  `095_schedule_gpt5_model_config.sql` still cannot be compared with the ledger
+  or recorded. Applying it also requires explicit production-DB approval.
+- Resume: restore Supabase MCP permission or provide a migration-capable local
+  DB credential, approve recording migration 095, then run `/audit-repo Admin`.
 
 ## Queue
 
