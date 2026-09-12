@@ -60,7 +60,7 @@ None.
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
     `supabase/migrations/` record; production is aligned but migration `003`
     and the deferred script do not reproduce that final state safely.
-  - [ ] RPC EXECUTE grants (PUBLIC default vs service_role-only)
+  - [x] RPC EXECUTE grants (PUBLIC default vs service_role-only)
   - [ ] Legacy / untracked tables (RLS + schema lineage for posts,
         platform_tokens, storyboards, users_deprecated)
   - [ ] Migration catalog integrity (duplicate prefixes, stale `FROM users`
@@ -418,6 +418,27 @@ None.
   `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed. MCP applied
   `auth_users_fk_cutover`; FKs and leftover tables unchanged.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Database: RPC EXECUTE grants
+
+- Date: 2026-09-12
+- Base: `6167c97e876f2a2c0e8f25a177116344cb78a143`
+- Final commit: `81e3bc67475d02a77b76112118cfb0724eedba4b`
+- Scope: `supabase/migrations/092_krakatoa_rpc_grants.sql`,
+  `lib/rpc-grant-lockdown-self-check.ts`.
+- Findings: live `EXECUTE` on `krakatoa_apply_credit_transaction` (both
+  overloads), `expire_credit_lots`, `seed_initial_credits`, and
+  `set_updated_at` still included anon/authenticated via PUBLIC. 092 revokes
+  PUBLIC on every `public.krakatoa_*` function and grants `service_role`.
+- Accepted risks: functions remain SECURITY INVOKER; `CREATE OR REPLACE`
+  re-grants PUBLIC unless a later migration repeats the lock. Leftover
+  10-arg credit-RPC overload is now locked but still present (catalog).
+- Verification: `npm run test:rpc-grants` (red then green),
+  `npm run test:auth-users-fk`, `npm run test:admin-auth`, `npm run lint`
+  (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed. MCP applied `krakatoa_rpc_grants`; every
+  `krakatoa_*` function is service_role-only.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
