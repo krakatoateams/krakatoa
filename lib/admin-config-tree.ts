@@ -24,7 +24,7 @@ import {
   type CostUnit,
   calculateCredits,
 } from "@/lib/pricing-math";
-import { getModelDefault } from "@/lib/admin-config-defaults";
+import { getModelDefault } from "@/lib/admin-config-resolved-defaults";
 import { PIPELINE_GROUP_SPECS, type PipelineRoleSpec } from "@/lib/admin-pipeline-config";
 import { getV2PricingDefault } from "@/lib/pricing-defaults";
 import {

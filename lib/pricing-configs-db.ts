@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { buildMissingPricingConfigInsert } from "@/lib/admin-config-persistence-pure";
 
 /**
  * Pricing configs data access (service-role).
@@ -127,5 +128,41 @@ export async function updatePricingConfig(
     .maybeSingle();
 
   handleError(error, "Failed to update pricing config.");
+  return (data as PricingConfig | null) ?? null;
+}
+
+/**
+ * Update an existing row, or materialize a missing canonical built-in pricing
+ * row. Unknown keys remain rejected so this cannot create arbitrary products.
+ */
+export async function saveBuiltinPricingConfig(
+  pricingKey: string,
+  patch: PricingConfigPatch,
+  updatedByProfileId: string | null
+): Promise<PricingConfig | null> {
+  const updated = await updatePricingConfig(
+    pricingKey,
+    patch,
+    updatedByProfileId
+  );
+  if (updated) return updated;
+
+  const insert = buildMissingPricingConfigInsert(
+    pricingKey,
+    patch,
+    updatedByProfileId
+  );
+  if (!insert) return null;
+
+  const { data, error } = await supabaseServer
+    .from(PRICING_CONFIGS_TABLE)
+    .insert(insert)
+    .select("*")
+    .single();
+
+  if (error?.code === "23505") {
+    return updatePricingConfig(pricingKey, patch, updatedByProfileId);
+  }
+  handleError(error, "Failed to create pricing config.");
   return (data as PricingConfig | null) ?? null;
 }

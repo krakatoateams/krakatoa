@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updatePricingConfig } from "@/lib/pricing-configs-db";
+import { saveBuiltinPricingConfig } from "@/lib/pricing-configs-db";
 import { validatePricingPatch } from "@/lib/admin-config-validation";
 
 // Update a pricing config by pricing_key (admin only). Phase Admin 2 wired the
@@ -29,7 +29,11 @@ export async function PATCH(
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
     }
 
-    const pricing = await updatePricingConfig(params.pricing_key, result.patch, ctx.profile.id);
+    const pricing = await saveBuiltinPricingConfig(
+      params.pricing_key,
+      result.patch,
+      ctx.profile.id
+    );
     if (!pricing) {
       return NextResponse.json({ error: "Pricing config not found." }, { status: 404 });
     }

@@ -1188,6 +1188,7 @@ export default function AdminConfigV2Page() {
         const live = findVariantByPricingKey(toolsRef.current, pricingKey);
         if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
         await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
+          display_name: live.label,
           credit_amount: Math.round(live.credits),
           provider_cost_usd: live.providerReferenceUsd,
           enabled: live.enabled,
@@ -1211,6 +1212,7 @@ export default function AdminConfigV2Page() {
         const live = findVariantByPricingKey(toolsRef.current, pricingKey);
         if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
         await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
+          display_name: live.label,
           credit_amount: Math.round(live.credits),
           provider_cost_usd: live.providerReferenceUsd,
           enabled: live.enabled,
