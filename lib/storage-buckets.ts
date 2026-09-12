@@ -149,6 +149,22 @@ export function photoProxySegmentsToStoragePath(segments: string[]): string | nu
   return `${userMediaPrefix(userId, PHOTOS_FOLDER)}/${rest}`;
 }
 
+/**
+ * Storage keys the TikTok photo proxy may download, in order: user-first
+ * `{userId}/photos/…`, then advertised legacy `photos/{userId}/…`.
+ * Every candidate stays under a photos/ segment.
+ */
+export function photoProxyStorageCandidates(segments: string[]): string[] {
+  const userFirst = photoProxySegmentsToStoragePath(segments);
+  if (userFirst) {
+    const userId = segments[0]!;
+    const rest = segments.slice(1).join("/");
+    return [userFirst, `${PHOTOS_FOLDER}/${userId}/${rest}`];
+  }
+  if (!segments.length) return [];
+  return [`${PHOTOS_FOLDER}/${segments.join("/")}`];
+}
+
 /** @deprecated Scheduler device uploads only — generations use `videosUserPrefix`. */
 export function videosStoragePath(filename: string): string {
   return `${VIDEOS_FOLDER}/${filename}`;

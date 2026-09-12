@@ -40,7 +40,7 @@ None.
   - [x] Checkout + owner-scoped reconcile
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
   - [x] Read-sign core (path/assetId ownership + signed-URL cache)
-  - [ ] TikTok photo proxy
+  - [x] TikTok photo proxy
   - [ ] Device upload signing
   - [ ] Generation-ref upload signing
   - [ ] Client egress (stable URLs, next/image)
@@ -279,6 +279,28 @@ None.
   `npm run test:creation-item-actions`, `npm run test:video-studio`,
   `npm run probe:signed-url-cache`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Storage: TikTok photo proxy
+
+- Date: 2026-09-12
+- Base: `5acd8590cea554683ed236efca11845bee121fee`
+- Final commit: `344514f74222fc51e4963a85c8ef432d27a40aa2`
+- Scope: `app/api/tiktok-photos/[...path]/route.ts`,
+  `photoProxyStorageCandidates`, `toProxyPhotoUrl` / path rewrite.
+- Findings: proxy now tries user-first `{userId}/photos/…` then advertised
+  legacy `photos/{userId}/…`. Traversal and non-photos roots already rejected.
+- Accepted risks: unauthenticated `photos/`-prefix fetch is required for TikTok
+  `PULL_FROM_URL` (OpenSpec). A leaked UI signed URL still reveals a durable
+  proxy path; HMAC/post-binding would be a product change. `Cache-Control:
+  public, max-age=3600` is intentional for the puller.
+- Follow-up: device upload signing and remaining Storage slices stay queued.
+- Verification: `npm run test:tiktok-photo-proxy` (red on missing legacy key,
+  then green), `npm run test:storage-sign-ownership`,
+  `npm run test:tiktok-creator-info`, `npm run test:post-ownership`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 

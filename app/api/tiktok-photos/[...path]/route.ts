@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
-  PHOTOS_FOLDER,
   STORAGE_BUCKET,
-  photoProxySegmentsToStoragePath,
+  photoProxyStorageCandidates,
 } from "@/lib/storage-buckets";
 
 /**
@@ -27,25 +26,28 @@ export async function GET(
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  const storagePath =
-    photoProxySegmentsToStoragePath(segments) ??
-    `${PHOTOS_FOLDER}/${segments.join("/")}`;
-
-  const { data, error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .download(storagePath);
-
-  if (error || !data) {
+  const candidates = photoProxyStorageCandidates(segments);
+  if (!candidates.length) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  const bytes = await data.arrayBuffer();
-  return new NextResponse(bytes, {
-    status: 200,
-    headers: {
-      "Content-Type": data.type || "application/octet-stream",
-      "Content-Disposition": "inline",
-      "Cache-Control": "public, max-age=3600",
-    },
-  });
+  for (const storagePath of candidates) {
+    const { data, error } = await supabaseServer.storage
+      .from(STORAGE_BUCKET)
+      .download(storagePath);
+
+    if (error || !data) continue;
+
+    const bytes = await data.arrayBuffer();
+    return new NextResponse(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": data.type || "application/octet-stream",
+        "Content-Disposition": "inline",
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  }
+
+  return NextResponse.json({ error: "Not found." }, { status: 404 });
 }
