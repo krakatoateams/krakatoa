@@ -28,6 +28,10 @@ None.
   - [x] Service-role `user_id` ownership (creations, connections; storage
         signing stays with the Storage queue item)
 - [ ] Credits: ledger, pricing, bonus offers, and refund policy
+  - [x] Refund after provider commit (leftover canvas-text / reconcile)
+  - [ ] Ledger RPC, wallets, lots, expiry
+  - [ ] Pricing resolver and admin knobs
+  - [ ] Welcome/bonus claim races
 - [ ] Payments: DOKU checkout, callbacks, signatures, and replay handling
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
@@ -161,6 +165,28 @@ None.
   OAuth CSRF stays with Integrations.
 - Verification: `npm run test:creation-ownership`,
   `npm run test:creation-item-actions`, `npm run test:animate-handoff`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Credits: refund after provider commit
+
+- Date: 2026-09-12
+- Base: `b773548678c1083b9f050d6559ecafb3edd87c22`
+- Final commit: `00c44a53143742f29b34e5960f97ac16e6acc535`
+- Scope: `app/api/generate-canvas-text/route.ts`,
+  `lib/generation-reconcile.ts`, `lib/generation-commit-pure.ts`.
+- Findings: leftover canvas-text catch and legacy reconcile no longer refund
+  after `cancel_allowed=false`.
+- Accepted risks: if `markProviderCommitted` itself fails after Replicate
+  success, refund may still run. Reconcile with no generation request still
+  refunds (pre-commit-era jobs). User credit read routes already bind to
+  session `profile.id`; admin set/grant stay admin-wallet-only.
+- Follow-up: welcome claim vs first-job TOCTOU; optional `Date.now()` spend
+  keys when canvas-text has no job id; pricing zero-amount admin knobs.
+- Verification: `npm run test:generation-commit`,
+  `npm run test:recoverable-refund`, `npm run test:metered-generation`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
