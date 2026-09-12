@@ -650,6 +650,7 @@ export async function POST(req: Request) {
         requestHash,
       },
       job: {
+        required: true,
         tool: "reels",
         jobType: jobKind,
         provider: resolvedModel.provider,

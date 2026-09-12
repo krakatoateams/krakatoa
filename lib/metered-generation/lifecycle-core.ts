@@ -181,11 +181,15 @@ export type MeteredLifecycleOps = {
   recordUsageEvent: (params: Record<string, unknown>) => Promise<void>;
   finishGenerationRequestSuccess: (params: Record<string, unknown>) => Promise<void>;
   purgeResumableJobStorage: (userId: string, jobId: string) => Promise<void>;
+  isProviderCommitLocked: (
+    profileId: string,
+    generationRequestId: string
+  ) => Promise<boolean>;
   persistMeteredSettlementLegacy: (
     plan: ReturnType<typeof resolveMeteredSettlement>,
     ctx: Record<string, unknown>,
     opts?: MeteredSettlementLegacyOpts,
-  ) => Promise<void>;
+  ) => Promise<{ refunded: boolean }>;
   resolveMeteredSettlement: typeof resolveMeteredSettlement;
 };
 
@@ -279,6 +283,9 @@ export async function beginMeteredAttemptWithOps(
 
   if (input.createJobFn) {
     jobId = await input.createJobFn(generationRequestId);
+    if (!jobId) {
+      throw new Error("Failed to create generation job.");
+    }
   } else if (input.job) {
     const jobInput = input.job;
     const attach = async (id: string) => {
@@ -330,13 +337,14 @@ export async function beginMeteredAttemptWithOps(
   let creditsAmount = 0;
 
   if (!input.spend.skip) {
+    if (!jobId) {
+      throw new Error("Cannot spend credits without a generation job.");
+    }
     try {
       await ops.spendCredits({
         profileId: input.profileId,
         amount: input.spend.amount,
-        idempotencyKey: jobId
-          ? `spend:${input.spend.jobType}:${jobId}`
-          : `spend:${input.spend.jobType}:profile:${input.profileId}:${Date.now()}`,
+        idempotencyKey: `spend:${input.spend.jobType}:${jobId}`,
         jobId,
         description: input.spend.description,
         metadata: input.spend.metadata,
@@ -483,12 +491,20 @@ export async function finishMeteredAttemptWithOps(
 
   const recoverable = outcome.kind === "recoverable";
   const terminal = outcome.kind === "terminal";
+  const commitLocked =
+    terminal && handle.generationRequestId
+      ? await ops.isProviderCommitLocked(
+          handle.profileId,
+          handle.generationRequestId
+        )
+      : false;
   const plan = ops.resolveMeteredSettlement({
     cancelled: terminal ? outcome.cancelled : false,
     recoverable,
     pricingMissing: terminal ? !!outcome.pricingMissing : false,
     rawMessage: outcome.rawMessage,
     creditsSpent: handle.creditsSpent,
+    commitLocked,
     creditsAmount: handle.creditsAmount,
     hasProfileId: true,
     hasJobId: !!handle.jobId,
@@ -501,7 +517,7 @@ export async function finishMeteredAttemptWithOps(
     options: outcome.settlementOptions,
   });
 
-  await ops.persistMeteredSettlementLegacy(
+  const persisted = await ops.persistMeteredSettlementLegacy(
     plan,
     {
       profileId: handle.profileId,
@@ -527,6 +543,9 @@ export async function finishMeteredAttemptWithOps(
     httpBody = outcome.pricingMissing
       ? { error: outcome.clientErrorOverride, code: "PRICING_CONFIG_MISSING" }
       : { error: outcome.clientErrorOverride };
+  }
+  if (plan.kind === "cancelled") {
+    httpBody = { ...httpBody, refunded: persisted.refunded };
   }
 
   return { http: { status: plan.httpStatus, body: httpBody } };

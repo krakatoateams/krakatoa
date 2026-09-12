@@ -1,12 +1,21 @@
 import {
   resolveMeteredErrorJson,
-  resolveMeteredSettlement,
+  resolveMeteredSettlement as resolveMeteredSettlementCore,
   resolveMeteredSettlementKind,
   resolveMeteredSettlementMessage,
 } from "./settlement-pure";
+import type { MeteredSettlementInput } from "./types";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
+}
+
+function resolveMeteredSettlement(
+  input: Omit<MeteredSettlementInput, "commitLocked"> & {
+    commitLocked?: boolean;
+  }
+) {
+  return resolveMeteredSettlementCore({ commitLocked: false, ...input });
 }
 
 /** ponytail: runnable without Supabase — terminal catch characterization invariants. */
@@ -205,6 +214,59 @@ export function meteredSettlementSelfCheck(): void {
     options: { requireJobTypeForRefund: true },
   });
   assert(!reelsNoJobType.refundEligible, "reels refund requires jobType");
+
+  const postCommitFailure = resolveMeteredSettlement({
+    cancelled: false,
+    recoverable: false,
+    pricingMissing: false,
+    rawMessage: "delivery failed",
+    creditsSpent: true,
+    commitLocked: true,
+    creditsAmount: 10,
+    hasProfileId: true,
+    hasJobId: true,
+    hasJobType: true,
+    hasGenerationRequestId: true,
+  });
+  assert(
+    !postCommitFailure.refundEligible,
+    "post-commit terminal failures must not refund"
+  );
+
+  const missingJobFailure = resolveMeteredSettlement({
+    cancelled: false,
+    recoverable: false,
+    pricingMissing: false,
+    rawMessage: "delivery failed",
+    creditsSpent: true,
+    creditsAmount: 10,
+    hasProfileId: true,
+    hasJobId: false,
+    hasJobType: true,
+    hasGenerationRequestId: true,
+  });
+  assert(
+    !missingJobFailure.refundEligible,
+    "terminal failures without a stable job id must not refund"
+  );
+
+  const postCommitCancel = resolveMeteredSettlement({
+    cancelled: true,
+    recoverable: false,
+    pricingMissing: false,
+    rawMessage: "cancelled",
+    creditsSpent: true,
+    commitLocked: true,
+    creditsAmount: 10,
+    hasProfileId: true,
+    hasJobId: true,
+    hasJobType: true,
+    hasGenerationRequestId: true,
+  });
+  assert(
+    postCommitCancel.httpBody.refunded === false,
+    "cancel responses must not claim a post-commit refund"
+  );
 
   const cancelPurge = resolveMeteredSettlement({
     cancelled: true,

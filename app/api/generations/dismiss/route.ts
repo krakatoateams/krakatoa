@@ -3,6 +3,7 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { getJob } from "@/lib/jobs-db";
 import { canDismissGeneration } from "@/lib/generation-workflows/control-policy-pure";
 import { dismissGenerationJob } from "@/lib/generation-workflows/workflow-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 export const maxDuration = 30;
 
@@ -45,7 +46,10 @@ export async function POST(req: Request) {
     if (error instanceof Error && /not authenticated/i.test(error.message)) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    console.error("[generations/dismiss] Error:", error);
+    console.error(
+      "[generations/dismiss] Error:",
+      generationErrorLogSafe(error)
+    );
     return NextResponse.json({ error: "Failed to dismiss generation." }, { status: 500 });
   }
 }

@@ -36,6 +36,8 @@ export type MeteredSettlementInput = {
   pricingMissing: boolean;
   rawMessage: string;
   creditsSpent: boolean;
+  /** Provider output already committed; terminal failures must not refund. */
+  commitLocked: boolean;
   creditsAmount: number;
   hasProfileId: boolean;
   hasJobId: boolean;

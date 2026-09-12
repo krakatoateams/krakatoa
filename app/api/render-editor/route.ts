@@ -37,6 +37,8 @@ import {
   validateEditorExport,
 } from "@/lib/editor-document";
 import { runEditorRender } from "@/lib/editor-render";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -58,7 +60,10 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[editor obs] ${label} failed:`, e);
+      console.warn(
+        `[editor obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -73,7 +78,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[render-editor] profile resolution failed (non-auth):", e);
+      console.error(
+        "[render-editor] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -89,7 +97,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[render-editor] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[render-editor] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -395,7 +406,9 @@ export async function POST(req: Request) {
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
         : isCancellation(error);
     if (cancelled) console.log("[render-editor] Cancelled by user.");
-    else console.error("[render-editor] Error:", error);
+    else {
+      console.error("[render-editor] Error:", generationErrorLogSafe(error));
+    }
     const message = cancelled
       ? "Export cancelled."
       : error instanceof Error
@@ -436,6 +449,9 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: GENERIC_GENERATION_CLIENT_ERROR },
+      { status: 500 }
+    );
   }
 }

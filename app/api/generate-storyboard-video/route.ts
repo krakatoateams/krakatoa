@@ -74,6 +74,7 @@ import {
   readBlankVideoBytes,
   requireDevBlankAccess,
 } from "@/lib/dev-blank-generation";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 // Vercel Hobby plan caps serverless functions at 300s (Pro allows up to 800s)
 export const maxDuration = 300;
@@ -111,7 +112,10 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[storyboard-video obs] ${label} failed:`, e);
+      console.warn(
+        `[storyboard-video obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -128,7 +132,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[storyboard-video] profile resolution failed (non-auth):", e);
+      console.error(
+        "[storyboard-video] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -147,7 +154,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[storyboard-video] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[storyboard-video] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const body = await req.json();
@@ -202,7 +212,7 @@ export async function POST(req: Request) {
 
     if (!devBlank && !process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
-        { error: "REPLICATE_API_TOKEN is not configured." },
+        { error: "AI provider is temporarily unavailable." },
         { status: 500 }
       );
     }
@@ -217,7 +227,7 @@ export async function POST(req: Request) {
 
     if (fetchError || !row) {
       return NextResponse.json(
-        { error: fetchError?.message || "Storyboard not found." },
+        { error: "Storyboard not found." },
         { status: 404 }
       );
     }
@@ -370,6 +380,7 @@ export async function POST(req: Request) {
         requestHash,
       },
       job: {
+        required: true,
         tool: "storyboard",
         jobType: "storyboard_video",
         provider: devBlank ? "dev_blank" : resolvedVideoModel.provider,
@@ -437,7 +448,10 @@ export async function POST(req: Request) {
       .update(statusUpdate)
       .eq("id", storyboardId);
     if (statusErr) {
-      console.error("[Storyboard Video] status update:", statusErr);
+      console.error(
+        "[Storyboard Video] status update:",
+        generationErrorLogSafe(statusErr)
+      );
       throw new Error(statusErr.message || "Failed to update status.");
     }
 
@@ -538,7 +552,7 @@ export async function POST(req: Request) {
 
       const videoRemoteUrl = extractMediaUrl(videoResult);
       if (!videoRemoteUrl || !videoRemoteUrl.startsWith("http")) {
-        console.error("[Storyboard Video] Bad Seedance output:", videoResult);
+        console.error("[Storyboard Video] Bad provider output shape.");
         throw new Error("Failed to resolve video URL from Seedance output.");
       }
       await endStep({ videoRemoteUrl });
@@ -596,7 +610,10 @@ export async function POST(req: Request) {
       });
 
     if (uploadError) {
-      console.error("[Storyboard Video] Upload error:", uploadError);
+      console.error(
+        "[Storyboard Video] Upload error:",
+        generationErrorLogSafe(uploadError)
+      );
       throw new RecoverablePipelineError(
         `Failed to upload video: ${uploadError.message}`,
         "upload",
@@ -616,11 +633,14 @@ export async function POST(req: Request) {
       .eq("id", storyboardId);
 
     if (finalErr) {
-      console.error("[Storyboard Video] Final DB update:", finalErr);
+      console.error(
+        "[Storyboard Video] Final DB update:",
+        generationErrorLogSafe(finalErr)
+      );
       throw new Error(finalErr.message || "Video uploaded but failed to update record.");
     }
 
-    console.log("[Storyboard Video] Done:", videoUrl);
+    console.log("[Storyboard Video] Done.");
 
     // Mark the final video asset ready, then best-effort link it back to its
     // source storyboard image via asset_relations (storyboard_for).
@@ -701,7 +721,10 @@ export async function POST(req: Request) {
         },
       });
     } catch (historyErr) {
-      console.warn("[Storyboard Video] History log failed:", historyErr);
+      console.warn(
+        "[Storyboard Video] History log failed:",
+        generationErrorLogSafe(historyErr)
+      );
     }
 
     const successResponse = { videoUrl, storagePath, aspectRatio, language, historyItem };
@@ -761,7 +784,12 @@ export async function POST(req: Request) {
     const rawMessage =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     if (cancelled) console.log("[Storyboard Video] Cancelled by user.");
-    else console.error("[Storyboard Video] Error:", error);
+    else {
+      console.error(
+        "[Storyboard Video] Error:",
+        generationErrorLogSafe(error)
+      );
+    }
     if (storyboardIdForCleanup && supabaseForCleanup) {
       await safe("resetStoryboardStatus", async () => {
         await supabaseForCleanup!
@@ -814,6 +842,9 @@ export async function POST(req: Request) {
         return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-    return NextResponse.json({ error: rawMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: "Storyboard video generation failed." },
+      { status: 500 }
+    );
   }
 }

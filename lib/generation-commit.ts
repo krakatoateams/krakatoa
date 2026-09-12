@@ -5,6 +5,7 @@ import {
   commitLockedFromCancelAllowed,
   isRefundableUserCancellationPure,
 } from "@/lib/generation-commit-pure";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 const REQUESTS_TABLE = "generation_requests";
 const MARK_COMMIT_RETRIES = 3;
@@ -55,7 +56,10 @@ export async function markProviderCommitted(params: {
     }
   }
   const reason = params.reason ? ` (${params.reason})` : "";
-  console.error("[generation-commit] markProviderCommitted failed after retries" + reason, lastError);
+  console.error(
+    "[generation-commit] markProviderCommitted failed after retries" + reason,
+    generationErrorLogSafe(lastError)
+  );
   throw lastError instanceof Error
     ? lastError
     : new Error("Failed to lock generation request after provider commit");
@@ -74,7 +78,10 @@ export async function isProviderCommitLocked(
       .maybeSingle();
     if (error) {
       if (isMissingDbObject(error.message, REQUESTS_TABLE)) return false;
-      console.error("[generation-commit] isProviderCommitLocked DB error:", error.message);
+      console.error(
+        "[generation-commit] isProviderCommitLocked DB error:",
+        generationErrorLogSafe(error)
+      );
       // ponytail: fail-closed — unknown lock state blocks cancel/refund paths
       return true;
     }
@@ -85,7 +92,10 @@ export async function isProviderCommitLocked(
     }
     return commitLockedFromCancelAllowed(row.cancel_allowed);
   } catch (e) {
-    console.error("[generation-commit] isProviderCommitLocked threw:", e);
+    console.error(
+      "[generation-commit] isProviderCommitLocked threw:",
+      generationErrorLogSafe(e)
+    );
     return true;
   }
 }
@@ -103,7 +113,10 @@ export async function readGenerationCancelAllowed(
       .maybeSingle();
     if (error) {
       if (isMissingDbObject(error.message, REQUESTS_TABLE)) return true;
-      console.error("[generation-commit] readGenerationCancelAllowed DB error:", error.message);
+      console.error(
+        "[generation-commit] readGenerationCancelAllowed DB error:",
+        generationErrorLogSafe(error)
+      );
       return false;
     }
     if (!data) return false;
@@ -111,7 +124,10 @@ export async function readGenerationCancelAllowed(
     if (row.status === "succeeded" || row.status === "failed") return false;
     return !commitLockedFromCancelAllowed(row.cancel_allowed);
   } catch (e) {
-    console.error("[generation-commit] readGenerationCancelAllowed threw:", e);
+    console.error(
+      "[generation-commit] readGenerationCancelAllowed threw:",
+      generationErrorLogSafe(e)
+    );
     return false;
   }
 }

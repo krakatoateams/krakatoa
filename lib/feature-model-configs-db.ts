@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   defaultFeatureModelRows,
   defaultTierForFeature,
@@ -283,7 +284,10 @@ export async function getPhotoFeatureEnablement(): Promise<
     cache = { map: out, expiresAt: now + CACHE_TTL_MS };
     return out;
   } catch (e) {
-    console.warn("[feature-model-configs] DB read failed, using code defaults:", e);
+    console.warn(
+      "[feature-model-configs] DB read failed, using code defaults:",
+      generationErrorLogSafe(e)
+    );
     return codeDefaults();
   }
 }
@@ -342,7 +346,10 @@ export async function getVideoComposerEnablement(): Promise<
     videoCache = { map: out, expiresAt: now + CACHE_TTL_MS };
     return out;
   } catch (e) {
-    console.warn("[feature-model-configs] video DB read failed, using code defaults:", e);
+    console.warn(
+      "[feature-model-configs] video DB read failed, using code defaults:",
+      generationErrorLogSafe(e)
+    );
     return codeVideoDefaults();
   }
 }

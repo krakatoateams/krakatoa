@@ -28,6 +28,8 @@ import {
 } from "@/lib/motion-control-finalize";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { Job } from "@/lib/jobs-db";
+import { generationClientErrorJson } from "@/lib/generation-client-error";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -72,23 +74,22 @@ export async function GET(req: Request) {
         const failedJobId =
           generationRequest.job_id ?? (await lookupJobId(profileId, generationRequest.id));
         const failedJob = failedJobId ? await loadJob(profileId, failedJobId) : null;
-        const failedInput = (failedJob?.input ?? {}) as MotionControlJobInput;
-        const failedCredits =
-          failedInput.creditsAmount ?? failedJob?.cost_credits ?? 0;
-        const refunded =
-          failedJob?.execution_backend === "workflow"
-            ? await hasSuccessfulRefund(profileId, failedJob.id)
-            : failedCredits > 0;
+        const refunded = failedJob
+          ? await hasSuccessfulRefund(profileId, failedJob.id)
+          : false;
         return NextResponse.json(
           {
-            error: err.message ?? "Generation cancelled.",
+            error: "Generation cancelled.",
             code: "GENERATION_CANCELLED",
             refunded,
           },
           { status: 409 },
         );
       }
-      return NextResponse.json(err, { status: 500 });
+      return NextResponse.json(
+        generationClientErrorJson(err) ?? { message: "Generation failed." },
+        { status: 500 }
+      );
     }
 
     const jobIdEarly =
@@ -147,12 +148,15 @@ export async function GET(req: Request) {
         });
       }
       const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
-      await failMotionControlAttempt(ctx, errJson, { cancelled: true });
+      const failure = await failMotionControlAttempt(ctx, errJson, {
+        cancelled: true,
+        refund: true,
+      });
       return NextResponse.json(
         {
           error: "Generation cancelled.",
           code: "GENERATION_CANCELLED",
-          refunded: creditsAmount > 0,
+          refunded: failure.refunded,
         },
         { status: 409 },
       );
@@ -168,7 +172,7 @@ export async function GET(req: Request) {
       const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
       const lockedNow = await isProviderCommitLocked(profileId, generationRequest.id);
       const refundable = !lockedNow;
-      await failMotionControlAttempt(ctx, errJson, {
+      const failure = await failMotionControlAttempt(ctx, errJson, {
         cancelled: true,
         refund: refundable,
       });
@@ -176,7 +180,7 @@ export async function GET(req: Request) {
         {
           error: "Generation cancelled.",
           code: "GENERATION_CANCELLED",
-          refunded: refundable && creditsAmount > 0,
+          refunded: failure.refunded,
         },
         { status: 409 },
       );
@@ -190,7 +194,11 @@ export async function GET(req: Request) {
             ? JSON.stringify(prediction.error)
             : "Motion control generation failed.";
       const errJson = { message };
-      await failMotionControlAttempt(ctx, errJson);
+      const refund = !(await isProviderCommitLocked(
+        profileId,
+        generationRequest.id
+      ));
+      await failMotionControlAttempt(ctx, errJson, { refund });
       return NextResponse.json({ error: "Motion control generation failed." }, { status: 500 });
     }
 
@@ -203,8 +211,15 @@ export async function GET(req: Request) {
     const generatedVideoUrl = extractMediaUrl(prediction.output);
     if (!generatedVideoUrl.startsWith("http")) {
       const errJson = { message: "Motion control model did not return a valid video URL" };
-      await failMotionControlAttempt(ctx, errJson);
-      return NextResponse.json({ error: errJson.message }, { status: 500 });
+      const refund = !(await isProviderCommitLocked(
+        profileId,
+        generationRequest.id
+      ));
+      await failMotionControlAttempt(ctx, errJson, { refund });
+      return NextResponse.json(
+        { error: "Motion control generation failed." },
+        { status: 500 }
+      );
     }
 
     const { data: runningStep } = await supabaseServer
@@ -243,26 +258,38 @@ export async function GET(req: Request) {
               error,
             )
           : true;
+      let refunded = false;
       if (motionCtx) {
-        await failMotionControlAttempt(motionCtx, errJson, {
+        const failure = await failMotionControlAttempt(motionCtx, errJson, {
           cancelled: true,
           refund: refundable,
         });
+        refunded = failure.refunded;
       }
       return NextResponse.json(
         {
           error: "Generation cancelled.",
           code: "GENERATION_CANCELLED",
-          refunded: refundable && motionCtx ? motionCtx.creditsAmount > 0 : false,
+          refunded,
         },
         { status: 409 },
       );
     }
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[motion-control status] Error:", error);
+    console.error(
+      "[motion-control status] Error:",
+      generationErrorLogSafe(error)
+    );
     if (motionCtx) {
       const errJson = { message };
-      await failMotionControlAttempt(motionCtx, errJson, { refund: true });
+      const refund =
+        motionCtx.generationRequestId
+          ? !(await isProviderCommitLocked(
+              motionCtx.profileId,
+              motionCtx.generationRequestId
+            ))
+          : false;
+      await failMotionControlAttempt(motionCtx, errJson, { refund });
     }
     return NextResponse.json({ error: "Motion control generation failed." }, { status: 500 });
   }
@@ -278,7 +305,13 @@ async function hasSuccessfulRefund(profileId: string, jobId: string): Promise<bo
     .eq("status", "succeeded")
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(`Failed to read generation refund: ${error.message}`);
+  if (error) {
+    console.warn(
+      "[motion-control status] refund lookup failed:",
+      generationErrorLogSafe(error)
+    );
+    return false;
+  }
   return !!data;
 }
 

@@ -58,8 +58,13 @@ function makeFakeOps(log: CallLog): MeteredLifecycleOps {
     purgeResumableJobStorage: async () => {
       log.push("purgeResumableJobStorage");
     },
+    isProviderCommitLocked: async () => {
+      log.push("isProviderCommitLocked");
+      return false;
+    },
     persistMeteredSettlementLegacy: async () => {
       log.push("persistMeteredSettlementLegacy");
+      return { refunded: false };
     },
     resolveMeteredSettlement: (input) => {
       log.push("resolveMeteredSettlement");
@@ -271,8 +276,24 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
   );
   assert(terminal.http?.status === 500, "terminal http");
   assert(
-    terminalLog.join(",") === "resolveMeteredSettlement,persistMeteredSettlementLegacy",
+    terminalLog.join(",") ===
+      "isProviderCommitLocked,resolveMeteredSettlement,persistMeteredSettlementLegacy",
     `terminal finish: ${terminalLog.join(",")}`,
+  );
+
+  const cancelledOps = makeFakeOps([]);
+  cancelledOps.resolveMeteredSettlement = resolveMeteredSettlement;
+  cancelledOps.persistMeteredSettlementLegacy = async () => ({
+    refunded: false,
+  });
+  const cancelledFailure = await finishMeteredAttemptWithOps(
+    handle,
+    { kind: "terminal", cancelled: true, rawMessage: "cancelled" },
+    cancelledOps
+  );
+  assert(
+    cancelledFailure.http?.body.refunded === false,
+    "cancel response reports the actual refund result"
   );
 
   const missingJobTypeCapture: {
@@ -284,6 +305,7 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
   missingJobTypeOps.persistMeteredSettlementLegacy = async (plan, ctx) => {
     missingJobTypeCapture.refundEligible = plan.refundEligible;
     missingJobTypeCapture.refundJobType = ctx.refundJobType;
+    return { refunded: false };
   };
   await finishMeteredAttemptWithOps(
     { ...handle, refundJobType: "" },
@@ -309,6 +331,7 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
   validJobTypeOps.persistMeteredSettlementLegacy = async (plan, ctx) => {
     validJobTypeCapture.refundEligible = plan.refundEligible;
     validJobTypeCapture.refundJobType = ctx.refundJobType;
+    return { refunded: plan.refundEligible };
   };
   await finishMeteredAttemptWithOps(
     handle,
@@ -327,6 +350,54 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
   assert(
     validJobTypeCapture.refundJobType === "product_photo",
     "production finish path preserves the refund idempotency namespace",
+  );
+
+  let postCommitRefundEligible: boolean | undefined;
+  const postCommitOps = makeFakeOps([]);
+  postCommitOps.isProviderCommitLocked = async () => true;
+  postCommitOps.resolveMeteredSettlement = resolveMeteredSettlement;
+  postCommitOps.persistMeteredSettlementLegacy = async (plan) => {
+    postCommitRefundEligible = plan.refundEligible;
+    return { refunded: false };
+  };
+  await finishMeteredAttemptWithOps(
+    handle,
+    { kind: "terminal", cancelled: false, rawMessage: "delivery failed" },
+    postCommitOps
+  );
+  assert(
+    postCommitRefundEligible === false,
+    "production finish path blocks post-commit refunds"
+  );
+
+  const noJobLog: CallLog = [];
+  let noJobRejected = false;
+  try {
+    await beginMeteredAttemptWithOps(
+      {
+        profileId: "p1",
+        idempotency: {
+          key: "k-no-job",
+          routeKey: "test",
+          toolKey: "photo",
+          requestHash: "h-no-job",
+        },
+        spend: {
+          amount: 4,
+          jobType: "product_photo",
+          description: "test",
+          metadata: {},
+        },
+      },
+      makeFakeOps(noJobLog)
+    );
+  } catch {
+    noJobRejected = true;
+  }
+  assert(noJobRejected, "spend without a generation job must fail closed");
+  assert(
+    !noJobLog.includes("spendCredits"),
+    "spend must not run without a stable job id"
   );
 
   const deferred = await finishMeteredAttemptWithOps(handle, { kind: "deferred" }, makeFakeOps([]));

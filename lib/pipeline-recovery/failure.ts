@@ -29,6 +29,8 @@ export async function terminalGenerationFailure(params: {
     pricingMissing: false,
     rawMessage,
     creditsSpent: !!params.refund,
+    // Canonical recoverable-terminal policy already decided `params.refund`.
+    commitLocked: false,
     creditsAmount: params.creditsAmount,
     hasProfileId: true,
     hasJobId: true,

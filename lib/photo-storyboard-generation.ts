@@ -50,6 +50,7 @@ import {
   readBlankImageBytes,
   requireDevBlankAccess,
 } from "@/lib/dev-blank-generation";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   resolveStoryboardStyle,
   STORYBOARD_STYLE_INSTRUCTIONS,
@@ -328,7 +329,10 @@ export async function handlePhotoStoryboardGeneration(
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[photo storyboard obs] ${label} failed:`, e);
+      console.warn(
+        `[photo storyboard obs] ${label} failed:`,
+        generationErrorLogSafe(e)
+      );
       return null;
     }
   };
@@ -348,7 +352,10 @@ export async function handlePhotoStoryboardGeneration(
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[photo storyboard] profile resolution failed (non-auth):", e);
+      console.error(
+        "[photo storyboard] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -365,7 +372,10 @@ export async function handlePhotoStoryboardGeneration(
           { status: 403 }
         );
       }
-      console.warn("[photo storyboard] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[photo storyboard] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const parsed = await parseStoryboardRequest(req, options.formData);
@@ -433,7 +443,7 @@ export async function handlePhotoStoryboardGeneration(
 
     if (!devBlank && !process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
-        { error: "REPLICATE_API_TOKEN is not configured." },
+        { error: "AI provider is temporarily unavailable." },
         { status: 500 }
       );
     }
@@ -484,6 +494,7 @@ export async function handlePhotoStoryboardGeneration(
         requestHash,
       },
       job: {
+        required: true,
         tool: "photo",
         jobType: "storyboard_image",
         provider: devBlank ? "dev_blank" : imageModel.provider,
@@ -627,7 +638,10 @@ export async function handlePhotoStoryboardGeneration(
         break;
       } catch (e) {
         if (attempt === MAX_JSON_ATTEMPTS) throw e;
-        console.warn("[Storyboard] JSON parse failed, retrying:", e);
+        console.warn(
+          "[Storyboard] JSON parse failed, retrying:",
+          generationErrorLogSafe(e)
+        );
       }
     }
 
@@ -709,7 +723,7 @@ export async function handlePhotoStoryboardGeneration(
 
     const rawUrl = extractMediaUrl(imageResult);
     if (!rawUrl || !rawUrl.startsWith("http")) {
-      console.error("[Storyboard] Unexpected gpt-image-2 output:", imageResult);
+      console.error("[Storyboard] Unexpected provider output shape.");
       throw new Error("Failed to resolve storyboard image URL from model output.");
     }
     await endStep({ imageUrl: rawUrl });
@@ -740,7 +754,7 @@ export async function handlePhotoStoryboardGeneration(
     const storagePath = storyboardSheetPath(userId!, filename);
     const supabase = getSupabase();
 
-    console.log("[Storyboard] Uploading to Supabase:", storagePath);
+    console.log("[Storyboard] Uploading output to storage.");
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(storagePath, imageBuffer, {
@@ -750,7 +764,10 @@ export async function handlePhotoStoryboardGeneration(
       });
 
     if (uploadError) {
-      console.error("[Storyboard] Upload error:", uploadError);
+      console.error(
+        "[Storyboard] Upload error:",
+        generationErrorLogSafe(uploadError)
+      );
       throw new Error(`Failed to upload storyboard: ${uploadError.message}`);
     }
 
@@ -777,7 +794,10 @@ export async function handlePhotoStoryboardGeneration(
       .single();
 
     if (insertError || !inserted?.id) {
-      console.error("[Storyboard] DB insert error:", insertError);
+      console.error(
+        "[Storyboard] DB insert error:",
+        generationErrorLogSafe(insertError)
+      );
       throw new Error(insertError?.message || "Failed to save storyboard record.");
     }
 
@@ -826,10 +846,13 @@ export async function handlePhotoStoryboardGeneration(
         },
       });
     } catch (historyErr) {
-      console.warn("[Storyboard] History log failed:", historyErr);
+      console.warn(
+        "[Storyboard] History log failed:",
+        generationErrorLogSafe(historyErr)
+      );
     }
 
-    console.log("[Storyboard] Done:", storyboardUrl, "id:", inserted.id);
+    console.log("[Storyboard] Done.");
     const successResponse = {
       storyboardId: inserted.id,
       storyboardUrl,
@@ -871,7 +894,9 @@ export async function handlePhotoStoryboardGeneration(
     const rawMessage =
       error instanceof Error ? error.message : String(error ?? "Unknown error");
     if (cancelled) console.log("[Storyboard] Cancelled by user.");
-    else console.error("[Storyboard] Error:", error);
+    else {
+      console.error("[Storyboard] Error:", generationErrorLogSafe(error));
+    }
     const handle =
       metered ??
       (profileId
@@ -901,6 +926,9 @@ export async function handlePhotoStoryboardGeneration(
         return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-    return NextResponse.json({ error: rawMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: "Storyboard generation failed." },
+      { status: 500 }
+    );
   }
 }

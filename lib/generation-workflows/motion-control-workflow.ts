@@ -8,6 +8,7 @@ import {
   SUBMISSION_FENCE_POLL_SLEEP_MS,
 } from "./submission-recovery-pure";
 import type { MotionControlSuccessResponse } from "@/lib/motion-control-finalize";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   isWorkflowStoppedError,
   workflowStoppedMessage,
@@ -39,7 +40,11 @@ export async function motionControlGenerationWorkflow(
     return result;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[motion-control workflow] failed", params.jobId, message);
+    console.error(
+      "[motion-control workflow] failed",
+      params.jobId,
+      generationErrorLogSafe(error)
+    );
     const stopped = isWorkflowStoppedError(error);
     if (stopped) {
       console.log("[motion-control workflow] stop detected — settling", params.jobId);

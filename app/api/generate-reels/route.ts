@@ -316,6 +316,7 @@ export async function POST(req: Request) {
         requestHash,
       },
       job: {
+        required: true,
         tool: reqv.jobTool,
         jobType: reqv.jobType,
         provider: devBlank ? "dev_blank" : models!.video.provider,

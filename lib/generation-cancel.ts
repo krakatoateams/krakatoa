@@ -6,6 +6,7 @@ import {
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { supabaseServer } from "@/lib/supabase-server";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 /**
  * Generation cancellation data access (Cancel-in-flight v1).
@@ -62,9 +63,17 @@ export async function recordPrediction(params: {
         },
         { onConflict: "generation_request_id,prediction_id" }
       );
-    if (error) console.warn("[generation-cancel] recordPrediction failed:", error.message);
+    if (error) {
+      console.warn(
+        "[generation-cancel] recordPrediction failed:",
+        generationErrorLogSafe(error)
+      );
+    }
   } catch (e) {
-    console.warn("[generation-cancel] recordPrediction threw:", e);
+    console.warn(
+      "[generation-cancel] recordPrediction threw:",
+      generationErrorLogSafe(e)
+    );
   }
 }
 
@@ -163,11 +172,14 @@ export async function isCancelRequested(
       if (attempt < CANCEL_READ_RETRIES - 1) continue;
       console.error(
         "[generation-cancel] isCancelRequested DB error after retry:",
-        error.message
+        generationErrorLogSafe(error)
       );
     } catch (e) {
       if (attempt < CANCEL_READ_RETRIES - 1) continue;
-      console.error("[generation-cancel] isCancelRequested threw after retry:", e);
+      console.error(
+        "[generation-cancel] isCancelRequested threw after retry:",
+        generationErrorLogSafe(e)
+      );
     }
   }
   // ponytail: fail-closed — safer to refund than charge when cancel state is unknown
@@ -219,7 +231,10 @@ export async function cancelReplicatePredictions(
         await replicate.predictions.cancel(id);
         cancelled += 1;
       } catch (e) {
-        console.warn(`[generation-cancel] cancel prediction ${id} failed:`, e);
+        console.warn(
+          `[generation-cancel] cancel prediction ${id} failed:`,
+          generationErrorLogSafe(e)
+        );
       }
     })
   );
