@@ -14,10 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Admin
-- Slice: Log redaction — admin API and ops crons
-- Base: `953dcf78dd7a05b9bd790caa05d737ff50ead4cd`
-- Branch: `audit-repo/admin-ops-log-redaction`
+None.
 
 ## Queue
 
@@ -100,7 +97,7 @@ the runbook.
     - [x] Credit packs and welcome controls
     - [x] Expiry settings and manual enforcement
   - [x] Admin skills catalog
-  - [ ] Log redaction: admin API and ops crons
+  - [x] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
   - [ ] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
@@ -1188,6 +1185,32 @@ the runbook.
   edited-file diagnostics passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings; the
   accepted low cache/storage/prompt-visibility observations are recorded above.
+
+### Admin: API and ops-cron log redaction
+
+- Date: 2026-09-13
+- Base: `953dcf78dd7a05b9bd790caa05d737ff50ead4cd`
+- Final commit: `7161b66`
+- Scope: shared admin 500 handling, direct admin/skill logs, admin-user linking,
+  non-publisher expiry/sweep/reconcile/failed-post crons, and their best-effort
+  helper warnings.
+- Findings: several catch paths logged full Error objects/stacks and returned
+  raw PostgREST/storage text; downstream warnings bypassed route redaction; and
+  reconcile returned raw per-item errors on HTTP 200. `errorLogSafe` now emits
+  one line, strips signed queries plus Bearer/Basic/JWT/keyed credentials, and
+  is applied at every in-scope log/response boundary. Cron 500s are generic and
+  admin skill-delete infrastructure failures reach the shared generic 500 path.
+- Accepted risks: bare storage object paths and job/post identifiers remain
+  visible to the CRON-secret operator. Production still depends on
+  `CRON_SECRET`; publisher-cron logging remains governed by its previously
+  completed `cronErrorLogSafe` slice.
+- Verification: `npm run test:admin-log-redaction` (red then green),
+  `test:cron-publish`, `test:creation-expiry`, `test:storage-sweep`,
+  `test:admin-skills-catalog`, `test:admin-auth`, `npm run lint` (0 errors;
+  11 pre-existing warnings), `npm run build`, `git diff --check`, and
+  edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings; the
+  accepted operator-visibility risks are recorded above.
 
 ## Deferred
 
