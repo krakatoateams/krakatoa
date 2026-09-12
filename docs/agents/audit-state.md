@@ -57,9 +57,15 @@ None.
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
 - [ ] Database: RLS, RPC grants, constraints, and security advisors
-  - [ ] Reconcile the live Supabase Auth FK cutover with an idempotent
+  - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
     `supabase/migrations/` record; production is aligned but migration `003`
     and the deferred script do not reproduce that final state safely.
+  - [ ] RPC EXECUTE grants (PUBLIC default vs service_role-only)
+  - [ ] Legacy / untracked tables (RLS + schema lineage for posts,
+        platform_tokens, storyboards, users_deprecated)
+  - [ ] Migration catalog integrity (duplicate prefixes, stale `FROM users`
+        backfills, 001–003 bootstrap)
+  - [ ] Live Supabase security advisors
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
@@ -391,6 +397,27 @@ None.
   `npm run test:animate-handoff`, `npm run test:post-ownership`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Database: Auth FK cutover
+
+- Date: 2026-09-12
+- Base: `687d79c1ed3a8b183ff6da0dcb91a8007d50d188`
+- Final commit: `96b408fa852dfb308b0dacc466ee755dde55135a`
+- Scope: `supabase/migrations/091_auth_users_fk_cutover.sql`, guards on
+  `001`/`003`, superseded remap script, `lib/auth-users-fk-cutover-pure.ts`.
+- Findings: live FKs already pointed at `auth.users` (21/21 profiles, 159/159
+  creations, 0 orphans). Added an idempotent no-op-on-prod record; `001` no
+  longer recreates `product_photo_generations` after `users` is gone; `003`
+  skips the NextAuth backfill; deferred email-rematch script now raises.
+- Accepted risks: 091 does not rewrite `ON DELETE` when an FK already targets
+  `auth.users` (production posts stay CASCADE). Greenfield `002`/`003`
+  `CREATE … REFERENCES users` remains catalog-integrity work.
+- Verification: `npm run test:auth-users-fk` (red then green),
+  `npm run test:auth`, `npm run test:creation-ownership`,
+  `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed. MCP applied
+  `auth_users_fk_cutover`; FKs and leftover tables unchanged.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
