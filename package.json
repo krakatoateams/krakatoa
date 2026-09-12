@@ -31,6 +31,7 @@
     "test:auth-users-fk": "npx tsx lib/auth-users-fk-cutover-self-check.ts",
     "test:rpc-grants": "npx tsx lib/rpc-grant-lockdown-self-check.ts",
     "test:deny-by-default-rls": "npx tsx lib/deny-by-default-rls-self-check.ts",
+    "test:migration-catalog": "npx tsx lib/migration-catalog-self-check.ts",
     "test:admin-auth": "npx tsx lib/admin-auth-self-check.ts",
     "test:provider-route-auth": "npx tsx lib/provider-route-auth-self-check.ts",
     "test:post-ownership": "npx tsx lib/post-ownership-self-check.ts",

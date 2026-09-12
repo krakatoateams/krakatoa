@@ -1,7 +1,7 @@
 -- 003_platform_foundation_nextauth_single_user.sql
--- Krakatoa platform foundation (single-user, NextAuth-only).
--- Ownership boundary = profile_id. profiles links 1:1 to the existing NextAuth
--- users table via profiles.user_id -> users(id) (verified uuid).
+-- Krakatoa platform foundation.
+-- Ownership boundary = profile_id. profiles links 1:1 to auth.users via
+-- profiles.user_id -> auth.users(id). Live cutover is recorded in 091.
 --
 -- Additive and non-destructive:
 --   * create table if not exists / add column if not exists / create index if not exists
@@ -33,7 +33,7 @@ $$;
 -- ---------------------------------------------------------------------------
 create table if not exists profiles (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid unique not null references users (id) on delete cascade,
+  user_id uuid unique not null references auth.users (id) on delete cascade,
   email text,
   display_name text,
   avatar_url text,
