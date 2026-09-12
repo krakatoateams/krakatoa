@@ -34,6 +34,7 @@
     "test:creation-ownership": "npx tsx lib/creation-ownership-self-check.ts",
     "test:doku-fulfillment": "npx tsx lib/doku-fulfillment-self-check.ts",
     "test:storage-sign-ownership": "npx tsx lib/storage-sign-ownership-self-check.ts",
+    "test:storage-sweep": "npx tsx lib/storage-sweep-self-check.ts",
     "test:tiktok-photo-proxy": "npx tsx lib/tiktok-photo-proxy-self-check.ts",
     "test:replicate-output-url": "npx tsx lib/replicate-output-url-self-check.ts",
     "test:tiktok-creator-info": "npx tsx lib/tiktok-creator-info-pure.ts",

@@ -1,10 +1,10 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, isVideosTempPath } from "@/lib/storage-buckets";
+import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 import {
   collectStorageReferences,
-  isReferenced,
   listAllUserMediaObjects,
 } from "@/lib/storage-orphan-audit";
+import { classifySweepObject } from "@/lib/storage-sweep-pure";
 
 /**
  * Storage hygiene sweep (see openspec/changes/storage-hygiene).
@@ -14,6 +14,8 @@ import {
  *   - under `videos/temp/` (transient by design), OR
  *   - "orphan" (no `assets`/`posts`/`user_creations`/`storyboards` row references it)
  *     AND older than a safety age threshold (default 24h).
+ * `{userId}/resumable/{jobId}/` is never swept here — generation-reconcile and
+ * job settlement purge that prefix.
  *
  * The age guard is what makes immediate-upload safe: a freshly uploaded file
  * that the user is still captioning/scheduling in the same session is never
@@ -48,7 +50,7 @@ export interface SweepResult extends SweepPlan {
   reclaimedBytes: number;
 }
 
-export { isReferenced };
+export { sweepPathIsReferenced as isReferenced } from "@/lib/storage-sweep-pure";
 
 /**
  * Build the deletion plan without deleting anything.
@@ -69,21 +71,14 @@ export async function planStorageSweep(
   const deletable: Array<SweepObject & { reason: "temp" | "orphan" }> = [];
 
   for (const obj of objects) {
-    const isTemp = isVideosTempPath(obj.path);
-    // Without a timestamp we cannot prove the object is old enough → keep it.
-    const isOldEnough = obj.createdAtMs !== null && obj.createdAtMs < cutoffMs;
-
-    if (isTemp) {
-      if (isOldEnough) {
-        deletable.push({ ...obj, reason: "temp" });
-      } else {
-        keep.push(obj);
-      }
-      continue;
-    }
-
-    if (!isReferenced(obj.path, refBlob) && isOldEnough) {
-      deletable.push({ ...obj, reason: "orphan" });
+    const decision = classifySweepObject({
+      path: obj.path,
+      createdAtMs: obj.createdAtMs,
+      cutoffMs,
+      refBlob,
+    });
+    if (decision.action === "delete") {
+      deletable.push({ ...obj, reason: decision.reason });
     } else {
       keep.push(obj);
     }
