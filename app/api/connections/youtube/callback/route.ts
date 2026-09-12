@@ -2,6 +2,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
+import {
+  youtubeRefreshLookupDenied,
+  youtubeRefreshTokenForUpsert,
+} from "@/lib/youtube-oauth-pure";
 
 const STATE_COOKIE = "youtube_oauth_state";
 
@@ -48,6 +52,18 @@ export async function GET(request: NextRequest) {
       return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
     }
 
+    const { data: existing, error: existingErr } = await supabaseServer
+      .from("platform_tokens")
+      .select("refresh_token")
+      .eq("user_id", userId)
+      .eq("platform", "youtube")
+      .maybeSingle();
+
+    if (youtubeRefreshLookupDenied(tokens.refresh_token, existingErr)) {
+      console.error("[youtube-connect] existing refresh lookup failed:", existingErr?.message);
+      return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
+    }
+
     // expiry_date from googleapis is already an absolute Unix ms timestamp.
     const expiresAt = tokens.expiry_date
       ? new Date(tokens.expiry_date).toISOString()
@@ -60,7 +76,10 @@ export async function GET(request: NextRequest) {
           user_id: userId,
           platform: "youtube",
           access_token: tokens.access_token ?? "",
-          refresh_token: tokens.refresh_token ?? null,
+          refresh_token: youtubeRefreshTokenForUpsert(
+            tokens.refresh_token,
+            existing?.refresh_token,
+          ),
           expires_at: expiresAt,
         },
         { onConflict: "user_id,platform" },
