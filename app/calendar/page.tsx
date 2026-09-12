@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { legacyCalendarYoutubeBadge } from "@/lib/legacy-calendar-badge-pure";
 import {
   ChevronLeft,
   ChevronRight,
@@ -167,7 +168,24 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 function Navbar() {
   const { status, name, image } = useCurrentUser();
   const isLoading = status === "loading";
-  const isConnected = status === "authenticated";
+  const isAuthenticated = status === "authenticated";
+  const [youtubeConnected, setYoutubeConnected] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setYoutubeConnected(false);
+      return;
+    }
+    fetch("/api/connections/status")
+      .then((res) => (res.ok ? res.json() : { youtube: false }))
+      .then((data: { youtube?: boolean }) => setYoutubeConnected(Boolean(data.youtube)))
+      .catch(() => setYoutubeConnected(false));
+  }, [isAuthenticated]);
+
+  const badge = legacyCalendarYoutubeBadge({
+    authenticated: isAuthenticated,
+    youtubeConnected,
+  });
 
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-800 bg-gray-950/80 px-6 backdrop-blur-md">
@@ -200,7 +218,7 @@ function Navbar() {
 
       {isLoading ? (
         <div className="h-9 w-44 animate-pulse rounded-lg bg-gray-800" />
-      ) : isConnected ? (
+      ) : badge === "youtube-connected" ? (
         <div className="flex items-center gap-2.5 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-1.5">
           {image ? (
             <Image src={image} alt={name ?? "Profile"} width={24} height={24} className="rounded-full" />
@@ -211,6 +229,14 @@ function Navbar() {
           )}
           <span className="text-sm font-medium text-green-400">YouTube Connected ✓</span>
         </div>
+      ) : badge === "youtube-disconnected" ? (
+        <a
+          href="/api/connections/youtube/start"
+          className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:border-red-500/60 hover:bg-red-500/20"
+        >
+          <YoutubeIcon className="h-4 w-4" />
+          Connect YouTube
+        </a>
       ) : (
         <button
           type="button"
@@ -218,7 +244,7 @@ function Navbar() {
           className="flex cursor-pointer items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:border-red-500/60 hover:bg-red-500/20"
         >
           <YoutubeIcon className="h-4 w-4" />
-          Connect YouTube
+          Sign in
         </button>
       )}
     </header>
