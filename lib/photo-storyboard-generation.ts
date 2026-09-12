@@ -20,6 +20,7 @@ import {
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
+import { assembledModelStepInput } from "@/lib/admin-prompt-capture-pure";
 import {
   beginMeteredAttempt,
   finishMeteredAttempt,
@@ -677,7 +678,11 @@ export async function handlePhotoStoryboardGeneration(
       await assertNotCancelled(profileId, generationRequestId);
     }
 
-    await beginStep("image_generation", "GPT Image storyboard sheet");
+    await beginStep(
+      "image_generation",
+      "GPT Image storyboard sheet",
+      assembledModelStepInput(imagePrompt),
+    );
     console.log(`[Storyboard] Calling ${imageModelRef} from scene breakdown...`);
     const imageResult = await runReplicateWithRetry(
       replicate!,

@@ -35,6 +35,7 @@ import { isCancellation } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
+import { assembledModelStepInput } from "@/lib/admin-prompt-capture-pure";
 import {
   beginMeteredAttempt,
   finishMeteredAttempt,
@@ -845,7 +846,7 @@ export async function POST(req: Request) {
       imageCount > 1
         ? `Generate ${imageCount} images + save to Supabase`
         : "Nano Banana product photo generation",
-      { prompt, ...(imageCount > 1 ? { imageCount } : {}) }
+      assembledModelStepInput(prompt, imageCount > 1 ? { imageCount } : {}),
     );
     console.log(
       devBlank
