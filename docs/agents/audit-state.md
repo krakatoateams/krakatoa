@@ -27,12 +27,14 @@ None.
     - [x] Welcome-offer claim auth + posts PATCH ownership
   - [x] Service-role `user_id` ownership (creations, connections; storage
         signing stays with the Storage queue item)
-- [ ] Credits: ledger, pricing, bonus offers, and refund policy
+- [x] Credits: ledger, pricing, bonus offers, and refund policy
   - [x] Refund after provider commit (leftover canvas-text / reconcile)
-  - [ ] Ledger RPC, wallets, lots, expiry
-  - [ ] Pricing resolver and admin knobs
-  - [ ] Welcome/bonus claim races
-- [ ] Payments: DOKU checkout, callbacks, signatures, and replay handling
+  - [x] Ledger RPC, wallets, lots, expiry
+  - [x] Pricing resolver and admin knobs
+  - [x] Welcome/bonus claim races
+- [x] Payments: DOKU checkout, callbacks, signatures, and replay handling
+  - [x] Webhook HMAC + amount binding
+  - [x] Checkout + owner-scoped reconcile
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
@@ -188,6 +190,47 @@ None.
 - Verification: `npm run test:generation-commit`,
   `npm run test:recoverable-refund`, `npm run test:metered-generation`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Credits: ledger, pricing, and welcome offers
+
+- Date: 2026-09-12
+- Base: `3805f4d9d0700aa58e4c7baf018d3946cc18ea3d`
+- Final commit: unchanged (review-only)
+- Scope: `app/api/credits/{balance,transactions,lots}`,
+  `app/api/admin/credits/{set,grant-bonus}`, `lib/pricing-resolver.ts`,
+  `lib/welcome-video-offer.ts`.
+- Findings: none requiring a code change. User ledger reads bind to session
+  `profile.id`. Admin set/grant reject non-admin wallets. Resolver fails
+  closed on unknown keys.
+- Accepted risks: admin may set `credit_amount: 0` on non-video keys.
+  Welcome claim vs first-job TOCTOU remains; idempotency prevents
+  double-grant only. Durable fix is an atomic claim RPC.
+- Verification: review-only; neighboring credit tests already green on
+  `3805f4d`.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Payments: DOKU checkout, webhook, and reconcile
+
+- Date: 2026-09-12
+- Base: `3805f4d9d0700aa58e4c7baf018d3946cc18ea3d`
+- Final commit: `4609b329d7a5fd24a874816661576c8c30bb250c`
+- Scope: `app/api/payments/doku/webhook/route.ts`,
+  `lib/credit-fulfillment.ts`, `lib/doku.ts`,
+  `app/api/credits/checkout/route.ts`, `app/api/credits/orders/[id]/route.ts`.
+- Findings: reconcile no longer fulfills a SUCCESS when DOKU amount is
+  missing; webhook and reconcile share `dokuPaidAmountMatchesOrder`.
+  Checkout still takes only `packId`; webhook HMAC remains fail-closed.
+- Accepted risks: no `Request-Id` / timestamp replay store (ledger
+  idempotency is the backstop). Amount mismatch on webhook returns 200 so
+  DOKU stops retrying (user poll can still fulfill). `Client-Id` is not
+  rebound to env.
+- Follow-up: `scripts/reconcile-doku-orders.mjs` still fail-opens on a
+  missing amount and uses a single purchase key.
+- Verification: `npm run test:doku-fulfillment`, `npm run lint`
+  (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
