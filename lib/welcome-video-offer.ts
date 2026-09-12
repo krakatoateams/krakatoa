@@ -1,6 +1,7 @@
 import { hasAnyJobs } from "@/lib/jobs-db";
 import { hasCreditTransaction } from "@/lib/credits-db";
 import { getWelcomeBonusSettings } from "@/lib/welcome-bonus-settings-db";
+import { isWelcomeVideoOfferEligible } from "@/lib/welcome-video-offer-pure";
 
 /**
  * Idempotency key for the on-demand welcome-video grant (see migration 089
@@ -10,6 +11,11 @@ import { getWelcomeBonusSettings } from "@/lib/welcome-bonus-settings-db";
  */
 export function welcomeVideoClaimIdempotencyKey(profileId: string): string {
   return `bonus:welcome_video_claim:${profileId}`;
+}
+
+/** Pre-migration-089 automatic welcome grant key. */
+export function legacyWelcomeBonusIdempotencyKey(profileId: string): string {
+  return `seed:welcome_bonus:${profileId}`;
 }
 
 export type WelcomeVideoOfferEligibility = {
@@ -24,10 +30,10 @@ export type WelcomeVideoOfferEligibility = {
  * Eligible requires ALL of:
  * - the admin-configured welcome bonus is enabled (now read as "is the
  *   claim offer on", not "auto-grant on signup" — see migration 089)
- * - this profile has never claimed it before (checked via the claim's own
- *   idempotency key, NOT wallet balance — balance is deliberately 0 before
- *   claiming under the on-demand model, so a balance check would have
- *   backwards logic here)
+ * - the configured grant amount is greater than zero
+ * - this profile has neither claimed it nor received the legacy pre-089
+ *   automatic welcome grant (checked by both stable idempotency keys, not
+ *   wallet balance)
  * - this profile has never created a single job — a safety net so an older
  *   pre-existing account doesn't see "claim your free video" just because
  *   an admin turns the offer on later
@@ -35,14 +41,25 @@ export type WelcomeVideoOfferEligibility = {
 export async function getWelcomeVideoOfferEligibility(
   profileId: string
 ): Promise<WelcomeVideoOfferEligibility> {
-  const [{ enabled, creditAmount }, hasJobs, hasClaimed] = await Promise.all([
+  const [
+    { enabled, creditAmount },
+    hasJobs,
+    hasClaimed,
+    hasLegacyGrant,
+  ] = await Promise.all([
     getWelcomeBonusSettings(),
     hasAnyJobs(profileId),
     hasCreditTransaction(profileId, welcomeVideoClaimIdempotencyKey(profileId)),
+    hasCreditTransaction(profileId, legacyWelcomeBonusIdempotencyKey(profileId)),
   ]);
 
   return {
-    eligible: enabled && !hasJobs && !hasClaimed,
+    eligible: isWelcomeVideoOfferEligible({
+      enabled,
+      creditAmount,
+      hasJobs,
+      hasClaimed: hasClaimed || hasLegacyGrant,
+    }),
     creditAmount,
   };
 }

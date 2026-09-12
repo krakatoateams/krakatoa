@@ -5,6 +5,7 @@ import {
   getWelcomeBonusSettings,
   updateWelcomeBonusSettings,
 } from "@/lib/welcome-bonus-settings-db";
+import { parseWelcomeBonusCreditAmount } from "@/lib/welcome-bonus-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -37,15 +38,14 @@ export async function PATCH(req: Request) {
     }
 
     if ("creditAmount" in body) {
-      const raw = body.creditAmount;
-      const n = typeof raw === "number" ? raw : Number(raw);
-      if (!Number.isInteger(n) || n < 0) {
+      const result = parseWelcomeBonusCreditAmount(body.creditAmount);
+      if (!result.ok) {
         return NextResponse.json(
-          { error: "creditAmount must be a non-negative whole number." },
+          { error: result.error },
           { status: 400 }
         );
       }
-      patch.creditAmount = n;
+      patch.creditAmount = result.value;
     }
 
     if (Object.keys(patch).length === 0) {

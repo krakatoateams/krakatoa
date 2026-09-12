@@ -5,7 +5,7 @@ import Image from "next/image";
 import { Check, Loader2, X } from "lucide-react";
 import { useCreditPacks } from "@/lib/use-credit-packs";
 import { CREDITS_PER_IMAGE, CREDITS_PER_VIDEO } from "@/lib/landing-content";
-import { DEFAULT_CREDIT_PACKS, type CreditPack } from "@/lib/credit-packs";
+import type { CreditPack } from "@/lib/credit-packs";
 import {
   PROMO_COPY,
   PROMO_HERO_IMAGE,
@@ -37,12 +37,11 @@ export default function PromoOfferModal({
   const [purchasing, setPurchasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Map configured tiers → live packs (fall back to static defaults), keeping
-  // config order. Tiers whose pack id no longer exists are dropped.
+  // Map configured tiers → available packs, keeping config order. Tiers whose
+  // pack id is inactive or no longer exists are dropped.
   const tiers = useMemo<ResolvedTier[]>(() => {
-    const source = packs.length ? packs : DEFAULT_CREDIT_PACKS;
     return PROMO_TIERS.flatMap((tier) => {
-      const pack = source.find((p) => p.id === tier.packId);
+      const pack = packs.find((p) => p.id === tier.packId);
       if (!pack) return [];
       return [{ tier, pack, discount: promoDiscountPct(pack, tier) }];
     });

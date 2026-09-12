@@ -10,7 +10,12 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
-import { DEFAULT_CREDIT_PACKS, formatIdr, type CreditPack } from "@/lib/credit-packs";
+import {
+  DEFAULT_CREDIT_PACKS,
+  creditPacksFromApiPayload,
+  formatIdr,
+  type CreditPack,
+} from "@/lib/credit-packs";
 
 type BalanceResponse = {
   balance: number;
@@ -114,11 +119,14 @@ export default function CreditsTab() {
     let cancelled = false;
     const loadPacks = () => {
       fetch("/api/credits/packs", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: { packs?: CreditPack[] } | null) => {
-          if (!cancelled && d?.packs?.length) setPacks(d.packs);
+        .then((r) => (r.ok ? r.json() : { packs: [] }))
+        .then((payload: unknown) => {
+          const next = creditPacksFromApiPayload(payload);
+          if (!cancelled) setPacks(next ?? []);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setPacks([]);
+        });
     };
     loadPacks();
     // Re-pull tiers when the tab regains focus so admin price edits show up

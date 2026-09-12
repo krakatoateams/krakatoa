@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * Start a credit-pack purchase via DOKU Checkout.
  *
  * The client sends only `{ packId }`. Credits + amount are resolved server-side
- * from lib/credit-packs.ts (never trusted from the client). We create a pending
+ * from the active DB row (never trusted from the client). We create a pending
  * order, open a DOKU payment session, and return the hosted payment URL. The
  * wallet is credited later by the signature-verified notification webhook.
  */
@@ -38,7 +38,19 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as { packId?: unknown } | null;
   const packId = typeof body?.packId === "string" ? body.packId.trim() : "";
-  const pack = await getActiveCreditPack(packId);
+  let pack;
+  try {
+    pack = await getActiveCreditPack(packId);
+  } catch (e) {
+    console.error(
+      "[credits/checkout] pack resolution failed:",
+      e instanceof Error ? e.message : "unknown"
+    );
+    return NextResponse.json(
+      { error: "Credit packs are temporarily unavailable. Please try again." },
+      { status: 503 }
+    );
+  }
   if (!pack) {
     return NextResponse.json({ error: "Unknown credit pack." }, { status: 400 });
   }
