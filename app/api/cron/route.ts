@@ -28,6 +28,12 @@ import {
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
+import {
+  cronProcessingLogSafe,
+  cronTokenLogSafe,
+  isPermanentFailure,
+  isTikTokPermanentFailure,
+} from "@/lib/cron-publish-pure";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -69,66 +75,6 @@ const TIKTOK_RATE_LIMIT_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 // re-checks comfortably granular (~96 over 24h) while cutting both that
 // starvation risk and the load on TikTok's creator_info endpoint by ~15x.
 const TIKTOK_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000;
-
-/**
- * Classify an upload failure. Permanent failures will not self-heal on retry and
- * may waste scarce YouTube quota, so they are marked failed immediately.
- *  - auth/token problems: user must re-authorise (401, missing/invalid token)
- *  - quota: daily cap hit (403 quotaExceeded) — retrying just burns more quota
- * Everything else (network blips, 5xx, fetch errors) is treated as transient.
- */
-function isPermanentFailure(err: unknown, message: string): boolean {
-  const m = message.toLowerCase();
-  if (/re-?authori|refresh token|invalid_grant|sign in again|token for user|access token from google/.test(m)) {
-    return true;
-  }
-  if (/quota|dailylimitexceeded|quotaexceeded/.test(m)) {
-    return true;
-  }
-  if (/video file no longer exists in storage|could not fetch video from storage/.test(m)) {
-    return true;
-  }
-  const status = (err as { response?: { status?: number } })?.response?.status;
-  if (status === 401 || status === 403) return true;
-  return false;
-}
-
-/**
- * Same intent as isPermanentFailure, for TikTok's error shapes (which don't
- * overlap with Google's): auth/scope/reconnect problems and the SELF_ONLY +
- * branded-content conflict are permanent (retrying wastes an attempt on
- * something that cannot self-heal); everything else is treated as transient.
- *
- * A TikTokCreatorInfoError for spam_risk_user_banned_from_posting (genuine
- * account ban, no time dimension in TikTok's own docs) is permanent too —
- * but its sibling spam_risk_too_many_posts (daily post cap) is NOT handled
- * here at all: that one gets its own bounded wall-clock auto-retry inside
- * the TikTok branch above, before this function ever runs, since a routine
- * daily cap for a high-volume scheduler shouldn't cost the user a manual
- * retry every time.
- */
-function isTikTokPermanentFailure(err: unknown, message: string): boolean {
-  if (err instanceof TikTokCreatorInfoError && err.code === "spam_risk_user_banned_from_posting") {
-    return true;
-  }
-  const m = message.toLowerCase();
-  if (/re-?authori|refresh token|reconnect|token for user|token request failed/.test(m)) {
-    return true;
-  }
-  if (/branded content cannot be posted|self_only/.test(m)) {
-    return true;
-  }
-  if (/video file no longer exists in storage|could not fetch video from storage/.test(m)) {
-    return true;
-  }
-  // Photo posts (openspec/changes/tiktok-photo-post): a domain/URL-prefix
-  // verification problem can't self-heal by retrying — it needs a human to
-  // re-verify in the TikTok Developer Portal.
-  if (/url_ownership_unverified|not a recognized storage url/.test(m)) {
-    return true;
-  }
-  return false;
-}
 
 /**
  * GET /api/cron
@@ -227,14 +173,7 @@ export async function GET(req: NextRequest) {
   let skipped = 0;
 
   for (const post of posts) {
-    console.log(`[cron] Processing post:`, {
-      id: post.id,
-      title: post.title,
-      platform: post.platform,
-      user_id: post.user_id,
-      scheduled_time: post.scheduled_time,
-      video_url: post.video_url,
-    });
+    console.log(`[cron] Processing post:`, cronProcessingLogSafe(post));
 
     // ── Claim-lock: only proceed if we win the conditional update. This blocks a
     //    concurrent/overlapping run from uploading the same post. A claim older
@@ -302,11 +241,7 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      console.log(`[cron] Token retrieved:`, {
-        access_token_preview: token.access_token?.slice(0, 20) + "...",
-        has_refresh_token: !!token.refresh_token,
-        refresh_token_preview: token.refresh_token?.slice(0, 20) + "...",
-      });
+      console.log(`[cron] Token retrieved:`, cronTokenLogSafe(token));
 
       // Instagram has no refresh_token concept at all (its long-lived
       // access_token refreshes itself via a separate proactive cron — see
@@ -801,11 +736,12 @@ export async function GET(req: NextRequest) {
       const stack = err instanceof Error ? err.stack : undefined;
       console.error(`[cron] ✗ Post ${post.id} failed — message:`, message);
       if (stack) console.error(`[cron] Stack trace:`, stack);
-      // Google API errors carry a .response.data field with the real reason
       const anyErr = err as Record<string, unknown>;
       if (anyErr?.response) {
-        console.error(`[cron] Google API response status:`, (anyErr.response as Record<string, unknown>)?.status);
-        console.error(`[cron] Google API response data:`, JSON.stringify((anyErr.response as Record<string, unknown>)?.data, null, 2));
+        console.error(
+          `[cron] Google API response status:`,
+          (anyErr.response as Record<string, unknown>)?.status,
+        );
       }
 
       // ── Decide retry vs give up ─────────────────────────────────────────────
