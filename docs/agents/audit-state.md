@@ -15,7 +15,7 @@ the runbook.
 ## Active slice
 
 - Domain: Admin
-- Slice: Log redaction — generation routes
+- Slice: Log redaction — primary generation and shared pipelines
 - Base: `606421da24e59e6c3ffb4e986f82641247f154d8`
 - Branch: `audit-repo/generation-log-redaction`
 
@@ -102,6 +102,8 @@ the runbook.
   - [x] Admin skills catalog
   - [x] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
+    - [ ] Primary generation and shared pipelines
+    - [ ] Secondary generation and admin test route
   - [ ] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
 
