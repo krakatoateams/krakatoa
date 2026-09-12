@@ -69,7 +69,7 @@ None.
   - [x] Failed-post storage cleanup cron
   - [x] Scheduler composer UI: schedule, bulk retry, TikTok preflight
   - [x] In-app calendar UI: edit, cancel, drag-reschedule
-  - [ ] Cross-tool handoff and dashboard reads
+  - [x] Cross-tool handoff and dashboard reads
   - [ ] Legacy public calendar (`/calendar`)
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
@@ -638,6 +638,22 @@ None.
   `npm run test:tiktok-publish`, `npm run test:post-ownership`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Cross-tool handoff and dashboard reads
+
+- Date: 2026-09-12
+- Base: `7818f07e7c6ceb36bec25d3fe49161b9ae46badf`
+- Final commit: unchanged (review-only)
+- Scope: `lib/scheduler-handoff.ts`, `GenerationScheduleButton.tsx`,
+  `StatsRow.tsx`, scheduler deep-link intake.
+- Findings: none. Handoff only builds URL params; `POST /api/posts` re-asserts
+  path ownership. StatsRow is a profile-scoped GET.
+- Accepted risks: `caption` query length is uncapped (cosmetic). Deep-link
+  `assetUrl` can be a raw path in the address bar.
+- Follow-up: legacy `/calendar` YouTube-connected-on-login remains.
+- Verification: review-only; `npm run test:post-ownership` and
+  `npm run test:storage-sign-ownership` already green on `7818f07`.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ### Scheduler: In-app calendar UI
