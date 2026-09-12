@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCreatorInfo, refreshAccessToken, TikTokCreatorInfoError, type TikTokCreatorInfo } from "@/lib/tiktok";
 import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
+import { tiktokRotatedRefreshPersistDenied } from "@/lib/tiktok-oauth-pure";
 
 function successResponse(info: TikTokCreatorInfo) {
   return NextResponse.json({
@@ -80,7 +81,7 @@ export async function GET() {
     try {
       const refreshed = await refreshAccessToken(token.refresh_token);
 
-      await supabaseServer.from("platform_tokens").upsert(
+      const { error: refreshUpsertErr } = await supabaseServer.from("platform_tokens").upsert(
         {
           user_id: userId,
           platform: "tiktok",
@@ -90,6 +91,15 @@ export async function GET() {
         },
         { onConflict: "user_id,platform" },
       );
+
+      const persistDenied = tiktokRotatedRefreshPersistDenied(refreshUpsertErr);
+      if (persistDenied) {
+        console.error(
+          "[tiktok-creator-info] failed to persist refreshed token:",
+          refreshUpsertErr?.message,
+        );
+        return NextResponse.json({ error: persistDenied.error }, { status: persistDenied.status });
+      }
 
       const info = await getCreatorInfo(refreshed.accessToken);
       return successResponse(info);
