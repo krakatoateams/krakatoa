@@ -14,6 +14,10 @@ import {
   suggestCreditsFromProvider,
 } from "@/lib/admin-config-tree";
 import {
+  readRequiredAdminConfigJson,
+  requireAdminConfigRows,
+} from "@/lib/admin-config-load";
+import {
   DEFAULT_BILLING_SETTINGS,
   normalizeBillingSettings,
   type BillingSettings,
@@ -954,6 +958,14 @@ export default function AdminConfigV2Page() {
   const autosaveInflightRef = useRef(new Map<string, Promise<void>>());
 
   const load = useCallback(async () => {
+    if (
+      debouncersRef.current.size > 0 ||
+      savingCountRef.current > 0 ||
+      autosaveInflightRef.current.size > 0
+    ) {
+      setLoadError("Wait for pending changes to finish saving before refreshing.");
+      return;
+    }
     setLoading(true);
     setLoadError(null);
     try {
@@ -966,47 +978,60 @@ export default function AdminConfigV2Page() {
         fetch("/api/credits/pricing"),
       ]);
 
-      if (!fmRes.ok) {
-        const body = await fmRes.json().catch(() => ({}));
-        throw new Error(
-          typeof body.error === "string"
-            ? body.error
-            : `Failed to load feature-model configs (${fmRes.status}).`
-        );
-      }
-      if (!catalogRes.ok) {
-        const body = await catalogRes.json().catch(() => ({}));
-        throw new Error(
-          typeof body.error === "string"
-            ? body.error
-            : `Failed to load model catalog (${catalogRes.status}). Apply migration 048.`
-        );
-      }
-
-      const toolsData = await toolsRes.json();
-      const pricingResData = await pricingRes.json();
-      const fmData = await fmRes.json();
-      const catalogData = await catalogRes.json();
-      const modelsData = modelsRes.ok ? await modelsRes.json() : { models: [] };
-      const billingResData = billingRes.ok ? await billingRes.json() : null;
+      const [toolsData, pricingResData, fmData, catalogData, modelsData] =
+        await Promise.all([
+          readRequiredAdminConfigJson(toolsRes, "tool configs"),
+          readRequiredAdminConfigJson(pricingRes, "pricing configs"),
+          readRequiredAdminConfigJson(fmRes, "feature-model configs"),
+          readRequiredAdminConfigJson(catalogRes, "model catalog"),
+          readRequiredAdminConfigJson(modelsRes, "model configs"),
+        ]);
+      const billingResData = billingRes.ok
+        ? await billingRes.json().catch(() => null)
+        : null;
 
       const settings = normalizeBillingSettings(billingResData?.billingSettings);
-      setBillingSettings(settings);
 
-      const pricing = ((pricingResData.pricing ?? []) as Array<Record<string, unknown>>).map((row) => ({
-        pricing_key: String(row.pricing_key),
-        display_name: String(row.display_name),
-        credit_amount: Number(row.credit_amount),
+      const toolConfigs = requireAdminConfigRows(toolsData, "tools", "tool configs").map(
+        (row) => ({
+          tool_key: String(row.tool_key),
+          display_name: String(row.display_name),
+          enabled: Boolean(row.enabled),
+          visible_in_sidebar: Boolean(row.visible_in_sidebar),
+          coming_soon: Boolean(row.coming_soon),
+          sort_order: Number(row.sort_order),
+        })
+      );
+      const pricing = requireAdminConfigRows(
+        pricingResData,
+        "pricing",
+        "pricing configs"
+      ).map((row) => ({
+          pricing_key: String(row.pricing_key),
+          display_name: String(row.display_name),
+          credit_amount: Number(row.credit_amount),
+          enabled: Boolean(row.enabled),
+          provider_cost_usd:
+            row.provider_cost_usd === null || row.provider_cost_usd === undefined
+              ? null
+              : Number(row.provider_cost_usd),
+          cost_unit: (row.cost_unit as CostUnit | null) ?? null,
+          is_deprecated: Boolean(row.is_deprecated),
+        }));
+
+      const featureModels = requireAdminConfigRows(
+        fmData,
+        "featureModels",
+        "feature-model configs"
+      ).map((row) => ({
+        id: String(row.id),
+        tool_key: String(row.tool_key),
+        feature_key: String(row.feature_key),
+        model_tier: String(row.model_tier),
         enabled: Boolean(row.enabled),
-        provider_cost_usd:
-          row.provider_cost_usd === null || row.provider_cost_usd === undefined
-            ? null
-            : Number(row.provider_cost_usd),
-        cost_unit: (row.cost_unit as CostUnit | null) ?? null,
-        is_deprecated: Boolean(row.is_deprecated),
+        is_default: Boolean(row.is_default),
       }));
-
-      const modelConfigs = ((modelsData.models ?? []) as Array<Record<string, unknown>>).map(
+      const modelConfigs = requireAdminConfigRows(modelsData, "models", "model configs").map(
         (row) => ({
           id: String(row.id),
           tool_key: String(row.tool_key),
@@ -1017,26 +1042,34 @@ export default function AdminConfigV2Page() {
         })
       );
 
-      const modelCatalog = ((catalogData.modelCatalog ?? []) as Array<Record<string, unknown>>).map(
-        (row) => ({
-          id: String(row.id),
-          tool_key: String(row.tool_key),
-          model_id: String(row.model_id),
-          enabled: Boolean(row.enabled),
-        })
-      );
+      const modelCatalog = requireAdminConfigRows(
+        catalogData,
+        "modelCatalog",
+        "model catalog"
+      ).map((row) => ({
+        id: String(row.id),
+        tool_key: String(row.tool_key),
+        model_id: String(row.model_id),
+        enabled: Boolean(row.enabled),
+      }));
 
       const tree = buildAdminConfigTree({
-          tools: toolsData.tools ?? [],
-          pricing,
-          featureModels: fmData.featureModels ?? [],
-          modelCatalog,
-          modelConfigs,
-          billingSettings: settings,
-        });
+        tools: toolConfigs,
+        pricing,
+        featureModels,
+        modelCatalog,
+        modelConfigs,
+        billingSettings: settings,
+      });
+      setBillingSettings(settings);
       setTools(tree);
+      toolsRef.current = tree;
       setSavedPricing(collectPricingBaselines(tree));
     } catch (e) {
+      setBillingSettings(DEFAULT_BILLING_SETTINGS);
+      setTools([]);
+      toolsRef.current = [];
+      setSavedPricing({});
       setLoadError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
       setLoading(false);
