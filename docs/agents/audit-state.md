@@ -66,7 +66,7 @@ None.
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
   - [x] Posts API: create, list, and mutate
   - [x] Publisher cron: claim, idempotency, retries, concurrent runs
-  - [ ] Failed-post storage cleanup cron
+  - [x] Failed-post storage cleanup cron
   - [ ] Scheduler composer UI: schedule, bulk retry, TikTok preflight
   - [ ] In-app calendar UI: edit, cancel, drag-reschedule
   - [ ] Cross-tool handoff and dashboard reads
@@ -639,6 +639,30 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Failed-post storage cleanup cron
+
+- Date: 2026-09-12
+- Base: `90a5bd853cd2a75fb3dfb40148aff05688f39487`
+- Final commit: `d437a2b`
+- Scope: `GET /api/cron/cleanup-failed-posts`, `lib/post-storage-cleanup.ts`,
+  `lib/post-storage-cleanup-pure.ts`.
+- Findings: cleanup now claims with `status IN (failed, published)` before
+  deleting objects, so a PATCH re-arm to `scheduled` skips reclaim. Unparseable
+  `video_url` warnings redact signed-URL tokens.
+- Accepted risks: `CRON_SECRET` open when unset. Narrow claim-then-PATCH
+  window can still delete after the claim UPDATE wins. A stale batch can
+  clean a post that retried and failed again with a fresh `failed_at`.
+  Asset-linked videos skip object delete; only `/uploads/scheduler/` photos
+  are removed. `minDays=0` is an explicit override.
+- Follow-up: `docs/ops/cron-jobs.md` still omits this sixth cron. Scheduler
+  and calendar UI remain.
+- Verification: `npm run test:post-cleanup` (red on re-arm reclaim, then
+  green), `npm run test:cron-publish`, `npm run test:post-ownership`,
+  `npm run test:tiktok-publish`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ### Scheduler: Publisher cron claim, retries, and logs
 
