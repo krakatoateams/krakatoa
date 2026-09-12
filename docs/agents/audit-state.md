@@ -57,7 +57,7 @@ None.
   - [x] TikTok OAuth, callbacks, and token lifecycle
   - [x] TikTok publish client (`lib/tiktok.ts`; cron stays Scheduler)
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
-  - [ ] YouTube OAuth, callbacks, and token lifecycle
+  - [x] YouTube OAuth, callbacks, and token lifecycle
   - [ ] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
 - [ ] Integrations: Instagram OAuth, callbacks, and token lifecycle
   (discovered; same `platform_tokens` / connections family)
@@ -542,6 +542,29 @@ None.
   `npm run test:tiktok-photo-proxy`, `npm run test:post-ownership`,
   `npm run test:storage-sign-ownership`, `npm run lint` (0 errors; 11
   pre-existing warnings), `npm run build`, and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: YouTube OAuth and token lifecycle
+
+- Date: 2026-09-12
+- Base: `9ae2440d05f5d1ae496f4f198c3ec8a54db92a74`
+- Final commit: `5ef7cc7`
+- Scope: `app/api/connections/youtube/{start,callback,route}`,
+  `app/api/connections/status` (YouTube bit), `lib/youtube-oauth-pure.ts`.
+- Findings: reconnect now preserves a stored `refresh_token` when Google
+  omits one, and fails closed if the existing-row lookup errors. CSRF,
+  session binding, and disconnect already matched Model B.
+- Accepted risks: disconnect is local-only (no Google revoke). Concurrent
+  reconnects can race on read-then-upsert (Google refresh is stable).
+  YouTube still uses `request.url` origin, not `resolveOrigin`. Code
+  exchange still happens before session check (TikTok binds first).
+- Follow-up: legacy `app/calendar/page.tsx` treats login as "YouTube
+  Connected" (Public/deployment or Scheduler). YouTube upload client
+  still embeds signed URLs in errors.
+- Verification: `npm run test:youtube-oauth` (red on refresh wipe, then
+  green), `npm run test:tiktok-oauth`, `npm run test:auth`,
+  `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
