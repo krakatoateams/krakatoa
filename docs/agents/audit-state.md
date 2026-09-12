@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Platform settings (expiry, welcome knobs, credit packs)
+- Base: `fbf1dfc3dd7a420912402cb17462af983a851bc3`
+- Branch: `audit-repo/admin-platform-settings`
 
 ## Queue
 
