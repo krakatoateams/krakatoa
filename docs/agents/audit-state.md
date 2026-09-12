@@ -41,8 +41,8 @@ None.
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
   - [x] Read-sign core (path/assetId ownership + signed-URL cache)
   - [x] TikTok photo proxy
-  - [ ] Device upload signing
-  - [ ] Generation-ref upload signing
+  - [x] Device upload signing
+  - [x] Generation-ref upload signing
   - [ ] Client egress (stable URLs, next/image)
   - [ ] Cross-tool mention / creation-ID resolution
   - [ ] History batch signing
@@ -303,6 +303,26 @@ None.
   `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
+
+### Storage: upload signing (device + generation-ref)
+
+- Date: 2026-09-12
+- Base: `a31855818bb4d6b7ddd2ded1bd23aa37d99fd16c`
+- Final commit: unchanged (review-only)
+- Scope: `POST /api/upload/sign`, `POST|DELETE /api/upload/ref/sign`,
+  deprecated `POST /api/upload`, scheduler/ref path builders.
+- Findings: none requiring a code change. Paths are server-chosen under
+  `{userId}/`; filenames are sanitized; ref DELETE is prefix-gated and rejects
+  nested segments. Legacy multipart upload remains 410.
+- Accepted risks: MIME and size are validated from client claims at sign time
+  and are not bound into the Storage upload token. Same-tenant oversize or
+  type mismatch is possible within bucket limits.
+- Follow-up: remaining Storage slices (client egress, mentions, history,
+  pipeline/publish signing, canonical layout, sweeps, resumable, expiry,
+  skill thumbs).
+- Verification: review-only; neighboring `npm run test:storage-sign-ownership`
+  and `npm run test:tiktok-photo-proxy` already green on `a318558`.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
 
