@@ -34,8 +34,29 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function containsSecretKey(obj: Record<string, unknown>): boolean {
-  return Object.keys(obj).some((k) => SECRET_KEY_RE.test(k));
+function containsSecretKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsSecretKey);
+  if (!isPlainObject(value)) return false;
+  return Object.entries(value).some(
+    ([k, v]) => SECRET_KEY_RE.test(k) || containsSecretKey(v),
+  );
+}
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) throw new Error(`admin-config-validation self-check: ${message}`);
+}
+
+export function adminConfigValidationSelfCheck(): void {
+  const top = validateModelPatch({ parameters: { api_key: "sk" } });
+  assert(!top.ok, "top-level secret keys in parameters must stay rejected");
+  const nested = validateModelPatch({
+    parameters: { opts: { api_key: "sk-nested" } },
+  });
+  assert(!nested.ok, "nested secret keys in parameters must be rejected");
+  const meta = validateToolPatch({ metadata: { authorization: "Bearer x" } });
+  assert(!meta.ok, "secret keys in metadata must be rejected");
+  const ok = validateModelPatch({ parameters: { guidance: 7 } });
+  assert(ok.ok, "non-secret parameters must still save");
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +118,9 @@ export function validatePricingPatch(
   if (body.metadata !== undefined) {
     if (!isPlainObject(body.metadata)) {
       return { ok: false, error: "metadata must be a JSON object." };
+    }
+    if (containsSecretKey(body.metadata)) {
+      return { ok: false, error: "Secrets/API keys are not allowed in metadata." };
     }
     patch.metadata = body.metadata;
   }
@@ -252,6 +276,9 @@ export function validateModelPatch(
     if (!isPlainObject(body.metadata)) {
       return { ok: false, error: "metadata must be a JSON object." };
     }
+    if (containsSecretKey(body.metadata)) {
+      return { ok: false, error: "Secrets/API keys are not allowed in metadata." };
+    }
     patch.metadata = body.metadata;
   }
 
@@ -311,8 +338,16 @@ export function validateToolPatch(
     if (!isPlainObject(body.metadata)) {
       return { ok: false, error: "metadata must be a JSON object." };
     }
+    if (containsSecretKey(body.metadata)) {
+      return { ok: false, error: "Secrets/API keys are not allowed in metadata." };
+    }
     patch.metadata = body.metadata;
   }
 
   return { ok: true, patch, warnings };
+}
+
+if (require.main === module) {
+  adminConfigValidationSelfCheck();
+  console.log("admin-config-validation self-check passed");
 }

@@ -35,6 +35,7 @@
     "test:migration-catalog": "npx tsx lib/migration-catalog-self-check.ts",
     "test:admin-auth": "npx tsx lib/admin-auth-self-check.ts",
     "test:admin-metrics": "npx tsx lib/admin-metrics-pure.ts",
+    "test:admin-config-validation": "npx tsx lib/admin-config-validation.ts",
     "test:provider-route-auth": "npx tsx lib/provider-route-auth-self-check.ts",
     "test:post-ownership": "npx tsx lib/post-ownership-self-check.ts",
     "test:creation-ownership": "npx tsx lib/creation-ownership-self-check.ts",
