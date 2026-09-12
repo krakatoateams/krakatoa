@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Log redaction — secondary generation and admin test route
+- Base: `81e6f67342c698ed8acc0542fd1ae4a88085bfb9`
+- Branch: `audit-repo/secondary-generation-log-redaction`
 
 ## Queue
 
