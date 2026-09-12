@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile } from "@/lib/profiles-db";
-import { postOwnerDenied } from "@/lib/post-ownership-pure";
-
-// A claim newer than this means the cron is actively publishing the post right
-// now, so edits/cancels are refused. Mirrors lib/post-status.ts's window.
-const CLAIM_STALE_MS = 10 * 60 * 1000;
-
-function isPublishing(publish_started_at?: string | null): boolean {
-  if (!publish_started_at) return false;
-  const claimedAt = new Date(publish_started_at).getTime();
-  return Number.isFinite(claimedAt) && Date.now() - claimedAt < CLAIM_STALE_MS;
-}
+import {
+  POST_CLAIM_STALE_MS,
+  isActivePublishClaim,
+  postOwnerDenied,
+  postPatchLostPublishRace,
+} from "@/lib/post-ownership-pure";
 
 // PATCH /api/posts/[id] — edit content/timing, re-arm, or soft-cancel a post.
 export async function PATCH(
@@ -74,7 +69,7 @@ export async function PATCH(
     );
   }
   // A post the cron has actively claimed is mid-upload; refuse to avoid a race.
-  if (isPublishing(existing.publish_started_at)) {
+  if (isActivePublishClaim(existing.publish_started_at, Date.now())) {
     return NextResponse.json(
       { error: "This post is being published right now. Try again shortly." },
       { status: 409 },
@@ -129,17 +124,25 @@ export async function PATCH(
     updates.failed_at = null;
   }
 
+  const staleCutoff = new Date(Date.now() - POST_CLAIM_STALE_MS).toISOString();
   const { data, error } = await supabaseServer
     .from("posts")
     .update(updates)
     .eq("id", id)
     .eq("profile_id", profile.id)
+    .neq("status", "published")
+    .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("[posts/id] update failed:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const lostRace = postPatchLostPublishRace(data);
+  if (lostRace) {
+    return NextResponse.json({ error: lostRace.error }, { status: lostRace.status });
   }
 
   return NextResponse.json({ success: true, post: data });
