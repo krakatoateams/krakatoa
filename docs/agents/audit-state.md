@@ -15,7 +15,7 @@ the runbook.
 ## Active slice
 
 - Domain: Admin
-- Slice: Platform settings (expiry, welcome knobs, credit packs)
+- Slice: Platform settings — credit packs and welcome controls
 - Base: `fbf1dfc3dd7a420912402cb17462af983a851bc3`
 - Branch: `audit-repo/admin-platform-settings`
 
@@ -97,6 +97,8 @@ the runbook.
   - [x] Admin Config v2: tree builder and UI read contract
   - [x] Admin Config v2: persistence layer
   - [ ] Platform settings: expiry, welcome knobs, credit packs
+    - [ ] Credit packs and welcome controls
+    - [ ] Expiry settings and manual enforcement
   - [ ] Admin skills catalog
   - [ ] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
