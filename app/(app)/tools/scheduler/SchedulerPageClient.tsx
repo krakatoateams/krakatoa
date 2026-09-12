@@ -15,6 +15,12 @@ import {
 } from "@/lib/storage-buckets";
 import type { CreationHistoryItem } from "@/lib/creations";
 import { derivePostDisplayStatus } from "@/lib/post-status";
+import {
+  classifyTikTokCreatorInfoHttp,
+  tiktokCreatorInfoBlocksSchedule,
+  tiktokCreatorInfoPrivacyPlaceholder,
+  type TikTokCreatorInfoHttpKind,
+} from "@/lib/tiktok-creator-info-pure";
 import CreationsHistory from "@/components/CreationsHistory";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
@@ -1354,6 +1360,7 @@ interface TikTokCreatorInfoState {
   blockedReason: string | null;
   rateLimited: boolean;
   rateLimitedReason: string | null;
+  httpKind: TikTokCreatorInfoHttpKind | "loading";
 }
 
 const DEFAULT_TIKTOK_CREATOR_INFO: TikTokCreatorInfoState = {
@@ -1367,6 +1374,7 @@ const DEFAULT_TIKTOK_CREATOR_INFO: TikTokCreatorInfoState = {
   blockedReason: null,
   rateLimited: false,
   rateLimitedReason: null,
+  httpKind: "loading",
 };
 
 // Shared by ScheduleCard (single mode) and BulkVideoCard (bulk mode) so both
@@ -1573,11 +1581,17 @@ function PlatformFields({
             )}
           </div>
 
-          {tiktokCreatorInfo.postingBlocked ? (
+          {tiktokCreatorInfo.postingBlocked ||
+          tiktokCreatorInfo.httpKind === "reconnect" ||
+          tiktokCreatorInfo.httpKind === "unavailable" ? (
             <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/10 px-3.5 py-3">
               <AlertCircle className="mt-px h-4 w-4 shrink-0 text-error" />
               <p className="text-xs text-error">
-                {tiktokCreatorInfo.blockedReason ?? "This TikTok account can't publish right now."}
+                {tiktokCreatorInfo.httpKind === "reconnect"
+                  ? "TikTok needs to be reconnected before you can schedule."
+                  : tiktokCreatorInfo.httpKind === "unavailable"
+                    ? "Couldn't load TikTok creator info. Try again in a moment."
+                    : (tiktokCreatorInfo.blockedReason ?? "This TikTok account can't publish right now.")}
               </p>
             </div>
           ) : (
@@ -1610,7 +1624,10 @@ function PlatformFields({
                   className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
                 >
                   <option value="" disabled>
-                    {tiktokCreatorInfo.privacyLevelOptions.length === 0 ? "Loading…" : "Select privacy…"}
+                    {tiktokCreatorInfoPrivacyPlaceholder({
+                      optionCount: tiktokCreatorInfo.privacyLevelOptions.length,
+                      httpKind: tiktokCreatorInfo.httpKind,
+                    })}
                   </option>
                   {tiktokCreatorInfo.privacyLevelOptions.map((opt) => (
                     <option key={opt} value={opt}>
@@ -1883,7 +1900,7 @@ function ScheduleCard({
   // TikTok-only gates — each is vacuously true when TikTok isn't a selected
   // platform, so they never affect a YouTube-only schedule.
   const tiktokTargeted = platforms.includes("tiktok");
-  const tiktokNotBlocked = !tiktokTargeted || !tiktokCreatorInfo.postingBlocked;
+  const tiktokNotBlocked = !tiktokTargeted || !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo);
   const tiktokDurationOk =
     !tiktokTargeted ||
     !videoDuration ||
@@ -2186,7 +2203,7 @@ function ScheduleCard({
         )}
 
         {/* TikTok's required pre-publish declaration + express consent */}
-        {tiktokTargeted && !tiktokCreatorInfo.postingBlocked && (
+        {tiktokTargeted && !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo) && (
           <TikTokConsentDeclaration
             brandContentToggle={tiktokBrandContentToggle}
             checked={tiktokConsentChecked}
@@ -3081,7 +3098,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             videoDurationSec={item.duration}
           />
 
-          {tiktokTargeted && !tiktokCreatorInfo.postingBlocked && (
+          {tiktokTargeted && !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo) && (
             <TikTokConsentDeclaration
               brandContentToggle={item.tiktokBrandContentToggle}
               checked={item.tiktokConsentChecked}
@@ -3344,11 +3361,14 @@ export default function SchedulerDashboardPage() {
       return;
     }
     fetch("/api/connections/tiktok/creator-info")
-      .then((res) => (res.ok ? res.json() : {}))
-      .then((data: Partial<TikTokCreatorInfoState>) =>
-        setTiktokCreatorInfo({ ...DEFAULT_TIKTOK_CREATOR_INFO, ...data }),
-      )
-      .catch(() => setTiktokCreatorInfo(DEFAULT_TIKTOK_CREATOR_INFO));
+      .then(async (res) => {
+        const httpKind = classifyTikTokCreatorInfoHttp(res.status).kind;
+        const data: Partial<TikTokCreatorInfoState> = res.ok ? await res.json() : {};
+        setTiktokCreatorInfo({ ...DEFAULT_TIKTOK_CREATOR_INFO, ...data, httpKind });
+      })
+      .catch(() =>
+        setTiktokCreatorInfo({ ...DEFAULT_TIKTOK_CREATOR_INFO, httpKind: "unavailable" }),
+      );
   }, [tiktokConnected]);
 
   // ── Bulk caption state (Prompt 2) ──
@@ -3626,7 +3646,7 @@ export default function SchedulerDashboardPage() {
       const durationOk =
         !i.duration || !tiktokCreatorInfo.maxVideoPostDurationSec || i.duration <= tiktokCreatorInfo.maxVideoPostDurationSec;
       const discloseComplete = !i.tiktokDiscloseOpen || i.tiktokBrandOrganicToggle || i.tiktokBrandContentToggle;
-      return !!i.tiktokPrivacyLevel && !tiktokCreatorInfo.postingBlocked && durationOk && discloseComplete && i.tiktokConsentChecked;
+      return !!i.tiktokPrivacyLevel && !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo) && durationOk && discloseComplete && i.tiktokConsentChecked;
     },
     [tiktokCreatorInfo],
   );

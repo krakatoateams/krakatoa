@@ -67,7 +67,7 @@ None.
   - [x] Posts API: create, list, and mutate
   - [x] Publisher cron: claim, idempotency, retries, concurrent runs
   - [x] Failed-post storage cleanup cron
-  - [ ] Scheduler composer UI: schedule, bulk retry, TikTok preflight
+  - [x] Scheduler composer UI: schedule, bulk retry, TikTok preflight
   - [ ] In-app calendar UI: edit, cancel, drag-reschedule
   - [ ] Cross-tool handoff and dashboard reads
   - [ ] Legacy public calendar (`/calendar`)
@@ -639,6 +639,27 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Composer UI TikTok preflight
+
+- Date: 2026-09-12
+- Base: `10d06065e828d63c478931e1d2cd90a86b41ae63`
+- Final commit: `c18912c`
+- Scope: `SchedulerPageClient.tsx`, `lib/tiktok-creator-info-pure.ts` HTTP
+  outcome helpers.
+- Findings: creator-info 409/502 no longer look like "Loading…"; reconnect and
+  outage block schedule and show an alert. Client `platformResults` retry
+  idempotency was already correct.
+- Accepted risks: `httpKind === "loading"` does not block schedule if a prior
+  privacy level is already set (same-user only; cron still publishes).
+- Follow-up: in-app calendar UI, handoff, and legacy `/calendar` remain.
+  Browser E2E of the 409/502 banners was not run (no live TikTok 409).
+- Verification: `npm run test:tiktok-creator-info` (red on 409-as-loading,
+  then green), `npm run test:tiktok-oauth`, `npm run test:post-ownership`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ### Scheduler: Failed-post storage cleanup cron
 
