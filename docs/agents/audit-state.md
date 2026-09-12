@@ -53,9 +53,9 @@ None.
   - [x] Resumable recovery staging
   - [x] Creation expiry cleanup
   - [x] Platform skill thumbs
-- [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
+- [x] Integrations: TikTok OAuth, callbacks, tokens, and publishing
   - [x] TikTok OAuth, callbacks, and token lifecycle
-  - [ ] TikTok publish client (`lib/tiktok.ts`; cron stays Scheduler)
+  - [x] TikTok publish client (`lib/tiktok.ts`; cron stays Scheduler)
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
   - [ ] YouTube OAuth, callbacks, and token lifecycle
   - [ ] YouTube upload client (`lib/youtube.ts`; cron stays Scheduler)
@@ -510,13 +510,38 @@ None.
   TikTok revoke). Concurrent creator-info + cron refresh can race on TikTok's
   rotating refresh (same as cron; lock would need a DB change). Refresh on
   any generic creator-info error is a conservative retry.
-- Follow-up: TikTok publish client and cron claim stay queued; scheduler UI
-  swallows 409/502 on creator-info (Scheduler).
+- Follow-up: scheduler UI swallows 409/502 on creator-info (Scheduler).
 - Verification: `npm run test:tiktok-oauth` (red on persist-proceed, then
   green), `npm run test:tiktok-creator-info`,
   `npm run test:tiktok-photo-proxy`, `npm run test:post-ownership`,
   `npm run test:auth`, `npm run lint` (0 errors; 11 pre-existing warnings),
   `npm run build`, and `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Integrations: TikTok publish client
+
+- Date: 2026-09-12
+- Base: `d7d744c9b8d2912ff266a5eaac3d8cb56c692aae`
+- Final commit: `f3d1018`
+- Scope: `lib/tiktok.ts` publish helpers (`publishToTikTok`,
+  `publishPhotoToTikTok`, `waitForTikTokPublishOutcome`, disclosure guard,
+  photo conversion/proxy), `lib/tiktok-publish-pure.ts`. Cron claim lock
+  stays Scheduler.
+- Findings: publish errors no longer embed signed URL query tokens (cron
+  copies them onto `posts.last_error`). Branded-content + SELF_ONLY reject,
+  status poll outcomes, and photo PULL_FROM_URL already matched shipped
+  specs.
+- Accepted risks: publish helpers do not re-assert path ownership (cron
+  does). Unauthenticated photo proxy remains a Storage-accepted constraint.
+  Optimistic-Init JSDoc is stale relative to cron polling.
+- Follow-up: cron `isTikTokPermanentFailure` regex does not match the
+  current photo-path error text (Scheduler). Converted `.tiktok.jpg`
+  siblings are not swept. YouTube fetch errors still embed signed URLs.
+- Verification: `npm run test:tiktok-publish` (red on token-in-error, then
+  green), `npm run test:tiktok-oauth`, `npm run test:tiktok-creator-info`,
+  `npm run test:tiktok-photo-proxy`, `npm run test:post-ownership`,
+  `npm run test:storage-sign-ownership`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
