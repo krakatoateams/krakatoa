@@ -1,14 +1,15 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { DEFAULT_CREDIT_PACKS, type CreditPack } from "@/lib/credit-packs";
+import {
+  creditPacksFromDbRows,
+  type CreditPack,
+} from "@/lib/credit-packs";
 
 /**
  * DB-backed credit packs (admin-managed purchase tiers).
  *
- * Read path (public/checkout) NEVER throws: a missing table / query error falls
- * back to DEFAULT_CREDIT_PACKS so purchasing keeps working. Reads hit the DB
- * every call (no in-process cache) — Next bundles each route module separately,
- * so a shared module-level cache can't be reliably invalidated across routes and
- * would serve stale prices right after an admin save.
+ * Public display and checkout reads fail closed on DB errors so stale code
+ * defaults never advertise or authorize a purchase. Reads hit the DB every
+ * call (no in-process cache) so admin price edits affect checkout immediately.
  * Admin CRUD (listAll / saveAll) throws on error so the admin UI can surface it.
  */
 
@@ -19,6 +20,7 @@ export type AdminCreditPack = CreditPack & {
 };
 
 const TABLE = "credit_packs";
+const REPLACE_CREDIT_PACKS_RPC = "krakatoa_replace_credit_packs";
 
 type CreditPackRow = {
   id: string;
@@ -59,8 +61,8 @@ const SELECT =
   "id, credits, bonus_credits, price_idr, label, popular, is_active, sort_order";
 
 /**
- * Active purchasable tiers, sorted. Reads fresh from the DB every call. Falls
- * back to DEFAULT_CREDIT_PACKS on any read failure (never throws).
+ * Active purchasable tiers, sorted. Reads fresh from the DB every call and
+ * returns an empty set on failure or when admins disable every pack.
  */
 export async function listActiveCreditPacks(): Promise<CreditPack[]> {
   try {
@@ -71,25 +73,31 @@ export async function listActiveCreditPacks(): Promise<CreditPack[]> {
       .order("sort_order", { ascending: true });
 
     if (error || !data) {
-      if (error) console.warn("[credit-packs] read failed, using defaults:", error.message);
-      return DEFAULT_CREDIT_PACKS;
+      if (error) console.warn("[credit-packs] read failed, hiding packs:", error.message);
+      return creditPacksFromDbRows(null);
     }
-    if (data.length === 0) return DEFAULT_CREDIT_PACKS;
 
-    return (data as CreditPackRow[]).map(toPublic);
+    return creditPacksFromDbRows((data as CreditPackRow[]).map(toPublic));
   } catch (e) {
-    console.warn("[credit-packs] read threw, using defaults:", e);
-    return DEFAULT_CREDIT_PACKS;
+    console.warn("[credit-packs] read threw, hiding packs:", e);
+    return creditPacksFromDbRows(null);
   }
 }
 
 /**
- * Resolve a single ACTIVE pack by id (checkout path). Returns null for unknown
- * or inactive ids so a disabled tier can't be purchased.
+ * Resolve a single ACTIVE pack by id for checkout. This path deliberately
+ * fails closed on DB errors instead of selling a potentially stale fallback.
  */
 export async function getActiveCreditPack(id: string): Promise<CreditPack | null> {
-  const packs = await listActiveCreditPacks();
-  return packs.find((p) => p.id === id) ?? null;
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .select(SELECT)
+    .eq("id", id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ? toPublic(data as CreditPackRow) : null;
 }
 
 /** All tiers incl. inactive, sorted (admin). Throws on error. */
@@ -104,9 +112,8 @@ export async function listAllCreditPacks(): Promise<AdminCreditPack[]> {
 }
 
 /**
- * Replace the full tier set (admin "Save"): upsert every pack in `packs` and
- * delete any existing row whose id is not present. Ordering is taken from array
- * position. Throws on error.
+ * Replace the full tier set atomically through a Postgres RPC. The prior set
+ * remains intact if validation, deletion, or upsert fails.
  */
 export async function saveAllCreditPacks(
   packs: AdminCreditPack[]
@@ -122,19 +129,10 @@ export async function saveAllCreditPacks(
     sort_order: p.sortOrder ?? i,
   }));
 
-  const keepIds = rows.map((r) => r.id);
-
-  // Delete removed tiers first (anything not in the incoming set). Ids are
-  // slug-safe (enforced by the admin API), so an unquoted IN list is safe.
-  const del = keepIds.length
-    ? await supabaseServer.from(TABLE).delete().not("id", "in", `(${keepIds.join(",")})`)
-    : await supabaseServer.from(TABLE).delete().neq("id", "");
-  if (del.error) throw new Error(del.error.message);
-
-  if (rows.length) {
-    const { error } = await supabaseServer.from(TABLE).upsert(rows, { onConflict: "id" });
-    if (error) throw new Error(error.message);
-  }
+  const { error } = await supabaseServer.rpc(REPLACE_CREDIT_PACKS_RPC, {
+    p_packs: rows,
+  });
+  if (error) throw new Error(error.message);
 
   return listAllCreditPacks();
 }

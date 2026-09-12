@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Eye, Plus, Trash2 } from "lucide-react";
 import { formatIdr } from "@/lib/credit-packs";
+import { MAX_WELCOME_BONUS_CREDITS } from "@/lib/welcome-bonus-validation";
 import PromoOfferModal from "@/components/PromoOfferModal";
 
 type AdminCreditPack = {
@@ -335,16 +336,15 @@ export default function AdminPricingPage() {
 
       <PromoOfferModal open={offerPreview} onClose={() => setOfferPreview(false)} />
 
-      {/* Welcome bonus — credits auto-granted to new users on sign-up. */}
+      {/* Welcome bonus — credits granted when an eligible user claims the offer. */}
       <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h3 className="text-sm font-semibold text-white">Welcome bonus</h3>
             <p className="mt-1 max-w-xl text-xs text-gray-500">
-              Credits automatically granted to each new user when they sign up.
-              Applies to regular customers; admins always receive the internal
-              test seed. Expiry follows the new-user bonus setting on the Expiry
-              tab.
+              Credits granted when an eligible new user claims the welcome-video
+              offer. Admins receive the separate internal test seed. Expiry
+              follows the new-user bonus setting on the Expiry tab.
             </p>
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
@@ -369,6 +369,7 @@ export default function AdminPricingPage() {
             id="welcome-amount"
             type="number"
             min={0}
+            max={MAX_WELCOME_BONUS_CREDITS}
             value={welcomeAmount}
             onChange={(e) => {
               setWelcomeAmount(e.target.value.replace(/[^\d]/g, ""));
@@ -613,8 +614,8 @@ export default function AdminPricingPage() {
 
       <p className="text-xs text-gray-600">
         Removing a tier only deletes the offer — historical orders and granted
-        credits are unaffected. Changes apply within ~a minute (cached), or
-        immediately for new checkouts.
+        credits are unaffected. Pack changes apply immediately to new checkouts;
+        welcome toggles may take up to a minute across running instances.
       </p>
     </div>
   );

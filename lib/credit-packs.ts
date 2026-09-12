@@ -23,10 +23,9 @@ export type CreditPack = {
 };
 
 /**
- * Built-in default tiers. These are the seed source for the `credit_packs`
- * table (migration 052) AND the runtime fallback used when the table is
- * unavailable. Admin edits live in the DB — read them via lib/credit-packs-db.ts
- * (server) or the public /api/credits/packs endpoint (client).
+ * Built-in default tiers. These seed the `credit_packs` table (migration 052)
+ * and provide an immediate client loading state. Server reads fail closed when
+ * the table is unavailable; checkout never authorizes these static values.
  */
 export const DEFAULT_CREDIT_PACKS: CreditPack[] = [
   { id: "p1", credits: 100, priceIdr: 27_000, label: "Starter" },
@@ -37,6 +36,23 @@ export const DEFAULT_CREDIT_PACKS: CreditPack[] = [
 
 /** @deprecated Use DEFAULT_CREDIT_PACKS (fallback) or the DB-backed reader. */
 export const CREDIT_PACKS = DEFAULT_CREDIT_PACKS;
+
+/**
+ * Empty and failed DB reads both disable pack display. Admins may intentionally
+ * disable every pack, and an outage must not advertise stale prices.
+ */
+export function creditPacksFromDbRows(
+  rows: CreditPack[] | null
+): CreditPack[] {
+  return rows ?? [];
+}
+
+/** Parse the public packs payload while preserving an explicit empty array. */
+export function creditPacksFromApiPayload(payload: unknown): CreditPack[] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const packs = (payload as { packs?: unknown }).packs;
+  return Array.isArray(packs) ? (packs as CreditPack[]) : null;
+}
 
 /** Resolve a default pack by id, or undefined when unknown (fallback only). */
 export function getCreditPack(id: string): CreditPack | undefined {

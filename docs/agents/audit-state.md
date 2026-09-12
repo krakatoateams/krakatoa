@@ -94,6 +94,8 @@ None.
   - [x] Admin Config v2: tree builder and UI read contract
   - [x] Admin Config v2: persistence layer
   - [ ] Platform settings: expiry, welcome knobs, credit packs
+    - [x] Credit packs and welcome controls
+    - [ ] Expiry settings and manual enforcement
   - [ ] Admin skills catalog
   - [ ] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
@@ -1097,6 +1099,36 @@ None.
   Scheduler row as `openai/gpt-5`.
 - Security: final review found 0 critical, 0 high, and 0 medium findings; two
   low admin-trust/manual-corruption hardening notes are accepted above.
+
+### Admin: credit packs and welcome controls
+
+- Date: 2026-09-13
+- Base: `fbf1dfc3dd7a420912402cb17462af983a851bc3`
+- Final commit: `456da38`
+- Scope: admin pack replacement, public pack display, checkout resolution,
+  welcome-bonus settings/eligibility, and migration
+  `096_atomic_credit_pack_replace.sql`.
+- Findings: disabling every pack still exposed and sold static defaults; pack
+  replacement deleted before a separate upsert; malformed/failed pack responses
+  left stale buy options; zero-credit offers appeared claimable; welcome amounts
+  were unbounded; and pre-089 auto-grant recipients could claim again. Pack
+  display and checkout now fail closed, full-set saves are transactional,
+  welcome values are bounded on write/read, and both legacy/current grant keys
+  fence eligibility.
+- Accepted risks: welcome eligibility versus first-job creation remains a
+  non-atomic TOCTOU; idempotency prevents duplicate grants, and a durable fix
+  requires an atomic claim RPC. Clients may briefly render seed packs before the
+  first fetch, but checkout always re-resolves the live active row. Pack numeric
+  maxima beyond Postgres constraints remain an admin-trust policy choice.
+- Verification: `npm run test:admin-platform-settings` (red then green),
+  `test:doku-fulfillment`, `test:admin-auth`, `test:rpc-grants`,
+  `test:migration-catalog`, `npm run lint` (0 errors; 11 pre-existing warnings),
+  `npm run build`, `git diff --check`, and edited-file diagnostics passed.
+  Supabase MCP applied `atomic_credit_pack_replace`; the RPC is invoker-security,
+  has an empty search path, and is executable only by `service_role`. Live pack
+  state remained 4 total / 4 active.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings; the accepted low TOCTOU is recorded above.
 
 ## Deferred
 

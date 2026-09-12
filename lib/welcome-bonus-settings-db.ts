@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { normalizeWelcomeBonusCreditAmount } from "@/lib/welcome-bonus-validation";
 
 /**
  * Welcome-bonus settings reader/updater (Pricing admin).
@@ -9,9 +10,8 @@ import { supabaseServer } from "@/lib/supabase-server";
  *   - 60s in-memory TTL cache. A failed read is NOT cached (next call retries).
  *   - Writes bust the cache.
  *
- * The Postgres seed trigger (migration 053) reads this row directly to decide
- * whether new regular users receive the bonus, so this lib is only used by the
- * admin UI/API — but it stays the single TS source of truth for the shape.
+ * Since migration 089, the on-demand welcome-video eligibility/claim flow reads
+ * this row; regular users are no longer auto-granted credits at profile insert.
  */
 
 export type WelcomeBonusSettings = {
@@ -35,18 +35,10 @@ type WelcomeBonusRow = {
   credit_amount: number | string | null;
 };
 
-/** Coerce a DB value to a non-negative integer credit amount (0 on bad input). */
-function toAmount(v: number | string | null | undefined): number {
-  if (v === null || v === undefined) return 0;
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.floor(n);
-}
-
 function mapRow(row: WelcomeBonusRow): WelcomeBonusSettings {
   return {
     enabled: row.enabled === true,
-    creditAmount: toAmount(row.credit_amount),
+    creditAmount: normalizeWelcomeBonusCreditAmount(row.credit_amount),
   };
 }
 
