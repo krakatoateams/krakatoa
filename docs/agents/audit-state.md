@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Platform settings — expiry settings and manual enforcement
+- Base: `4b16235370d07df0eb7d7c51f804f1a7abdc25a2`
+- Branch: `audit-repo/admin-expiry-enforcement`
 
 ## Queue
 
