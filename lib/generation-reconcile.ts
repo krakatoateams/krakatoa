@@ -12,6 +12,8 @@ import { parseRecoveryManifest } from "@/lib/pipeline-recovery/manifest";
 import { isWorkflowRunAbandoned } from "@/lib/generation-workflows/stop-settlement-pure";
 import { settleWorkflowFailure } from "@/lib/generation-workflows/stop-settlement-core";
 import { getGenerationRequestForJob } from "@/lib/generation-workflows/workflow-db";
+import { isProviderCommitLocked } from "@/lib/generation-commit";
+import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
@@ -157,7 +159,17 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
         if (!refunded) {
           const amount = await spendAmountForJob(row.id);
           const refundAmount = amount > 0 ? amount : row.cost_credits ?? 0;
-          if (refundAmount > 0) {
+          const request = await getGenerationRequestForJob(row.profile_id, row.id);
+          const commitLocked = request
+            ? await isProviderCommitLocked(row.profile_id, request.id)
+            : false;
+          if (
+            shouldRefundSpentCreditsAfterFailure({
+              creditsSpent: true,
+              creditsAmount: refundAmount,
+              commitLocked,
+            })
+          ) {
             await refundCredits({
               profileId: row.profile_id,
               amount: refundAmount,

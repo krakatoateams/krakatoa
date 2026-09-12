@@ -1,6 +1,7 @@
 import {
   commitLockedFromCancelAllowed,
   isRefundableUserCancellationPure,
+  shouldRefundSpentCreditsAfterFailure,
 } from "./generation-commit-pure";
 
 /** ponytail: runnable without Supabase — fails if refund/commit pure contract breaks. */
@@ -26,6 +27,25 @@ export function generationCommitSelfCheck(): void {
   }
   if (isRefundableUserCancellationPure(false, false, true)) {
     throw new Error("non-cancel errors must not be refundable via this gate");
+  }
+
+  if (
+    !shouldRefundSpentCreditsAfterFailure({
+      creditsSpent: true,
+      creditsAmount: 10,
+      commitLocked: false,
+    })
+  ) {
+    throw new Error("pre-commit failure must refund spent credits");
+  }
+  if (
+    shouldRefundSpentCreditsAfterFailure({
+      creditsSpent: true,
+      creditsAmount: 10,
+      commitLocked: true,
+    })
+  ) {
+    throw new Error("post-commit failure must not refund spent credits");
   }
 }
 

@@ -32,7 +32,12 @@ import {
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
 import { assertNotCancelled, makeReplicateCancelHooks } from "@/lib/generation-cancel";
-import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import {
+  markProviderCommitted,
+  isRefundableUserCancellation,
+  isProviderCommitLocked,
+} from "@/lib/generation-commit";
+import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 import { assertPathOwnedByUser } from "@/lib/storage-signed-url";
 import { uploadStoragePathToReplicate } from "@/lib/replicate-product-image";
 
@@ -445,7 +450,17 @@ export async function POST(req: Request) {
       }
     }
 
-    if (creditsSpent && profileId && creditsAmount > 0) {
+    const commitLocked =
+      Boolean(profileId && generationRequestId) &&
+      (await isProviderCommitLocked(profileId!, generationRequestId!));
+    if (
+      shouldRefundSpentCreditsAfterFailure({
+        creditsSpent,
+        creditsAmount,
+        commitLocked,
+      }) &&
+      profileId
+    ) {
       await safe("refundCredits", () =>
         refundCredits({
           profileId: profileId!,
