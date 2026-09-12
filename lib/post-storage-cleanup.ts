@@ -1,6 +1,11 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { removeStorageObjects } from "@/lib/creations-db";
 import { resolveStoragePath } from "@/lib/storage-signed-url";
+import {
+  POST_CLEANUP_RECLAIM_STATUSES,
+  cleanupLogVideoRef,
+  isSchedulerRawPhotoUpload,
+} from "@/lib/post-storage-cleanup-pure";
 
 /**
  * Best-effort: delete the video file from storage (only when the post has no
@@ -18,21 +23,37 @@ export async function cleanupPostVideo(
   videoUrl: string | null | undefined,
   assetId: string | null | undefined,
 ): Promise<void> {
+  const { data: abandoned, error: claimErr } = await supabaseServer
+    .from("posts")
+    .update({ video_url: null })
+    .eq("id", postId)
+    .in("status", [...POST_CLEANUP_RECLAIM_STATUSES])
+    .select("id")
+    .maybeSingle();
+  if (claimErr) {
+    console.warn(`[post-cleanup] failed to null video_url for post ${postId}:`, claimErr.message);
+    return;
+  }
+  if (!abandoned) {
+    console.log(`[post-cleanup] post ${postId} is no longer failed or published — skipping video cleanup`);
+    return;
+  }
+
   if (assetId) {
     // The file belongs to an asset row — deleting it here would break the
     // asset's public_url and the Reels Creator history gallery.
     console.log(`[post-cleanup] post ${postId} is asset-linked (asset_id=${assetId}) — skipping storage deletion`);
-  } else {
-    const path = resolveStoragePath(null, videoUrl);
-    if (path) {
-      await removeStorageObjects([path]);
-      console.log(`[post-cleanup] storage object removed: ${path}`);
-    } else if (videoUrl) {
-      console.warn(`[post-cleanup] could not extract storage path from video_url: ${videoUrl}`);
-    }
+    return;
   }
-  const { error } = await supabaseServer.from("posts").update({ video_url: null }).eq("id", postId);
-  if (error) console.warn(`[post-cleanup] failed to null video_url for post ${postId}:`, error.message);
+  const path = resolveStoragePath(null, videoUrl);
+  if (path) {
+    await removeStorageObjects([path]);
+    console.log(`[post-cleanup] storage object removed: ${path}`);
+  } else if (videoUrl) {
+    console.warn(
+      `[post-cleanup] could not extract storage path from video_url: ${cleanupLogVideoRef(videoUrl)}`,
+    );
+  }
 }
 
 /**
@@ -51,21 +72,30 @@ export async function cleanupPostVideo(
 export async function cleanupPostPhotos(postId: string, photoUrls: string[] | null | undefined): Promise<void> {
   if (!Array.isArray(photoUrls) || photoUrls.length === 0) return;
 
-  const isRawUpload = (p: string) => p.includes("/uploads/scheduler/");
-  const toDelete = photoUrls.filter(isRawUpload);
-  const toKeep = photoUrls.filter((p) => !isRawUpload(p));
+  const toDelete = photoUrls.filter(isSchedulerRawPhotoUpload);
+  const toKeep = photoUrls.filter((p) => !isSchedulerRawPhotoUpload(p));
 
   if (toDelete.length === 0) {
     console.log(`[post-cleanup] post ${postId}: no raw-uploaded photos to clean up (all asset-linked)`);
     return;
   }
 
-  await removeStorageObjects(toDelete);
-  console.log(`[post-cleanup] storage objects removed for post ${postId}:`, toDelete);
-
-  const { error } = await supabaseServer
+  const { data: abandoned, error } = await supabaseServer
     .from("posts")
     .update({ photo_urls: toKeep.length > 0 ? toKeep : null })
-    .eq("id", postId);
-  if (error) console.warn(`[post-cleanup] failed to update photo_urls for post ${postId}:`, error.message);
+    .eq("id", postId)
+    .in("status", [...POST_CLEANUP_RECLAIM_STATUSES])
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.warn(`[post-cleanup] failed to update photo_urls for post ${postId}:`, error.message);
+    return;
+  }
+  if (!abandoned) {
+    console.log(`[post-cleanup] post ${postId} is no longer failed or published — skipping photo cleanup`);
+    return;
+  }
+
+  await removeStorageObjects(toDelete);
+  console.log(`[post-cleanup] storage objects removed for post ${postId}:`, toDelete);
 }
