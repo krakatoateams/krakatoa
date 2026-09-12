@@ -14,10 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Admin
-- Slice: Admin skills catalog
-- Base: `694fa082e89eea8d4ad22c6f65d7f1f3a6bf67be`
-- Branch: `audit-repo/admin-skills-catalog`
+None.
 
 ## Queue
 
@@ -99,7 +96,7 @@ the runbook.
   - [x] Platform settings: expiry, welcome knobs, credit packs
     - [x] Credit packs and welcome controls
     - [x] Expiry settings and manual enforcement
-  - [ ] Admin skills catalog
+  - [x] Admin skills catalog
   - [ ] Log redaction: admin API and ops crons
   - [ ] Log redaction: generation route error logging
   - [ ] Admin dev-blank generation
@@ -1159,6 +1156,35 @@ the runbook.
   `git diff --check`, and edited-file diagnostics passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings; the
   direct-admin and best-effort-cleanup risks are accepted above.
+
+### Admin: skills catalog
+
+- Date: 2026-09-13
+- Base: `694fa082e89eea8d4ad22c6f65d7f1f3a6bf67be`
+- Final commit: `74bb280`
+- Scope: global master-skill CRUD/overlays, owner separation, photo/video
+  composer contracts, server-side model pins, input-slot validation, and
+  thumbnail replacement/revert/delete lifecycle.
+- Findings: required character-only photo inputs always failed outside product
+  mode; null overlays erased code model pins; designated model/resolution was
+  client-only; welcome-video duration could drift from its 10-credit grant;
+  unsupported slot combinations produced unsendable forms; disabled/ineligible
+  photo tiers caused UI dead ends; and thumbnail replacement/revert/delete left
+  orphaned or broken references. Pins and input capabilities now align
+  client/server before spend, welcome-video is fixed to 5s/480p while its model
+  is active, invalid slot matrices are rejected, and thumbnail mutations use
+  fresh rows with compensating/path-scoped cleanup.
+- Accepted risks: concurrent replacement of the same thumbnail can leave one
+  unreferenced object; storage cleanup is best-effort. Global config reads keep
+  the documented 60s/code-catalog fail-open behavior, and public catalog
+  responses expose recipe text needed by the current editor contract.
+- Verification: `npm run test:admin-skills-catalog` (red then green),
+  `test:skills`, `test:admin-config-toggles`, `test:studio-submit`,
+  `test:admin-auth`, `test:storage-sign-ownership`, `npm run lint` (0 errors;
+  11 pre-existing warnings), `npm run build`, `git diff --check`, and
+  edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, and 0 medium findings; the
+  accepted low cache/storage/prompt-visibility observations are recorded above.
 
 ## Deferred
 
