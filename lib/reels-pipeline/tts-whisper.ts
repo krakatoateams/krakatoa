@@ -75,7 +75,7 @@ export async function generateTtsAndTranscribe(
   );
   const url = extractMediaUrl(ttsRes);
   if (!url || !url.startsWith("http")) {
-    console.error("Failed to extract TTS audio URL:", ttsRes);
+    console.error("Failed to extract TTS audio URL from provider output.");
     throw new Error("Failed to generate TTS audio.");
   }
 

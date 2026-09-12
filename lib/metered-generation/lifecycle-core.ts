@@ -1,4 +1,6 @@
 import { buildRecoverableGenerationJson } from "@/lib/generation-idempotency-pure";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import { RECOVERABLE_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 import { resolveMeteredSettlement } from "./settlement-pure";
 import type { MeteredSettlementLegacyOpts } from "./settlement";
 import type { MeteredSettlementOptions } from "./types";
@@ -198,7 +200,10 @@ async function safeIo<T>(
   try {
     return await fn();
   } catch (e) {
-    console.warn(`[metered-lifecycle] ${label} failed:`, e);
+    console.warn(
+      `[metered-lifecycle] ${label} failed:`,
+      generationErrorLogSafe(e)
+    );
     return null;
   }
 }
@@ -263,10 +268,7 @@ export async function beginMeteredAttemptWithOps(
         status: 503,
         body: buildRecoverableGenerationJson({
           jobId: begin.jobId,
-          message:
-            typeof begin.errorJson.message === "string"
-              ? begin.errorJson.message
-              : undefined,
+          message: RECOVERABLE_GENERATION_CLIENT_ERROR,
         }),
       },
     };

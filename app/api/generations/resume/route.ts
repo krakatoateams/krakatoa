@@ -37,6 +37,10 @@ import {
   finishGenerationRequestsForJobSuccess,
   finishGenerationRequestsForJob,
 } from "@/lib/generation-idempotency";
+import {
+  GENERIC_GENERATION_CLIENT_ERROR,
+  RECOVERABLE_GENERATION_CLIENT_ERROR,
+} from "@/lib/generation-client-error";
 
 export const maxDuration = 300;
 
@@ -148,8 +152,16 @@ export async function POST(req: Request) {
     pipeline === "reels_veo_per_scene";
 
   if (needsRendi && !process.env.RENDI_API_KEY?.trim()) {
-    await revertToRecoverable(profileId, jobId, manifest, "RENDI_API_KEY is not set.");
-    return NextResponse.json({ error: "RENDI_API_KEY is not set." }, { status: 500 });
+    await revertToRecoverable(
+      profileId,
+      jobId,
+      manifest,
+      "Video processing is not configured."
+    );
+    return NextResponse.json(
+      { error: "Video processing is temporarily unavailable." },
+      { status: 500 }
+    );
   }
 
   const bumped = mergeManifest(manifest, { resumeAttempts: attempts + 1 });
@@ -409,7 +421,10 @@ export async function POST(req: Request) {
       "Resume not implemented for this pipeline.",
     );
     return NextResponse.json(
-      { error: "Resume not implemented for this pipeline.", pipeline },
+      {
+        error: "Resume is not available for this generation.",
+        code: "RESUME_NOT_IMPLEMENTED",
+      },
       { status: 501 },
     );
   } catch (error: unknown) {
@@ -422,7 +437,12 @@ export async function POST(req: Request) {
         error: { code: PIPELINE_RECOVERABLE, message },
       });
       return NextResponse.json(
-        { recoverable: true, jobId, error: message, code: PIPELINE_RECOVERABLE },
+        {
+          recoverable: true,
+          jobId,
+          error: RECOVERABLE_GENERATION_CLIENT_ERROR,
+          code: PIPELINE_RECOVERABLE,
+        },
         { status: 503 },
       );
     }
@@ -442,6 +462,9 @@ export async function POST(req: Request) {
       jobId,
       errorJson: { message },
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: GENERIC_GENERATION_CLIENT_ERROR },
+      { status: 500 }
+    );
   }
 }

@@ -37,6 +37,7 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import { assembledModelStepInput } from "@/lib/admin-prompt-capture-pure";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   beginMeteredAttempt,
   finishMeteredAttempt,
@@ -140,7 +141,7 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[photo obs] ${label} failed:`, e);
+      console.warn(`[photo obs] ${label} failed:`, generationErrorLogSafe(e));
       return null;
     }
   };
@@ -183,7 +184,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[photo] profile resolution failed (non-auth):", e);
+      console.error(
+        "[photo] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -202,7 +206,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[photo] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[photo] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     const formData = await req.formData();
@@ -221,7 +228,10 @@ export async function POST(req: Request) {
             { status: 403 }
           );
         }
-        console.warn("[photo] skills tool guard unexpected error (failing open):", e);
+        console.warn(
+          "[photo] skills tool guard unexpected error (failing open):",
+          generationErrorLogSafe(e)
+        );
       }
     }
     const skillId = liveSkill?.id;
@@ -891,7 +901,7 @@ export async function POST(req: Request) {
         modelLabel: tier.modelLabel,
         skillId,
       });
-      console.log("[Product Photo] Saved:", saved.storagePath, "user:", userId);
+      console.log("[Product Photo] Saved output.");
       return { saved, mimeType };
     };
 
@@ -1036,7 +1046,9 @@ export async function POST(req: Request) {
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Product Photo] Cancelled by user.");
-    else console.error("[Product Photo] Error:", error);
+    else {
+      console.error("[Product Photo] Error:", generationErrorLogSafe(error));
+    }
     const isNoImageProviderError =
       !pricingMissing &&
       !cancelled &&
@@ -1045,7 +1057,7 @@ export async function POST(req: Request) {
       );
     const clientMessage = isNoImageProviderError
       ? "The AI couldn't generate an image from this request. Try a more descriptive prompt (and add a reference image if you have one)."
-      : rawMessage;
+      : "Product photo generation failed.";
     const handle =
       metered ??
       (profileId

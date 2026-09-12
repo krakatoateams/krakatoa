@@ -37,7 +37,7 @@ export interface RunRendiOptions {
 export function getRendiApiKey(): string {
   const key = process.env.RENDI_API_KEY;
   if (!key) {
-    throw new Error("RENDI_API_KEY is not set.");
+    throw new Error("Video processing is not configured.");
   }
   return key;
 }
@@ -71,8 +71,7 @@ export async function runRendiCommand(
   });
 
   if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Rendi API failed (${resp.status}): ${errText || resp.statusText}`);
+    throw new Error(`Rendi API failed (${resp.status}).`);
   }
 
   const { command_id } = (await resp.json()) as { command_id?: string };
@@ -94,9 +93,7 @@ export async function runRendiCommand(
     const status = (data.status || "").toUpperCase();
     if (status === "SUCCESS" || status === "COMPLETED") return data;
     if (status === "FAILED" || status === "ERROR") {
-      throw new Error(
-        `Rendi failed: ${JSON.stringify(data.error_message || data.error_status || data)}`,
-      );
+      throw new Error("Rendi command failed.");
     }
   }
 

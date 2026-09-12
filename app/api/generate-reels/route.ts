@@ -22,6 +22,7 @@ import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/admin-auth";
 import { insertUserCreation } from "@/lib/creations-db";
 import { requireCurrentProfile } from "@/lib/profiles-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { finishJob, markJobRecoverable } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
@@ -101,7 +102,7 @@ export async function POST(req: Request) {
     try {
       return await fn();
     } catch (e) {
-      console.warn(`[reels obs] ${label} failed:`, e);
+      console.warn(`[reels obs] ${label} failed:`, generationErrorLogSafe(e));
       return null;
     }
   };
@@ -146,7 +147,10 @@ export async function POST(req: Request) {
       if (e instanceof Error && /not authenticated/i.test(e.message)) {
         return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
       }
-      console.error("[reels] profile resolution failed (non-auth):", e);
+      console.error(
+        "[reels] profile resolution failed (non-auth):",
+        generationErrorLogSafe(e)
+      );
       return NextResponse.json(
         { error: "Profile resolution failed. Please try again." },
         { status: 500 }
@@ -174,7 +178,10 @@ export async function POST(req: Request) {
           { status: 403 }
         );
       }
-      console.warn("[reels] tool guard unexpected error (failing open):", e);
+      console.warn(
+        "[reels] tool guard unexpected error (failing open):",
+        generationErrorLogSafe(e)
+      );
     }
 
     // ---- Validate + normalize the request (single source of truth) ----
@@ -210,7 +217,10 @@ export async function POST(req: Request) {
       const replicate = createReplicateClient(); // throws if REPLICATE_API_TOKEN missing
       const rendiApiKey = process.env.RENDI_API_KEY;
       if (!rendiApiKey) {
-        return NextResponse.json({ error: "RENDI_API_KEY is not set." }, { status: 500 });
+        return NextResponse.json(
+          { error: "Video processing is temporarily unavailable." },
+          { status: 500 }
+        );
       }
 
       // ---- Resolve runtime models (Admin Phase 2) ----
@@ -428,7 +438,10 @@ export async function POST(req: Request) {
           },
         });
       } catch (historyErr) {
-        console.warn("[reels] History log failed (video still saved):", historyErr);
+        console.warn(
+          "[reels] History log failed (video still saved):",
+          generationErrorLogSafe(historyErr)
+        );
       }
 
       if (jobId && profileId) {
@@ -614,7 +627,10 @@ export async function POST(req: Request) {
               },
       });
     } catch (historyErr) {
-      console.warn("[reels] History log failed (video still saved):", historyErr);
+      console.warn(
+        "[reels] History log failed (video still saved):",
+        generationErrorLogSafe(historyErr)
+      );
     }
 
     if (jobId && profileId) {
@@ -679,8 +695,14 @@ export async function POST(req: Request) {
     const rawMessage =
       error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[reels] Cancelled by user.");
-    else if (recoverable) console.warn("[reels] Recoverable pipeline error:", error);
-    else console.error("[reels] pipeline error:", error);
+    else if (recoverable) {
+      console.warn(
+        "[reels] Recoverable pipeline error:",
+        generationErrorLogSafe(error)
+      );
+    } else {
+      console.error("[reels] pipeline error:", generationErrorLogSafe(error));
+    }
     const handle =
       metered ??
       (profileId
@@ -742,6 +764,6 @@ export async function POST(req: Request) {
         return NextResponse.json(finished.http.body, { status: finished.http.status });
       }
     }
-    return NextResponse.json({ error: rawMessage }, { status: 500 });
+    return NextResponse.json({ error: "Reels generation failed." }, { status: 500 });
   }
 }

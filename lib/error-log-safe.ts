@@ -33,3 +33,32 @@ export function errorLogSafe(error: unknown): string {
         `${key}${separator}[redacted]`
     );
 }
+
+/**
+ * Generation providers may echo a user prompt in `error.message`. Generation
+ * logs therefore keep only stable error metadata; detailed messages remain in
+ * owner-scoped job/request state for admin monitoring.
+ */
+export function generationErrorLogSafe(error: unknown): string {
+  if (!error || typeof error !== "object") return "GenerationError";
+  const record = error as { name?: unknown; code?: unknown; status?: unknown };
+  const name =
+    typeof record.name === "string" &&
+    /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(record.name)
+      ? record.name
+      : "GenerationError";
+  const code =
+    typeof record.code === "string" && /^[A-Z0-9_]{1,64}$/.test(record.code)
+      ? record.code
+      : null;
+  const status =
+    typeof record.status === "number" &&
+    Number.isInteger(record.status) &&
+    record.status >= 100 &&
+    record.status <= 599
+      ? record.status
+      : null;
+  return [name, code ? `code=${code}` : null, status ? `status=${status}` : null]
+    .filter(Boolean)
+    .join(" ");
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { listCreditTransactions } from "@/lib/credits-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 // Read-only ledger feed for the signed-in profile, used by the Profile Settings
 // Credits tab. Never mutates balance. Mirrors the auth/error handling of
@@ -23,12 +24,19 @@ export async function GET(req: NextRequest) {
       : DEFAULT_LIMIT;
 
     const items = await listCreditTransactions(profile.id, { limit });
-    return NextResponse.json({ items });
+    const clientItems = items.map(({ metadata, ...item }) => {
+      void metadata;
+      return item;
+    });
+    return NextResponse.json({ items: clientItems });
   } catch (e) {
     if (e instanceof Error && /not authenticated/i.test(e.message)) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    console.error("[credits/transactions] failed to list transactions:", e);
+    console.error(
+      "[credits/transactions] failed to list transactions:",
+      errorLogSafe(e)
+    );
     return NextResponse.json(
       { error: "Failed to list transactions." },
       { status: 500 }

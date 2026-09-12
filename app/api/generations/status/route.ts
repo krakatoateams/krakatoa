@@ -18,6 +18,8 @@ import {
 } from "@/lib/active-generations-pure";
 import { getGenerationRequestForJob } from "@/lib/generation-workflows/workflow-db";
 import type { ExecutionBackend } from "@/lib/generation-workflows/types";
+import { generationClientErrorJson } from "@/lib/generation-client-error";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +70,7 @@ function generationStatusPayload(params: {
     canRetry: controls.canRetry,
     canDismiss: controls.canDismiss,
     result: params.result,
-    error: params.error,
+    error: generationClientErrorJson(params.error),
   };
 }
 
@@ -185,7 +187,10 @@ export async function GET(req: Request) {
     if (error instanceof Error && /not authenticated/i.test(error.message)) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    console.error("[generations/status] Error:", error);
+    console.error(
+      "[generations/status] Error:",
+      generationErrorLogSafe(error)
+    );
     return NextResponse.json({ error: "Failed to read generation status." }, { status: 500 });
   }
 }

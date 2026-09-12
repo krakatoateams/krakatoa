@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { listActiveGenerations } from "@/lib/active-generations-db";
+import { generationErrorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,13 @@ export async function GET() {
     if (error instanceof Error && /not authenticated/i.test(error.message)) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[generations/active] Error:", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error(
+      "[generations/active] Error:",
+      generationErrorLogSafe(error)
+    );
+    return NextResponse.json(
+      { error: "Failed to read active generations." },
+      { status: 500 }
+    );
   }
 }
