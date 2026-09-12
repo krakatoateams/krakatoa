@@ -51,10 +51,17 @@ create trigger profiles_set_updated_at
   for each row execute function krakatoa_set_updated_at();
 
 -- Backfill one profile per existing NextAuth user (idempotent).
-insert into profiles (user_id, email)
-select u.id, u.email
-from users u
-where not exists (select 1 from profiles p where p.user_id = u.id);
+-- Skip when public.users is already renamed (live cutover → users_deprecated).
+do $$
+begin
+  if to_regclass('public.users') is null then
+    return;
+  end if;
+  insert into profiles (user_id, email)
+  select u.id, u.email
+  from users u
+  where not exists (select 1 from profiles p where p.user_id = u.id);
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- 2) projects  (generic container for user work)
