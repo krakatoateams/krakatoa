@@ -65,7 +65,7 @@ None.
   - [x] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
   - [x] Posts API: create, list, and mutate
-  - [ ] Publisher cron: claim, idempotency, retries, concurrent runs
+  - [x] Publisher cron: claim, idempotency, retries, concurrent runs
   - [ ] Failed-post storage cleanup cron
   - [ ] Scheduler composer UI: schedule, bulk retry, TikTok preflight
   - [ ] In-app calendar UI: edit, cancel, drag-reschedule
@@ -639,6 +639,36 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Publisher cron claim, retries, and logs
+
+- Date: 2026-09-12
+- Base: `c16c540acab6f3d0a1586e76e1a42c6851bc83e3`
+- Final commit: `1425fac`
+- Scope: `GET /api/cron`, `lib/cron-publish-pure.ts`. Claim lock and platform
+  IDs were already correct; classifiers and log redaction were not.
+- Findings: TikTok photo-path errors now fail permanently (live text is
+  "not a recognized user photo storage path"). Token previews removed;
+  processing logs redact signed `video_url` tokens; Google catch logs status
+  only.
+- Accepted risks: `CRON_SECRET` open when unset (documented). YouTube
+  upload-then-persist can duplicate if the function dies after upload
+  (`scheduler-cron-reliability` residual; `maxDuration=60`). TikTok
+  refresh-then-persist is required by token rotation. Success UPDATE is
+  `.eq("id")` only; a live worker cannot outlive the 10-minute stale window
+  under the current 60s cap. Claim lock + `MAX_POSTS_PER_RUN=1` unchanged.
+- Follow-up: Instagram missing-video is still transient in
+  `isInstagramPermanentFailure` (cleanup/cron adjacent). Stack traces and
+  share-URL `console.warn(err)` stay Admin log redaction. Failed-post
+  storage cleanup and scheduler/calendar UI remain.
+- Verification: `npm run test:cron-publish` (red on photo-path and signed
+  URL log, then green), `npm run test:post-ownership`,
+  `npm run test:tiktok-publish`, `npm run test:instagram-publish`,
+  `npm run test:youtube-publish`, `npm run test:tiktok-creator-info`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ### Scheduler: Posts API create, list, and mutate
 
