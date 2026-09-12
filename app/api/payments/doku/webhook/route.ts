@@ -5,6 +5,7 @@ import {
 } from "@/lib/doku";
 import { getOrderByInvoice, markOrderFailed } from "@/lib/credit-orders-db";
 import { fulfillPaidOrder } from "@/lib/credit-fulfillment";
+import { dokuPaidAmountMatchesOrder } from "@/lib/doku-fulfillment-pure";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +87,12 @@ export async function POST(req: NextRequest) {
 
   // Re-validate the amount against the stored order before crediting.
   const paidAmount = Number(payload.order?.amount);
-  if (!Number.isFinite(paidAmount) || paidAmount !== order.amount_idr) {
+  if (
+    !dokuPaidAmountMatchesOrder(
+      Number.isFinite(paidAmount) ? paidAmount : null,
+      order.amount_idr,
+    )
+  ) {
     console.error(
       `[doku/webhook] amount mismatch for ${invoiceNumber}: paid=${payload.order?.amount} expected=${order.amount_idr}`
     );

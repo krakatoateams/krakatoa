@@ -7,6 +7,7 @@ import {
 import { getCreditPack } from "@/lib/credit-packs";
 import { addPurchaseCredits } from "@/lib/credits-db";
 import { checkCheckoutOrderStatus, DokuConfigError } from "@/lib/doku";
+import { dokuPaidAmountMatchesOrder } from "@/lib/doku-fulfillment-pure";
 
 /** Read a non-negative integer field from order metadata, or undefined. */
 function metaInt(
@@ -129,8 +130,7 @@ export async function reconcilePendingOrder(
   }
 
   if (doku.transactionStatus === "SUCCESS") {
-    // Guard against an amount mismatch before crediting.
-    if (doku.amount !== null && doku.amount !== order.amount_idr) {
+    if (!dokuPaidAmountMatchesOrder(doku.amount, order.amount_idr)) {
       console.error(
         `[reconcile] amount mismatch for ${invoiceNumber}: doku=${doku.amount} expected=${order.amount_idr}`
       );
