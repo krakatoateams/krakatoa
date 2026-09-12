@@ -64,6 +64,13 @@ None.
   - [x] Instagram OAuth, callbacks, and token lifecycle
   - [x] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
+  - [x] Posts API: create, list, and mutate
+  - [ ] Publisher cron: claim, idempotency, retries, concurrent runs
+  - [ ] Failed-post storage cleanup cron
+  - [ ] Scheduler composer UI: schedule, bulk retry, TikTok preflight
+  - [ ] In-app calendar UI: edit, cancel, drag-reschedule
+  - [ ] Cross-tool handoff and dashboard reads
+  - [ ] Legacy public calendar (`/calendar`)
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
     `supabase/migrations/` record; production is aligned but migration `003`
@@ -632,6 +639,30 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Posts API create, list, and mutate
+
+- Date: 2026-09-12
+- Base: `51af53fdc5f817bb19ec27bf3209b7e59e741f6a`
+- Final commit: `4f75201`
+- Scope: `POST|GET /api/posts`, `PATCH /api/posts/[id]`, `lib/post-ownership-pure.ts`.
+- Findings: unauthenticated hosted-URL schedule now 401; PATCH UPDATE is claim-safe
+  (not published + null/stale `publish_started_at`) and lost race is 409.
+- Accepted risks: wrong-owner PATCH stays 403 after fetch-by-id. Authenticated
+  hosted `http` `video_url` remains a cron fetch flow. Live `posts_status_check`
+  already allows `canceled` (088).
+- Follow-up: after the 10-minute stale window, PATCH can cancel while a cron
+  worker may still be uploading — cron success updates do not re-check status
+  (Publisher cron). `isTikTokPermanentFailure` regex, token-preview logs, and
+  claim/idempotency stay Publisher cron.
+- Verification: `npm run test:post-ownership` (red on hosted-URL 401 and claim
+  race, then green), `npm run test:storage-sign-ownership`, `npm run test:auth`,
+  `npm run test:tiktok-publish`, `npm run test:youtube-publish`,
+  `npm run test:instagram-publish`, `npm run test:creation-ownership`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ## Deferred
 

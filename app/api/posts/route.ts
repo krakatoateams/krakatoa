@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
-import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
+import { getCurrentProfile } from "@/lib/profiles-db";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { classifyPublishPhotoRef } from "@/lib/storage-sign-ownership-pure";
+import { schedulePostCreateDenied } from "@/lib/post-ownership-pure";
 import {
   assertPathOwnedByUser,
   resolveSignedMediaUrl,
@@ -191,35 +192,21 @@ export async function POST(req: NextRequest) {
     if (project_id !== undefined && project_id !== null && !UUID_RE.test(String(project_id))) {
       return NextResponse.json({ error: "project_id must be a valid UUID." }, { status: 400 });
     }
-    const wantsPlatformLink = Boolean(asset_id) || Boolean(project_id);
-
     // ── Resolve profile (auth + ownership boundary) ───────────────────────────
     // profile_id is the platform ownership boundary. It is always server-derived;
-    // never trust a client-provided profile_id.
-    let profileId: string | null = null;
-    let userId: string | null = null;
-    if (wantsPlatformLink) {
-      // Linkage requested -> a profile is required to verify ownership.
-      try {
-        const profile = await requireCurrentProfile();
-        profileId = profile.id;
-        userId = profile.user_id;
-      } catch (e) {
-        if (e instanceof Error && /not authenticated/i.test(e.message)) {
-          return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-        }
-        throw e; // infra error -> existing 500 catch
-      }
-    } else {
-      // No linkage -> populate profile_id best-effort; never fail the request.
-      try {
-        const profile = await getCurrentProfile();
-        profileId = profile?.id ?? null;
-        userId = profile?.user_id ?? null;
-      } catch {
-        profileId = null;
-      }
+    // never trust a client-provided profile_id. A session is required even for
+    // hosted http video_url (no storage/asset linkage) so cron cannot pick up
+    // ownerless scheduled rows.
+    const profile = await getCurrentProfile();
+    const createDenied = schedulePostCreateDenied(Boolean(profile));
+    if (!profile || createDenied) {
+      return NextResponse.json(
+        { error: createDenied?.error ?? "Not authenticated." },
+        { status: createDenied?.status ?? 401 },
+      );
     }
+    const profileId = profile.id;
+    const userId = profile.user_id;
 
     // ── Verify optional project ownership ─────────────────────────────────────
     let verifiedProjectId: string | null = null;
