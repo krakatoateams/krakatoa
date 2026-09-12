@@ -216,20 +216,35 @@ follow-up issues when they are not exploitable or correctness-blocking.
 
 ### 6. Deliver and clean up
 
-Commit only the slice, fast-forward `main`, push, and delete only the temporary
-branch created for that slice. Verify:
+Commit only the slice on its `audit-repo/` branch. Do not commit on `main` and
+do not fast-forward `main`. Push the branch, open a GitHub pull request, and
+merge with a merge commit so team history stays a branch-and-merge graph:
+
+```bash
+git push -u origin HEAD
+gh pr create --title "<slice title>" --body "<audit slice summary>"
+gh pr merge --merge --delete-branch
+git checkout main
+git pull --ff-only origin main
+```
+
+`--merge` is required. Squash, rebase, and fast-forward hide the feature
+branch and flatten the graph. Verify:
 
 ```bash
 git status --short --branch
 git log -1 --oneline
 ```
 
+`HEAD` on `main` should be the `Merge pull request` commit, not the slice's
+last feature commit.
+
 Completion requires:
 
 - no confirmed Spec defect or hard Standards violation;
 - no unresolved high/critical security finding;
 - focused tests, lint, build, and `git diff --check` passing;
-- `main` clean and synchronized with `origin/main`;
+- `main` clean and synchronized with `origin/main` via the merge commit;
 - only the audit's own temporary branches removed.
 
 Update architecture docs only when an invariant or system boundary changed.

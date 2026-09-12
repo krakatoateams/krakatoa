@@ -5,9 +5,12 @@
 - Execution mode: `auto-fix-and-merge`
 - Overall status: `in_progress`
 
-The runner owns only branches prefixed `audit-repo/`. It may commit,
-fast-forward `main`, push `origin/main`, and delete those branches after every
-quality gate passes. It pauses for the stop conditions in the runbook.
+The runner owns only branches prefixed `audit-repo/`. It may commit on those
+branches, open a GitHub pull request, merge with a merge commit (never squash,
+rebase, or fast-forward onto `main`), pull the merge onto local `main`, and
+delete those branches after every quality gate passes. It never commits on
+`main` or pushes `origin/main` directly. It pauses for the stop conditions in
+the runbook.
 
 ## Active slice
 

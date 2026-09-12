@@ -35,9 +35,14 @@ When `Execution mode` is `auto-fix-and-merge`, this invocation authorizes:
 
 - creating branches prefixed `audit-repo/`;
 - editing only files required by the selected audit slice and its tests;
-- committing verified fixes and audit-state checkpoints;
-- fast-forwarding local `main`, pushing `origin/main`, and deleting only the
-  runner's own temporary local/remote branch.
+- committing verified fixes and audit-state checkpoints on that branch only;
+- pushing the runner's own `audit-repo/` branch, opening a GitHub pull request,
+  merging it with a merge commit, pulling the merge onto local `main`, and
+  deleting only the runner's own temporary local/remote branch.
+
+Never commit on `main`. Never fast-forward or rebase `main` onto the audit
+branch. Never push `origin/main` directly. Team history must stay a merge-commit
+graph: feature branch → pull request → `Merge pull request` on `main`.
 
 This does not authorize force-pushes, destructive resets, discarding unknown
 work, deleting another branch, exposing secrets, changing production data, or
@@ -56,8 +61,9 @@ Otherwise stop without modifying them.
    rules.
 2. Read the runbook and audit state.
 3. Fetch `origin/main`, switch to local `main`, and require it to equal
-   `origin/main`.
-4. Create `audit-repo/<domain>-<slice>` from the aligned `main`.
+   `origin/main`. Do not commit, cherry-pick, or implement on `main`.
+4. Create `audit-repo/<domain>-<slice>` from the aligned `main` and stay on
+   that branch for every edit and commit in this slice.
 5. Record the selected queue item, base commit, and branch in `Active slice`
    before implementation.
 
@@ -132,22 +138,48 @@ or a documented follow-up with owner/rationale. Never silently defer them.
 
 ### 7. Deliver and checkpoint
 
-1. Commit the scoped implementation.
+Stay on the `audit-repo/...` branch for every commit. `main` receives work only
+through a GitHub merge commit.
+
+1. Commit the scoped implementation on the audit branch.
 2. Update `docs/agents/audit-state.md`:
    - clear `Active slice`;
    - check the exact completed slice;
    - append an audit-log entry with base/final commits, scope, findings,
      accepted risks, verification, and security result.
-3. Commit the checkpoint.
+3. Commit the checkpoint on the same audit branch.
 4. Re-fetch `origin/main`. If it moved, stop before integrating.
-5. Fast-forward local `main` to the audit branch and push `origin/main`.
-6. Confirm local `main` equals `origin/main` and the worktree is clean.
-7. Delete only the `audit-repo/...` branch owned by this slice.
+5. Push the audit branch and open a pull request into `main` with `gh pr create`.
+6. Merge with a merge commit, never squash or rebase:
+
+   ```bash
+   git push -u origin HEAD
+   gh pr create --title "<slice title>" --body "$(cat <<'EOF'
+   ## Summary
+   - Audit slice: <domain / slice>
+   - Confirmed fixes and accepted risks as recorded in audit-state.
+
+   ## Test plan
+   - Focused slice tests, neighboring contracts, lint, and production build
+     already ran on this branch.
+   EOF
+   )"
+   gh pr merge --merge --delete-branch
+   git fetch origin main
+   git checkout main
+   git pull --ff-only origin main
+   ```
+
+7. Confirm local `main` equals `origin/main`, `HEAD` is the merge commit, and
+   the worktree is clean. Delete only the leftover local `audit-repo/...`
+   branch owned by this slice.
 8. Continue immediately with the next pending slice unless the invocation
-   selected one domain or requested a stop.
+   selected one domain or requested a stop. Start that next slice from a new
+   `audit-repo/` branch; do not keep committing on `main`.
 
 If no defect was found, still checkpoint the reviewed scope and evidence; do
-not create an empty implementation commit.
+not create an empty implementation commit. A review-only slice still uses the
+same pull-request merge.
 
 ## Stop conditions
 
