@@ -1,4 +1,5 @@
 import {
+  classifyPublishPhotoRef,
   pathPrefixOwnedByUser,
   storedValueReferencesPath,
 } from "./storage-sign-ownership-pure";
@@ -39,6 +40,21 @@ export function storageSignOwnershipSelfCheck(): void {
     "a signed URL must not grant another user's path",
   );
   assert(!storedValueReferencesPath("", owned), "empty stored value must not match");
+
+  const ownPhoto = `${userId}/photos/generated/product/z.png`;
+  const foreignPhoto = "other-user/photos/generated/product/z.png";
+  const ownRef = classifyPublishPhotoRef(ownPhoto, userId);
+  const foreignRef = classifyPublishPhotoRef(foreignPhoto, userId);
+  const foreignSigned = classifyPublishPhotoRef(
+    `https://example.supabase.co/storage/v1/object/sign/krakatoa/${foreignPhoto}?token=abc`,
+    userId,
+  );
+  assert(ownRef.ok, "own photo path must be publishable");
+  assert(!foreignRef.ok && foreignRef.reason === "unowned", "another user's photo path must not be publish-signed");
+  assert(
+    !foreignSigned.ok && foreignSigned.reason === "unowned",
+    "a signed URL for another user's photo must not be publish-signed",
+  );
 }
 
 storageSignOwnershipSelfCheck();

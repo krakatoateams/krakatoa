@@ -19,7 +19,7 @@ import {
   publishContainer,
   isInstagramPermanentFailure,
 } from "@/lib/instagram";
-import { resolveStoragePath, resolvePublishVideoUrl, signStoragePathForPublish } from "@/lib/storage-signed-url";
+import { resolveStoragePath, resolvePublishVideoUrl, signOwnedStoragePathForPublish } from "@/lib/storage-signed-url";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
@@ -360,6 +360,7 @@ export async function GET(req: NextRequest) {
         publishVideoUrl = await resolvePublishVideoUrl({
           videoUrl: post.video_url,
           assetStoragePath,
+          userId: post.user_id,
         });
       }
 
@@ -639,7 +640,7 @@ export async function GET(req: NextRequest) {
               throw new Error("Instagram photo post has no resolvable storage path.");
             }
             const compatiblePath = await ensureInstagramCompatibleImage(photoStoragePath);
-            mediaUrl = await signStoragePathForPublish(compatiblePath);
+            mediaUrl = await signOwnedStoragePathForPublish(compatiblePath, post.user_id);
           } else {
             // Non-null: isPhotoPost is false here, exactly when
             // publishVideoUrl was computed by the shared block above.

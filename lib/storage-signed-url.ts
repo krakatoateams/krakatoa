@@ -302,13 +302,23 @@ export async function signStoragePathForPublish(storagePath: string): Promise<st
   return signed.url;
 }
 
+/** Cron / server publish: ownership first, then a short uncached URL. */
+export async function signOwnedStoragePathForPublish(
+  storagePath: string,
+  userId: string,
+): Promise<string> {
+  await assertPathOwnedByUser(storagePath, userId);
+  return signStoragePathForPublish(storagePath);
+}
+
 /** Resolve a fetchable publish URL from a post row (path, legacy URL, or asset). */
 export async function resolvePublishVideoUrl(params: {
   videoUrl?: string | null;
   assetStoragePath?: string | null;
+  userId: string;
 }): Promise<string> {
   const path = resolveStoragePath(params.assetStoragePath, params.videoUrl);
-  if (path) return signStoragePathForPublish(path);
+  if (path) return signOwnedStoragePathForPublish(path, params.userId);
   const raw = params.videoUrl?.trim();
   if (raw?.startsWith("http")) return raw;
   throw new Error("No publishable video location for this post.");
