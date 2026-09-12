@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Log redaction — admin API and ops crons
+- Base: `953dcf78dd7a05b9bd790caa05d737ff50ead4cd`
+- Branch: `audit-repo/admin-ops-log-redaction`
 
 ## Queue
 
