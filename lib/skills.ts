@@ -203,6 +203,8 @@ export type Skill = {
   badge?: "new";
   /** Admin-pinned Photo tier or Video model. Absent = catalog default. */
   modelId?: string;
+  /** Optional code-catalog video duration pin (seconds). */
+  duration?: number;
   /**
    * Pin the video resolution too (video skills only). Absent = the model's
    * own default resolution. Every catalog video model defaults to 720p or
@@ -627,6 +629,7 @@ export const SKILLS: Skill[] = [
     inputs: [],
     modelId: "seedance1_pro_fast",
     resolution: "480p",
+    duration: 5,
   },
 ];
 
@@ -675,6 +678,22 @@ export function skillPhotoMode(
 
 export function getSkill(id: string): Skill | undefined {
   return isSkillId(id) ? SKILL_BY_ID[id] : undefined;
+}
+
+/**
+ * Whether a request violates an active master-skill model designation.
+ * Disabled/ineligible designations may fall back to another enabled model.
+ */
+export function skillPinMismatch(
+  designatedId: string | undefined,
+  requestedId: string,
+  designationAvailable: boolean
+): boolean {
+  return Boolean(
+    designatedId &&
+      designationAvailable &&
+      designatedId !== requestedId
+  );
 }
 
 export function agentSkills(): Skill[] {

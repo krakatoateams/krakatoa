@@ -20,6 +20,7 @@
     "test:prompt-capture": "npx tsx lib/admin-prompt-capture-pure.ts",
     "test:animate-handoff": "npx tsx lib/animate-handoff.ts",
     "test:skills": "npx tsx lib/skills.ts",
+    "test:admin-skills-catalog": "npx tsx lib/admin-skills-catalog-self-check.ts",
     "test:canvas": "npx tsx lib/canvas-graph.ts && npx tsx lib/canvas-handoff.ts && npx tsx lib/canvas-document.ts && npx tsx lib/canvas-text-models.ts",
     "test:editor": "npx tsx lib/editor-document.ts && npx tsx lib/editor-handoff.ts && npx tsx lib/editor-render.ts",
     "test:aspect-ratio": "npx tsx lib/aspect-ratio-match.ts",

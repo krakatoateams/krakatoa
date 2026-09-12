@@ -15,6 +15,7 @@ import {
   buildCharacterSheetPrompt,
   buildPhotoProviderInput,
   getProductPhotoTier,
+  isValidProductPhotoTier,
   tierSupportsMultiReference,
   isValidPhotoAspectRatio,
   DEFAULT_PHOTO_ASPECT_RATIO,
@@ -75,6 +76,7 @@ import { resolveLiveSkill } from "@/lib/skill-configs-db";
 import {
   assembleSkillPrompt,
   skillDefaultTitle,
+  skillPinMismatch,
   skillPhotoMode,
 } from "@/lib/skills";
 
@@ -407,6 +409,56 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    const designatedTier =
+      liveSkill?.modelId && isValidProductPhotoTier(liveSkill.modelId)
+        ? getProductPhotoTier(liveSkill.modelId)
+        : null;
+    const skillRequiresReference = Boolean(
+      liveSkill?.inputs.some(
+        (slot) =>
+          (slot.key === "subject" || slot.key === "character") &&
+          slot.required
+      )
+    );
+    const requestHasReference =
+      referenceFiles.length > 0 ||
+      referenceCreationIds.length > 0 ||
+      characterFile instanceof File ||
+      Boolean(characterCreationId);
+    const needsSecondProductReference =
+      requiresProductImage &&
+      (Boolean(
+        liveSkill?.inputs.some(
+          (slot) => slot.key === "character" && slot.required
+        )
+      ) ||
+        characterFile instanceof File ||
+        Boolean(characterCreationId));
+    const needsAnyReference =
+      requiresProductImage || skillRequiresReference || requestHasReference;
+    const designatedInputEligible = Boolean(
+      designatedTier &&
+        (!needsAnyReference || designatedTier.supportsReference) &&
+        (!needsSecondProductReference ||
+          tierSupportsMultiReference(designatedTier))
+    );
+    const designatedModelAvailable = Boolean(
+      liveSkill?.modelId &&
+        enablement[mode].enabledTiers.includes(liveSkill.modelId) &&
+        designatedInputEligible
+    );
+    if (
+      skillPinMismatch(
+        liveSkill?.modelId,
+        modelTier,
+        designatedModelAvailable
+      )
+    ) {
+      return NextResponse.json(
+        { error: "This skill is configured to use a different photo model." },
+        { status: 400 }
+      );
+    }
 
     // Optional extra reference images. Product Try-on can pass a character/model
     // image alongside the product; Generate any image / Character creation can pass a
@@ -445,6 +497,8 @@ export async function POST(req: Request) {
     const hasCharacterReference =
       requiresProductImage &&
       (extraReferenceFiles.length > 0 || directReferenceUrls.length > 0);
+    const hasRequiredCharacterReference =
+      extraReferenceFiles.length > 0 || directReferenceUrls.length > 0;
 
     if (skillId === "change-background") {
       if (extraReferenceFiles.length === 0) {
@@ -477,14 +531,14 @@ export async function POST(req: Request) {
         );
       }
     }
-    if (skillId === "change-character" && !hasCharacterReference) {
+    if (skillId === "change-character" && !hasRequiredCharacterReference) {
       return NextResponse.json(
         { error: "A character image is required to change the character." },
         { status: 400 }
       );
     } else if (
       liveSkill?.inputs.some((slot) => slot.key === "character" && slot.required) &&
-      !hasCharacterReference
+      !hasRequiredCharacterReference
     ) {
       return NextResponse.json(
         { error: "A character image is required for this skill." },

@@ -76,6 +76,7 @@ import { resolveLiveSkill } from "@/lib/skill-configs-db";
 import {
   assembleSkillPrompt,
   skillDefaultTitle,
+  skillPinMismatch,
 } from "@/lib/skills";
 import {
   DevBlankForbiddenError,
@@ -349,6 +350,26 @@ export async function POST(req: Request) {
     if (!videoComposerModelEnabled(composerEnablement, composerKey, modelId)) {
       return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
     }
+    const designatedModelAvailable = Boolean(
+      liveSkill?.modelId &&
+        videoComposerModelEnabled(
+          composerEnablement,
+          composerKey,
+          liveSkill.modelId
+        )
+    );
+    if (
+      skillPinMismatch(
+        liveSkill?.modelId,
+        modelId,
+        designatedModelAvailable
+      )
+    ) {
+      return NextResponse.json(
+        { error: "This skill is configured to use a different video model." },
+        { status: 400 }
+      );
+    }
     jobKind = composerKey === "image2video" ? "video_image2video" : "video_text2video";
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
@@ -367,6 +388,17 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    if (
+      designatedModelAvailable &&
+      liveSkill?.modelId === modelId &&
+      liveSkill.resolution &&
+      liveSkill.resolution !== resolution
+    ) {
+      return NextResponse.json(
+        { error: "This skill is configured to use a different resolution." },
+        { status: 400 }
+      );
+    }
     if (!isValidVideoAspectRatio(model, aspectRatio)) {
       return NextResponse.json({ error: "Unsupported aspect ratio." }, { status: 400 });
     }
@@ -378,6 +410,18 @@ export async function POST(req: Request) {
         {
           error: `Duration must be one of: ${allowedDurations.join(", ")} seconds for ${resolution}.`,
         },
+        { status: 400 }
+      );
+    }
+    if (
+      designatedModelAvailable &&
+      liveSkill?.modelId === modelId &&
+      liveSkill.duration &&
+      allowedDurations.includes(liveSkill.duration) &&
+      liveSkill.duration !== duration
+    ) {
+      return NextResponse.json(
+        { error: "This skill is configured to use a different duration." },
         { status: 400 }
       );
     }

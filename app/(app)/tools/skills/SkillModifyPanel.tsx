@@ -441,7 +441,9 @@ export function SkillModifyPanel({
                     className="rounded-lg border border-white/10 bg-N50 px-2 py-1 text-xs text-N900 outline-none"
                   >
                     <option value="off">Hidden</option>
-                    <option value="optional">Optional</option>
+                    {key !== "scene" ? (
+                      <option value="optional">Optional</option>
+                    ) : null}
                     <option value="required">Required</option>
                   </select>
                 </label>

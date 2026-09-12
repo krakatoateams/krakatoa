@@ -42,6 +42,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
     console.error("[api/skills] create failed:", e);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to create skill." },
+      { status: 500 }
+    );
   }
 }
