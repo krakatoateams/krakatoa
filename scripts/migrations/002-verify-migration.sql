@@ -1,33 +1,40 @@
 -- ============================================================
--- PR 1 VERIFICATION — run AFTER 001-remap-users-to-supabase-auth.sql
+-- Auth FK cutover verification — after 091_auth_users_fk_cutover.sql
+-- Every query below must return 0 orphan rows.
 -- ============================================================
 
--- 1. Check profiles now point to auth.users UUIDs
---    auth_email should match profile email for all rows
-SELECT p.id, p.email, p.user_id, a.email as auth_email
-FROM profiles p
-LEFT JOIN auth.users a ON a.id = p.user_id
-ORDER BY p.email;
+-- 1. FKs must reference auth.users (posts CASCADE, storyboards SET NULL)
+SELECT c.relname AS table_name, con.conname, pg_get_constraintdef(con.oid) AS def
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE con.contype = 'f'
+  AND n.nspname = 'public'
+  AND pg_get_constraintdef(con.oid) ~* 'foreign key \(user_id\)'
+ORDER BY c.relname;
 
--- 2. Check platform_tokens consistency
---    Should show 1-3 rows with non-null email
-SELECT pt.user_id, a.email
-FROM platform_tokens pt
-LEFT JOIN auth.users a ON a.id = pt.user_id
-WHERE pt.platform = 'youtube';
+-- 2. Confirm public.users is gone (renamed, not dropped)
+SELECT to_regclass('public.users') AS users, to_regclass('public.users_deprecated') AS users_deprecated;
 
--- 3. Confirm old users table was renamed (not dropped)
---    Should return 3
-SELECT count(*) FROM users_deprecated;
-
--- 4. Confirm no orphaned user_ids remain
---    Must return 0 rows
-SELECT 'profiles' as tbl, user_id FROM profiles
+-- 3. Orphan user_id values — must return 0 rows
+SELECT 'profiles' AS tbl, user_id
+FROM profiles
 WHERE user_id NOT IN (SELECT id FROM auth.users)
 UNION ALL
-SELECT 'platform_tokens', user_id FROM platform_tokens
+SELECT 'user_creations', user_id
+FROM user_creations
 WHERE user_id NOT IN (SELECT id FROM auth.users)
 UNION ALL
-SELECT 'posts', user_id FROM posts
+SELECT 'platform_tokens', user_id
+FROM platform_tokens
+WHERE user_id NOT IN (SELECT id FROM auth.users)
+UNION ALL
+SELECT 'posts', user_id
+FROM posts
+WHERE user_id IS NOT NULL
+  AND user_id NOT IN (SELECT id FROM auth.users)
+UNION ALL
+SELECT 'storyboards', user_id
+FROM storyboards
 WHERE user_id IS NOT NULL
   AND user_id NOT IN (SELECT id FROM auth.users);
