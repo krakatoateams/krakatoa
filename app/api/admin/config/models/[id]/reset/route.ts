@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
 import { getModelConfigById, updateModelConfig } from "@/lib/model-configs-db";
-import { getModelDefault } from "@/lib/admin-config-defaults";
+import { getModelDefault } from "@/lib/admin-config-resolved-defaults";
 import { validateModelPatch } from "@/lib/admin-config-validation";
 
 // Reset a model config to its canonical default (Admin Phase 2.5).

@@ -92,7 +92,7 @@ None.
   - [x] Admin Config v2: PATCH validators and reset safety
   - [x] Admin Config v2: feature-model and catalog toggles
   - [x] Admin Config v2: tree builder and UI read contract
-  - [ ] Admin Config v2: persistence layer
+  - [x] Admin Config v2: persistence layer
   - [ ] Platform settings: expiry, welcome knobs, credit packs
   - [ ] Admin skills catalog
   - [ ] Log redaction: admin API and ops crons
@@ -1068,6 +1068,35 @@ None.
 - Security: final review found 0 critical, 0 high, and 0 medium findings; two
   low observations were accepted as the typed-admin-API and Suggest-only
   fallback contracts above.
+
+### Admin: Config v2 persistence layer
+
+- Date: 2026-09-13
+- Base: `547cfd8ec38a01f2ef4f9ff3bb9b2d174f1874e7`
+- Final commit: `30699a9`
+- Scope: pricing/model reset defaults, Config v2 pricing saves, canonical
+  missing-row materialization, update/insert race handling, and Scheduler LLM
+  seed alignment.
+- Findings: code-only pricing variants rendered by the tree returned 404 on
+  save; reset maps omitted registry pricing/model roles; Scheduler reset/seed
+  disagreed with its GPT-5 runtime fallback. Missing canonical rows now
+  materialize with complete v2/deprecation fields, duplicate insert races retry
+  the update, registry-backed defaults are isolated from lightweight client
+  imports, and Scheduler defaults align on `openai/gpt-5`.
+- Accepted risks: concurrent admin writes remain last-write-wins. Direct reset
+  of a missing row derives a display label from its key because Config v2 has no
+  reset UI. Reset does not repair a manually corrupted `is_deprecated` flag on
+  an existing row, and updates preserve existing noncanonical rows; both require
+  service-role/manual preconditions and do not create a non-admin billing path.
+- Verification: `npm run test:admin-config-persistence` (red then green),
+  `test:admin-config-validation`, `test:admin-config-tree`,
+  `test:admin-config-toggles`, `test:admin-auth`,
+  `test:migration-catalog`, `npm run lint` (0 errors; 11 pre-existing warnings),
+  `npm run build`, `git diff --check`, and edited-file diagnostics passed.
+  Supabase MCP recorded `schedule_gpt5_model_config` and verified the live
+  Scheduler row as `openai/gpt-5`.
+- Security: final review found 0 critical, 0 high, and 0 medium findings; two
+  low admin-trust/manual-corruption hardening notes are accepted above.
 
 ## Deferred
 

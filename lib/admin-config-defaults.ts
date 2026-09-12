@@ -29,6 +29,7 @@ export type PricingDefault = {
   pricing_type: PricingType;
   credit_amount: number;
   enabled: boolean;
+  is_deprecated?: boolean;
   // Pricing Config v2.1 (present only on v2 rows; legacy rows omit these).
   provider_cost_usd?: number | null;
   cost_unit?: CostUnit | null;
@@ -76,26 +77,31 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_image",
     credit_amount: PRODUCT_PHOTO_CREDITS,
     enabled: false,
+    is_deprecated: true,
   },
   storyboard_image: {
     pricing_type: "per_image",
     credit_amount: STORYBOARD_IMAGE_CREDITS,
     enabled: false,
+    is_deprecated: true,
   },
   storyboard_video: {
     pricing_type: "fixed",
     credit_amount: STORYBOARD_VIDEO_CREDITS,
     enabled: false,
+    is_deprecated: true,
   },
   seedance_video_per_second: {
     pricing_type: "per_second",
     credit_amount: VIDEO_CREDITS_PER_SECOND,
     enabled: false,
+    is_deprecated: true,
   },
   veo_video_per_second: {
     pricing_type: "per_second",
     credit_amount: VIDEO_CREDITS_PER_SECOND,
     enabled: false,
+    is_deprecated: true,
   },
   // ---- v2 provider-cost rows (009). credit_amount is fallback only. ----
   seedance_480p_per_second: {
@@ -372,18 +378,22 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
   // so a reset never re-activates an ambiguous price; runtime no longer reads them.
   product_photo_fallback_per_image: {
     pricing_type: "per_image", credit_amount: 4, enabled: false,
+    is_deprecated: true,
     provider_cost_usd: 0.035, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "fallback", currency: "USD",
   },
   product_photo_1k_per_image: {
     pricing_type: "per_image", credit_amount: 14, enabled: false,
+    is_deprecated: true,
     provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "1k", currency: "USD",
   },
   product_photo_2k_per_image: {
     pricing_type: "per_image", credit_amount: 14, enabled: false,
+    is_deprecated: true,
     provider_cost_usd: 0.15, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "2k", currency: "USD",
   },
   product_photo_4k_per_image: {
     pricing_type: "per_image", credit_amount: 27, enabled: false,
+    is_deprecated: true,
     provider_cost_usd: 0.30, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "4k", currency: "USD",
   },
   // ---- Product Photo model tiers (v2.3, migration 011). credit_amount fallback. ----
@@ -452,7 +462,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "photo.image_balanced": { provider: "replicate", model: "google/nano-banana-2", parameters: {}, enabled: true, is_default: true },
   "photo.image_pro": { provider: "replicate", model: "google/nano-banana-pro", parameters: {}, enabled: true, is_default: true },
   "render.rendi": { provider: "rendi", model: "default", parameters: {}, enabled: true, is_default: true },
-  "schedule.llm": { provider: "replicate", model: "google/gemini-2.5-flash", parameters: {}, enabled: true, is_default: true },
+  "schedule.llm": { provider: "replicate", model: "openai/gpt-5", parameters: {}, enabled: true, is_default: true },
   "schedule.whisper": { provider: "replicate", model: "vaibhavs10/incredibly-fast-whisper", parameters: { version: WHISPER_VERSION }, enabled: true, is_default: true },
 };
 
@@ -469,14 +479,6 @@ export const TOOL_DEFAULTS: Record<string, ToolDefault> = {
   calendar: { display_name: "Calendar", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 5 },
   virtual_creator: { display_name: "Virtual Creator", enabled: true, visible_in_sidebar: false, coming_soon: true, sort_order: 6 },
 };
-
-export function getPricingDefault(pricingKey: string): PricingDefault | null {
-  return PRICING_DEFAULTS[pricingKey] ?? null;
-}
-
-export function getModelDefault(toolKey: string, configKey: string): ModelDefault | null {
-  return MODEL_DEFAULTS[`${toolKey}.${configKey}`] ?? null;
-}
 
 export function getToolDefault(toolKey: string): ToolDefault | null {
   return TOOL_DEFAULTS[toolKey] ?? null;

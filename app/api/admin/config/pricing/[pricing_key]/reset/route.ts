@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updatePricingConfig } from "@/lib/pricing-configs-db";
-import { getPricingDefault } from "@/lib/admin-config-defaults";
+import { saveBuiltinPricingConfig } from "@/lib/pricing-configs-db";
+import { getPricingDefault } from "@/lib/admin-config-resolved-defaults";
 import { validatePricingPatch } from "@/lib/admin-config-validation";
 
 // Reset a pricing config to its canonical default (Admin Phase 2.5).
-// Admin-gated. Updates the existing row (never delete/reinsert) via the shared
-// update helper, so updated_by_profile_id is recorded. The default is run through
-// the same validator the PATCH route uses, so reset can never bypass validation.
+// Admin-gated. Updates an existing row or materializes a missing canonical
+// built-in row, recording updated_by_profile_id. The default is run through the
+// same validator the PATCH route uses, so reset can never bypass validation.
 export const dynamic = "force-dynamic";
 
 export async function POST(
@@ -40,7 +40,11 @@ export async function POST(
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    const pricing = await updatePricingConfig(params.pricing_key, result.patch, ctx.profile.id);
+    const pricing = await saveBuiltinPricingConfig(
+      params.pricing_key,
+      result.patch,
+      ctx.profile.id
+    );
     if (!pricing) {
       return NextResponse.json({ error: "Pricing config not found." }, { status: 404 });
     }
