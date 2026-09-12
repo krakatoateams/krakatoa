@@ -83,7 +83,7 @@ None.
   - [x] Live Supabase security advisors
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
   - [x] Monitoring: cross-user job reads and detail disclosure
-  - [ ] Monitoring: anomaly classification
+  - [x] Monitoring: anomaly classification
   - [ ] Prompt capture: primary generation routes
   - [ ] Prompt capture: secondary / unmetered routes
   - [ ] Log redaction: publisher cron residuals
@@ -832,6 +832,28 @@ None.
   `npm run admin:probe-monitoring` (live 50-row/720h probe ok),
   `npm run test:admin-auth`, `npm run lint` (0 errors; 11 pre-existing
   warnings), `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Admin: monitoring anomaly classification
+
+- Date: 2026-09-13
+- Base: `b5e98522126e0a4cf93a1f52a8461323dd6af738`
+- Final commit: unchanged (review-only)
+- Scope: `lib/admin-monitoring-flags.ts` plus delegation into
+  `shouldRefundRecoverableTerminal()` and `isRefundEligible()`.
+- Findings: none requiring a code change. `stuck` / `cancel_not_honored` /
+  `refund_missing` match the spec; recoverable refund rules are delegated,
+  not restated. Live terminal error codes are mapped or correctly fall
+  through as intended positives.
+- Accepted risks: `cancelRequestedAtMs` uses `generation_requests.updated_at`
+  (no `cancel_requested_at` column). Unmapped new terminal codes flag
+  `refund_missing` until added to `RECOVERABLE_TERMINAL_CODES`. Doc §stuck
+  still cites only `updated_at` (code also uses workflow heartbeat).
+- Follow-up: Prompt capture is the next Admin slice.
+- Verification: `npm run test:monitoring-flags`,
+  `npm run test:recoverable-refund`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
