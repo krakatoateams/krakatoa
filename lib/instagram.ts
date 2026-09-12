@@ -7,6 +7,11 @@ import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 import { instagramTokenExchangeErrorDetail } from "@/lib/instagram-oauth-pure";
+import {
+  instagramGraphErrorDetail,
+  instagramStorageCheckError,
+  parseInstagramGraphJson,
+} from "@/lib/instagram-publish-pure";
 
 export {
   INSTAGRAM_CONTENT_PUBLISH_SCOPE,
@@ -213,7 +218,7 @@ function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "webp" | "unknown
 export async function ensureInstagramCompatibleImage(storagePath: string): Promise<string> {
   const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
   if (error || !data) {
-    throw new Error(`Could not read photo from storage for Instagram format check: ${storagePath}`);
+    throw new Error(instagramStorageCheckError(storagePath));
   }
 
   const bytes = new Uint8Array(await data.arrayBuffer());
@@ -284,10 +289,12 @@ export async function createMediaContainer(
   });
 
   const rawText = await res.text();
-  const json = JSON.parse(rawText) as RawCreateContainerResponse;
+  const json = parseInstagramGraphJson(rawText) as RawCreateContainerResponse | null;
 
-  if (!res.ok || !json.id) {
-    throw new Error(`Instagram container creation failed: HTTP ${res.status} ${rawText}`);
+  if (!json || !res.ok || !json.id) {
+    throw new Error(
+      `Instagram container creation failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
   }
 
   return { containerId: json.id };
@@ -321,10 +328,12 @@ export async function getContainerStatus(
   });
 
   const rawText = await res.text();
-  const json = JSON.parse(rawText) as RawContainerStatusResponse;
+  const json = parseInstagramGraphJson(rawText) as RawContainerStatusResponse | null;
 
-  if (!res.ok || !json.status_code) {
-    throw new Error(`Instagram container status check failed: HTTP ${res.status} ${rawText}`);
+  if (!json || !res.ok || !json.status_code) {
+    throw new Error(
+      `Instagram container status check failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
   }
 
   // Meta's documented values are IN_PROGRESS / FINISHED / ERROR / EXPIRED /
@@ -361,10 +370,12 @@ export async function publishContainer(
   });
 
   const rawText = await res.text();
-  const json = JSON.parse(rawText) as RawPublishResponse;
+  const json = parseInstagramGraphJson(rawText) as RawPublishResponse | null;
 
-  if (!res.ok || !json.id) {
-    throw new Error(`Instagram media_publish failed: HTTP ${res.status} ${rawText}`);
+  if (!json || !res.ok || !json.id) {
+    throw new Error(
+      `Instagram media_publish failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
   }
 
   return { mediaId: json.id };
