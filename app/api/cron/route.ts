@@ -29,6 +29,7 @@ import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
 import {
+  cronErrorLogSafe,
   cronProcessingLogSafe,
   cronTokenLogSafe,
   isPermanentFailure,
@@ -497,7 +498,10 @@ export async function GET(req: NextRequest) {
             const creator = await getCreatorInfo(refreshed.accessToken);
             shareUrl = buildTikTokShareUrl(creator.creatorUsername, outcome.publicPostId);
           } catch (err) {
-            console.warn(`[cron] Post ${post.id} — failed to build TikTok share URL (non-blocking):`, err);
+            console.warn(
+              `[cron] Post ${post.id} — failed to build TikTok share URL (non-blocking):`,
+              cronErrorLogSafe(err),
+            );
           }
         }
 
@@ -733,9 +737,7 @@ export async function GET(req: NextRequest) {
           : err instanceof Error
             ? err.message
             : String(err);
-      const stack = err instanceof Error ? err.stack : undefined;
-      console.error(`[cron] ✗ Post ${post.id} failed — message:`, message);
-      if (stack) console.error(`[cron] Stack trace:`, stack);
+      console.error(`[cron] ✗ Post ${post.id} failed — message:`, cronErrorLogSafe(message));
       const anyErr = err as Record<string, unknown>;
       if (anyErr?.response) {
         console.error(

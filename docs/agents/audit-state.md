@@ -86,7 +86,7 @@ None.
   - [x] Monitoring: anomaly classification
   - [x] Prompt capture: primary generation routes
   - [x] Prompt capture: secondary / unmetered routes
-  - [ ] Log redaction: publisher cron residuals
+  - [x] Log redaction: publisher cron residuals
   - [ ] Admin analytics: RPC aggregates and paginated user PII
   - [ ] Admin metrics: cross-user dashboard reads
   - [ ] Admin Config v2: PATCH validators and reset safety
@@ -903,6 +903,35 @@ None.
   `9278f17`, which already passed `npm run build`.
 - Security: review of the three routes found 0 critical, 0 high, and 0
   unaccepted medium findings.
+
+### Admin: log redaction on publisher cron residuals
+
+- Date: 2026-09-13
+- Base: `587f00e1ac00bdf70e601eebbebc07fbaac213fe`
+- Final commit: `198ed2aa99ed34aa6a04551108d8955c8d306100`
+- Scope: `app/api/cron/route.ts` share-URL catch and outer-catch logs;
+  `lib/cron-publish-pure.ts` `cronErrorLogSafe`. Instagram missing-video
+  classifier stayed out of slice.
+- Findings: share-URL `console.warn(..., err)` dumped the full Error
+  (stack included); the outer catch printed `Error.stack`. Both now log
+  `cronErrorLogSafe` (message only, `http(s)` query tokens stripped).
+  Share-URL failure still publishes; `last_error` persist unchanged.
+- Accepted risks: scheme-less `path?token=` in a future throw is not
+  rewritten here (publish clients already call `redactPublishMediaRef`).
+  No generic Bearer/OAuth substring scrubber; current throw sites do not
+  embed tokens. Other cron `console.*` lines stay message-only status
+  text. `posts.last_error` still stores the classified message.
+- Follow-up: Admin analytics RPC aggregates and paginated user PII.
+  Remaining log-redaction slices cover admin API / ops crons and
+  generation route error logging.
+- Verification: `npm run test:cron-publish` (red on stack leak, then
+  green), `npm run test:post-ownership`, `npm run test:tiktok-publish`,
+  `npm run test:instagram-publish`, `npm run test:youtube-publish`,
+  `npm run test:tiktok-creator-info`, `npm run test:admin-auth`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted
+  medium findings.
 
 ## Deferred
 
