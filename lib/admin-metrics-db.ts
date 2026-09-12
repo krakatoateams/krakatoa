@@ -1,6 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBillingSettings } from "@/lib/billing-settings-db";
 import type { BillingSettings } from "@/lib/pricing-math";
+import { clampAdminListLimit } from "@/lib/admin-metrics-pure";
 
 /**
  * Read-only admin metrics (service-role, cross-profile).
@@ -110,7 +111,11 @@ function toRecentJob(row: JobRow): RecentJob {
 
 /** Overview numbers for the admin dashboard. */
 export async function getAdminSummary(): Promise<AdminSummary> {
-  const totalJobs = await countRows("jobs");
+  const [totalJobs, totalWallets, totalLedger] = await Promise.all([
+    countRows("jobs"),
+    countRows("credit_wallets"),
+    countRows("credit_transactions"),
+  ]);
 
   const { data: jobRows, error: jobErr } = await supabaseServer
     .from("jobs")
@@ -192,14 +197,14 @@ export async function getAdminSummary(): Promise<AdminSummary> {
       totalBalance,
       lifetimeSpent,
       lifetimePurchased,
-      walletsCapped: (walletRows?.length ?? 0) >= ROW_CAP,
+      walletsCapped: totalWallets > ROW_CAP,
     },
     ledger: {
       spendCount,
       spendAmount,
       refundCount,
       refundAmount,
-      windowCapped: (txRows?.length ?? 0) >= ROW_CAP,
+      windowCapped: totalLedger > ROW_CAP,
     },
     recentFailedJobs: ((failedRows as unknown as JobRow[] | null) ?? []).map(
       toRecentJob
@@ -299,7 +304,7 @@ export async function getAdminJobs(options?: {
       "id, tool, job_type, status, cost_credits, provider, model, created_at, profiles(email)"
     )
     .order("created_at", { ascending: false })
-    .limit(Math.min(options?.limit ?? 50, 200));
+    .limit(clampAdminListLimit(options?.limit));
 
   if (options?.tool) query = query.eq("tool", options.tool);
   if (options?.status) query = query.eq("status", options.status);
@@ -432,7 +437,7 @@ export async function getAdminCredits(options?: { limit?: number }): Promise<{
       "id, amount, direction, type, status, description, created_at, profiles(email)"
     )
     .order("created_at", { ascending: false })
-    .limit(Math.min(options?.limit ?? 50, 200));
+    .limit(clampAdminListLimit(options?.limit));
   if (txErr) throw new Error(txErr.message);
 
   const recentTransactions: LedgerEntry[] = (

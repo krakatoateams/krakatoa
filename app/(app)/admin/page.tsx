@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AdminAnalytics from "./AdminAnalytics";
+import { adminMetricsCapNotice } from "@/lib/admin-metrics-pure";
 import {
   AdminOverviewSkeleton,
   AdminTable,
@@ -43,8 +44,14 @@ type Summary = {
 
 /** Operational snapshot: what the platform is doing right now. */
 function SummaryStats({ data }: { data: Summary }) {
+  const capNotice = adminMetricsCapNotice(
+    data.jobs.capped || data.credits.walletsCapped || data.ledger.windowCapped,
+  );
   return (
     <>
+      {capNotice ? (
+        <p className="text-xs text-amber-300">{capNotice}</p>
+      ) : null}
       <section>
         <SectionHeading>Jobs</SectionHeading>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

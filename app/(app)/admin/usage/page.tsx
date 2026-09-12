@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { adminMetricsCapNotice } from "@/lib/admin-metrics-pure";
 import { AdminUsageSkeleton } from "../admin-ui";
 
 type UsageAggregate = {
@@ -78,6 +79,7 @@ function StatusPill({ status }: { status: string }) {
 
 export default function AdminUsagePage() {
   const [usage, setUsage] = useState<UsageAggregate[]>([]);
+  const [usageCapped, setUsageCapped] = useState(false);
   const [jobs, setJobs] = useState<RecentJob[]>([]);
   const [tx, setTx] = useState<LedgerEntry[]>([]);
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
@@ -92,6 +94,7 @@ export default function AdminUsagePage() {
     ])
       .then(([u, j, c]) => {
         setUsage(u.aggregates ?? []);
+        setUsageCapped(Boolean(u.capped));
         setJobs(j.jobs ?? []);
         setTx(c.recentTransactions ?? []);
         setTopUsers(c.topUsers ?? []);
@@ -103,12 +106,17 @@ export default function AdminUsagePage() {
   if (loading) return <AdminUsageSkeleton />;
   if (error) return <p className="text-sm text-red-400">{error}</p>;
 
+  const usageCapNotice = adminMetricsCapNotice(usageCapped);
+
   return (
     <div className="space-y-8">
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500">
           Usage by provider / model
         </h2>
+        {usageCapNotice ? (
+          <p className="mb-3 -mt-1 text-xs text-amber-300">{usageCapNotice}</p>
+        ) : null}
         {usage.length === 0 ? (
           <p className="text-sm text-gray-500">No usage events yet.</p>
         ) : (

@@ -88,7 +88,7 @@ None.
   - [x] Prompt capture: secondary / unmetered routes
   - [x] Log redaction: publisher cron residuals
   - [x] Admin analytics: RPC aggregates and paginated user PII
-  - [ ] Admin metrics: cross-user dashboard reads
+  - [x] Admin metrics: cross-user dashboard reads
   - [ ] Admin Config v2: PATCH validators and reset safety
   - [ ] Admin Config v2: feature-model and catalog toggles
   - [ ] Admin Config v2: tree builder and UI read contract
@@ -960,6 +960,32 @@ None.
   (0 errors; 11 pre-existing warnings), and `git diff --check` passed.
   Product behavior unchanged from `c00620a`, which already passed
   `npm run build`.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted
+  medium findings.
+
+### Admin: metrics cross-user dashboard reads
+
+- Date: 2026-09-13
+- Base: `c39696847275b08e4ce0c639fc3286f994276e60`
+- Final commit: `094349bc4293addbe25157ab6eeda486c316abeb`
+- Scope: `lib/admin-metrics-db.ts`, `lib/admin-metrics-pure.ts`,
+  `GET /api/admin/{summary,usage,jobs,credits,credits/wallets}`,
+  `app/(app)/admin/page.tsx`, `usage/page.tsx`.
+- Findings: `?limit=-1`/`0` on jobs/credits reached `.limit()` unclamped.
+  `clampAdminListLimit` now defaults 50 / max 200. Overview and usage
+  ignored `capped` flags while status/tool chips summed only the newest
+  5000 jobs; amber banner now uses `adminMetricsCapNotice`. Wallet/ledger
+  `capped` uses exact `countRows > 5000` (not `length >= 5000`).
+- Accepted risks: JS `ROW_CAP=5000` aggregation remains Phase 1 (SQL
+  deferred). Wallet subset above 5000 is unordered. Jobs/credits lists
+  have no offset (admin sees at most 200 emails). Usage page still does
+  not check `res.ok` (layout + `withAdmin` backstop). Browser E2E of the
+  banner was not run (admin session required).
+- Follow-up: Admin Config v2 PATCH validators and reset safety.
+- Verification: `npm run test:admin-metrics` (red on leaky clamp, then
+  green), `npm run test:admin-auth`, `npm run test:rpc-grants`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted
   medium findings.
 
