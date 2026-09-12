@@ -1,4 +1,15 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { isMissingDbObject } from "@/lib/generation-db-errors";
+import {
+  AdminNotFoundError,
+  LastAdminError,
+  interpretRevokeAdminResult,
+} from "@/lib/admin-auth-pure";
+
+export {
+  AdminNotFoundError,
+  LastAdminError,
+} from "@/lib/admin-auth-pure";
 
 /**
  * Admin users data access (service-role).
@@ -26,15 +37,7 @@ export type AdminUser = {
 };
 
 const ADMIN_USERS_TABLE = "admin_users";
-
-/** Thrown when an operation would remove the last remaining active admin. */
-export class LastAdminError extends Error {
-  readonly code = "LAST_ADMIN";
-  constructor(message = "Cannot remove the last active admin.") {
-    super(message);
-    this.name = "LastAdminError";
-  }
-}
+const REVOKE_RPC = "krakatoa_revoke_admin";
 
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
@@ -165,12 +168,26 @@ export async function addAdmin(params: {
 
 /**
  * Revoke an admin by id (soft remove — keeps the row for audit). Refuses to
- * revoke the last active admin (throws LastAdminError).
+ * revoke the last active admin (throws LastAdminError). The RPC serializes
+ * concurrent last-admin checks; the JS path is only a missing-RPC fallback.
  */
 export async function revokeAdminById(id: string): Promise<AdminUser> {
+  const { data, error } = await supabaseServer.rpc(REVOKE_RPC, { p_id: id });
+  if (error) {
+    if (isMissingDbObject(error.message, REVOKE_RPC)) {
+      return revokeAdminByIdLegacy(id);
+    }
+    handleError(error, "Failed to revoke admin.");
+  }
+  return interpretRevokeAdminResult(
+    (data ?? { action: "not_found" }) as { action: string; admin?: AdminUser },
+  );
+}
+
+async function revokeAdminByIdLegacy(id: string): Promise<AdminUser> {
   const target = await getAdminById(id);
   if (!target) {
-    throw new Error("Admin not found.");
+    throw new AdminNotFoundError();
   }
 
   if (target.status === "active") {

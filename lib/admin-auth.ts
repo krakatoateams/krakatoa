@@ -4,6 +4,12 @@ import {
   linkAdminProfile,
   type AdminUser,
 } from "@/lib/admin-users-db";
+import {
+  NotAdminError,
+  NotAuthenticatedError,
+} from "@/lib/admin-auth-pure";
+
+export { NotAdminError, NotAuthenticatedError } from "@/lib/admin-auth-pure";
 
 /**
  * Server-side admin authorization.
@@ -13,27 +19,11 @@ import {
  * Admin link) is cosmetic only and must never be relied on.
  *
  * Resolution chain (reuses the existing profile resolver):
- *   NextAuth session -> users (by email) -> profiles -> admin_users (active)
+ *   Supabase Auth session -> profiles -> admin_users (active)
  *
  * admin_users is the source of truth. The seed emails in the migration are only
  * the initial bootstrap, not a long-term hardcoded allowlist.
  */
-
-export class NotAuthenticatedError extends Error {
-  readonly code = "NOT_AUTHENTICATED";
-  constructor(message = "Not authenticated.") {
-    super(message);
-    this.name = "NotAuthenticatedError";
-  }
-}
-
-export class NotAdminError extends Error {
-  readonly code = "NOT_ADMIN";
-  constructor(message = "Forbidden.") {
-    super(message);
-    this.name = "NotAdminError";
-  }
-}
 
 export type CurrentAdmin = {
   admin: AdminUser;

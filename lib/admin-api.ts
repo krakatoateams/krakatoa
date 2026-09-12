@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import {
-  NotAdminError,
-  NotAuthenticatedError,
-  requireAdmin,
-  type CurrentAdmin,
-} from "@/lib/admin-auth";
-import { LastAdminError } from "@/lib/admin-users-db";
+import { requireAdmin, type CurrentAdmin } from "@/lib/admin-auth";
+import { classifyAdminError } from "@/lib/admin-auth-pure";
+
+export { classifyAdminError } from "@/lib/admin-auth-pure";
 
 /**
  * Shared HTTP helpers for admin API routes.
@@ -13,27 +10,18 @@ import { LastAdminError } from "@/lib/admin-users-db";
  * Contract (mirrors the generation routes):
  *   401 — no session (NotAuthenticatedError)
  *   403 — authenticated but not an active admin (NotAdminError)
+ *   404 — admin row does not exist (AdminNotFoundError)
  *   409 — would remove the last active admin (LastAdminError)
  *   500 — anything else (infra failure)
  */
 
 /** Map a thrown error to the correct admin HTTP response. */
 export function adminErrorResponse(e: unknown): NextResponse {
-  if (e instanceof NotAuthenticatedError) {
-    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const mapped = classifyAdminError(e);
+  if (mapped.status === 500) {
+    console.error("[admin-api] unexpected error:", e);
   }
-  if (e instanceof NotAdminError) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
-  }
-  if (e instanceof LastAdminError) {
-    return NextResponse.json({ error: e.message }, { status: 409 });
-  }
-  // Legacy string-based auth errors from the profile resolver.
-  if (e instanceof Error && /not authenticated/i.test(e.message)) {
-    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  }
-  console.error("[admin-api] unexpected error:", e);
-  return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+  return NextResponse.json({ error: mapped.error }, { status: mapped.status });
 }
 
 /**
