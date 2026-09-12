@@ -19,7 +19,12 @@ import {
   publishContainer,
   isInstagramPermanentFailure,
 } from "@/lib/instagram";
-import { resolveStoragePath, resolvePublishVideoUrl, signStoragePathForPublish } from "@/lib/storage-signed-url";
+import {
+  assertPathOwnedByUser,
+  resolveStoragePath,
+  resolvePublishVideoUrl,
+  signOwnedStoragePathForPublish,
+} from "@/lib/storage-signed-url";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
@@ -360,6 +365,7 @@ export async function GET(req: NextRequest) {
         publishVideoUrl = await resolvePublishVideoUrl({
           videoUrl: post.video_url,
           assetStoragePath,
+          userId: post.user_id,
         });
       }
 
@@ -404,6 +410,12 @@ export async function GET(req: NextRequest) {
           );
 
           try {
+            if (isPhotoPost) {
+              for (const raw of post.photo_urls ?? []) {
+                const path = resolveStoragePath(null, raw);
+                if (path) await assertPathOwnedByUser(path, post.user_id);
+              }
+            }
             publishId = isPhotoPost
               ? await publishPhotoToTikTok({
                   accessToken: refreshed.accessToken,
@@ -638,8 +650,9 @@ export async function GET(req: NextRequest) {
             if (!photoStoragePath) {
               throw new Error("Instagram photo post has no resolvable storage path.");
             }
+            await assertPathOwnedByUser(photoStoragePath, post.user_id);
             const compatiblePath = await ensureInstagramCompatibleImage(photoStoragePath);
-            mediaUrl = await signStoragePathForPublish(compatiblePath);
+            mediaUrl = await signOwnedStoragePathForPublish(compatiblePath, post.user_id);
           } else {
             // Non-null: isPhotoPost is false here, exactly when
             // publishVideoUrl was computed by the shared block above.

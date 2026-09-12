@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
 import { getAssetForProfile } from "@/lib/assets-db";
 import { isVideoUrlConfirmedMissing, videoObjectExists } from "@/lib/video-storage";
+import { classifyPublishPhotoRef } from "@/lib/storage-sign-ownership-pure";
 import {
   assertPathOwnedByUser,
   resolveSignedMediaUrl,
@@ -304,6 +305,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let ownedPhotoUrls: string[] | null = null;
+    if (hasPhotoUrls) {
+      if (!userId) {
+        return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+      }
+      ownedPhotoUrls = [];
+      for (const raw of photo_urls!) {
+        const classified = classifyPublishPhotoRef(raw, userId);
+        if (!classified.ok) {
+          const status = classified.reason === "unowned" ? 403 : 400;
+          return NextResponse.json(
+            { error: classified.reason === "unowned" ? "Forbidden" : "Invalid photo path." },
+            { status },
+          );
+        }
+        try {
+          await assertPathOwnedByUser(classified.path, userId);
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : "Forbidden.";
+          const status = /invalid storage/i.test(message) ? 400 : 403;
+          return NextResponse.json({ error: message }, { status });
+        }
+        ownedPhotoUrls.push(classified.path);
+      }
+    }
+
     // Persist storage path in video_url when ours; legacy http URLs unchanged.
     const persistedVideoRef = resolvedPath ?? legacyHttpUrl ?? null;
 
@@ -339,12 +366,12 @@ export async function POST(req: NextRequest) {
       // layers agreeing beats one implicit default.
       insertRow.tiktok_disable_duet = hasPhotoUrls ? true : Boolean(tiktok_disable_duet);
       insertRow.tiktok_disable_stitch = hasPhotoUrls ? true : Boolean(tiktok_disable_stitch);
-      if (hasPhotoUrls) insertRow.photo_urls = photo_urls;
+      if (ownedPhotoUrls) insertRow.photo_urls = ownedPhotoUrls;
     }
     // Instagram has no privacy-level/disclosure-toggle equivalent — just the
     // shared photo_urls column (validated above as exactly one entry).
-    if (platform === "instagram" && hasPhotoUrls) {
-      insertRow.photo_urls = photo_urls;
+    if (platform === "instagram" && ownedPhotoUrls) {
+      insertRow.photo_urls = ownedPhotoUrls;
     }
 
     const { data, error } = await supabaseServer

@@ -8,6 +8,22 @@ import {
   storagePathOwnerUserId,
 } from "@/lib/storage-buckets";
 
+export type PublishPhotoRef =
+  | { ok: true; path: string }
+  | { ok: false; reason: "unresolved" | "unowned" };
+
+/** Prefix ownership for a photo path or hosted URL before publish-signing. */
+export function classifyPublishPhotoRef(raw: string, userId: string): PublishPhotoRef {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, reason: "unresolved" };
+  const path = isStorageRelativePath(trimmed)
+    ? trimmed
+    : storagePathFromStorageUrl(trimmed);
+  if (!path) return { ok: false, reason: "unresolved" };
+  if (!pathPrefixOwnedByUser(path, userId)) return { ok: false, reason: "unowned" };
+  return { ok: true, path };
+}
+
 export function pathPrefixOwnedByUser(path: string, userId: string): boolean {
   return storagePathOwnerUserId(path) === userId;
 }
