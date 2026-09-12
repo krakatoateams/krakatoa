@@ -13,6 +13,10 @@ import {
 import { getAssetForProfile } from "@/lib/assets-db";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { requireResolvedSessionUserId } from "@/lib/provider-route-auth-pure";
+import {
+  pathPrefixOwnedByUser,
+  rowReferencesStoragePath,
+} from "@/lib/storage-sign-ownership-pure";
 
 export const SIGN_TTL = {
   /**
@@ -98,15 +102,38 @@ export function resolveStoragePath(
   return storagePathFromPublicUrl(raw) ?? storagePathFromSignedUrl(raw);
 }
 
+function escapeIlikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 async function pathReferencedByUser(path: string, userId: string): Promise<boolean> {
-  const { data: creation } = await supabaseServer
+  const { data: creationByPath } = await supabaseServer
     .from("user_creations")
     .select("id")
     .eq("user_id", userId)
-    .or(`storage_path.eq.${path},media_url.eq.${path},media_url.ilike.%${path}%`)
+    .eq("storage_path", path)
     .limit(1)
     .maybeSingle();
-  if (creation) return true;
+  if (creationByPath) return true;
+
+  const { data: creationByUrl } = await supabaseServer
+    .from("user_creations")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("media_url", path)
+    .limit(1)
+    .maybeSingle();
+  if (creationByUrl) return true;
+
+  const { data: creationCandidates } = await supabaseServer
+    .from("user_creations")
+    .select("storage_path, media_url")
+    .eq("user_id", userId)
+    .ilike("media_url", `%${escapeIlikePattern(path)}%`)
+    .limit(20);
+  if ((creationCandidates ?? []).some((row) => rowReferencesStoragePath(path, row))) {
+    return true;
+  }
 
   const { data: profile } = await supabaseServer
     .from("profiles")
@@ -125,14 +152,23 @@ async function pathReferencedByUser(path: string, userId: string): Promise<boole
     if (asset) return true;
   }
 
-  const { data: storyboard } = await supabaseServer
+  const like = `%${escapeIlikePattern(path)}%`;
+  const { data: byStoryboardUrl } = await supabaseServer
     .from("storyboards")
-    .select("id")
+    .select("storyboard_url, video_url")
     .eq("user_id", userId)
-    .or(`storyboard_url.ilike.%${path}%,video_url.ilike.%${path}%`)
-    .limit(1)
-    .maybeSingle();
-  return Boolean(storyboard);
+    .ilike("storyboard_url", like)
+    .limit(20);
+  if ((byStoryboardUrl ?? []).some((row) => rowReferencesStoragePath(path, row))) {
+    return true;
+  }
+  const { data: byVideoUrl } = await supabaseServer
+    .from("storyboards")
+    .select("storyboard_url, video_url")
+    .eq("user_id", userId)
+    .ilike("video_url", like)
+    .limit(20);
+  return (byVideoUrl ?? []).some((row) => rowReferencesStoragePath(path, row));
 }
 
 /** Throws if the path is outside photos/ or videos/ or not owned by userId. */
@@ -140,8 +176,7 @@ export async function assertPathOwnedByUser(path: string, userId: string): Promi
   if (!isAllowedStoragePath(path)) {
     throw new Error("Invalid storage path.");
   }
-  const owner = storagePathOwnerUserId(path);
-  if (owner === userId) return;
+  if (pathPrefixOwnedByUser(path, userId)) return;
   if (await pathReferencedByUser(path, userId)) return;
   throw new Error("Forbidden");
 }

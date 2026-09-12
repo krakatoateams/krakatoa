@@ -39,6 +39,20 @@ None.
   - [x] Webhook HMAC + amount binding
   - [x] Checkout + owner-scoped reconcile
 - [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
+  - [x] Read-sign core (path/assetId ownership + signed-URL cache)
+  - [ ] TikTok photo proxy
+  - [ ] Device upload signing
+  - [ ] Generation-ref upload signing
+  - [ ] Client egress (stable URLs, next/image)
+  - [ ] Cross-tool mention / creation-ID resolution
+  - [ ] History batch signing
+  - [ ] Pipeline server-side signing
+  - [ ] Publish/cron signing
+  - [ ] Canonical path layout
+  - [ ] Sweep / orphans
+  - [ ] Resumable recovery staging
+  - [ ] Creation expiry cleanup
+  - [ ] Platform skill thumbs
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
@@ -235,6 +249,36 @@ None.
 - Verification: `npm run test:doku-fulfillment`, `npm run lint`
   (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Storage: read-sign core
+
+- Date: 2026-09-12
+- Base: `d17ee3ec27222fb624d5c8b4acf5941beef00681`
+- Final commit: `caa9d12155fedcd34025b52eaff5cd0e9bff7bf1`
+- Scope: `GET /api/storage/sign`, `POST /api/storage/sign-batch`,
+  `lib/storage-signed-url.ts`, `lib/storage-sign-ownership-pure.ts`,
+  `getAssetForProfile` (review-only), migration `060` cache contract.
+- Findings: DB-reference fallback no longer treats a signed-URL substring as
+  ownership of a different key; PostgREST `.or()` no longer interpolates raw
+  paths. Prefix ownership, session 401, foreign `assetId` 404, and exact UI TTL
+  cache were already correct.
+- Accepted risks: same-owner soft-deleted assets remain signable via `assetId`
+  (`getAssetForProfile` has no `deleted_at` filter; trash is still owner media).
+  Cache is path-keyed after ownership. `ilike` candidate fetch is capped at 20
+  and fail-closed. `createSignedStorageUrl` without a session stays with
+  publish/pipeline/skill-thumb slices.
+- Follow-up: TikTok photo proxy, upload signing, client egress, mention
+  resolution, history/pipeline/publish signing, sweeps, and skill thumbs remain
+  in the Storage queue. Pipeline `resolveRefForPipeline` HTTP fallback stays
+  with pipeline signing.
+- Verification: `npm run test:storage-sign-ownership` (red on suffix grant,
+  then green), `npm run test:creation-ownership`,
+  `npm run test:animate-handoff`, `npm run test:post-ownership`,
+  `npm run test:creation-item-actions`, `npm run test:video-studio`,
+  `npm run probe:signed-url-cache`, `npm run lint` (0 errors; 11 pre-existing
+  warnings), `npm run build`, and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
