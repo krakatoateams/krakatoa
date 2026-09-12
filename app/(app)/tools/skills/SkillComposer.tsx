@@ -374,6 +374,7 @@ function SkillOmniInner({
       );
       const body = {
         skillId: skill.id,
+        composerKey: videoComposerKey,
         modelId: videoModel.id,
         prompt: normalizedPrompt,
         duration,

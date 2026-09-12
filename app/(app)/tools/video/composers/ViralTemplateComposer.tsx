@@ -224,6 +224,7 @@ export default function ViralTemplateComposer({
         : null;
 
     const body = {
+      composerKey: "viral_template" as const,
       modelId,
       prompt: lockedPrompt,
       viralTemplateId: template.id,

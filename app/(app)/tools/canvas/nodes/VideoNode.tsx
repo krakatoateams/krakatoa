@@ -187,6 +187,7 @@ export default function VideoNode({
     }
 
     const body = {
+      composerKey: refImages.length > 0 ? "image2video" : "text2video",
       modelId: data.modelId,
       prompt,
       duration: data.duration,

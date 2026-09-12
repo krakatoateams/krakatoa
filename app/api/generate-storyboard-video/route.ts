@@ -35,7 +35,11 @@ import { createAssetRelation } from "@/lib/asset-relations-db";
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
+import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import {
+  mapVideoComposerEnablement,
+  videoComposerModelEnabled,
+} from "@/lib/video-composer-features";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
@@ -188,7 +192,10 @@ export async function POST(req: Request) {
       ? videoModelIdRaw
       : DEFAULT_STORYBOARD_VIDEO_MODEL_ID;
     const videoModel = getVideoModel(videoModelId);
-    if (!(await isCatalogModelEnabled("reels", videoModelId))) {
+    const composerEnablement = mapVideoComposerEnablement(
+      await getVideoComposerEnablement()
+    );
+    if (!videoComposerModelEnabled(composerEnablement, "storyboard", videoModelId)) {
       return NextResponse.json({ error: "This video model isn't available." }, { status: 400 });
     }
     const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;

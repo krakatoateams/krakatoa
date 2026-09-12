@@ -14,7 +14,11 @@ import {
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
+import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import {
+  mapVideoComposerEnablement,
+  videoComposerModelEnabled,
+} from "@/lib/video-composer-features";
 import { supabaseServer } from "@/lib/supabase-server";
 import { isVideosTempRefPath } from "@/lib/storage-buckets";
 import { resolveRefForPipeline } from "@/lib/storage-signed-url";
@@ -186,7 +190,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown motion control model." }, { status: 400 });
     }
     const model = getMotionControlModel(modelId);
-    if (!(await isCatalogModelEnabled("reels", modelId))) {
+    const composerEnablement = mapVideoComposerEnablement(
+      await getVideoComposerEnablement()
+    );
+    if (!videoComposerModelEnabled(composerEnablement, "motion_control", modelId)) {
       return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
     }
     const prompt = promptRaw.slice(0, model.promptMaxChars);

@@ -27,7 +27,12 @@ import { createAssetRelation } from "@/lib/asset-relations-db";
 import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { isCatalogModelEnabled } from "@/lib/model-catalog-configs-db";
+import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import {
+  isGenerateVideoComposerKey,
+  mapVideoComposerEnablement,
+  videoComposerModelEnabled,
+} from "@/lib/video-composer-features";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   MEDIA_CACHE_CONTROL,
@@ -44,7 +49,6 @@ import {
   getAllowedDurations,
   validateVideoReferences,
   buildVideoProviderInput,
-  getVideoJobKind,
   adaptViralTemplatePromptForModel,
   supportsViralTemplateGeneration,
   viralTemplateUsesCharacterImageOnly,
@@ -300,6 +304,7 @@ export async function POST(req: Request) {
 
     const promptRaw = String(b.prompt ?? "").trim();
     const modelId = String(b.modelId ?? "").trim();
+    const composerKeyRaw = b.composerKey;
     const duration = Number(b.duration ?? NaN);
     const resolution = String(b.resolution ?? "").trim();
     const aspectRatio = String(b.aspectRatio ?? "").trim();
@@ -323,11 +328,28 @@ export async function POST(req: Request) {
     if (!modelId || !isValidVideoModelId(modelId)) {
       return NextResponse.json({ error: "Unknown video model." }, { status: 400 });
     }
+    if (!isGenerateVideoComposerKey(composerKeyRaw)) {
+      return NextResponse.json({ error: "Unknown video composer." }, { status: 400 });
+    }
+    const composerKey = composerKeyRaw;
     const model = getVideoModel(modelId);
-    if (!(await isCatalogModelEnabled("reels", modelId))) {
+    const isViralTemplateRun =
+      (viralTemplateId.length > 0 && isViralTemplateId(viralTemplateId)) ||
+      (viralTemplateStartFramePath.length > 0 &&
+        isViralTemplateAssetPath(viralTemplateStartFramePath));
+    if ((composerKey === "viral_template") !== isViralTemplateRun) {
+      return NextResponse.json(
+        { error: "Video composer does not match the request." },
+        { status: 400 }
+      );
+    }
+    const composerEnablement = mapVideoComposerEnablement(
+      await getVideoComposerEnablement()
+    );
+    if (!videoComposerModelEnabled(composerEnablement, composerKey, modelId)) {
       return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
     }
-    jobKind = getVideoJobKind(model);
+    jobKind = composerKey === "image2video" ? "video_image2video" : "video_text2video";
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
     // Cap the prompt to the selected model's limit (e.g. Kling v3 = 2500 chars).
@@ -360,10 +382,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const isViralTemplateRun =
-      (viralTemplateId.length > 0 && isViralTemplateId(viralTemplateId)) ||
-      (viralTemplateStartFramePath.length > 0 &&
-        isViralTemplateAssetPath(viralTemplateStartFramePath));
     const grokViral =
       isViralTemplateRun && viralTemplateUsesCharacterImageOnly(model);
 
@@ -545,6 +563,7 @@ export async function POST(req: Request) {
     }
     const requestHash = computeRequestHash({
       route: "generate_video",
+      composerKey,
       modelId,
       prompt,
       duration,
@@ -583,6 +602,7 @@ export async function POST(req: Request) {
         model: resolvedModel.model,
         input: {
           userId: userId!,
+          composerKey,
           modelId,
           duration,
           resolution,
@@ -601,6 +621,7 @@ export async function POST(req: Request) {
         metadata: {
           tool: "reels",
           jobType: jobKind,
+          composerKey,
           modelId,
           duration,
           resolution,
@@ -777,6 +798,7 @@ export async function POST(req: Request) {
           }
         : { prompt, userPrompt: prompt }),
       ...(skillId ? { skillId } : {}),
+      composerKey,
       modelId,
       modelLabel: model.modelLabel,
       providerModel: devBlank ? "dev_blank" : resolvedModel.model,
@@ -868,7 +890,7 @@ export async function POST(req: Request) {
         unitType: "video_seconds",
         units: duration,
         creditsCharged: creditsAmount,
-        metadata: { jobType: jobKind, modelId, resolution, aspectRatio, pricingKey },
+        metadata: { jobType: jobKind, composerKey, modelId, resolution, aspectRatio, pricingKey },
       },
       purgeResumable: true,
     });

@@ -310,6 +310,7 @@ export default function TextToVideoComposer({
       items.map((r) => ({ url: r.url, path: r.path }));
 
     const body = {
+      composerKey: "text2video" as const,
       modelId,
       prompt: prompt.trim(),
       duration,
