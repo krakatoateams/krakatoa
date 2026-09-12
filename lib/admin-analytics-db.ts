@@ -6,8 +6,10 @@ import { getBillingSettings } from "@/lib/billing-settings-db";
  *
  * Unlike lib/admin-metrics-db.ts — which aggregates in JS over a capped 5000-row
  * window and silently truncates past that — the group-bys here run as Postgres
- * functions (migration 060), so totals stay exact as the tables grow. The two
- * unbounded lists (new users, daily rollup) are paginated server-side.
+ * functions (migration 060), so totals stay exact as the tables grow. New users
+ * are paginated with PostgREST `.range()`. The daily rollup RPC returns the
+ * full series (one row per UTC day); `getDailyMetrics` slices that result, and
+ * headlines already need every day to sum lifetime totals.
  *
  * On "cost vs revenue": revenue is real money from paid credit_orders. The cost
  * side is credits CONSUMED valued at the current credit_value_idr — not provider
@@ -323,7 +325,10 @@ export async function getNewUsers(params: {
   return { rows, total: count ?? rows.length };
 }
 
-/** Daily rollup, newest day first. Powers both the Sales and DAU tables. */
+/**
+ * Daily rollup, newest day first. Powers both the Sales and DAU tables.
+ * Pages in-process after the full RPC — one row per UTC day, not per user.
+ */
 export async function getDailyMetrics(params: {
   limit: number;
   offset: number;
