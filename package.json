@@ -43,6 +43,7 @@
     "test:admin-config-tree": "npx tsx lib/admin-config-tree-self-check.ts",
     "test:admin-config-persistence": "npx tsx lib/admin-config-persistence-self-check.ts",
     "test:admin-platform-settings": "npx tsx lib/admin-platform-settings-self-check.ts",
+    "test:dev-blank": "npx tsx lib/dev-blank-generation-self-check.ts",
     "test:provider-route-auth": "npx tsx lib/provider-route-auth-self-check.ts",
     "test:post-ownership": "npx tsx lib/post-ownership-self-check.ts",
     "test:creation-ownership": "npx tsx lib/creation-ownership-self-check.ts",

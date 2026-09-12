@@ -667,8 +667,8 @@ export async function POST(req: Request) {
         required: true,
         tool: "photo",
         jobType: "product_photo",
-        provider: photoModel.provider,
-        model: photoModel.model,
+        provider: devBlank ? "dev_blank" : photoModel.provider,
+        model: devBlank ? "dev_blank" : photoModel.model,
         input: {
           poseId,
           styleId,
@@ -899,7 +899,7 @@ export async function POST(req: Request) {
             : undefined,
         characterName: isCharacterMode && characterName ? characterName : undefined,
         modelTier,
-        modelLabel: tier.modelLabel,
+        modelLabel: devBlank ? "Dev blank" : tier.modelLabel,
         skillId,
       });
       console.log("[Product Photo] Saved output.");
@@ -1020,8 +1020,8 @@ export async function POST(req: Request) {
       usage: {
         assetId: photoAssetId,
         tool: "photo",
-        provider: photoModel.provider,
-        model: photoModel.model,
+        provider: devBlank ? "dev_blank" : photoModel.provider,
+        model: devBlank ? "dev_blank" : photoModel.model,
         unitType: "image_count",
         units: successes.length,
         creditsCharged: creditsAmount,
@@ -1032,7 +1032,7 @@ export async function POST(req: Request) {
           modelTier,
           resolution,
           pricingKey,
-          providerModel: photoModel.model,
+          providerModel: devBlank ? "dev_blank" : photoModel.model,
           providerResolution,
           requestedImageCount: imageCount,
           failedImageCount: failureCount,

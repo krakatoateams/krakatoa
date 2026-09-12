@@ -259,6 +259,7 @@ export async function POST(req: Request) {
             voiceId: reqv.voiceId,
             emotion: reqv.emotion,
             captionStyle: reqv.style,
+            ...(devBlank ? { devBlank: true } : {}),
           }
         : {
             engine: "veo",
@@ -272,6 +273,7 @@ export async function POST(req: Request) {
             ...(reqv.mode === "single"
               ? { singlePromptScenes: reqv.singlePromptScenes }
               : { numScenes: reqv.numScenes }),
+            ...(devBlank ? { devBlank: true } : {}),
           }
     );
     const jobInput: Record<string, unknown> =

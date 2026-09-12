@@ -38,6 +38,7 @@ export default function VideoStudioShell({
   const { refetch: refetchCredits } = useCreditBalance();
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminResolved, setAdminResolved] = useState(false);
+  const [devBlank, setDevBlank] = useState(false);
 
   const [deepLink] = useState(() => parseVideoStudioDeepLink(searchParams));
   const {
@@ -52,6 +53,7 @@ export default function VideoStudioShell({
   useEffect(() => {
     if (status !== "authenticated") {
       setIsAdmin(false);
+      setDevBlank(false);
       setAdminResolved(true);
       return;
     }
@@ -60,12 +62,15 @@ export default function VideoStudioShell({
       .then((res) => (res.ok ? res.json() : { isAdmin: false }))
       .then((d: { isAdmin?: boolean }) => {
         if (!active) return;
-        setIsAdmin(Boolean(d.isAdmin));
+        const nextIsAdmin = Boolean(d.isAdmin);
+        setIsAdmin(nextIsAdmin);
+        if (!nextIsAdmin) setDevBlank(false);
         setAdminResolved(true);
       })
       .catch(() => {
         if (!active) return;
         setIsAdmin(false);
+        setDevBlank(false);
         setAdminResolved(true);
       });
     return () => {
@@ -78,7 +83,6 @@ export default function VideoStudioShell({
 
   const [composerEnablement, setComposerEnablement] =
     useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);
-  const [devBlank, setDevBlank] = useState(false);
 
   useEffect(() => {
     let active = true;
