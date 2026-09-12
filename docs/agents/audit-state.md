@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-None.
+- Domain: Admin
+- Slice: Admin skills catalog
+- Base: `694fa082e89eea8d4ad22c6f65d7f1f3a6bf67be`
+- Branch: `audit-repo/admin-skills-catalog`
 
 ## Queue
 
