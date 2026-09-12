@@ -63,14 +63,14 @@ None.
   (discovered; same `platform_tokens` / connections family)
   - [x] Instagram OAuth, callbacks, and token lifecycle
   - [x] Instagram publish client (`lib/instagram.ts`; cron stays Scheduler)
-- [ ] Scheduler: posts, retries, concurrent publication, and cron protection
+- [x] Scheduler: posts, retries, concurrent publication, and cron protection
   - [x] Posts API: create, list, and mutate
   - [x] Publisher cron: claim, idempotency, retries, concurrent runs
   - [x] Failed-post storage cleanup cron
   - [x] Scheduler composer UI: schedule, bulk retry, TikTok preflight
   - [x] In-app calendar UI: edit, cancel, drag-reschedule
   - [x] Cross-tool handoff and dashboard reads
-  - [ ] Legacy public calendar (`/calendar`)
+  - [x] Legacy public calendar (`/calendar`)
 - [x] Database: RLS, RPC grants, constraints, and security advisors
   - [x] Reconcile the live Supabase Auth FK cutover with an idempotent
     `supabase/migrations/` record; production is aligned but migration `003`
@@ -639,6 +639,26 @@ None.
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
+
+### Scheduler: Legacy public calendar (`/calendar`)
+
+- Date: 2026-09-12
+- Base: `5f9d7bbfa734177e0c4ff2395a087dbd330af866`
+- Final commit: `e748c97`
+- Scope: `app/calendar/page.tsx`, `lib/legacy-calendar-badge-pure.ts`.
+- Findings: the YouTube badge now requires a `platform_tokens` YouTube row via
+  `/api/connections/status`. Signed-in users without YouTube get Connect
+  YouTube (`/api/connections/youtube/start`); signed-out users get Sign in.
+- Accepted risks: brief "Connect YouTube" flash while status loads (fail-closed).
+  `/calendar` remains an orphaned duplicate of the in-app calendar.
+- Follow-up: consider redirecting `/calendar` → `/tools/scheduler/calendar`
+  (Public/deployment). Admin and Public/deployment queues remain.
+- Verification: `npm run test:legacy-calendar-badge` (red on login-as-connected,
+  then green), `npm run test:youtube-oauth`, `npm run test:post-ownership`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ### Scheduler: Cross-tool handoff and dashboard reads
 

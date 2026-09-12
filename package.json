@@ -50,6 +50,7 @@
     "test:instagram-publish": "npx tsx lib/instagram-publish-pure.ts",
     "test:cron-publish": "npx tsx lib/cron-publish-pure.ts",
     "test:post-cleanup": "npx tsx lib/post-storage-cleanup-pure.ts",
+    "test:legacy-calendar-badge": "npx tsx lib/legacy-calendar-badge-pure.ts",
     "test:generation-workflows": "npx tsx lib/generation-workflows/control-policy-self-check.ts && npx tsx lib/generation-workflows/stop-settlement-self-check.ts && npx tsx lib/generation-workflows/submission-fence-self-check.ts && npx tsx lib/generation-workflows/submission-recovery-self-check.ts && npx tsx lib/generation-workflows/webhook-token-self-check.ts && npx tsx lib/generation-workflows/polling-self-check.ts && npx tsx lib/generation-workflows/finalization-self-check.ts && npx tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",
     "admin:probe-monitoring": "npx tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "npx tsx scripts/probe-signed-url-cache.ts",
