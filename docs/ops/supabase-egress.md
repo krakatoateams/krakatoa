@@ -72,7 +72,7 @@ same URL.
 The cache is in Postgres rather than process memory on purpose: two serverless
 instances handing out two different URLs for one object would defeat the entire point.
 
-Only TTLs of a day or more are cached. `pipeline` (Rendi, Replicate) and `publish`
+Only the exact `SIGN_TTL.ui` value is cached. `pipeline` (Rendi, Replicate) and `publish`
 (TikTok, Instagram, YouTube) stay short and uncached — those consumers fetch a URL once
 and never re-request it, so caching would add a round trip and buy nothing.
 
