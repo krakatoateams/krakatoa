@@ -37,6 +37,21 @@ export const VIDEO_COMPOSER_KEYS = [
 
 export type VideoComposerKey = (typeof VIDEO_COMPOSER_KEYS)[number];
 
+export const GENERATE_VIDEO_COMPOSER_KEYS = [
+  "text2video",
+  "image2video",
+  "viral_template",
+] as const satisfies readonly VideoComposerKey[];
+
+export type GenerateVideoComposerKey = (typeof GENERATE_VIDEO_COMPOSER_KEYS)[number];
+
+export function isGenerateVideoComposerKey(value: unknown): value is GenerateVideoComposerKey {
+  return (
+    typeof value === "string" &&
+    (GENERATE_VIDEO_COMPOSER_KEYS as readonly string[]).includes(value)
+  );
+}
+
 export type VideoComposerFeature = {
   key: VideoComposerKey;
   toolKey: "reels";
@@ -187,7 +202,15 @@ export function mapVideoComposerEnablement(
   return out;
 }
 
-/** Filter a catalog to admin-enabled models; falls back to full catalog if empty. */
+export function videoComposerModelEnabled(
+  enablement: Record<VideoComposerKey, VideoComposerEnablement>,
+  composerKey: VideoComposerKey,
+  modelId: string
+): boolean {
+  return enablement[composerKey].enabledModelIds.includes(modelId);
+}
+
+/** Filter a catalog to admin-enabled models; missing enablement alone falls back. */
 export function filterEnabledCatalog<T extends { id: string }>(
   catalog: readonly T[],
   composerKey: VideoComposerKey,
@@ -195,8 +218,7 @@ export function filterEnabledCatalog<T extends { id: string }>(
 ): T[] {
   if (!enablement) return [...catalog];
   const { enabledModelIds } = enablement[composerKey];
-  const filtered = catalog.filter((m) => enabledModelIds.includes(m.id));
-  return filtered.length > 0 ? filtered : [...catalog];
+  return catalog.filter((m) => enabledModelIds.includes(m.id));
 }
 
 /** Snap selection to an enabled model (admin default wins when still enabled). */
@@ -219,8 +241,7 @@ export function filterReelsEngines<
 >(engines: readonly T[], enablement: Record<VideoComposerKey, VideoComposerEnablement> | null): T[] {
   if (!enablement) return [...engines];
   const enabled = new Set(enablement["reels-creator"].enabledModelIds);
-  const filtered = engines.filter((e) => enabled.has(REELS_ENGINE_CATALOG_MODEL_ID[e.id]));
-  return filtered.length > 0 ? filtered : [...engines];
+  return engines.filter((e) => enabled.has(REELS_ENGINE_CATALOG_MODEL_ID[e.id]));
 }
 
 /** True when at least one model is enabled for this composer. */
@@ -240,6 +261,9 @@ export function composerHasEnabledModels(
 
 // ponytail: runnable self-check — `npx tsx lib/video-composer-features.ts`
 if (require.main === module) {
+  const assert = (condition: boolean, message: string): void => {
+    if (!condition) throw new Error(`video-composer-features: ${message}`);
+  };
   const rows = defaultVideoComposerRows();
   const defaults = VIDEO_COMPOSER_KEYS.map((k) => [k, defaultModelForComposer(k)] as const);
   const perComposer = Object.fromEntries(
@@ -252,5 +276,35 @@ if (require.main === module) {
       `default ${modelId} must be eligible for ${key}`
     );
   }
+  const noneEnabled = {} as Record<VideoComposerKey, VideoComposerEnablement>;
+  for (const key of VIDEO_COMPOSER_KEYS) {
+    noneEnabled[key] = {
+      enabledModelIds: [],
+      defaultModelId: defaultModelForComposer(key),
+    };
+  }
+  assert(
+    filterEnabledCatalog([{ id: "seedance2_fast" }], "text2video", noneEnabled).length === 0,
+    "an explicitly empty composer must not fall back to the full model catalog"
+  );
+  assert(
+    filterReelsEngines([{ id: "seedance" }, { id: "veo" }], noneEnabled).length === 0,
+    "an explicitly empty Reels composer must not fall back to all engines"
+  );
+  assert(
+    !videoComposerModelEnabled(noneEnabled, "motion_control", "kling26_motion"),
+    "server-side checks must reject a model disabled for its composer"
+  );
+  assert(
+    isGenerateVideoComposerKey("text2video") &&
+      isGenerateVideoComposerKey("image2video") &&
+      isGenerateVideoComposerKey("viral_template"),
+    "generate-video must recognize every supported composer discriminator"
+  );
+  assert(
+    !isGenerateVideoComposerKey("motion_control") &&
+      !isGenerateVideoComposerKey(undefined),
+    "generate-video must reject missing or sibling-route composer discriminators"
+  );
   console.log("video-composer-features ok", { rows: rows.length, perComposer, defaults });
 }

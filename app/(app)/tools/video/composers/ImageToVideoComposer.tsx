@@ -291,6 +291,7 @@ export default function ImageToVideoComposer({
     }
 
     const body = {
+      composerKey: "image2video" as const,
       modelId,
       prompt: prompt.trim(),
       duration,
