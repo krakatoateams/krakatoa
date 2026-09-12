@@ -22,6 +22,10 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
 import {
+  assembledModelStepInput,
+  storyboardVideoJobPromptFields,
+} from "@/lib/admin-prompt-capture-pure";
+import {
   beginMeteredAttempt,
   finishMeteredAttempt,
   type MeteredAttemptHandle,
@@ -372,6 +376,9 @@ export async function POST(req: Request) {
           aspectRatio,
           language,
           style: storyboardStyle,
+          ...storyboardVideoJobPromptFields({
+            theme: typeof row.theme === "string" ? row.theme : null,
+          }),
           ...(devBlank ? devBlankJobTag() : {}),
         },
       },
@@ -475,7 +482,11 @@ export async function POST(req: Request) {
       videoBuffer = await readBlankVideoBytes(aspectRatio as VideoAspectRatio);
       await endStep({ devBlank: true });
     } else {
-      await beginStep("video_generation", "Seedance video from storyboard reference");
+      await beginStep(
+        "video_generation",
+        "Seedance video from storyboard reference",
+        assembledModelStepInput(seedancePrompt),
+      );
       // If the user already hit Cancel between spend and provider call, abort now so
       // we never start (and pay for) a provider run we're about to throw away.
       if (generationRequestId && profileId) {

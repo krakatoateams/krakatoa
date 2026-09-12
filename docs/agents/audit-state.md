@@ -84,7 +84,7 @@ None.
 - [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
   - [x] Monitoring: cross-user job reads and detail disclosure
   - [x] Monitoring: anomaly classification
-  - [ ] Prompt capture: primary generation routes
+  - [x] Prompt capture: primary generation routes
   - [ ] Prompt capture: secondary / unmetered routes
   - [ ] Log redaction: publisher cron residuals
   - [ ] Admin analytics: RPC aggregates and paginated user PII
@@ -854,6 +854,32 @@ None.
 - Verification: `npm run test:monitoring-flags`,
   `npm run test:recoverable-refund`, `npm run lint` (0 errors; 11
   pre-existing warnings), `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Admin: prompt capture on primary generation routes
+
+- Date: 2026-09-13
+- Base: `04c4b6601ff00bd662ec6610f69b8e551d15a749`
+- Final commit: `7f201d7`
+- Scope: `lib/admin-prompt-capture-pure.ts`, Reels Seedance/Veo pipelines,
+  `generate-video`, `generate-photo`, `generate-motion-control`,
+  `generate-storyboard-video`, `lib/photo-storyboard-generation.ts`,
+  monitoring `PromptSection` empty copy.
+- Findings: Reels `scene_breakdown` now stores scene prompts + narration
+  (not a count). Assembled model prompts persist on the generating step
+  for video, photo, motion-control, storyboard image, storyboard video,
+  and Veo single. Storyboard-video jobs store `theme` only. Empty copy
+  no longer claims every route never persists.
+- Accepted risks: storyboard-image `scene_breakdown` still stores a
+  scene count (Reels-only spec). Veo `veo_prompt` step still stores
+  `promptChars`; the assembled string is on `video_generation`. System
+  instructions remain unstored.
+- Follow-up: Prompt capture on secondary/unmetered routes is next.
+- Verification: `npm run test:prompt-capture` (red on scene count, then
+  green), `npm run test:monitoring-flags`, `npm run test:video-studio`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  and `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 

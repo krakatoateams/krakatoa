@@ -14,6 +14,10 @@ import { runWithRetry } from "@/lib/reels-helpers";
 import { extractMediaUrl, ReplicateCancellationError, isCancellation } from "@/lib/replicate-server";
 import { buildAssContent } from "./ass";
 import { generateVeoStyle, generateScenes } from "./llm";
+import {
+  assembledModelStepInput,
+  reelsSceneBreakdownStepOutput,
+} from "@/lib/admin-prompt-capture-pure";
 import { runTtsPipeline, parseWhisperWords } from "./tts-whisper";
 import {
   concatScenes,
@@ -173,7 +177,11 @@ ${promptInstruction}`,
   await ctx.log.endStep({ promptChars: veoPrompt.length });
 
   // ----- Step 3: Veo single-clip generation -----
-  await ctx.log.beginStep("video_generation", "Veo single-clip generation");
+  await ctx.log.beginStep(
+    "video_generation",
+    "Veo single-clip generation",
+    assembledModelStepInput(veoPrompt),
+  );
   await abortIfCancelled(ctx);
   const veoRes = await runWithRetry(
     ctx.replicate,
@@ -370,7 +378,7 @@ Return ONLY raw JSON array, nothing else.`;
     .filter(Boolean)
     .join(" ");
   if (!fullNarration) throw new Error("All scene narrations are empty.");
-  await ctx.log.endStep({ scenes: scenes.length });
+  await ctx.log.endStep(reelsSceneBreakdownStepOutput(scenes));
 
   // ----- Step 3: Veo scene videos concurrent with TTS -----
   await abortIfCancelled(ctx);

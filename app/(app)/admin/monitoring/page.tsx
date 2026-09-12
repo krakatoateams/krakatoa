@@ -251,8 +251,8 @@ const str = (v: unknown): string | null =>
  * reconstructed here. Coverage is uneven by design and the UI says so out loud:
  * motion-control writes `input.prompt`, Reels/Veo/storyboard write `input.theme`
  * (the seed the LLM expands), and the Reels style anchor lands in the
- * `style_anchor` step output. Photo and text/image-to-video assemble their prompt
- * at call time and never store it, so those read "not recorded" rather than blank.
+ * `style_anchor` step output. Photo and text/image-to-video persist the user
+ * prompt on the job and the assembled model prompt on the generating step.
  */
 function PromptSection({
   input,
@@ -282,7 +282,7 @@ function PromptSection({
     <Section title="Prompt">
       {empty ? (
         <p className="text-sm text-gray-500">
-          Not recorded — this route builds its prompt at call time and never persists it.
+          Not recorded — older jobs, or a route that builds its prompt at call time, have nothing persisted.
         </p>
       ) : (
         <div className="space-y-2">

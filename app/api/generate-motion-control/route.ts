@@ -5,6 +5,7 @@ import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-canc
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob } from "@/lib/jobs-db";
 import { createJobStep } from "@/lib/job-steps-db";
+import { assembledModelStepInput } from "@/lib/admin-prompt-capture-pure";
 import {
   beginMeteredAttempt,
   finishMeteredAttempt,
@@ -541,12 +542,16 @@ export async function POST(req: Request) {
     }
 
     const replicate = createReplicateClient();
-    await beginStep("motion_control_generation", `${model.modelLabel} motion control generation`, {
-      mode,
-      characterOrientation,
-      keepOriginalSound,
-      billedDuration,
-    });
+    await beginStep(
+      "motion_control_generation",
+      `${model.modelLabel} motion control generation`,
+      assembledModelStepInput(prompt, {
+        mode,
+        characterOrientation,
+        keepOriginalSound,
+        billedDuration,
+      }),
+    );
     if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
       throw new ReplicateCancellationError();
     }

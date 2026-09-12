@@ -76,7 +76,7 @@ Panel menampilkan prompt **hanya dari yang benar-benar ditulis pipeline** — ti
 |---|---|---|
 | `jobs.input.prompt` | Prompt user apa adanya | motion-control, text/image-to-video, photo (kalau user mengisi) |
 | `jobs.input.theme` | Seed yang dikembangkan LLM — **bukan** prompt final | Reels, Veo, storyboard |
-| `job_steps.<step>.input.prompt` | Prompt final rakitan yang benar-benar diterima model | photo (`image_generation`) |
+| `job_steps.<step>.input.prompt` | Prompt final rakitan yang benar-benar diterima model | photo (`image_generation`), video (`video_generation`), motion-control, storyboard video, Veo single |
 | `job_steps.style_anchor.output` | `styleAnchor` + `negativePrompt` | Reels/Veo |
 | `job_steps.scene_breakdown.output.scenes` | Prompt + narasi per scene | Reels |
 

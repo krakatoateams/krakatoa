@@ -17,6 +17,7 @@
     "test:generation-commit": "npx tsx lib/generation-commit-self-check.ts",
     "test:recoverable-refund": "npx tsx lib/pipeline-recovery/refund-policy-pure.ts",
     "test:monitoring-flags": "npx tsx lib/admin-monitoring-flags.ts",
+    "test:prompt-capture": "npx tsx lib/admin-prompt-capture-pure.ts",
     "test:animate-handoff": "npx tsx lib/animate-handoff.ts",
     "test:skills": "npx tsx lib/skills.ts",
     "test:canvas": "npx tsx lib/canvas-graph.ts && npx tsx lib/canvas-handoff.ts && npx tsx lib/canvas-document.ts && npx tsx lib/canvas-text-models.ts",

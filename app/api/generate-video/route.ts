@@ -13,6 +13,7 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
+import { assembledModelStepInput } from "@/lib/admin-prompt-capture-pure";
 import {
   beginMeteredAttempt,
   finishMeteredAttempt,
@@ -670,11 +671,11 @@ export async function POST(req: Request) {
         viralTemplateMode: isViralTemplateRun && !grokViral,
       });
 
-      await beginStep("video_generation", `${model.modelLabel} ${jobLabel.toLowerCase()} generation`, {
-        duration,
-        resolution,
-        aspectRatio,
-      });
+      await beginStep(
+        "video_generation",
+        `${model.modelLabel} ${jobLabel.toLowerCase()} generation`,
+        assembledModelStepInput(providerPrompt, { duration, resolution, aspectRatio }),
+      );
       if (generationRequestId && profileId) {
         await assertNotCancelled(profileId, generationRequestId);
       }

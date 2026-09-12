@@ -11,6 +11,7 @@ import { runWithRetry } from "@/lib/reels-helpers";
 import { extractMediaUrl, ReplicateCancellationError } from "@/lib/replicate-server";
 import { buildAssContent } from "./ass";
 import { generateSeedanceStyle, generateScenes } from "./llm";
+import { reelsSceneBreakdownStepOutput } from "@/lib/admin-prompt-capture-pure";
 import { runTtsPipeline } from "./tts-whisper";
 import {
   concatScenes,
@@ -105,7 +106,7 @@ Return ONLY raw JSON array, nothing else.`;
     styleAnchor,
     maxWordsPerScene: MAX_WORDS_PER_SCENE,
   });
-  await ctx.log.endStep({ sceneCount: scenes.length });
+  await ctx.log.endStep(reelsSceneBreakdownStepOutput(scenes));
 
   const fullNarration = scenes
     .map((s) => String(s.narration || "").trim())
