@@ -89,7 +89,7 @@ None.
   - [x] Log redaction: publisher cron residuals
   - [x] Admin analytics: RPC aggregates and paginated user PII
   - [x] Admin metrics: cross-user dashboard reads
-  - [ ] Admin Config v2: PATCH validators and reset safety
+  - [x] Admin Config v2: PATCH validators and reset safety
   - [ ] Admin Config v2: feature-model and catalog toggles
   - [ ] Admin Config v2: tree builder and UI read contract
   - [ ] Admin Config v2: persistence layer
@@ -986,6 +986,30 @@ None.
   green), `npm run test:admin-auth`, `npm run test:rpc-grants`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted
+  medium findings.
+
+### Admin: Config v2 PATCH validators and reset safety
+
+- Date: 2026-09-13
+- Base: `2a12e3cd5d9721c3112981d5f60b7159efe063ca`
+- Final commit: `066bbadff4fd4ab5549d807ba728ed80d6a1d87e`
+- Scope: `lib/admin-config-validation.ts`; pricing/model/tool PATCH and
+  `/reset`. Feature-model and catalog stayed out of slice.
+- Findings: all six routes already used `withAdmin()` and the shared
+  validator. `containsSecretKey` was top-level only — nested
+  `parameters.opts.api_key` would persist. Walk is now recursive
+  (objects/arrays) and applies to metadata too. Reset still validates
+  defaults before update (no delete/reinsert).
+- Accepted risks: `credit_amount: 0` still allowed with a warning.
+  Value-only secrets under benign keys are not scanned. Reset does not
+  clear existing metadata. Partial PATCH does not re-scan stored JSON.
+- Follow-up: Admin Config v2 feature-model and catalog toggles.
+- Verification: `npm run test:admin-config-validation` (red on nested
+  key, then green), `npm run test:admin-auth`,
+  `npm run test:admin-metrics`, `npm run lint` (0 errors; 11
+  pre-existing warnings), `npm run build`, and `git diff --check`
+  passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted
   medium findings.
 
