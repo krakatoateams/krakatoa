@@ -38,7 +38,7 @@ None.
 - [x] Payments: DOKU checkout, callbacks, signatures, and replay handling
   - [x] Webhook HMAC + amount binding
   - [x] Checkout + owner-scoped reconcile
-- [ ] Storage: upload/read signing, canonical paths, cleanup, and egress
+- [x] Storage: upload/read signing, canonical paths, cleanup, and egress
   - [x] Read-sign core (path/assetId ownership + signed-URL cache)
   - [x] TikTok photo proxy
   - [x] Device upload signing
@@ -48,11 +48,11 @@ None.
   - [x] History batch signing
   - [x] Pipeline server-side signing
   - [x] Publish/cron signing
-  - [ ] Canonical path layout
-  - [ ] Sweep / orphans
-  - [ ] Resumable recovery staging
-  - [ ] Creation expiry cleanup
-  - [ ] Platform skill thumbs
+  - [x] Canonical path layout
+  - [x] Sweep / orphans
+  - [x] Resumable recovery staging
+  - [x] Creation expiry cleanup
+  - [x] Platform skill thumbs
 - [ ] Integrations: TikTok OAuth, callbacks, tokens, and publishing
 - [ ] Integrations: Google/YouTube OAuth, tokens, and publishing
 - [ ] Scheduler: posts, retries, concurrent publication, and cron protection
@@ -363,6 +363,35 @@ None.
   pre-existing warnings), `npm run build`, and `git diff --check` passed.
 - Security: 0 critical, 0 high, 0 unaccepted medium. Low cron-ordering
   finding fixed in the same slice.
+
+### Storage: canonical paths, sweep, resumable, expiry, and skill thumbs
+
+- Date: 2026-09-12
+- Base: `5fceccc574fca48c8e425888485a2bd9eff111a7`
+- Final commit: `d3140e90b4f3b1a3726cf080d7428dec94881075`
+- Scope: `lib/storage-buckets.ts`, `lib/storage-paths.ts`,
+  `lib/storage-sweep.ts`, `lib/storage-orphan-audit.ts`,
+  `lib/pipeline-recovery/storage.ts`, `lib/creation-expiry.ts`,
+  cron sweep/expiry routes, skill thumb upload routes.
+- Findings: daily sweep listed `{userId}/resumable/` as `videos` and treated
+  child artifacts as orphans; prefix-only job refs do not protect them.
+  Classifier now keeps resumable paths (reconcile/settlement purge). Canonical
+  builders, expiry, cron auth, and skill-thumb gates needed no code change.
+- Accepted risks: sweep remains videos-only (photos audit-only). `CRON_SECRET`
+  open when unset. Expiry deletes `storage_path` without a prefix-vs-`user_id`
+  assert (no client write path to that column). User custom thumbs write
+  `platform/skills/{slug}/`; `createSignedStorageUrl` without a user prefix is
+  by design for that tree. Abandoned resumable folders wait for reconcile.
+- Follow-up: paginate `collectStorageReferences` / expiry selects before
+  PostgREST's ~1000-row default matters; optional expiry ownership assert;
+  unused prior thumb objects under `platform/skills/`.
+- Verification: `npm run test:storage-sweep` (red on resumable orphan, then
+  green), `npm run test:storage-sign-ownership`,
+  `npm run test:tiktok-photo-proxy`, `npm run test:creation-ownership`,
+  `npm run test:animate-handoff`, `npm run test:post-ownership`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
+- Security: 0 critical, 0 high, 0 unaccepted medium.
 
 ## Deferred
 
