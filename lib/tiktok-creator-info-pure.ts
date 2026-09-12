@@ -28,6 +28,34 @@ const RATE_LIMITED_MESSAGE =
 
 const UNKNOWN_MESSAGE = "TikTok couldn't confirm this account can post right now.";
 
+export type TikTokCreatorInfoHttpKind = "ok" | "reconnect" | "unavailable";
+
+/** Scheduler fetch of /api/connections/tiktok/creator-info. */
+export function classifyTikTokCreatorInfoHttp(status: number): {
+  kind: TikTokCreatorInfoHttpKind;
+} {
+  if (status === 409) return { kind: "reconnect" };
+  if (status >= 400) return { kind: "unavailable" };
+  return { kind: "ok" };
+}
+
+export function tiktokCreatorInfoPrivacyPlaceholder(opts: {
+  optionCount: number;
+  httpKind: TikTokCreatorInfoHttpKind | "loading";
+}): string {
+  if (opts.httpKind === "reconnect") return "Reconnect TikTok…";
+  if (opts.httpKind === "unavailable") return "Couldn't load privacy options";
+  if (opts.optionCount === 0) return "Loading…";
+  return "Select privacy…";
+}
+
+export function tiktokCreatorInfoBlocksSchedule(info: {
+  postingBlocked: boolean;
+  httpKind: TikTokCreatorInfoHttpKind | "loading";
+}): boolean {
+  return info.postingBlocked || info.httpKind === "reconnect" || info.httpKind === "unavailable";
+}
+
 export function classifyTikTokCreatorInfoError(code: string): TikTokCreatorInfoClassification {
   switch (code) {
     case "spam_risk_user_banned_from_posting":
@@ -67,6 +95,25 @@ export function tiktokCreatorInfoClassifierSelfCheck(): void {
   const reachedActiveUserCap = classifyTikTokCreatorInfoError("reached_active_user_cap");
   if (reachedActiveUserCap.severity !== "unknown") {
     throw new Error("reached_active_user_cap is this app's own client-wide quota, not a per-creator signal — must classify as unknown, not blocked or rate_limited");
+  }
+
+  if (classifyTikTokCreatorInfoHttp(409).kind !== "reconnect") {
+    throw new Error("creator-info 409 must ask the user to reconnect, not look like loading");
+  }
+  if (classifyTikTokCreatorInfoHttp(502).kind !== "unavailable") {
+    throw new Error("creator-info 502 must be unavailable, not look like loading");
+  }
+  if (classifyTikTokCreatorInfoHttp(200).kind !== "ok") {
+    throw new Error("creator-info 200 must proceed");
+  }
+  if (tiktokCreatorInfoPrivacyPlaceholder({ optionCount: 0, httpKind: "reconnect" }) === "Loading…") {
+    throw new Error("reconnect must not reuse the Loading placeholder");
+  }
+  if (!tiktokCreatorInfoBlocksSchedule({ postingBlocked: false, httpKind: "reconnect" })) {
+    throw new Error("reconnect must block scheduling");
+  }
+  if (tiktokCreatorInfoBlocksSchedule({ postingBlocked: false, httpKind: "ok" })) {
+    throw new Error("healthy creator-info must not block scheduling");
   }
 }
 
