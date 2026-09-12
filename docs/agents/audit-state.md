@@ -17,7 +17,7 @@ None.
 
 - [x] Identity: authentication and session resolution
   - [x] Supabase Auth session lifecycle and product-profile resolution
-- [ ] Authorization: admin guards and service-role ownership checks
+- [x] Authorization: admin guards and service-role ownership checks
   - [x] Admin guards (pages, `withAdmin`, feature gates)
   - [x] Unauthenticated service-role provider routes (`generate-caption`,
         `test-stitch`)
@@ -25,7 +25,7 @@ None.
     - [x] Canvas and editor CRUD
     - [x] Owned skills CRUD
     - [x] Welcome-offer claim auth + posts PATCH ownership
-  - [ ] Service-role `user_id` ownership (creations, connections; storage
+  - [x] Service-role `user_id` ownership (creations, connections; storage
         signing stays with the Storage queue item)
 - [ ] Credits: ledger, pricing, bonus offers, and refund policy
 - [ ] Payments: DOKU checkout, callbacks, signatures, and replay handling
@@ -142,6 +142,27 @@ None.
 - Verification: `npm run test:post-ownership`, `npm run test:canvas`,
   `npm run test:editor`, `npm run test:skills`, `npm run lint` (0 errors;
   11 pre-existing warnings), `npm run build`, and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
+
+### Authorization: user_id ownership
+
+- Date: 2026-09-12
+- Base: `89606a95fcbfef1e5b721cb237190733e3cd7984`
+- Final commit: `c5edfa0dfef4c1190c7ffc973af814d7c6699eaa`
+- Scope: `app/api/creations/[id]/route.ts`, `lib/creations-db.ts`, plus
+  review-only connections, storyboards list, product-photo history, and
+  creations history/trash.
+- Findings: rename/restore/trash of a missing or foreign creation now
+  returns 404 instead of 500. Connections, history, and list routes already
+  scoped every query to session `user_id`.
+- Accepted risks: select-time DB errors in `updateUserCreation` map to 404
+  except missing-table. Storage signing stays with the Storage queue item.
+  OAuth CSRF stays with Integrations.
+- Verification: `npm run test:creation-ownership`,
+  `npm run test:creation-item-actions`, `npm run test:animate-handoff`,
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
+  `git diff --check` passed.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
 
