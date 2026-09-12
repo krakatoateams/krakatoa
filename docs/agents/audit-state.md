@@ -87,7 +87,7 @@ None.
   - [x] Prompt capture: primary generation routes
   - [x] Prompt capture: secondary / unmetered routes
   - [x] Log redaction: publisher cron residuals
-  - [ ] Admin analytics: RPC aggregates and paginated user PII
+  - [x] Admin analytics: RPC aggregates and paginated user PII
   - [ ] Admin metrics: cross-user dashboard reads
   - [ ] Admin Config v2: PATCH validators and reset safety
   - [ ] Admin Config v2: feature-model and catalog toggles
@@ -930,6 +930,36 @@ None.
   `npm run test:tiktok-creator-info`, `npm run test:admin-auth`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   and `git diff --check` passed.
+- Security: final review found 0 critical, 0 high, and 0 unaccepted
+  medium findings.
+
+### Admin: analytics RPC aggregates and paginated user PII
+
+- Date: 2026-09-13
+- Base: `c00620a7a037c9a44b0bb7b9bd8a30326a0a76ff`
+- Final commit: `ee6cde7081639ae8463df9ad978aed10cdb656e6`
+- Scope: `GET /api/admin/analytics`, `/daily`, `/users`;
+  `lib/admin-analytics-db.ts`; `lib/admin-page-params.ts`;
+  `AdminAnalytics.tsx`; migrations `060`/`061`; live `krakatoa_admin_*`
+  EXECUTE grants; country capture in `lib/profiles-db.ts`.
+- Findings: no authorization or PII-leak defect. All three routes use
+  `withAdmin()`. Users are PostgREST-ranged and `limit` is capped at 100.
+  File header overstated daily "server-side" pagination; comment now
+  matches the fetch-all-then-slice used because headlines already need
+  the full UTC-day series. No query/grant/route behavior change.
+- Accepted risks: an active admin can enumerate every email/balance by
+  paging (`offset` uncapped). Daily RPC is re-fetched per page (one row
+  per UTC day). `060`/`061` names are absent from the live migration
+  ledger; the five functions exist, INVOKER, service_role-only (092).
+  Country capture trusts Vercel's 2-letter geo header. Duplicate Sales
+  + DAU daily fetches are UI waste, not a leak.
+- Follow-up: Admin metrics cross-user dashboard reads.
+- Verification: live SQL `anon_exec=false` / `service_role_exec=true` on
+  all five `krakatoa_admin_*` functions; `profiles.country` present.
+  `npm run test:rpc-grants`, `npm run test:admin-auth`, `npm run lint`
+  (0 errors; 11 pre-existing warnings), and `git diff --check` passed.
+  Product behavior unchanged from `c00620a`, which already passed
+  `npm run build`.
 - Security: final review found 0 critical, 0 high, and 0 unaccepted
   medium findings.
 
