@@ -14,10 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Public/deployment
-- Slice: Marketing landing and legal pages
-- Base: `ef5052cfe8319931518b6fcef316626da4bd725c`
-- Branch: `audit-repo/public-marketing-legal`
+- None.
 
 ## Queue
 
@@ -114,7 +111,7 @@ the runbook.
   - [x] Auth modal forms and password lifecycle
   - [x] Standalone auth pages and redirect chain
   - [x] Public unauthenticated read APIs
-  - [ ] Marketing landing and legal pages
+  - [x] Marketing landing and legal pages
   - [ ] Client bundle versus server-secret boundary
   - [ ] PWA install surface
   - [ ] Internal and dev-only route obscurity
@@ -1614,6 +1611,44 @@ the runbook.
   upload returned 410.
 - Security: independent inventory and security reviews found 0 critical, 0
   high, and 0 unaccepted medium findings.
+
+### Public/deployment: marketing landing and legal pages
+
+- Date: 2026-09-13
+- Base: `ef5052cfe8319931518b6fcef316626da4bd725c`
+- Final commit: `ca3807c1f5507257b3661b6f3a4ef1c90ec2a528`
+- Scope: `/`, the public pricing and promo surfaces, model-labelled showreels,
+  testimonials, mobile navigation, shared legal rendering, `/privacy`,
+  `/terms`, `/data-deletion`, globally mounted analytics, configured marketing
+  CDNs, and the CI contract that guards those public claims.
+- Findings: corrected legal pages that described live Instagram OAuth as future
+  work; disclosed Vercel Analytics, the opt-in YouTube embed, Cloudflare, and
+  Amazon CloudFront; replaced inaccurate password-storage wording; removed
+  static output-count and two-year-expiry claims that contradicted resolver and
+  live 360/30/7-day settings; aligned purchase and Terms refund copy with the
+  provider-commit/recoverable boundary; excluded the Nano Banana image-model
+  stand-in from labelled video clips; labelled unverified testimonials as
+  illustrative; linked data deletion publicly; and fixed reduced motion,
+  closed-sheet focus, bilingual language, and nested heading semantics.
+- Accepted risks: legal pages remain intentionally `noindex` but publicly
+  linked. Dormant subscription/feature copy is not rendered. The authenticated
+  promo retains intentional cosmetic launch-price anchors while checkout
+  remains server-authoritative; this consumer-marketing choice is outside the
+  security fix. Account deletion remains a manual support process, and
+  Instagram scheduling availability remains deliberately hedged until its UI
+  phase ships.
+- Verification: red/green `test:public-marketing`; public-auth, admin platform
+  settings, Instagram OAuth/publish, metered settlement/lifecycle, recoverable
+  refund, post cleanup, and security-header checks passed. `ci:checks` passed
+  with 0 dependency vulnerabilities, lint at 0 errors and 11 pre-existing
+  warnings, production build, `git diff --check`, and the CLAUDE.md size guard.
+  A built-server smoke test returned 200 and rendered the expected current copy
+  for `/`, `/privacy`, `/terms`, and `/data-deletion`. Live expiry settings were
+  read-only verified as 360/30/7 days.
+- Security: final independent Standards and behavior reviews found 0 critical,
+  0 high, and 0 unaccepted medium findings. The dedicated security review found
+  no critical/high issue; its media-disclosure medium was fixed and its
+  cosmetic promo-pricing medium is the explicit accepted product risk above.
 
 ## Deferred
 
