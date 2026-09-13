@@ -1,4 +1,5 @@
 import {
+  authPageHref,
   authCallbackFailureUrl,
   navigateAfterPasswordSignIn,
   passwordResetCallbackUrl,
@@ -11,6 +12,8 @@ import {
 } from "./supabase-auth-response";
 import {
   PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC,
+  isPasswordRecoveryCallback,
+  passwordRecoveryDestinationFromCallback,
   passwordRecoveryDestinationFromLanding,
   passwordRecoveryDestinationFromProof,
   passwordRecoveryGateDecision,
@@ -51,6 +54,10 @@ export function authSessionSelfCheck(): void {
     "/%5c%5cattacker.example",
     (path) => navigations.push(path),
   );
+  navigateAfterPasswordSignIn(
+    "/tools/video/%25252e%25252e/admin",
+    (path) => navigations.push(path),
+  );
 
   assert(
     navigations[0] === "/dashboard",
@@ -72,6 +79,10 @@ export function authSessionSelfCheck(): void {
     navigations[5] === "/dashboard" && navigations[6] === "/dashboard",
     "password sign-in must reject encoded protocol-relative separators",
   );
+  assert(
+    navigations[7] === "/dashboard",
+    "password sign-in must reject over-nested encoded traversal",
+  );
 
   const failedCallback = new URL(
     authCallbackFailureUrl(
@@ -85,6 +96,16 @@ export function authSessionSelfCheck(): void {
       failedCallback.searchParams.get("next") ===
         "/tools/video?type=image2video",
     "an OAuth retry must retain its safe internal destination",
+  );
+  assert(
+    authPageHref("/signup", "/tools/video?type=image2video") ===
+      "/signup?next=%2Ftools%2Fvideo%3Ftype%3Dimage2video" &&
+      authPageHref("/login", "//attacker.example/steal") ===
+        "/login?next=%2Fdashboard" &&
+      authPageHref("/login", "/tools/video", {
+        next: "//attacker.example",
+      }) === "/login?next=%2Ftools%2Fvideo",
+    "standalone auth cross-links must carry only a sanitized destination",
   );
 
   const resetCallback = new URL(
@@ -164,6 +185,26 @@ export function authSessionSelfCheck(): void {
         isRecoveryStateApi: false,
       }) === "require-reset-page",
     "a recovery-created session must be limited to its reset landing and proof endpoint",
+  );
+  assert(
+    isPasswordRecoveryCallback("recovery", resetLanding) &&
+      isPasswordRecoveryCallback(null, "/reset-password") &&
+      !isPasswordRecoveryCallback(null, resetLanding),
+    "only an explicit modern recovery flow or exact legacy reset callback may use recovery failure handling",
+  );
+  assert(
+    passwordRecoveryDestinationFromCallback("recovery", resetLanding) ===
+      "/tools/video?type=image2video" &&
+      passwordRecoveryDestinationFromCallback(
+        "recovery",
+        "/tools/video",
+      ) === "/dashboard" &&
+      passwordRecoveryDestinationFromCallback(
+        null,
+        "/reset-password",
+      ) === "/dashboard" &&
+      passwordRecoveryDestinationFromCallback(null, resetLanding) === null,
+    "every successful recovery callback must canonicalize to a gated reset destination",
   );
 
   const forwardedCookies: Array<{

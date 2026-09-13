@@ -6,6 +6,7 @@ import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
 import { JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
 import {
+  authPageHref,
   navigateAfterPasswordSignIn,
   sanitizeNextPath,
 } from "@/lib/safe-redirect";
@@ -250,7 +251,10 @@ export function SignInForm({
               Sign up here
             </button>
           ) : (
-            <Link href="/signup" className="text-brand-primary hover:text-brand-primary-hover">
+            <Link
+              href={authPageHref("/signup", safeNext)}
+              className="text-brand-primary hover:text-brand-primary-hover"
+            >
               Sign up here
             </Link>
           )}
@@ -307,7 +311,7 @@ export function SignInForm({
               </button>
             ) : (
               <Link
-                href={`/forgot-password?next=${encodeURIComponent(safeNext)}`}
+                href={authPageHref("/forgot-password", safeNext)}
                 className="text-small text-brand-primary hover:text-brand-primary-hover"
               >
                 Forgot password?
@@ -356,7 +360,10 @@ export function SignInForm({
                 Sign up here
               </button>
             ) : (
-              <Link href="/signup" className="underline hover:text-white">
+              <Link
+                href={authPageHref("/signup", safeNext)}
+                className="underline hover:text-white"
+              >
                 Sign up here
               </Link>
             )}
