@@ -14,13 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Public/deployment
-- Slice: Client bundle versus server-secret boundary (delivery)
-- Status: `blocked`
-- Blocker: [PR #192](https://github.com/krakatoateams/krakatoa/pull/192)
-  is clean and its quality gate passed, but GitHub reports a partial system
-  outage and both GraphQL and REST merge endpoints return HTTP 502.
-- Safest next command: `gh pr merge 192 --merge --delete-branch`
+- None.
 
 ## Queue
 
@@ -119,7 +113,7 @@ the runbook.
   - [x] Public unauthenticated read APIs
   - [x] Marketing landing and legal pages
   - [x] Client bundle versus server-secret boundary
-  - [ ] PWA install surface
+  - [x] PWA install surface
   - [ ] Internal and dev-only route obscurity
   - [ ] Supabase Auth leaked-password protection
 
@@ -1693,6 +1687,46 @@ the runbook.
   medium findings. Its static-check observations were either addressed
   (bracket/destructured/dynamic env reads and directive prologue handling) or
   recorded in the accepted limitations above.
+
+### Public/deployment: PWA install surface
+
+- Date: 2026-09-13
+- Base: `144f2fa6a94bb21d7ba385844bd5c7aacf26d571`
+- Final commit: unchanged (review-only)
+- Scope: `app/manifest.ts`, root PWA and Apple metadata, global service-worker
+  registration, `public/sw.js`, generated install/favicon assets and their
+  generator, same-origin manifest/worker CSP, production response MIME/cache
+  headers, install scope/start URL, activation, and authenticated-response
+  caching risk.
+- Findings: none requiring a code change. The production manifest supplies a
+  stable app id, name, same-origin `/` scope/start, standalone display, matching
+  theme/background colors, valid 192/512 and maskable icons, and Apple metadata.
+  The root worker registers at the same scope; it uses no Cache API and never
+  calls `respondWith`, so every authenticated page, API, and signed-media
+  request remains browser-network handled rather than persisted. Worker and
+  manifest loads are allowed only from self by CSP and are not auth-gated.
+- Accepted risks: the install-only worker has no offline experience, update
+  prompt, or registration telemetry; the product makes no offline claim.
+  `skipWaiting` plus `clients.claim` is safe while the worker has no fetch
+  behavior but must be revisited before adding caching. `/` opens the marketing
+  surface rather than deep-linking to Dashboard, portrait orientation is a
+  product choice, and richer screenshots/install prompts remain optional UX.
+  Any future cache is a new trust-boundary change and must exclude auth/API,
+  private HTML/JSON, and signed media. The review claim that `worker-src blob:`
+  permits a persistent blob service worker was rejected: registration requires
+  an HTTP(S), same-origin script URL.
+- Verification: `test:security-headers`, lint (0 errors; 11 pre-existing
+  warnings), production build, and `git diff --check` passed. Production-like
+  probes returned 200 with `application/manifest+json` for the manifest,
+  JavaScript for `/sw.js`, PNG for install icons, immediate worker
+  revalidation (`max-age=0`), the enforced CSP baseline, and expected emitted
+  manifest/theme/Apple/icon links. Generated 192/512/maskable/Apple assets were
+  present and visually consistent.
+- Security: independent Standards, behavior, and dedicated security reviews
+  found 0 critical, 0 high, and 0 unaccepted medium findings. The reported
+  worker cache-header concern was ruled out by the observed `max-age=0`
+  production response; remaining observations are accepted product/process
+  constraints above.
 
 ## Deferred
 
