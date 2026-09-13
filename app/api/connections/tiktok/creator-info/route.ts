@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
-import { getCreatorInfo, refreshAccessToken, TikTokCreatorInfoError, type TikTokCreatorInfo } from "@/lib/tiktok";
+import { getCreatorInfo, TikTokCreatorInfoError, type TikTokCreatorInfo } from "@/lib/tiktok";
 import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
-import { tiktokRotatedRefreshPersistDenied } from "@/lib/tiktok-oauth-pure";
+import { refreshTikTokTokensLocked } from "@/lib/tiktok-refresh-locked";
 
 function successResponse(info: TikTokCreatorInfo) {
   return NextResponse.json({
@@ -79,26 +79,10 @@ export async function GET() {
       return NextResponse.json({ error: "TikTok connection needs to be re-authorized." }, { status: 409 });
     }
     try {
-      const refreshed = await refreshAccessToken(token.refresh_token);
-
-      const { error: refreshUpsertErr } = await supabaseServer.from("platform_tokens").upsert(
-        {
-          user_id: userId,
-          platform: "tiktok",
-          access_token: refreshed.accessToken,
-          refresh_token: refreshed.refreshToken,
-          expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString(),
-        },
-        { onConflict: "user_id,platform" },
-      );
-
-      const persistDenied = tiktokRotatedRefreshPersistDenied(refreshUpsertErr);
-      if (persistDenied) {
-        console.error(
-          "[tiktok-creator-info] failed to persist refreshed token:",
-          refreshUpsertErr?.message,
-        );
-        return NextResponse.json({ error: persistDenied.error }, { status: persistDenied.status });
+      const refreshed = await refreshTikTokTokensLocked(userId);
+      if (!refreshed.ok) {
+        console.error("[tiktok-creator-info] failed to persist refreshed token");
+        return NextResponse.json({ error: refreshed.error }, { status: refreshed.status });
       }
 
       const info = await getCreatorInfo(refreshed.accessToken);

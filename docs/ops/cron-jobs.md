@@ -38,7 +38,7 @@ Setelah ubah env di Vercel → **redeploy**.
 
 ---
 
-## Daftar cron (6 endpoint)
+## Daftar cron (7 endpoint)
 
 ### 1. Publisher — `GET /api/cron`
 
@@ -135,6 +135,20 @@ Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel
 
 ---
 
+### 7. Instagram long-lived token refresh — `GET /api/cron/instagram-token-refresh`
+
+**Untuk apa:** Perpanjang long-lived Instagram `access_token` **sebelum** kedaluwarsa. Instagram tidak punya `refresh_token` terpisah — token yang tersimpan di-refresh lewat `GET graph.instagram.com/refresh_access_token`. Job ini **bukan** piggyback ke credit-expiry atau publisher `/api/cron`.
+
+**User merasakan:** Koneksi Instagram tetap hidup meski lama tidak publish; gagal refresh permanen meninggalkan row (user reconnect), 5xx tidak menghapus token yang masih valid.
+
+**Jadwal Vercel:** setiap hari **05:30 UTC** (12:30 WIB)
+
+Pilih `platform_tokens` `platform = "instagram"` dengan `expires_at` di **14 hari ke depan** (belum kedaluwarsa). Token yang umurnya < 24 jam dilewati. Persist hanya `access_token` + `expires_at`; `refresh_token` tetap `NULL`.
+
+Code: `app/api/cron/instagram-token-refresh/route.ts`
+
+---
+
 ## Ringkasan satu baris
 
 | Endpoint | Fungsi singkat |
@@ -145,6 +159,7 @@ Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel
 | `/api/cron/creation-expiry` | History kreasi expired |
 | `/api/cron/cleanup-failed-posts` | Hapus media post gagal yang ditinggalkan |
 | `/api/cron/generation-reconcile` | Refund job generation stuck |
+| `/api/cron/instagram-token-refresh` | Refresh token Instagram jangka panjang |
 
 ---
 
@@ -155,7 +170,8 @@ storage-sweep         → 0 3 * * *    (harian 03:00 UTC)
 credit-expiry         → 30 3 * * *   (harian 03:30 UTC)
 creation-expiry       → 0 4 * * *    (harian 04:00 UTC)
 cleanup-failed-posts  → 30 4 * * *   (harian 04:30 UTC)
-generation-reconcile  → 0 5 * * *    (harian 05:00 UTC)
+generation-reconcile        → 0 5 * * *    (harian 05:00 UTC)
+instagram-token-refresh     → 30 5 * * *   (harian 05:30 UTC)
 ```
 
 Publisher (`/api/cron`) sengaja **di luar** `vercel.json` karena plan Hobby membatasi cron Vercel; trigger eksternal lebih sering. Alasan yang sama bikin `generation-reconcile` harian di sini — pakai trigger eksternal kalau butuh tiap 30 menit.
@@ -171,6 +187,7 @@ export CRON_SECRET='your-secret'
 export BASE='http://localhost:3000'
 
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/generation-reconcile"
+curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/instagram-token-refresh"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/storage-sweep?dryRun=1"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/credit-expiry?dryRun=1"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/creation-expiry?dryRun=1"

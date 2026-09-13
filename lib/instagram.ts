@@ -1,7 +1,7 @@
 // Phase 1: connect-time functions (OAuth token exchange). Phase 2: publish
 // functions (createMediaContainer, getContainerStatus, publishContainer) and
-// JPEG-compatibility conversion, added below. Phase 3 (refreshLongLivedToken
-// call site + the daily proactive-refresh cron) is still not implemented.
+// JPEG-compatibility conversion. Phase 3: refreshLongLivedToken + the daily
+// proactive-refresh cron at /api/cron/instagram-token-refresh.
 
 import "server-only";
 
@@ -25,7 +25,17 @@ export {
 
 const INSTAGRAM_CODE_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const INSTAGRAM_LONG_LIVED_TOKEN_URL = "https://graph.instagram.com/access_token";
+const INSTAGRAM_REFRESH_TOKEN_URL = "https://graph.instagram.com/refresh_access_token";
 const INSTAGRAM_GRAPH_BASE = "https://graph.instagram.com";
+
+export class InstagramRefreshError extends Error {
+  readonly httpStatus: number;
+  constructor(httpStatus: number, message: string) {
+    super(message);
+    this.name = "InstagramRefreshError";
+    this.httpStatus = httpStatus;
+  }
+}
 
 // The one scope this app actually needs to grant publish access. Checked
 // against the code-exchange response's `permissions` string (see
@@ -141,8 +151,7 @@ interface RawInstagramLongLivedTokenPayload {
 /**
  * Exchanges a short-lived token for a long-lived (60-day) Instagram User
  * access token. There is no separate refresh_token — the long-lived token
- * refreshes itself later via a distinct endpoint (refreshLongLivedToken,
- * Phase 3 — not implemented yet).
+ * refreshes itself later via refreshLongLivedToken.
  */
 export async function exchangeForLongLivedToken(
   shortLivedToken: string,
@@ -158,6 +167,32 @@ export async function exchangeForLongLivedToken(
   if (!res.ok || !json.access_token || !json.expires_in) {
     throw new Error(
       `Instagram long-lived token exchange failed: HTTP ${res.status} ${instagramTokenExchangeErrorDetail(json)}`,
+    );
+  }
+
+  return { accessToken: json.access_token, expiresIn: json.expires_in };
+}
+
+/**
+ * Extends a long-lived Instagram user token (~60 more days). There is no
+ * separate refresh_token — callers persist the new access_token + expires_at
+ * and keep refresh_token null. The token must be at least 24 hours old and
+ * not yet expired (enforced by the daily cron selector, not this call).
+ */
+export async function refreshLongLivedToken(
+  accessToken: string,
+): Promise<InstagramLongLivedTokenResponse> {
+  const url = new URL(INSTAGRAM_REFRESH_TOKEN_URL);
+  url.searchParams.set("grant_type", "ig_refresh_token");
+  url.searchParams.set("access_token", accessToken);
+
+  const res = await fetch(url.toString());
+  const json = (await res.json()) as RawInstagramLongLivedTokenPayload;
+
+  if (!res.ok || !json.access_token || !json.expires_in) {
+    throw new InstagramRefreshError(
+      res.status,
+      `Instagram long-lived token refresh failed: HTTP ${res.status} ${instagramTokenExchangeErrorDetail(json)}`,
     );
   }
 

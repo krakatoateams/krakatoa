@@ -1,6 +1,6 @@
 # Tasks
 
-Phased per the confirmed decisions in `design.md`. **Phase 1 and Phase 2 are both implemented** (Phase 2 as of 2026-07-31); Phases 3–4 remain future work.
+Phased per the confirmed decisions in `design.md`. **Phase 1, Phase 2, and Phase 3 are implemented**; Phase 4 (scheduler UI) remains future work.
 
 ## Phase 1 — OAuth connect/disconnect only
 
@@ -22,7 +22,7 @@ Phased per the confirmed decisions in `design.md`. **Phase 1 and Phase 2 are bot
 - [x] 3.1 `exchangeCodeForToken(code, redirectUri)` — `POST https://api.instagram.com/oauth/access_token`, form-encoded (`client_id`, `client_secret`, `code`, `grant_type=authorization_code`, `redirect_uri`); parse `{ data: [{ access_token, user_id, permissions }] }`; return `{ accessToken, userId, permissions }`
 - [x] 3.2 `exchangeForLongLivedToken(shortLivedToken)` — `GET https://graph.instagram.com/access_token` (`grant_type=ig_exchange_token`, `client_secret`, `access_token`); return `{ accessToken, expiresIn }`
 - [x] 3.3 Business/Creator eligibility check (design.md Decision 12) — inspect the `permissions` string from 3.1's response for `instagram_business_content_publish`; exposed as a small helper so `callback` can reject before ever calling 3.2
-- [ ] 3.4 `refreshLongLivedToken` — **Phase 3**, not implemented yet
+- [x] 3.4 `refreshLongLivedToken` — Phase 3, implemented
 - [x] 3.5 Container/publish functions (`createMediaContainer`, `getContainerStatus`, `publishContainer`) — **Phase 2, implemented**
 - [x] 3.6 `isInstagramPermanentFailure` — **Phase 2, implemented**
 - [x] 3.7 (Phase 2, not originally planned) `ensureInstagramCompatibleImage` — JPEG-only conversion, discovered as a real requirement (stricter than TikTok, which also accepts WebP) during Phase 2's re-verification, not assumed from Phase 1
@@ -60,10 +60,10 @@ Phased per the confirmed decisions in `design.md`. **Phase 1 and Phase 2 are bot
 - [x] 7.6 `POST /api/posts` — fixed: `photo_urls` now accepted for `platform === "instagram"` (in addition to `"tiktok"`), with a dedicated rejection if more than 1 photo is submitted for Instagram (no carousel support — matches the cron's own `photo_urls[0]`-only handling, but rejects up front instead of silently dropping extras); the "can't mix photos and video" guard now applies to Instagram too; `insertRow.photo_urls` is now persisted for Instagram posts (previously only assigned inside the `platform === "tiktok"` block, so it would have been silently dropped even if the platform check had allowed it through)
 - [ ] 7.7 (Flagged, not fixed here) Confirm whether `lib/reels-pipeline`'s Rendi FFmpeg output needs `-movflags +faststart` added for Instagram's Reels container spec ("moov atom at the front of the file") — currently absent; TikTok/YouTube have not needed this, Instagram's docs list it explicitly
 
-## Phase 3 — Proactive token refresh (future change, not this one)
-- [ ] 8.1 `lib/instagram.ts`: `refreshLongLivedToken` (design.md Decision 2, endpoint already researched)
-- [ ] 8.2 New daily cron route selecting `platform_tokens` rows (`platform = "instagram"`) with `expires_at` inside the next 7–14 days, calling `refreshLongLivedToken` and persisting the result (design.md Decision 2b)
-- [ ] 8.3 Register the cron in `vercel.json`, matching the existing native-cron convention
+## Phase 3 — Proactive token refresh (implemented)
+- [x] 8.1 `lib/instagram.ts`: `refreshLongLivedToken` (design.md Decision 2, endpoint already researched)
+- [x] 8.2 New daily cron route selecting `platform_tokens` rows (`platform = "instagram"`) with `expires_at` inside the next 7–14 days, calling `refreshLongLivedToken` and persisting the result (design.md Decision 2b)
+- [x] 8.3 Register the cron in `vercel.json`, matching the existing native-cron convention
 
 ## Phase 4 — Scheduler UI (future change, not this one; depends on Phase 2)
 - [ ] 9.1 Widen `platforms: Array<"youtube" | "tiktok">` to include `"instagram"` everywhere the union is spelled out in `app/(app)/tools/scheduler/page.tsx`

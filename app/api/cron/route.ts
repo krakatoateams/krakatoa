@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { uploadToYouTube } from "@/lib/youtube";
 import {
-  refreshAccessToken,
   publishToTikTok,
   publishPhotoToTikTok,
   resolveOrigin,
@@ -11,6 +10,7 @@ import {
   buildTikTokShareUrl,
   TikTokCreatorInfoError,
 } from "@/lib/tiktok";
+import { refreshTikTokTokensLocked } from "@/lib/tiktok-refresh-locked";
 import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
 import {
   ensureInstagramCompatibleImage,
@@ -329,30 +329,15 @@ export async function GET(req: NextRequest) {
       }
 
       if (post.platform === "tiktok") {
-        // ── Refresh, then IMMEDIATELY persist, then publish ───────────────────
-        // TikTok invalidates the old refresh_token on every refresh call and
-        // issues a new one. The rotated token is persisted before anything else
-        // is attempted so a later publish failure can never strand the user
-        // with an already-invalidated refresh_token (see
-        // openspec/changes/tiktok-publish/design.md, Decision 3).
-        const refreshed = await refreshAccessToken(token.refresh_token);
-
-        const { error: refreshUpsertErr } = await supabaseServer
-          .from("platform_tokens")
-          .upsert(
-            {
-              user_id: post.user_id,
-              platform: "tiktok",
-              access_token: refreshed.accessToken,
-              refresh_token: refreshed.refreshToken,
-              expires_at: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString(),
-            },
-            { onConflict: "user_id,platform" },
-          );
-
-        if (refreshUpsertErr) {
-          console.error(`[cron] Failed to persist refreshed TikTok token for post ${post.id}:`, refreshUpsertErr.message);
-          throw new Error(`Failed to persist refreshed TikTok token: ${refreshUpsertErr.message}`);
+        // ── Locked refresh, persist, then publish ─────────────────────────────
+        // TikTok invalidates the old refresh_token on every refresh call.
+        // creator-info and this cron share refreshTikTokTokensLocked so only
+        // one caller rotates; the loser re-reads. Persist still happens before
+        // publish (tiktok-publish Decision 3).
+        const refreshed = await refreshTikTokTokensLocked(post.user_id);
+        if (!refreshed.ok) {
+          console.error(`[cron] Failed to persist refreshed TikTok token for post ${post.id}`);
+          throw new Error(refreshed.error);
         }
 
         // ── Publish to TikTok, or resume checking a prior attempt ────────────────

@@ -3,6 +3,8 @@
  * and eligibility can be tested without loading the service-role client.
  */
 
+import { readFileSync } from "node:fs";
+
 export const INSTAGRAM_CONTENT_PUBLISH_SCOPE = "instagram_business_content_publish";
 
 export function hasBusinessContentPublishPermission(permissions: string[]): boolean {
@@ -38,6 +40,18 @@ export function instagramOAuthSelfCheck(): void {
   }
   if (hasBusinessContentPublishPermission(["instagram_business_basic"])) {
     throw new Error("basic-only permission must not persist a connection");
+  }
+
+  const callbackSource = readFileSync(
+    new URL("../app/api/connections/instagram/callback/route.ts", import.meta.url),
+    "utf8",
+  );
+  const sessionIdx = callbackSource.search(/await getSessionUserId\s*\(/);
+  const exchangeIdx = callbackSource.search(/exchangeCodeForToken\s*\(/);
+  if (sessionIdx < 0 || exchangeIdx < 0 || sessionIdx > exchangeIdx) {
+    throw new Error(
+      "Instagram callback must bind the session before exchanging the authorization code",
+    );
   }
 }
 
