@@ -21,6 +21,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Run development server**: `npm run dev`
 - **Build for production**: `npm run build`
 - **Linting**: `npm run lint`
+- **Run deterministic CI quality gates**: `npm run ci:checks`
 - **Regenerate PWA icons** (from `public/Logo White transparent.svg`): `npm run icons:generate`
 - **Apply DB migrations**: `npm run db:setup` (applies every file in `supabase/migrations/` against the project — idempotent and safe to re-run)
 - **Migrate storage layout** (one-off path moves): `npm run storage:migrate-layout` (dry-run) / `npm run storage:migrate-layout -- --execute`

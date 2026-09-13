@@ -18,6 +18,7 @@ keeps only the rules needed on most engineering tasks.
 - Develop: `npm run dev`
 - Build: `npm run build`
 - Lint: `npm run lint`
+- CI quality gates: `npm run ci:checks`
 - Apply migrations: `npm run db:setup`
 - Relevant focused checks are listed in `package.json`.
 

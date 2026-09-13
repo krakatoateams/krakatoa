@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Deployment CI quality-gate automation
+- Base: `b016ca85f5267e6397e46168bfe9f4ebcaaaffd5`
+- Branch: `audit-repo/public-ci-gates`
 
 ## Queue
 

@@ -1,0 +1,52 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Build-only hostname used by next.config.mjs. CI never contacts this host.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
+    steps:
+      - name: Check out the committed patch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the minimum supported Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20.9.0"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run deterministic quality gates
+        run: npm run ci:checks
+
+      - name: Check pull-request patch whitespace
+        if: github.event_name == 'pull_request'
+        run: >-
+          git diff --check
+          "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+
+      - name: Check pushed patch whitespace
+        if: github.event_name == 'push'
+        run: >-
+          git diff --check
+          "${{ github.event.before }}..${{ github.sha }}"
