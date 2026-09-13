@@ -3,7 +3,7 @@
 - Runbook: `docs/agents/code-security-audit-runbook.md`
 - Runner: `/audit-repo`
 - Execution mode: `auto-fix-and-merge`
-- Overall status: `in_progress`
+- Overall status: `complete`
 
 The runner owns only branches prefixed `audit-repo/`. It may commit on those
 branches, open a GitHub pull request, merge with a merge commit (never squash,
@@ -14,22 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Public/deployment
-- Slice: Supabase Auth leaked-password protection
-- Base: `68afea72b41aaea3f16d944732f01c515c3bb02b`
-- Branch: `audit-repo/public-leaked-password-protection`
-- Status: `blocked`
-- Evidence: the live Supabase security advisor reports
-  `auth_leaked_password_protection` (`WARN`, count 1). Supabase documents leaked
-  password checks through HaveIBeenPwned as available on Pro and above, while
-  organization `krakatoateams` currently reports plan `free`.
-- Blocker: upgrading the Supabase subscription and changing production Auth
-  settings are owner-controlled billing/configuration decisions outside the
-  audit runner's authorization.
-- Safest next action: either upgrade to Pro and enable leaked-password
-  protection in the project's Auth settings, then rerun the security advisor,
-  or explicitly accept the free-plan residual risk so this slice can be
-  checkpointed and the Public/deployment audit closed.
+- None.
 
 ## Queue
 
@@ -117,7 +102,7 @@ the runbook.
     - [x] Primary generation and shared pipelines
     - [x] Secondary generation and admin test route
   - [x] Admin dev-blank generation
-- [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
+- [x] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
   - [x] Dependency and Image Optimizer supply chain
   - [x] Production secrets and fail-open deployment guards
   - [x] Deployment CI quality-gate automation
@@ -130,7 +115,7 @@ the runbook.
   - [x] Client bundle versus server-secret boundary
   - [x] PWA install surface
   - [x] Internal and dev-only route obscurity
-  - [ ] Supabase Auth leaked-password protection
+  - [x] Supabase Auth leaked-password protection
 
 ## Completed
 
@@ -1789,6 +1774,45 @@ the runbook.
   `app` and `lib`, banning setup routes outside `/api/dev`, forbidding
   `test-stitch` GET, and running the complete dev-blank check in CI.
 
+### Public/deployment: Supabase Auth leaked-password protection
+
+- Date: 2026-09-13
+- Base: `68afea72b41aaea3f16d944732f01c515c3bb02b`
+- Final commit: unchanged (review-only)
+- Scope: live Supabase Auth security advisors, organization entitlement,
+  official password-security guidance, repository-managed Auth configuration,
+  email/password signup and reset paths, login throttling, recovery proof, and
+  the boundary between application validation and hosted GoTrue policy.
+- Findings: the live advisor reports
+  `auth_leaked_password_protection` (`WARN`, count 1): GoTrue does not reject
+  passwords found in HaveIBeenPwned at signup or password change. Official
+  Supabase guidance confirms the feature is available on Pro and above; MCP
+  reports organization `krakatoateams` on plan `free`. No migration,
+  repository config, or application-only change can enable the entitlement or
+  clear this advisor. A client/server pre-check would remain bypassable through
+  the public Auth endpoint and would not equal upstream enforcement.
+- Accepted risks: the owner explicitly chose to remain on Free and document the
+  residual risk. Email/password users may choose a known-breached or reused
+  password, increasing credential-stuffing takeover risk for their session,
+  credits, assets, scheduled posts, and connected-platform access. Existing
+  per-email login lockout, per-instance rate limiting, email confirmation,
+  hardened recovery-session proof, Google OAuth, bcrypt storage, deny-by-default
+  RLS, and owner-scoped service routes reduce adjacent impact but do not replace
+  leaked-password rejection. The live advisor WARN is expected to remain.
+- Follow-up trigger: after any Supabase Pro upgrade, enable leaked-password
+  protection in the project's Auth settings and rerun the security advisor;
+  completion is the absence of `auth_leaked_password_protection`.
+- Verification: Supabase MCP `get_advisors(type=security)` returned the single
+  Auth WARN plus expected deny-by-default RLS INFO notices;
+  `get_organization` returned `plan: free`. Current official
+  `auth/password-security` documentation was checked, repository search found
+  no `password_hibp`/HIBP implementation and no `supabase/config.toml`, and
+  sign-in lockout/recovery controls were traced to their previously verified
+  public seams.
+- Security: dedicated review classified this as an accepted external
+  low-to-medium entitlement risk, not an application auth bypass, with 0
+  critical, 0 high, and 0 unaccepted medium findings.
+
 ## Deferred
 
 - Public/deployment / GitHub required quality status — owner: repository admin.
@@ -1796,6 +1820,10 @@ the runbook.
   2026-09-13. After the `Quality gates / quality` check exists on `main`, require
   it for merges and restrict direct pushes. This is an external repository
   settings mutation outside the audit runner's code/PR authorization.
+- Public/deployment / Supabase Auth leaked-password protection — owner:
+  repository billing/Auth administrator. The owner accepted the Free-plan risk;
+  after a Pro upgrade, enable the hosted HIBP check and verify the live advisor
+  WARN is gone.
 
 ## Audit log template
 
