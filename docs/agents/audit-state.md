@@ -114,7 +114,7 @@ the runbook.
   - [x] Marketing landing and legal pages
   - [x] Client bundle versus server-secret boundary
   - [x] PWA install surface
-  - [ ] Internal and dev-only route obscurity
+  - [x] Internal and dev-only route obscurity
   - [ ] Supabase Auth leaked-password protection
 
 ## Completed
@@ -1727,6 +1727,52 @@ the runbook.
   worker cache-header concern was ruled out by the observed `max-age=0`
   production response; remaining observations are accepted product/process
   constraints above.
+
+### Public/deployment: internal and dev-only route obscurity
+
+- Date: 2026-09-13
+- Base: `1cb58b888e0ef70adaa89f0fd373062637b9bac8`
+- Final commit: `91f1d9c`
+- Scope: every internal/dev/test/setup route and route-like static surface,
+  including `app/api/dev/**`, `app/api/test-stitch`, the internal design
+  system, admin dev-blank generation, `public/dev/**`, middleware matching,
+  production/preview environment gates, Management API credentials, route
+  callers, HTTP mutation semantics, filesystem path selection, and CI policy.
+- Findings: retired two unreferenced `GET /api/dev/*` handlers that exposed
+  Supabase Management API DDL from deployable Next route source, plus their
+  now-orphaned `lib/supabase-migrate.ts` helper. Although Vercel production and
+  previews returned 404 through `NODE_ENV`, a non-production-facing host with
+  setup credentials could invoke database mutation; the generic migration
+  endpoint also accepted an unrestricted filename and normalized `..` outside
+  the migration directory before submitting file contents as SQL. Removing the
+  dormant HTTP surface eliminates that path, raw upstream error responses, and
+  the `NEXTAUTH_SECRET` setup-key fallback. Missing-table guidance now points
+  to the configured Supabase MCP/SQL Editor or local `DATABASE_URL` CLI flow.
+  CI forbids `/api/dev` and setup-route source, deployable Management API
+  credentials/endpoints, stale HTTP hints, and changes to reviewed internal,
+  test-stitch, dev-blank, or public placeholder gates.
+- Accepted risks: `POST /api/test-stitch` intentionally remains a production
+  admin operator utility and can spend Replicate/Rendi quota; anonymous and
+  non-admin callers receive 401/403 rather than route-obscuring 404. The design
+  system is unauthenticated only in development and 404s in production.
+  Reviewed blank PNG/MP4 files remain public and non-sensitive while every
+  generation use is server-admin-gated. Local migration scripts still support
+  Management API tokens outside deployable `app`/`lib` source. The legacy
+  `db:setup-product-photo` alias and single-table script naming remain
+  operational cleanup, not a deployed authorization path.
+- Verification: red/green `test:internal-routes`, now paired with the full
+  dev-blank authorization-order check; deployment-CI, client-secret,
+  provider-route, admin-auth, cron-auth, and dev-blank neighbors passed. Final
+  `ci:checks` passed with 0 dependency vulnerabilities, lint at 0 errors and 11
+  pre-existing warnings, production build, and the CLAUDE.md size guard.
+  Production-server probes returned 404 for both retired setup URLs and the
+  internal design system, 401 for anonymous `POST /api/test-stitch`, and 200
+  for the reviewed blank placeholder. `git diff --check`, source/reference
+  searches, and edited-file diagnostics passed.
+- Security: final dedicated review found 0 critical, 0 high, and 0 unaccepted
+  medium findings. Its guardrail observations were addressed by scanning both
+  `app` and `lib`, banning setup routes outside `/api/dev`, forbidding
+  `test-stitch` GET, and running the complete dev-blank check in CI.
 
 ## Deferred
 
