@@ -110,7 +110,7 @@ the runbook.
   - [x] Logged-out middleware route matrix and draft hand-off
   - [x] Auth modal forms and password lifecycle
   - [x] Standalone auth pages and redirect chain
-  - [ ] Public unauthenticated read APIs
+  - [x] Public unauthenticated read APIs
   - [ ] Marketing landing and legal pages
   - [ ] Client bundle versus server-secret boundary
   - [ ] PWA install surface
@@ -1577,6 +1577,40 @@ the runbook.
   preserving `next` at `/forgot-password?...&error=expired`.
 - Security: final re-review found 0 critical, 0 high, and 0 unaccepted medium
   findings.
+
+### Public/deployment: public unauthenticated read APIs
+
+- Date: 2026-09-13
+- Base: `a81df84e1932ab7747c7901d0b0f983793712ca6`
+- Final commit: unchanged (review-only)
+- Scope: every API GET/HEAD plus read-like POST, API middleware behavior,
+  handler-local session/admin/secret gates, service-role reads, public callers,
+  response fields, caching/rate limits, storage/proxy access, and provider cost.
+- Findings: no accidentally public user, wallet, creation, post, storage-sign,
+  admin, production-cron, or provider-work read was found. Intentional public
+  responses are tool visibility, credit packs, promo state, platform Skills,
+  admin cosmetic state, recovery proof state, the deprecated upload response,
+  the rate-limited auth-provider hint, and the TikTok photo pull proxy. Public
+  fields are minimal for their callers; authenticated routes enforce ownership
+  in handlers because API middleware is only the recovery-session gate.
+- Accepted risks: the TikTok photo proxy intentionally converts a constrained,
+  user-first photo storage path into an unauthenticated verified-domain URL.
+  `/api/auth/check-provider` intentionally reveals the Google-only case and
+  performs a per-instance-rate-limited admin user scan. Public Skills expose
+  platform recipes/model IDs and sign platform thumbnails. Catalog reads have
+  no shared distributed rate limit; these are documented scale/DoS follow-ups,
+  not current cross-user disclosure.
+- Verification: public-auth, Skills, TikTok proxy, admin, creation ownership,
+  storage signing, cron, and posts self-checks passed. `ci:checks` passed with 0
+  dependency vulnerabilities, lint at 0 errors and 11 pre-existing warnings,
+  production build, `git diff --check`, and the CLAUDE.md size guard. Anonymous
+  production probes returned the expected minimal 200 shapes for config, packs,
+  promo, Skills, admin/me, recovery state, and provider hint; authenticated
+  creations, balance, storage sign, admin monitoring, and posts returned 401,
+  cron failed closed with 503, an invalid TikTok path returned 404, and legacy
+  upload returned 410.
+- Security: independent inventory and security reviews found 0 critical, 0
+  high, and 0 unaccepted medium findings.
 
 ## Deferred
 
