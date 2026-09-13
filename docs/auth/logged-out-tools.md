@@ -30,5 +30,16 @@ with `consumePendingDraftForOwner()`, and reopen the matching composer from
 `pendingDraftOwner()`. Files and blobs are intentionally excluded; affected
 forms tell users to re-attach them after sign-in.
 
+Password recovery carries the same sanitized `next` destination through the
+email callback. A successful reset resumes that page; an expired link keeps the
+destination on the retry form. Reset callback URLs must be built with
+`passwordResetCallbackUrl()` rather than assembling nested query strings in a
+component. A successful recovery callback also sets an HttpOnly proof cookie.
+The reset modal requires both that proof and a session; middleware keeps
+the recovery-created session on the reset landing and rejects app APIs until the
+password update clears the proof. Dismissing an unfinished reset signs out the
+local recovery session. A later normal password or callback sign-in clears stale
+proof before entering the app.
+
 Run `npm run test:public-auth-flow` when changing the route matrix, auth
 redirects, modal OAuth behavior, or draft persistence.

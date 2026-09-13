@@ -1,11 +1,21 @@
 import {
   authCallbackFailureUrl,
   navigateAfterPasswordSignIn,
+  passwordResetCallbackUrl,
+  passwordResetDestination,
+  passwordResetRetryUrl,
 } from "./safe-redirect";
 import {
   SUPABASE_AUTH_CACHE_HEADERS,
   forwardSupabaseAuthUpdates,
 } from "./supabase-auth-response";
+import {
+  PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC,
+  passwordRecoveryDestinationFromLanding,
+  passwordRecoveryDestinationFromProof,
+  passwordRecoveryGateDecision,
+  passwordRecoveryProofValue,
+} from "./password-recovery";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`auth-session self-check: ${message}`);
@@ -75,6 +85,85 @@ export function authSessionSelfCheck(): void {
       failedCallback.searchParams.get("next") ===
         "/tools/video?type=image2video",
     "an OAuth retry must retain its safe internal destination",
+  );
+
+  const resetCallback = new URL(
+    passwordResetCallbackUrl(
+      "https://www.kelolako.com",
+      "/tools/video?type=image2video",
+    ),
+  );
+  const resetLanding = resetCallback.searchParams.get("next");
+  assert(
+    resetCallback.pathname === "/auth/callback" &&
+      resetCallback.searchParams.get("flow") === "recovery" &&
+      resetLanding ===
+        "/dashboard?resetPassword=1&next=%2Ftools%2Fvideo%3Ftype%3Dimage2video",
+    "password recovery must carry the sanitized gated destination through the callback",
+  );
+  assert(
+    passwordResetDestination(
+      new URL(resetLanding!, "https://www.kelolako.com").searchParams.get(
+        "next",
+      ),
+    ) === "/tools/video?type=image2video" &&
+      passwordResetDestination("//attacker.example/steal") === "/dashboard",
+    "password reset completion must preserve only a safe internal destination",
+  );
+
+  const resetRetry = new URL(
+    passwordResetRetryUrl("https://www.kelolako.com", resetLanding),
+  );
+  assert(
+    resetRetry.pathname === "/forgot-password" &&
+      resetRetry.searchParams.get("error") === "expired" &&
+      resetRetry.searchParams.get("next") ===
+        "/tools/video?type=image2video",
+    "an expired recovery link must preserve its safe retry destination",
+  );
+  assert(
+    passwordRecoveryDestinationFromLanding(resetLanding) ===
+      "/tools/video?type=image2video" &&
+      passwordRecoveryDestinationFromLanding("/dashboard") === null &&
+      passwordRecoveryDestinationFromLanding(
+        "/dashboard?resetPassword=1&next=%2F%2Fattacker.example",
+      ) === "/dashboard",
+    "only a reset landing may establish recovery proof and its destination must be sanitized",
+  );
+  const recoveryProof = passwordRecoveryProofValue(
+    "/tools/video?type=image2video",
+  );
+  assert(
+    passwordRecoveryDestinationFromProof(recoveryProof) ===
+      "/tools/video?type=image2video" &&
+      passwordRecoveryDestinationFromProof("%") === null &&
+      PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC >= 30 * 24 * 60 * 60,
+    "the recovery gate cookie must round-trip only a valid destination",
+  );
+  assert(
+    passwordRecoveryGateDecision({
+      authenticated: true,
+      recoveryDestination: "/tools/video?type=image2video",
+      requestPathWithSearch: "/api/generate-video",
+      isApi: true,
+      isRecoveryStateApi: false,
+    }) === "reject-api" &&
+      passwordRecoveryGateDecision({
+        authenticated: true,
+        recoveryDestination: "/tools/video?type=image2video",
+        requestPathWithSearch:
+          "/dashboard?resetPassword=1&next=%2Ftools%2Fvideo%3Ftype%3Dimage2video",
+        isApi: false,
+        isRecoveryStateApi: false,
+      }) === "allow" &&
+      passwordRecoveryGateDecision({
+        authenticated: true,
+        recoveryDestination: "/tools/video?type=image2video",
+        requestPathWithSearch: "/tools/video",
+        isApi: false,
+        isRecoveryStateApi: false,
+      }) === "require-reset-page",
+    "a recovery-created session must be limited to its reset landing and proof endpoint",
   );
 
   const forwardedCookies: Array<{

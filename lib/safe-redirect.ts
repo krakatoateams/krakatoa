@@ -67,3 +67,53 @@ export function authCallbackFailureUrl(
   url.searchParams.set("next", sanitizeNextPath(next));
   return url.toString();
 }
+
+export function passwordResetDestination(
+  next: string | null | undefined,
+): string {
+  return sanitizeNextPath(next);
+}
+
+export function passwordResetLandingPath(
+  next: string | null | undefined,
+): string {
+  const url = new URL("/dashboard", "https://internal.invalid");
+  url.searchParams.set("resetPassword", "1");
+  url.searchParams.set("next", passwordResetDestination(next));
+  return `${url.pathname}${url.search}`;
+}
+
+export function passwordResetCallbackUrl(
+  origin: string,
+  next: string | null | undefined,
+): string {
+  const url = new URL("/auth/callback", origin);
+  url.searchParams.set("flow", "recovery");
+  url.searchParams.set("next", passwordResetLandingPath(next));
+  return url.toString();
+}
+
+export function passwordResetRetryUrl(
+  origin: string,
+  resetLanding: string | null | undefined,
+): string {
+  let next = "/dashboard";
+  const safeLanding = sanitizeNextPath(resetLanding);
+
+  try {
+    const landing = new URL(safeLanding, origin);
+    if (
+      landing.pathname === "/dashboard" &&
+      landing.searchParams.get("resetPassword") === "1"
+    ) {
+      next = passwordResetDestination(landing.searchParams.get("next"));
+    }
+  } catch {
+    // Keep the safe dashboard fallback.
+  }
+
+  const retry = new URL("/forgot-password", origin);
+  retry.searchParams.set("error", "expired");
+  retry.searchParams.set("next", next);
+  return retry.toString();
+}

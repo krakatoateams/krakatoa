@@ -3,6 +3,7 @@ import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { checkLoginLock, recordFailedLoginAttempt, clearLoginAttempts } from "@/lib/login-attempts-db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
+import { PASSWORD_RECOVERY_PROOF_COOKIE } from "@/lib/password-recovery";
 
 function authJson(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, {
@@ -84,12 +85,19 @@ export async function POST(req: NextRequest) {
       {
         error: error.message,
         code: (error as { code?: string }).code ?? null,
-        attemptsRemaining: afterFail.attemptsRemaining,
       },
       401,
     );
   }
 
   await clearLoginAttempts(email);
-  return authJson({ success: true });
+  const response = authJson({ success: true });
+  response.cookies.set(PASSWORD_RECOVERY_PROOF_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  return response;
 }

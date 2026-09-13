@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
@@ -72,9 +72,11 @@ export function SignUpForm({
    * no modal view state to switch.
    */
   onSwitchToSignIn,
+  onBusyChange,
 }: {
   next?: string;
   onSwitchToSignIn?: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -82,27 +84,54 @@ export function SignUpForm({
   const [signupError, setSignupError] = useState<SignupError | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
 
   const supabase = getSupabaseAuthBrowser();
   const safeNext = sanitizeNextPath(next);
+  const busy = loading || oauthLoading;
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   async function handleGoogleSignUp() {
     setSignupError(null);
-    // Optimistic — we're about to leave the page entirely for Google's
-    // consent screen, so there's no later point to set this from.
-    flagJustSignedIn();
+    setOauthLoading(true);
 
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        // Drafts remain in same-tab sessionStorage. Never copy user prompts or
-        // settings into this external OAuth redirect URL.
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
-        // Forces Google's account chooser every time — see SignInForm.tsx's
-        // handleGoogleSignIn for why this is needed.
-        queryParams: { prompt: "select_account" },
-      },
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          // Return the provider URL first so a local start failure can be
+          // surfaced instead of disappearing behind a navigation attempt.
+          skipBrowserRedirect: true,
+          // Drafts remain in same-tab sessionStorage. Never copy user prompts
+          // or settings into this external OAuth redirect URL.
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
+          // Forces Google's account chooser every time — see SignInForm.tsx's
+          // handleGoogleSignIn for why this is needed.
+          queryParams: { prompt: "select_account" },
+        },
+      });
+
+      if (error || !data.url) {
+        setOauthLoading(false);
+        setSignupError({
+          kind: "other",
+          message: "Could not start Google sign-up. Please try again.",
+        });
+        return;
+      }
+
+      flagJustSignedIn();
+      window.location.assign(data.url);
+    } catch {
+      setOauthLoading(false);
+      setSignupError({
+        kind: "other",
+        message: "Could not start Google sign-up. Please try again.",
+      });
+    }
   }
 
   async function handleSignUp(e: React.FormEvent) {
@@ -195,7 +224,8 @@ export function SignUpForm({
             <button
               type="button"
               onClick={onSwitchToSignIn}
-              className="text-brand-primary hover:text-brand-primary-hover"
+              disabled={busy}
+              className="text-brand-primary hover:text-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Log in here
             </button>
@@ -211,10 +241,11 @@ export function SignUpForm({
       <button
         type="button"
         onClick={handleGoogleSignUp}
+        disabled={oauthLoading || loading}
         className="flex w-full items-center justify-center gap-3 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20 disabled:opacity-50"
       >
         <GoogleIcon />
-        Continue with Google
+        {oauthLoading ? "Connecting…" : "Continue with Google"}
       </button>
 
       <div className="flex items-center gap-3">
@@ -280,10 +311,11 @@ export function SignUpForm({
             <button
               type="button"
               onClick={handleGoogleSignUp}
-              className="flex w-full items-center justify-center gap-2.5 rounded-radius-xl bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100"
+              disabled={oauthLoading || loading}
+              className="flex w-full items-center justify-center gap-2.5 rounded-radius-xl bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100 disabled:opacity-50"
             >
               <GoogleIcon />
-              Continue with Google
+              {oauthLoading ? "Connecting…" : "Continue with Google"}
             </button>
           </div>
         )}
@@ -314,7 +346,14 @@ export function SignUpForm({
           </div>
         )}
 
-        <Button type="submit" variant="primary" size="md" loading={loading} className="w-full">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          loading={loading}
+          disabled={oauthLoading}
+          className="w-full"
+        >
           Create account
         </Button>
 

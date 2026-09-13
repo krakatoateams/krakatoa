@@ -28,18 +28,24 @@ export function SignInModal({
   onClose: () => void;
 }) {
   const [view, setView] = useState<View>(initialView);
+  const [busy, setBusy] = useState(false);
 
   // Reset to the requested view every time this modal opens — otherwise
   // closing mid "forgot password" (or leaving it on "signup" from a prior
   // open) would strand the next open on the wrong view.
   useEffect(() => {
-    if (open) setView(initialView);
+    if (open) {
+      setView(initialView);
+    } else {
+      setBusy(false);
+    }
   }, [open, initialView]);
 
   return (
     <AuthModalShell
       open={open}
       onClose={onClose}
+      closeDisabled={busy}
       ariaLabel={ARIA_LABELS[view]}
       promoPanel={<AuthPromoPanel mode={view} />}
     >
@@ -47,13 +53,22 @@ export function SignInModal({
         <SignInForm
           next={next}
           onSuccess={onClose}
+          onBusyChange={setBusy}
           onForgotPassword={() => setView("forgot-password")}
           onSwitchToSignUp={() => setView("signup")}
         />
       ) : view === "signup" ? (
-        <SignUpForm next={next} onSwitchToSignIn={() => setView("signin")} />
+        <SignUpForm
+          next={next}
+          onBusyChange={setBusy}
+          onSwitchToSignIn={() => setView("signin")}
+        />
       ) : (
-        <ForgotPasswordForm onBackToSignIn={() => setView("signin")} />
+        <ForgotPasswordForm
+          next={next}
+          onBusyChange={setBusy}
+          onBackToSignIn={() => setView("signin")}
+        />
       )}
     </AuthModalShell>
   );

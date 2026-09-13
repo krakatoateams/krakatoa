@@ -22,19 +22,21 @@ export function AuthModalShell({
   open,
   ariaLabel,
   onClose,
+  closeDisabled = false,
   promoPanel,
   children,
 }: {
   open: boolean;
   ariaLabel: string;
   onClose: () => void;
+  closeDisabled?: boolean;
   promoPanel?: React.ReactNode;
   children: React.ReactNode;
 }) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !closeDisabled) onClose();
     };
     document.addEventListener("keydown", onKeyDown);
     const prevOverflow = document.body.style.overflow;
@@ -43,7 +45,7 @@ export function AuthModalShell({
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open, onClose]);
+  }, [closeDisabled, open, onClose]);
 
   if (!open) return null;
 
@@ -53,7 +55,7 @@ export function AuthModalShell({
       aria-modal="true"
       aria-label={ariaLabel}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={closeDisabled ? undefined : onClose}
     >
       <div
         className={`relative w-full overflow-hidden rounded-radius-2xl border border-border-default shadow-elevation-02 ${
@@ -68,8 +70,9 @@ export function AuthModalShell({
         <button
           type="button"
           onClick={onClose}
+          disabled={closeDisabled}
           aria-label="Close"
-          className="absolute right-spacing-lg top-spacing-lg z-30 rounded-radius-xl p-spacing-sm text-icon-low-emphasis transition-colors hover:bg-bg-surface-2 hover:text-text-primary"
+          className="absolute right-spacing-lg top-spacing-lg z-30 rounded-radius-xl p-spacing-sm text-icon-low-emphasis transition-colors hover:bg-bg-surface-2 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
           <X className="h-4 w-4" />
         </button>
