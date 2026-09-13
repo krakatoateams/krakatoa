@@ -34,6 +34,12 @@ export async function GET(request: NextRequest) {
     return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
   }
 
+  const userId = await getSessionUserId();
+  if (!userId) {
+    // Do not consume the single-use authorization code while signed out.
+    return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
+  }
+
   try {
     const auth = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID!,
@@ -47,11 +53,6 @@ export async function GET(request: NextRequest) {
       // Shouldn't happen with prompt=consent, but log and continue — the
       // stored row may already have a valid refresh_token from a prior connect.
       console.warn("[youtube-connect] Google did not return a refresh_token");
-    }
-
-    const userId = await getSessionUserId();
-    if (!userId) {
-      return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
     }
 
     const { data: existing, error: existingErr } = await supabaseServer

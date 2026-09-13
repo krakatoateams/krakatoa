@@ -1851,15 +1851,53 @@ the runbook.
      (`test:instagram-publish`).
   10. Cron success binds `status=scheduled` + held `publish_started_at`
       (`test:cron-publish`).
-- Out of scope left: Instagram Phase 3 long-lived token refresh; YouTube
-  code-exchange after session check; concurrent creator-info + cron refresh
-  lock.
+- Out of scope left (closed 2026-09-13, see next slice): Instagram Phase 3
+  long-lived token refresh; YouTube code-exchange after session check;
+  concurrent creator-info + cron refresh lock.
 - Verification: focused tests above, plus `test:post-ownership`,
   `test:rpc-grants` not re-run after 092 (new migration has its own grants),
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
   `git diff --check`.
 - Security: 0 critical, 0 high, 0 unaccepted medium. Owner-only residuals:
   GitHub required checks + branch protection; Supabase HIBP after Pro.
+
+### Integration leftovers (YouTube session, TikTok refresh lock, Instagram Phase 3)
+
+- Date: 2026-09-13
+- Base: `main` at `fe78326` (PR #196 merged)
+- Final commit: this PR
+- Scope: three leftover integration follow-ups from the closeout above.
+  Did not reopen `/audit-repo`. Skipped owner-only GitHub branch protection
+  and Supabase HIBP; disconnect-side token revoke; OAuth state cookies bound
+  to user id; Instagram Phase 4 scheduler UI (openspec 9.x).
+- Findings:
+  1. YouTube callback now binds `getSessionUserId` after CSRF and before
+     `auth.getToken`. Signed-out browsers redirect `youtube_connect_failed`
+     without consuming the authorization code. Refresh-token preserve helpers
+     unchanged. Instagram already bound session before `exchangeCodeForToken`
+     (skip-with-evidence). `test:youtube-oauth`, `test:instagram-oauth`.
+  2. TikTok refresh+persist is serialized per `(user_id, platform='tiktok')`
+     via `098_tiktok_refresh_lock.sql` (`krakatoa_claim/complete/release_
+     platform_token_refresh`, `refresh_lock_until` lease; service_role-only,
+     empty `search_path`). Live MCP apply `tiktok_refresh_lock`. Creator-info
+     and the publisher cron both call `refreshTikTokTokensLocked`; the loser
+     re-reads; persist failure still 409 (`tiktokRotatedRefreshPersistDenied`).
+     YouTube does not take this lock. `test:tiktok-oauth`,
+     `test:tiktok-creator-info`, `test:cron-publish`.
+  3. Instagram Phase 3: `refreshLongLivedToken` + dedicated daily cron
+     `/api/cron/instagram-token-refresh` (`cronAuthorizationFailure`,
+     vercel.json `30 5 * * *`, documented in `docs/ops/cron-jobs.md`).
+     Selects `platform=instagram` with `expires_at` inside the next 14 days
+     (7–14 day retry margin; still eligible under 7 days), 24h age floor,
+     persist `access_token` + `expires_at` with `refresh_token` null. Graph
+     5xx leaves the row; permanent invalid leaves the row (reconnect). Does
+     not refresh TikTok/YouTube. `test:instagram-refresh`,
+     `test:instagram-oauth`, `test:instagram-publish`, `test:cron-auth`.
+- Accepted risks: unchanged from the completed repo audit.
+- Verification: focused tests above, `npm run lint`, `npm run build`,
+  `git diff --check`.
+- Security: 0 critical, 0 high, 0 unaccepted medium. Owner-only residuals
+  unchanged.
 
 ## Deferred
 

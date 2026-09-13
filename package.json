@@ -70,6 +70,7 @@
     "test:youtube-publish": "tsx lib/youtube-publish-pure.ts",
     "test:instagram-oauth": "tsx lib/instagram-oauth-pure.ts",
     "test:instagram-publish": "tsx lib/instagram-publish-pure.ts",
+    "test:instagram-refresh": "tsx lib/instagram-refresh-pure.ts",
     "test:cron-auth": "tsx lib/cron-auth-self-check.ts",
     "test:cron-publish": "tsx lib/cron-publish-pure.ts",
     "test:post-cleanup": "tsx lib/post-storage-cleanup-pure.ts",

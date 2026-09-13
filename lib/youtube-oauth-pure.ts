@@ -25,6 +25,34 @@ export function youtubeRefreshLookupDenied(
   return Boolean(lookupError) && !incoming;
 }
 
+export type YoutubeCallbackNext =
+  | "invalid_state"
+  | "youtube_connect_failed"
+  | "exchange";
+
+/**
+ * CSRF first, then session, then code exchange. A missing session must never
+ * reach Google getToken — the authorization code is single-use.
+ */
+export function youtubeCallbackNextStep(input: {
+  state: string | null;
+  storedState: string | null;
+  code: string | null;
+  userId: string | null;
+}): YoutubeCallbackNext {
+  if (!input.state || !input.storedState || input.state !== input.storedState) {
+    return "invalid_state";
+  }
+  if (!input.code || !input.userId) return "youtube_connect_failed";
+  return "exchange";
+}
+
+export function youtubeCallbackBindsSessionBeforeCodeExchange(source: string): boolean {
+  const sessionIdx = source.search(/await getSessionUserId\s*\(/);
+  const tokenIdx = source.search(/\.getToken\s*\(/);
+  return sessionIdx >= 0 && tokenIdx >= 0 && sessionIdx < tokenIdx;
+}
+
 export function youtubeOAuthSelfCheck(): void {
   const preserved = youtubeRefreshTokenForUpsert(null, "stored-refresh");
   if (preserved !== "stored-refresh") {
@@ -53,6 +81,37 @@ export function youtubeOAuthSelfCheck(): void {
     throw new Error("a successful lookup without a new refresh must proceed to preserve");
   }
 
+  if (
+    youtubeCallbackNextStep({
+      state: "s",
+      storedState: "s",
+      code: "auth-code",
+      userId: null,
+    }) !== "youtube_connect_failed"
+  ) {
+    throw new Error("a signed-out callback must fail closed before any code exchange");
+  }
+  if (
+    youtubeCallbackNextStep({
+      state: "s",
+      storedState: "other",
+      code: "auth-code",
+      userId: null,
+    }) !== "invalid_state"
+  ) {
+    throw new Error("CSRF must be rejected before the session or code-exchange checks");
+  }
+  if (
+    youtubeCallbackNextStep({
+      state: "s",
+      storedState: "s",
+      code: "auth-code",
+      userId: "user-1",
+    }) !== "exchange"
+  ) {
+    throw new Error("a signed-in callback with a valid state and code may exchange");
+  }
+
   for (const relative of [
     "../app/api/connections/youtube/start/route.ts",
     "../app/api/connections/youtube/callback/route.ts",
@@ -64,6 +123,16 @@ export function youtubeOAuthSelfCheck(): void {
     if (/const \{[^}]*origin[^}]*\} = new URL\(request\.url\)/.test(source)) {
       throw new Error(`${relative} must not bind OAuth origin from request.url`);
     }
+  }
+
+  const callbackSource = readFileSync(
+    new URL("../app/api/connections/youtube/callback/route.ts", import.meta.url),
+    "utf8",
+  );
+  if (!youtubeCallbackBindsSessionBeforeCodeExchange(callbackSource)) {
+    throw new Error(
+      "YouTube callback must bind the session before Google getToken so a logged-out browser cannot consume the authorization code",
+    );
   }
 }
 

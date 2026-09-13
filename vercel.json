@@ -29,6 +29,10 @@
     {
       "path": "/api/cron/generation-reconcile",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/instagram-token-refresh",
+      "schedule": "30 5 * * *"
     }
   ]
 }
