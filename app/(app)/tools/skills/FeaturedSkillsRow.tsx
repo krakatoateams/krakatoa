@@ -10,6 +10,7 @@ import {
   type Skill,
   type SkillId,
 } from "@/lib/skills";
+import { catalogSkillsForDisplay } from "@/lib/skills-catalog-display";
 import { useSkillFavorites } from "@/lib/use-skill-favorites";
 import { useSkillsCatalog, type CatalogSkill } from "./SkillsCatalogProvider";
 
@@ -25,25 +26,27 @@ export default function FeaturedSkillsRow({
   onSelectSkill: (id: SkillId) => void;
   className?: string;
 }) {
-  const { featured, skillById } = useSkillsCatalog();
+  const { featured, skillById, ready } = useSkillsCatalog();
   const { ids: favoriteIds } = useSkillFavorites();
 
   const chips = useMemo(() => {
+    const settled = catalogSkillsForDisplay(featured, ready);
     const seen = new Set<string>();
     const out: CatalogSkill[] = [];
+    if (!ready) return out;
     for (const id of favoriteIds) {
       const skill = skillById(id);
       if (!skill || seen.has(skill.id)) continue;
       seen.add(skill.id);
       out.push(skill);
     }
-    for (const skill of featured) {
+    for (const skill of settled) {
       if (seen.has(skill.id)) continue;
       seen.add(skill.id);
       out.push(skill);
     }
     return out;
-  }, [favoriteIds, featured, skillById]);
+  }, [favoriteIds, featured, ready, skillById]);
 
   return (
     <div className={`flex flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}>

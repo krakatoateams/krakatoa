@@ -22,7 +22,7 @@
     "test:monitoring-flags": "tsx lib/admin-monitoring-flags.ts",
     "test:prompt-capture": "tsx lib/admin-prompt-capture-pure.ts",
     "test:animate-handoff": "tsx lib/animate-handoff.ts",
-    "test:skills": "tsx lib/skills.ts",
+    "test:skills": "tsx lib/skills.ts && tsx lib/skills-catalog-display-self-check.ts",
     "test:admin-skills-catalog": "tsx lib/admin-skills-catalog-self-check.ts",
     "test:canvas": "tsx lib/canvas-graph.ts && tsx lib/canvas-handoff.ts && tsx lib/canvas-document.ts && tsx lib/canvas-text-models.ts",
     "test:editor": "tsx lib/editor-document.ts && tsx lib/editor-handoff.ts && tsx lib/editor-render.ts",
