@@ -1408,7 +1408,7 @@ the runbook.
 
 - Date: 2026-09-13
 - Base: `b016ca85f5267e6397e46168bfe9f4ebcaaaffd5`
-- Final commit: `e8af6d3575dc38123004bf37727e9f0cffd203fd`
+- Final commit: `02f22c3cf8bbb022e52b6ba014aa54677a21ab5a`
 - Scope: GitHub pull-request and `main` push automation, locked dependency
   installation, deployment/security self-checks, dependency audit, lint/build,
   committed-patch whitespace, Vercel main-only deployment policy, and publisher
@@ -1416,22 +1416,31 @@ the runbook.
 - Findings: the only GitHub workflow mutated the production publisher and no
   automated check ran before code reached deployable `main`. Added a secretless
   quality workflow with read-only permissions, immutable current Action pins,
-  no persisted checkout credentials, minimum supported Node, `npm ci`, a shared
+  no persisted checkout credentials, Node 24, `npm ci`, a shared
   `ci:checks` command, and event-scoped `git diff --check`. The deployment
   self-check pins this workflow, Node/lockfile parity, CLAUDE.md size, main-only
-  Vercel deployment, and the publisher's empty token permissions.
+  Vercel deployment, no repository secrets/variables, and the publisher's empty
+  token permissions. The first live run also proved the old Node 20.9 contract
+  stale against locked Node 22+ dependencies, while the second exposed missing
+  build-time Supabase values; the final workflow uses the Vercel-aligned Node 24
+  runtime and reserved `.invalid` non-secret placeholders.
 - Accepted risks: the repository currently has no `main` branch protection or
   ruleset, so the quality workflow is automatic but not a required merge status.
   The audit merge procedure remains the immediate backstop; repository-admin
   enforcement is recorded below because changing GitHub repository settings is
-  outside the runner's code/PR authorization.
+  outside the runner's code/PR authorization. Same-repository collaborators with
+  workflow-write access remain trusted under GitHub's standard `pull_request`
+  secret model; the quality workflow itself references no secrets or variables.
 - Verification: `test:deployment-ci` failed before the workflow/aggregate
   existed and passed after implementation. Clean `npm ci` and
   `npm run ci:checks` passed, including dependency/cron guards, a zero-vulnerability
   high-severity audit gate, lint with 0 errors and 11 pre-existing warnings, and
   production build. Workflow YAML parsing, `git diff --check`, CLAUDE.md's
-  under-200-line guard, and edited-file diagnostics passed.
-- Security: final review found no issues.
+  under-200-line guard, and edited-file diagnostics passed. PR
+  `Quality gates / quality` passed on the final commit after its two red,
+  actionable environment/runtime runs.
+- Security: final repeated review found no issues; branch-protection and
+  trusted-collaborator constraints remain documented operational notes.
 
 ## Deferred
 
