@@ -15,10 +15,8 @@ export const dynamic = "force-dynamic";
  *   - { action: "restore" } → move out of Trash (clears metadata.deletedAt)
  *   - { name }              → rename (Character creation) + store metadata.characterName
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getSessionUserId();
     if (!userId) {
@@ -66,10 +64,8 @@ export async function PATCH(
  *   - default        → soft delete (move to Trash)
  *   - ?permanent=1   → hard delete (removes the storage object + DB row)
  */
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getSessionUserId();
     if (!userId) {

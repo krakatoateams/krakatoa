@@ -25,10 +25,8 @@ function authError(e: unknown): NextResponse | null {
   return null;
 }
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     if (!isSkillSlug(params.skillId)) {
@@ -45,10 +43,8 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     if (!isSkillSlug(params.skillId)) {
@@ -166,10 +162,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function DELETE(_req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     if (!isSkillSlug(params.skillId)) {

@@ -17,9 +17,10 @@ import { supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
-type RouteParams = { params: { submissionId: string } };
+type RouteParams = { params: Promise<{ submissionId: string }> };
 
-export async function POST(req: Request, { params }: RouteParams) {
+export async function POST(req: Request, props: RouteParams) {
+  const params = await props.params;
   const submissionId = params.submissionId?.trim();
   if (!submissionId) {
     return NextResponse.json({ error: "Missing submission id." }, { status: 400 });

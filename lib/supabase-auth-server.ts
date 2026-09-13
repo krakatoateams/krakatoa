@@ -11,8 +11,8 @@ import { cookies } from "next/headers";
  * only Route Handlers and Server Actions can — the middleware handles token
  * refresh for Server Component requests.
  */
-export function createSupabaseAuthServer() {
-  const cookieStore = cookies();
+export async function createSupabaseAuthServer() {
+  const cookieStore = await cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

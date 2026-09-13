@@ -40,9 +40,9 @@ function missingTableError(): Error {
  * (cron, scripts) — headers() throws there, and a missing country must never
  * break profile resolution.
  */
-function requestCountry(): string | null {
+async function requestCountry(): Promise<string | null> {
   try {
-    const raw = headers().get("x-vercel-ip-country");
+    const raw = (await headers()).get("x-vercel-ip-country");
     const code = raw?.trim().toUpperCase();
     // Vercel sends "XX" when it cannot geolocate the address.
     if (!code || code === "XX" || code.length !== 2) return null;
@@ -62,7 +62,7 @@ function requestCountry(): string | null {
 async function backfillCountry(profile: Profile): Promise<Profile> {
   if (profile.country) return profile;
 
-  const country = requestCountry();
+  const country = await requestCountry();
   if (!country) return profile;
 
   const { data, error } = await supabaseServer
@@ -79,7 +79,7 @@ async function backfillCountry(profile: Profile): Promise<Profile> {
 
 /** Resolve the authenticated Supabase user (id + email), or null. */
 async function getSessionUser(): Promise<{ id: string; email: string } | null> {
-  const supabase = createSupabaseAuthServer();
+  const supabase = await createSupabaseAuthServer();
   const {
     data: { user },
   } = await supabase.auth.getUser();

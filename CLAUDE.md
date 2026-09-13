@@ -1,12 +1,12 @@
 # Krakatoa engineering guide
 
-Krakatoa is a Next.js 14 creator platform with AI video, photo, scheduling, and
+Krakatoa is a Next.js 15 creator platform with AI video, photo, scheduling, and
 social tooling. `AGENTS.md` is the detailed architecture reference; this file
 keeps only the rules needed on most engineering tasks.
 
 ## Stack
 
-- Next.js App Router, React 18, TypeScript, Tailwind CSS
+- Next.js 15 App Router, React 19, Node.js 20.9+, TypeScript, Tailwind CSS
 - Supabase Auth via `@supabase/ssr` with Google OAuth and email/password
 - Supabase Postgres and private Storage
 - Replicate for AI models and Rendi for cloud FFmpeg

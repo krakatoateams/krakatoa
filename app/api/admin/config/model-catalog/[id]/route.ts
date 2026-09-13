@@ -4,7 +4,8 @@ import { updateModelCatalogConfig } from "@/lib/model-catalog-configs-db";
 
 export const dynamic = "force-dynamic";
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     let body: Record<string, unknown>;
     try {

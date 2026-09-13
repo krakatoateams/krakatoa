@@ -9,10 +9,8 @@ import { validateToolPatch } from "@/lib/admin-config-validation";
 // via lib/admin-config-validation.ts. Runtime changes may take up to ~60s (cache).
 export const dynamic = "force-dynamic";
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { tool_key: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ tool_key: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     let body: Record<string, unknown>;
     try {

@@ -9,10 +9,8 @@ import { validatePricingPatch } from "@/lib/admin-config-validation";
 // lib/admin-config-validation.ts. Runtime changes may take up to ~60s (TTL cache).
 export const dynamic = "force-dynamic";
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { pricing_key: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ pricing_key: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     let body: Record<string, unknown>;
     try {

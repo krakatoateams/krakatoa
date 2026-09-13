@@ -10,10 +10,8 @@ import { validatePricingPatch } from "@/lib/admin-config-validation";
 // same validator the PATCH route uses, so reset can never bypass validation.
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: { pricing_key: string } }
-) {
+export async function POST(_req: Request, props: { params: Promise<{ pricing_key: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     const def = getPricingDefault(params.pricing_key);
     if (!def) {

@@ -6,7 +6,8 @@ import { getAdminJobDetail } from "@/lib/admin-monitoring-db";
 // Replicate prediction ids and the recovery manifest.
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: { jobId: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ jobId: string }> }) {
+  const params = await props.params;
   return withAdmin(async () => {
     const detail = await getAdminJobDetail(params.jobId);
     if (!detail) return NextResponse.json({ error: "Job not found." }, { status: 404 });

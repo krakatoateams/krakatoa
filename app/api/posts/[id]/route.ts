@@ -9,10 +9,8 @@ import {
 } from "@/lib/post-ownership-pure";
 
 // PATCH /api/posts/[id] — edit content/timing, re-arm, or soft-cancel a post.
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const profile = await getCurrentProfile();
   if (!profile) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });

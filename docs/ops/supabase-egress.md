@@ -81,10 +81,11 @@ Ownership is still enforced before signing; the cache sits under
 
 ### Image optimization instead of full-res sources
 
-`next/image` no longer passes `unoptimized` for library and picker grids, and
-`next.config.mjs` allows `/storage/v1/object/sign/**` with `minimumCacheTTL` at 30 days
-(the default 60 s would send the optimizer back to Supabase every minute and undo the
-saving).
+`next/image` no longer passes `unoptimized` for library and picker grids.
+`next.config.mjs` derives the exact Supabase hostname and private bucket from the
+deployment environment, allows only `/storage/v1/object/sign/{bucket}/**`, and keeps
+`minimumCacheTTL` at 30 days. The old 60 s default would send the optimizer back to
+Supabase every minute and undo the saving.
 
 Measured on a real 2.42 MB PNG through the optimizer:
 

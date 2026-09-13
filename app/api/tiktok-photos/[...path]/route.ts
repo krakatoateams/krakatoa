@@ -12,10 +12,8 @@ import {
  * "PULL_FROM_URL"`) can fetch a photo from a URL under a domain we've verified.
  * Storage key: `{userId}/photos/…rest` (legacy `photos/{userId}/…rest` fallback).
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { path: string[] } },
-) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
   const segments = params.path;
 
   if (

@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 const VIDEO_URL =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260622_204221_5339e40b-e73d-4ab0-9c65-79c18c66fd50.mp4";
@@ -42,12 +43,12 @@ export default function NotFound() {
         <p className="mt-4 text-base text-white/60 [animation:fadeSlideUp_0.8s_ease_0.5s_both] sm:mt-6 sm:text-lg">
           Nothing at this address.
         </p>
-        <a
+        <Link
           href="/"
           className="mt-7 inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black transition-transform [animation:fadeSlideUp_0.8s_ease_0.9s_both] hover:scale-105 sm:mt-8 sm:px-6 sm:py-3"
         >
           Go to homepage <ArrowRight size={16} />
-        </a>
+        </Link>
       </div>
     </div>
   );

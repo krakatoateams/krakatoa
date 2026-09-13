@@ -6,7 +6,7 @@ Krakatoa is a premium AI-powered platform tailored for content creators. It feat
 The platform foundation (profiles, projects, jobs, job_steps, assets, asset_relations, posts platform linkage, credit_wallets, credit_transactions, usage_events) is complete (Phase 1–7). The Dummy Credit Integration is live for internal testing — every existing profile holds 500 dummy credits and the four credit-charged generation routes spend/refund through the ledger RPC before any provider call. No payment gateway/Xendit/subscription system is wired yet.
 
 ## Tech Stack
-- **Framework**: Next.js 14 (App Router)
+- **Framework**: Next.js 15.5 (App Router), React 19, Node.js 20.9+
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide React
 - **Language**: TypeScript
@@ -27,6 +27,7 @@ The platform foundation (profiles, projects, jobs, job_steps, assets, asset_rela
 - **Migrate to user-first paths** (`photos|videos/{userId}` → `{userId}/photos|videos`): `npm run storage:migrate-user-first` (dry-run, scans DB + storage) / `npm run storage:migrate-user-first -- --execute` / optional `--prune-stale-db` `--delete-global-temp`
 - **List storage orphans** (`videos/` + `photos/`): `npm run storage:list-orphans` (optional `--min-age-hours=0`, `--json`, `--include-young`)
 - **Verify signed-URL caching** (egress guard): `npm run probe:signed-url-cache`
+- **Verify dependency/Image Optimizer security**: `npm run test:dependency-security`
 
 ## Project Structure
 - `app/`: Next.js App Router root.
@@ -189,7 +190,7 @@ Rules for new code:
 
 1. **Never sign the same object twice with a fresh token for UI reads.** `createSignedStorageUrl` caches `ui`-TTL URLs in the `signed_url_cache` table (migration `060`) so the URL is identical across requests and instances. Only the `ui` TTL is cached, matched **exactly** — `ttl` arrives from a query param, so a range would let any caller mint unbounded cache rows. `pipeline` and `publish` stay short and uncached on purpose.
 2. `SIGN_TTL.ui` is **30 days**. Any client-side `setTimeout` derived from it must be clamped — past ~24.8 days the delay overflows int32 and fires immediately (see `MAX_REFRESH_MS` in `lib/use-signed-media-url.ts`).
-3. **Never render user media with `unoptimized` on `next/image`.** A 2.42 MB source PNG becomes 20 KB of WebP at grid size. `next.config.mjs` allows `/object/sign/**` with `minimumCacheTTL` 30 days.
+3. **Never render user media with `unoptimized` on `next/image`.** A 2.42 MB source PNG becomes 20 KB of WebP at grid size. `next.config.mjs` restricts optimization to the configured Supabase host and `/object/sign/{bucket}/**`, with `minimumCacheTTL` 30 days.
 4. Upload with `MEDIA_CACHE_CONTROL` from `lib/storage-buckets.ts`, never a literal `"3600"`. Exception: upserted recovery staging paths.
 5. `storage.objects.metadata->>'cacheControl'` is **not** what Supabase serves — the header comes from S3 object metadata. Editing that jsonb does nothing.
 

@@ -23,10 +23,8 @@ const TYPES: Record<string, "jpg" | "jpeg" | "png" | "webp"> = {
   "image/webp": "webp",
 };
 
-export async function POST(
-  req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function POST(req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     if (!isSkillSlug(params.skillId)) {
