@@ -93,6 +93,7 @@ keeps only the rules needed on most engineering tasks.
 - Keep heavy Vercel routes within the current plan's supported duration.
 - Deployed cron routes must fail closed when `CRON_SECRET` is absent.
 - Keep browser allowlists in `lib/security-headers.mjs`; run `test:security-headers`.
+- Keep pending drafts in sessionStorage, never URLs; owner-scope shared paths.
 - Do not hardcode credit prices, storage cache-control values, or secrets.
 - Server routes using the Supabase service role must enforce ownership in code.
 - Run focused self-checks plus build/lint in proportion to the change.

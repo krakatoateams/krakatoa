@@ -1,4 +1,7 @@
-import { navigateAfterPasswordSignIn } from "./safe-redirect";
+import {
+  authCallbackFailureUrl,
+  navigateAfterPasswordSignIn,
+} from "./safe-redirect";
 import {
   SUPABASE_AUTH_CACHE_HEADERS,
   forwardSupabaseAuthUpdates,
@@ -22,6 +25,22 @@ export function authSessionSelfCheck(): void {
     "/tools/video?type=image2video",
     (path) => navigations.push(path),
   );
+  navigateAfterPasswordSignIn(
+    "/tools/video/../admin",
+    (path) => navigations.push(path),
+  );
+  navigateAfterPasswordSignIn(
+    "/tools/video/%2e%2e/admin",
+    (path) => navigations.push(path),
+  );
+  navigateAfterPasswordSignIn(
+    "/%2f%2fattacker.example",
+    (path) => navigations.push(path),
+  );
+  navigateAfterPasswordSignIn(
+    "/%5c%5cattacker.example",
+    (path) => navigations.push(path),
+  );
 
   assert(
     navigations[0] === "/dashboard",
@@ -34,6 +53,28 @@ export function authSessionSelfCheck(): void {
   assert(
     navigations[2] === "/tools/video?type=image2video",
     "password sign-in must preserve a safe internal destination",
+  );
+  assert(
+    navigations[3] === "/dashboard" && navigations[4] === "/dashboard",
+    "password sign-in must reject literal and encoded path traversal",
+  );
+  assert(
+    navigations[5] === "/dashboard" && navigations[6] === "/dashboard",
+    "password sign-in must reject encoded protocol-relative separators",
+  );
+
+  const failedCallback = new URL(
+    authCallbackFailureUrl(
+      "https://www.kelolako.com",
+      "/tools/video?type=image2video",
+    ),
+  );
+  assert(
+    failedCallback.origin === "https://www.kelolako.com" &&
+      failedCallback.searchParams.get("error") === "auth_callback_failed" &&
+      failedCallback.searchParams.get("next") ===
+        "/tools/video?type=image2video",
+    "an OAuth retry must retain its safe internal destination",
   );
 
   const forwardedCookies: Array<{

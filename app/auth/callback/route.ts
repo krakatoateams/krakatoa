@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { sanitizeNextPath } from "@/lib/safe-redirect";
+import {
+  authCallbackFailureUrl,
+  sanitizeNextPath,
+} from "@/lib/safe-redirect";
 import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
 
 function authRedirect(url: string): NextResponse {
@@ -75,5 +78,5 @@ export async function GET(request: NextRequest) {
 
   // Everything else (OAuth, signup confirmation) — go to login with an
   // error hint (surfaced by app/login/page.tsx's `callbackError`).
-  return authRedirect(`${origin}/login?error=auth_callback_failed`);
+  return authRedirect(authCallbackFailureUrl(origin, next));
 }

@@ -4,8 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
-import { JUST_SIGNED_IN_FLAG, peekPendingDraftRaw } from "@/lib/pending-form-draft";
-import { navigateAfterPasswordSignIn } from "@/lib/safe-redirect";
+import { JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
+import {
+  navigateAfterPasswordSignIn,
+  sanitizeNextPath,
+} from "@/lib/safe-redirect";
 
 function flagJustSignedIn() {
   try {
@@ -107,6 +110,7 @@ export function SignInForm({
   const [resendSuccess, setResendSuccess] = useState(false);
 
   const supabase = getSupabaseAuthBrowser();
+  const safeNext = sanitizeNextPath(next);
 
   async function handleGoogleSignIn() {
     setLoginError(null);
@@ -114,21 +118,12 @@ export function SignInForm({
     // consent screen, so there's no later point to set this from.
     flagJustSignedIn();
 
-    // Google's is the only sign-in path that leaves the page (a full reload
-    // through Google's consent screen and back), so it's the only one where
-    // sessionStorage might not survive the round trip — ride a copy of the
-    // pending draft through the redirect URL itself as a fallback (see
-    // consumePendingDraft's URL fallback in lib/pending-form-draft.ts).
-    const draftPath = window.location.pathname;
-    const rawDraft = peekPendingDraftRaw(draftPath);
-    const nextWithDraft = rawDraft
-      ? `${next}${next.includes("?") ? "&" : "?"}kdraft=${encodeURIComponent(rawDraft)}`
-      : next;
-
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextWithDraft)}`,
+        // Drafts remain in same-tab sessionStorage. Never copy user prompts or
+        // settings into this external OAuth redirect URL.
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
         // Without this, Google silently reuses the browser's single active
         // session + prior consent and skips the chooser entirely — fine with
         // multiple Google accounts signed in (Google disambiguates on its
@@ -170,7 +165,7 @@ export function SignInForm({
       // The route wrote the session cookies outside the browser client, so
       // use a full navigation to remount AuthProvider with the new session.
       // The helper also rejects user-controlled external destinations.
-      navigateAfterPasswordSignIn(next);
+      navigateAfterPasswordSignIn(safeNext);
       return;
     }
 

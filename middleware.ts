@@ -1,22 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { forwardSupabaseAuthUpdates } from "@/lib/supabase-auth-response";
+import {
+  isLoggedOutPublicAppRoute,
+  loggedOutAuthRedirectUrl,
+} from "@/lib/public-route-policy";
 
 // Routes browsable without a session — the page itself gates individual
 // actions (generate, schedule, save, ...) client-side via useAuthModal()
 // instead of a hard server redirect. See kelolako-dashboard-nonlogin-plan.
 // Grows one page at a time as each gets its own action-level gating.
-const PUBLIC_APP_ROUTES = new Set([
-  "/dashboard",
-  "/tools/photo-v2",
-  "/tools/scheduler",
-  "/tools/scheduler/calendar",
-  "/tools/video",
-  "/tools/canvas",
-  "/tools/editor",
-  "/tools/skills",
-]);
-
 export async function middleware(request: NextRequest) {
   // Start with a passthrough response. setAll may replace this variable so
   // refreshed session cookies are forwarded to both the browser and the
@@ -69,17 +62,12 @@ export async function middleware(request: NextRequest) {
     // redirects, but now to /dashboard (which opens the sign-in modal
     // itself) instead of the old standalone /login page.
     const pathname = request.nextUrl.pathname;
-    if (
-      PUBLIC_APP_ROUTES.has(pathname) ||
-      pathname.startsWith("/tools/skills/")
-    ) {
+    if (isLoggedOutPublicAppRoute(pathname)) {
       return supabaseResponse;
     }
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    url.searchParams.set("authRequired", "1");
-    url.searchParams.set("next", request.nextUrl.pathname);
-    return applyLatestAuthUpdates(NextResponse.redirect(url));
+    return applyLatestAuthUpdates(
+      NextResponse.redirect(loggedOutAuthRedirectUrl(request.nextUrl)),
+    );
   }
 
   // Return supabaseResponse (not a fresh NextResponse.next()) so the

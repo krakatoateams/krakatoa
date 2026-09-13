@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Logged-out middleware route matrix and draft hand-off
+- Base: `48ce0c020bbf74d5e85c6ee1fa2899c41a3dba82`
+- Branch: `audit-repo/public-middleware-drafts`
 
 ## Queue
 

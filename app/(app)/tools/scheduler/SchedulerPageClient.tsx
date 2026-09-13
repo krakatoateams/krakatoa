@@ -1116,6 +1116,8 @@ function DescriptionCard({
   // a video (Whisper) or, for a photo post, the cover photo (vision), and the
   // two-branch usedTranscript warning is rendered by CaptionControls.
   const ai = useCaptionAI();
+  const { status } = useCurrentUser();
+  const { openSignInModal } = useAuthModal();
   const [uploadingForCaption, setUploadingForCaption] = useState(false);
   const isPhoto = contentType === "photo";
   const photoStoragePath = photoUrls[0] ?? null;
@@ -1129,7 +1131,14 @@ function DescriptionCard({
     ai.resetWarning();
   }, [videoUrl, storagePath, photoStoragePath, ai.resetWarning]);
 
+  const requireAuthForCaption = () => {
+    if (status === "authenticated") return true;
+    openSignInModal(undefined, { title, tags, caption });
+    return false;
+  };
+
   const handleGenerate = async () => {
+    if (!requireAuthForCaption()) return;
     try {
       let effectiveVideoUrl = videoUrl;
       let effectiveStoragePath = storagePath;
@@ -1167,6 +1176,7 @@ function DescriptionCard({
   };
 
   const handlePolish = async () => {
+    if (!requireAuthForCaption()) return;
     try {
       const next = await ai.polish(caption);
       onCaptionChange(next);

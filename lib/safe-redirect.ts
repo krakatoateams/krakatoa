@@ -11,12 +11,35 @@
  * position. Reject backslashes too: the WHATWG URL parser treats them as
  * slashes for HTTP(S), so `/\evil.com` also becomes protocol-relative.
  */
+function hasRelativePathSegment(next: string): boolean {
+  let pathname = next.split(/[?#]/, 1)[0];
+  try {
+    // Two passes also catch a once-double-encoded traversal without touching
+    // query values, where dots are ordinary user input.
+    for (let i = 0; i < 2; i++) {
+      const decoded = decodeURIComponent(pathname);
+      if (decoded === pathname) break;
+      pathname = decoded;
+    }
+  } catch {
+    return true;
+  }
+  const normalizedSeparators = pathname.replaceAll("\\", "/");
+  return (
+    normalizedSeparators.startsWith("//") ||
+    normalizedSeparators
+      .split("/")
+      .some((segment) => segment === "." || segment === "..")
+  );
+}
+
 export function sanitizeNextPath(next: string | null | undefined): string {
   if (
     next &&
     next.startsWith("/") &&
     !next.startsWith("//") &&
-    !/[\\\u0000-\u001f\u007f]/.test(next)
+    !/[\\\u0000-\u001f\u007f]/.test(next) &&
+    !hasRelativePathSegment(next)
   ) {
     return next;
   }
@@ -33,4 +56,14 @@ export function navigateAfterPasswordSignIn(
   assign: (path: string) => void = (path) => window.location.assign(path),
 ): void {
   assign(sanitizeNextPath(next));
+}
+
+export function authCallbackFailureUrl(
+  origin: string,
+  next: string | null | undefined,
+): string {
+  const url = new URL("/login", origin);
+  url.searchParams.set("error", "auth_callback_failed");
+  url.searchParams.set("next", sanitizeNextPath(next));
+  return url.toString();
 }
