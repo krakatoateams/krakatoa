@@ -106,7 +106,7 @@ the runbook.
   - [x] Dependency and Image Optimizer supply chain
   - [x] Production secrets and fail-open deployment guards
   - [x] Deployment CI quality-gate automation
-  - [ ] Site-wide security headers and CSP
+  - [x] Site-wide security headers and CSP
   - [ ] Logged-out middleware route matrix and draft hand-off
   - [ ] Auth modal forms and password lifecycle
   - [ ] Standalone auth pages and redirect chain
@@ -1441,6 +1441,36 @@ the runbook.
   actionable environment/runtime runs.
 - Security: final repeated review found no issues; branch-protection and
   trusted-collaborator constraints remain documented operational notes.
+
+### Public/deployment: site-wide security headers and CSP
+
+- Date: 2026-09-13
+- Base: `0581431667d91f087ab3efa3fa868bff703560e0`
+- Final commit: `11faf44ca415b0c98f5f6edb9542e098a32b15f4`
+- Scope: public/app/API/static/PWA response headers, production/development CSP,
+  configured Supabase browser origins, Next.js/Vercel Analytics, Google Fonts,
+  YouTube embeds, direct uploads, signed and hosted media, and CI policy checks.
+- Findings: no site-wide browser security policy existed. Added enforced CSP,
+  clickjacking and MIME guards, strict cross-origin referrers, a restrictive
+  Permissions Policy, production HSTS, and disabled the framework fingerprint
+  through one `/:path*` Next config rule. Production browser connections are
+  restricted to self plus the configured HTTPS/WSS Supabase project; development
+  alone receives HMR relaxations. The regression check covers the full image
+  allowlist, dev/prod split, insecure-production-origin rejection, and CI wiring.
+- Accepted risks: Next.js hydration and existing React/Reels styles retain
+  `'unsafe-inline'`; Scheduler's accepted hosted-media contract retains
+  `media-src https:`. A nonce policy would force broad dynamic rendering, and
+  narrowing media requires a product URL contract first. HSTS intentionally
+  does not claim unverified subdomains or preload eligibility.
+- Verification: `test:security-headers` failed on the absent site-wide rule and
+  passed after implementation; dependency and deployment-CI neighbors passed.
+  Dependency audit found 0 vulnerabilities, lint passed with 0 errors and 11
+  pre-existing warnings, production build and `git diff --check` passed, and
+  edited-file diagnostics were clean. A local production server returned the
+  enforced baseline on `/`, `/dashboard`, `/api/credits/packs`, `/sw.js`, and
+  `/manifest.webmanifest`.
+- Security: final repeated review found no issues and no unresolved critical,
+  high, or medium finding.
 
 ## Deferred
 
