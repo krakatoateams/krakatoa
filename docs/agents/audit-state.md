@@ -14,10 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Public/deployment
-- Slice: Production secrets and fail-open deployment guards
-- Base: `9cfeaa4b4543c468cc028587f11883fa04170d70`
-- Branch: `audit-repo/public-secret-guards`
+- None.
 
 ## Queue
 
@@ -107,7 +104,8 @@ the runbook.
   - [x] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
   - [x] Dependency and Image Optimizer supply chain
-  - [ ] Production secrets and fail-open deployment guards
+  - [x] Production secrets and fail-open deployment guards
+  - [ ] Deployment CI quality-gate automation
   - [ ] Site-wide security headers and CSP
   - [ ] Logged-out middleware route matrix and draft hand-off
   - [ ] Auth modal forms and password lifecycle
@@ -1377,6 +1375,34 @@ the runbook.
   edited-file diagnostics passed.
 - Security: final repeated reviews found 0 critical, 0 high, and 0 unaccepted
   medium findings.
+
+### Public/deployment: production secrets and fail-open deployment guards
+
+- Date: 2026-09-13
+- Base: `9cfeaa4b4543c468cc028587f11883fa04170d70`
+- Final commit: `24e81f14ed98b6e73de595134a1e107a02bfb26b`
+- Scope: all six mutation-capable `GET /api/cron/*` routes, shared deployment
+  detection and bearer comparison, cron operations documentation, active
+  storage-hygiene OpenSpec artifacts, and adjacent webhook/setup secret guards.
+- Findings: cron authorization previously failed open whenever `CRON_SECRET`
+  was absent, including production and preview deployments. All cron routes now
+  use one constant-time bearer guard, reject a missing deployed secret with 503
+  before mutation, and retain secretless access only for local development.
+  The self-check pins policy decisions and route-family integration.
+- Accepted risks: supported deployments are detected through production Node or
+  Vercel markers; a custom internet-facing host deliberately using development
+  markers must still set `CRON_SECRET`, as the deployment documentation
+  requires. There is no repository-wide CI quality-gate aggregate, so automatic
+  execution of this self-check is owned by the newly queued Public/deployment CI
+  slice rather than expanding this cron-auth change into a CI design.
+- Verification: `npm run test:cron-auth`, cron publish, post cleanup, storage
+  sweep, creation expiry, generation workflows, recoverable refund, admin
+  platform settings, and DOKU fulfillment checks passed. `npm audit` reports 0
+  vulnerabilities; `npm run lint` passed with 0 errors and 11 pre-existing
+  warnings; `npm run build`, `git diff --check`, CLAUDE.md's under-200-line
+  guard, and edited-file diagnostics passed.
+- Security: final review found 0 critical, 0 high, 0 medium, and 2 documented
+  low operational findings.
 
 ## Deferred
 
