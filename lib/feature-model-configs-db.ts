@@ -56,7 +56,7 @@ function handleError(error: { message: string } | null, fallback: string): void 
   ) {
     throw new Error(
       `Database table ${TABLE} is missing. Apply supabase/migrations/012_feature_model_enablement.sql ` +
-        "(GET /api/dev/setup-db?file=012_feature_model_enablement.sql, or run it in the Supabase SQL editor)."
+        "through the configured Supabase MCP or SQL Editor, or run npm run db:setup with DATABASE_URL."
     );
   }
   throw new Error(error.message || fallback);
