@@ -109,7 +109,7 @@ the runbook.
   - [x] Site-wide security headers and CSP
   - [x] Logged-out middleware route matrix and draft hand-off
   - [x] Auth modal forms and password lifecycle
-  - [ ] Standalone auth pages and redirect chain
+  - [x] Standalone auth pages and redirect chain
   - [ ] Public unauthenticated read APIs
   - [ ] Marketing landing and legal pages
   - [ ] Client bundle versus server-secret boundary
@@ -1543,6 +1543,40 @@ the runbook.
   `git diff --check`, and the CLAUDE.md under-200-line guard.
 - Security: the final review confirmed the proof-clear and failed-sign-out
   bypasses closed, with 0 critical, 0 high, and 0 unaccepted medium findings.
+
+### Public/deployment: standalone auth pages and redirect chain
+
+- Date: 2026-09-13
+- Base: `c42d8c962fc43bf580c6a8f3ce7b2bc29c589e4b`
+- Final commit: `a376ad8440393b85e05f01552f7ba3ec1b2af343`
+- Scope: standalone login, signup, forgot-password, and legacy reset pages;
+  shared-form cross-links; OAuth/signup/recovery callback success and failure
+  routing; nested destination encoding; and recovery-proof compatibility.
+- Findings: login/signup/forgot cross-links dropped the sanitized `next`
+  destination, and duplicate-signup navigation copied email into the URL.
+  `authPageHref()` now owns those links, prevents extra parameters from
+  overriding `next`, and no generated/read email query remains. The standalone
+  reset page accepted any session and sat outside the proof gate; successful
+  legacy recovery callbacks now canonicalize into the gated dashboard modal,
+  while direct visits fail closed through a new reset request. Recovery callback
+  classification is explicit instead of substring-based, and every successful
+  `flow=recovery` callback sets proof even if its `next` was tampered. Redirect
+  path decoding now reaches a bounded stable form and rejects excessive nesting.
+- Accepted risks: a stripped `flow` marker on a modern recovery URL falls back
+  to generic login failure rather than recovery-specific retry; application-
+  generated links always include it. The long-lived proof cookie intentionally
+  outlives an upstream Supabase refresh session and is cleared on every normal
+  auth or terminal reset path, preventing the app gate from expiring first.
+- Verification: all cross-link, email-query, direct/legacy reset, callback
+  classification, tampered recovery, nested encoding, and extra-parameter seams
+  failed before their fixes, then `test:auth` and `test:public-auth-flow` passed.
+  TypeScript and edited-file diagnostics were clean. `ci:checks` passed with 0
+  dependency vulnerabilities, lint at 0 errors and 11 pre-existing warnings,
+  production build, `git diff --check`, and the CLAUDE.md size guard. Production
+  probes returned 200 for standalone login/signup and a 307 direct-reset redirect
+  preserving `next` at `/forgot-password?...&error=expired`.
+- Security: final re-review found 0 critical, 0 high, and 0 unaccepted medium
+  findings.
 
 ## Deferred
 
