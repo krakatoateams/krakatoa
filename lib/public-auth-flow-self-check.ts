@@ -21,6 +21,10 @@ export function publicAuthFlowSelfCheck(): void {
   );
   const signInRoute = read("app/api/auth/signin/route.ts");
   const middleware = read("middleware.ts");
+  const recoveryPolicy = read("lib/password-recovery.ts");
+  const standaloneForgot = read("app/forgot-password/page.tsx");
+  const legacyReset = read("app/reset-password/page.tsx");
+  const loginPage = read("app/login/page.tsx");
   const drafts = read("lib/pending-form-draft.ts");
   const photo = read("app/(app)/tools/photo-v2/page.tsx");
   const legacyPhoto = read("app/(app)/tools/photo/page.tsx");
@@ -138,6 +142,24 @@ export function publicAuthFlowSelfCheck(): void {
       middleware.includes("PASSWORD_RECOVERY_REQUIRED") &&
       middleware.includes('"/api/:path*"'),
     "a recovery-created session must stay gated from app pages and APIs until reset completes",
+  );
+  assert(
+    signIn.includes('authPageHref("/signup", safeNext)') &&
+      signUp.includes('authPageHref("/login", safeNext)') &&
+      !signUp.includes("/login?email=") &&
+      !loginPage.includes('searchParams.get("email")') &&
+      standaloneForgot.split('authPageHref("/login", safeNext)').length - 1 ===
+        2,
+    "standalone auth cross-links must preserve next without putting email in the URL",
+  );
+  assert(
+    legacyReset.includes("redirect(") &&
+      !legacyReset.includes("updateUser") &&
+      recoveryPolicy.includes("isPasswordRecoveryCallback") &&
+      recoveryPolicy.includes('"/reset-password"') &&
+      callback.includes("const failedRecovery =") &&
+      callback.includes("passwordResetLandingPath("),
+    "legacy reset callbacks must enter the proof-gated flow and direct visits must fail closed",
   );
 }
 

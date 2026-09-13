@@ -23,7 +23,6 @@ function LoginPageContent() {
       <SignInForm
         next={next}
         callbackError={callbackError}
-        initialEmail={searchParams.get("email") ?? ""}
       />
     </AuthLayout>
   );

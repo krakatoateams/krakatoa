@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
 import { JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
-import { sanitizeNextPath } from "@/lib/safe-redirect";
+import { authPageHref, sanitizeNextPath } from "@/lib/safe-redirect";
 
 function flagJustSignedIn() {
   try {
@@ -206,7 +206,10 @@ export function SignUpForm({
             Back to login
           </button>
         ) : (
-          <Link href="/login" className="block text-body-3 text-brand-primary hover:text-brand-primary-hover">
+          <Link
+            href={authPageHref("/login", safeNext)}
+            className="block text-body-3 text-brand-primary hover:text-brand-primary-hover"
+          >
             Back to login
           </Link>
         )}
@@ -230,7 +233,10 @@ export function SignUpForm({
               Log in here
             </button>
           ) : (
-            <Link href="/login" className="text-brand-primary hover:text-brand-primary-hover">
+            <Link
+              href={authPageHref("/login", safeNext)}
+              className="text-brand-primary hover:text-brand-primary-hover"
+            >
               Log in here
             </Link>
           )}
@@ -332,7 +338,7 @@ export function SignUpForm({
             <div className="rounded-radius-md border border-error/30 bg-error/10 px-3 py-2.5 text-small text-error">
               This email is already registered. Already have an account?{" "}
               <Link
-                href={`/login?email=${encodeURIComponent(email)}`}
+                href={authPageHref("/login", safeNext)}
                 className="underline hover:text-white"
               >
                 Log in here

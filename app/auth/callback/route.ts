@@ -3,13 +3,15 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import {
   authCallbackFailureUrl,
+  passwordResetLandingPath,
   passwordResetRetryUrl,
   sanitizeNextPath,
 } from "@/lib/safe-redirect";
 import {
   PASSWORD_RECOVERY_PROOF_COOKIE,
   PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC,
-  passwordRecoveryDestinationFromLanding,
+  isPasswordRecoveryCallback,
+  passwordRecoveryDestinationFromCallback,
   passwordRecoveryProofValue,
 } from "@/lib/password-recovery";
 import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
@@ -70,11 +72,12 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      const response = authRedirect(`${origin}${next}`);
       const recoveryDestination =
-        flow === "recovery"
-          ? passwordRecoveryDestinationFromLanding(next)
-          : null;
+        passwordRecoveryDestinationFromCallback(flow, next);
+      const successDestination = recoveryDestination
+        ? passwordResetLandingPath(recoveryDestination)
+        : next;
+      const response = authRedirect(`${origin}${successDestination}`);
       if (recoveryDestination) {
         response.cookies.set(
           PASSWORD_RECOVERY_PROOF_COOKIE,
@@ -106,7 +109,8 @@ export async function GET(request: NextRequest) {
   // `next` is /reset-password for older emails sent before the reset flow
   // moved into a modal (app/reset-password/page.tsx stays as a fallback for
   // those), or /dashboard?resetPassword=1 for anything sent after.
-  if (next.startsWith("/reset-password") || next.includes("resetPassword=")) {
+  const failedRecovery = isPasswordRecoveryCallback(flow, next);
+  if (failedRecovery) {
     return authRedirect(passwordResetRetryUrl(origin, next));
   }
 

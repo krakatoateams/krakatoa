@@ -14,13 +14,19 @@
 function hasRelativePathSegment(next: string): boolean {
   let pathname = next.split(/[?#]/, 1)[0];
   try {
-    // Two passes also catch a once-double-encoded traversal without touching
-    // query values, where dots are ordinary user input.
-    for (let i = 0; i < 2; i++) {
+    // Decode to a stable pathname without touching query values, where dots
+    // are ordinary user input. Reject excessive nesting instead of letting a
+    // later router layer decode more times than this boundary validated.
+    let stable = false;
+    for (let i = 0; i < 4; i++) {
       const decoded = decodeURIComponent(pathname);
-      if (decoded === pathname) break;
+      if (decoded === pathname) {
+        stable = true;
+        break;
+      }
       pathname = decoded;
     }
+    if (!stable) return true;
   } catch {
     return true;
   }
@@ -66,6 +72,19 @@ export function authCallbackFailureUrl(
   url.searchParams.set("error", "auth_callback_failed");
   url.searchParams.set("next", sanitizeNextPath(next));
   return url.toString();
+}
+
+export function authPageHref(
+  path: "/login" | "/signup" | "/forgot-password",
+  next: string | null | undefined,
+  extra: Record<string, string | null | undefined> = {},
+): string {
+  const url = new URL(path, "https://internal.invalid");
+  url.searchParams.set("next", sanitizeNextPath(next));
+  for (const [key, value] of Object.entries(extra)) {
+    if (key !== "next" && value) url.searchParams.set(key, value);
+  }
+  return `${url.pathname}${url.search}`;
 }
 
 export function passwordResetDestination(

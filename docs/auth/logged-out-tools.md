@@ -41,5 +41,11 @@ password update clears the proof. Dismissing an unfinished reset signs out the
 local recovery session. A later normal password or callback sign-in clears stale
 proof before entering the app.
 
+Standalone `/login`, `/signup`, and `/forgot-password` remain fallback routes.
+Their cross-links must use `authPageHref()` so a sanitized `next` survives every
+step; never put the user's email in those URLs. Direct `/reset-password` visits
+fail closed, while still-valid legacy email callbacks are normalized into the
+proof-gated dashboard reset modal.
+
 Run `npm run test:public-auth-flow` when changing the route matrix, auth
 redirects, modal OAuth behavior, or draft persistence.

@@ -4,7 +4,11 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
-import { passwordResetCallbackUrl } from "@/lib/safe-redirect";
+import {
+  authPageHref,
+  passwordResetCallbackUrl,
+  sanitizeNextPath,
+} from "@/lib/safe-redirect";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/Button";
 
@@ -16,7 +20,7 @@ import { Button } from "@/components/ui/Button";
 function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const expired = searchParams.get("error") === "expired";
-  const next = searchParams.get("next");
+  const safeNext = sanitizeNextPath(searchParams.get("next"));
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,7 +38,10 @@ function ForgotPasswordForm() {
     // than login, so unlike login's Case A+C this never distinguishes.
     try {
       await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: passwordResetCallbackUrl(window.location.origin, next),
+        redirectTo: passwordResetCallbackUrl(
+          window.location.origin,
+          safeNext,
+        ),
       });
     } catch {
       // Fail closed to the same success state.
@@ -69,7 +76,10 @@ function ForgotPasswordForm() {
             If <strong className="text-text-primary">{email}</strong> is registered, we&apos;ve
             sent a password reset link to that address.
           </p>
-          <Link href="/login" className="block text-body-3 text-brand-primary hover:text-brand-primary-hover">
+          <Link
+            href={authPageHref("/login", safeNext)}
+            className="block text-body-3 text-brand-primary hover:text-brand-primary-hover"
+          >
             Back to login
           </Link>
         </div>
@@ -115,7 +125,10 @@ function ForgotPasswordForm() {
         </form>
 
         <p className="text-center text-body-3 text-text-secondary">
-          <Link href="/login" className="text-brand-primary hover:text-brand-primary-hover">
+          <Link
+            href={authPageHref("/login", safeNext)}
+            className="text-brand-primary hover:text-brand-primary-hover"
+          >
             Back to login
           </Link>
         </p>
