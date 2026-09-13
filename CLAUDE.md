@@ -6,7 +6,7 @@ keeps only the rules needed on most engineering tasks.
 
 ## Stack
 
-- Next.js 15 App Router, React 19, Node.js 20.9+, TypeScript, Tailwind CSS
+- Next.js 15 App Router, React 19, Node.js 24+, TypeScript, Tailwind CSS
 - Supabase Auth via `@supabase/ssr` with Google OAuth and email/password
 - Supabase Postgres and private Storage
 - Replicate for AI models and Rendi for cloud FFmpeg
@@ -18,6 +18,7 @@ keeps only the rules needed on most engineering tasks.
 - Develop: `npm run dev`
 - Build: `npm run build`
 - Lint: `npm run lint`
+- CI quality gates: `npm run ci:checks`
 - Apply migrations: `npm run db:setup`
 - Relevant focused checks are listed in `package.json`.
 

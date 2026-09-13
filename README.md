@@ -16,7 +16,7 @@ A premium AI-powered platform for content creators. Krakatoa hosts multiple AI t
 
 ## Tech Stack
 
-- **Framework**: Next.js 15.5 (App Router) + React 19 + TypeScript
+- **Framework**: Next.js 15.5 (App Router) + React 19 + Node.js 24+ + TypeScript
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide React
 - **Storage / DB**: Supabase
@@ -96,6 +96,7 @@ Open [http://localhost:3000](http://localhost:3000) for the landing page, or [ht
 | `npm run build` | Production build |
 | `npm run start` | Run the production build |
 | `npm run lint` | Lint the codebase |
+| `npm run ci:checks` | Run secretless deployment self-checks, audit, lint, and build |
 | `npm run db:setup` | Apply every migration in `supabase/migrations/` (idempotent) |
 
 ## Project Structure

@@ -190,6 +190,11 @@ Add checks that match the trust boundary:
 Warnings outside the diff may be recorded as pre-existing. Errors introduced by
 the branch block completion.
 
+GitHub runs the secretless repository baseline (`npm ci`, deployment security
+self-checks, dependency audit, lint, build, and committed-patch whitespace) on
+pull requests and pushes to `main`. This baseline does not replace the
+slice-specific checks above or live probes that require protected credentials.
+
 ### 5. Repeat code review, then security review
 
 Re-run the scoped code review against the original `BASE`. Fix confirmed

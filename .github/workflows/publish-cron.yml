@@ -17,6 +17,9 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
+# This workflow only calls the deployed endpoint; it does not need GITHUB_TOKEN.
+permissions: {}
+
 # Don't let a slow run overlap the next scheduled tick.
 concurrency:
   group: publish-cron

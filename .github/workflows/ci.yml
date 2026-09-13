@@ -1,0 +1,54 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Build-only placeholders. The reserved .invalid host cannot reach a project.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-placeholder
+      SUPABASE_SERVICE_ROLE_KEY: eyJci-service-role-placeholder
+    steps:
+      - name: Check out the committed patch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the deployment Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run deterministic quality gates
+        run: npm run ci:checks
+
+      - name: Check pull-request patch whitespace
+        if: github.event_name == 'pull_request'
+        run: >-
+          git diff --check
+          "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+
+      - name: Check pushed patch whitespace
+        if: github.event_name == 'push'
+        run: >-
+          git diff --check
+          "${{ github.event.before }}..${{ github.sha }}"
