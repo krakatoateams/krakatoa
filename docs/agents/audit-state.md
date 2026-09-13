@@ -256,8 +256,10 @@ the runbook.
   success, refund may still run. Reconcile with no generation request still
   refunds (pre-commit-era jobs). User credit read routes already bind to
   session `profile.id`; admin set/grant stay admin-wallet-only.
-- Follow-up: welcome claim vs first-job TOCTOU; optional `Date.now()` spend
-  keys when canvas-text has no job id; pricing zero-amount admin knobs.
+- Follow-up: welcome claim vs first-job TOCTOU closed (atomic RPC + jobs
+  lock trigger; `test:admin-platform-settings`). Canvas-text `Date.now()`
+  spend keys skipped — route already uses `spend:canvas_text:${jobId}`
+  (`test:generation-commit`). Pricing zero-amount admin knobs accepted.
 - Verification: `npm run test:generation-commit`,
   `npm run test:recoverable-refund`, `npm run test:metered-generation`,
   `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`, and
@@ -277,8 +279,8 @@ the runbook.
   `profile.id`. Admin set/grant reject non-admin wallets. Resolver fails
   closed on unknown keys.
 - Accepted risks: admin may set `credit_amount: 0` on non-video keys.
-  Welcome claim vs first-job TOCTOU remains; idempotency prevents
-  double-grant only. Durable fix is an atomic claim RPC.
+  Welcome claim vs first-job TOCTOU closed by
+  `krakatoa_claim_welcome_video_offer` (`097`, `test:admin-platform-settings`).
 - Verification: review-only; neighboring credit tests already green on
   `3805f4d`.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
@@ -298,8 +300,9 @@ the runbook.
   idempotency is the backstop). Amount mismatch on webhook returns 200 so
   DOKU stops retrying (user poll can still fulfill). `Client-Id` is not
   rebound to env.
-- Follow-up: `scripts/reconcile-doku-orders.mjs` still fail-opens on a
-  missing amount and uses a single purchase key.
+- Follow-up: `scripts/reconcile-doku-orders.mjs` now fail-closes with
+  `dokuPaidAmountMatchesOrder` and the live `:base`/`:bonus` keys
+  (`test:doku-fulfillment`).
 - Verification: `npm run test:doku-fulfillment`, `npm run lint`
   (0 errors; 11 pre-existing warnings), `npm run build`, and
   `git diff --check` passed.
@@ -436,9 +439,11 @@ the runbook.
   assert (no client write path to that column). User custom thumbs write
   `platform/skills/{slug}/`; `createSignedStorageUrl` without a user prefix is
   by design for that tree. Abandoned resumable folders wait for reconcile.
-- Follow-up: paginate `collectStorageReferences` / expiry selects before
-  PostgREST's ~1000-row default matters; optional expiry ownership assert;
-  unused prior thumb objects under `platform/skills/`.
+- Follow-up: `collectStorageReferences` pages with `.range()`
+  (`test:storage-sweep`). Expiry asserts `pathPrefixOwnedByUser` before
+  storage delete (`test:creation-expiry`). Leftover `.tiktok.jpg` siblings
+  and unused `platform/skills/{slug}/` thumbs are swept
+  (`test:storage-sweep`, `test:post-cleanup`).
 - Verification: `npm run test:storage-sweep` (red on resumable orphan, then
   green), `npm run test:storage-sign-ownership`,
   `npm run test:tiktok-photo-proxy`, `npm run test:creation-ownership`,
@@ -577,8 +582,10 @@ the runbook.
   does). Unauthenticated photo proxy remains a Storage-accepted constraint.
   Optimistic-Init JSDoc is stale relative to cron polling.
 - Follow-up: cron `isTikTokPermanentFailure` regex does not match the
-  current photo-path error text (Scheduler). Converted `.tiktok.jpg`
-  siblings are not swept. YouTube fetch errors still embed signed URLs.
+  current photo-path error text (Scheduler; later closed). Converted
+  `.tiktok.jpg` siblings are now swept when the source is gone
+  (`test:storage-sweep`, `test:post-cleanup`). YouTube fetch errors still
+  embed signed URLs (later redacted).
 - Verification: `npm run test:tiktok-publish` (red on token-in-error, then
   green), `npm run test:tiktok-oauth`, `npm run test:tiktok-creator-info`,
   `npm run test:tiktok-photo-proxy`, `npm run test:post-ownership`,
@@ -598,10 +605,12 @@ the runbook.
   session binding, and disconnect already matched Model B.
 - Accepted risks: disconnect is local-only (no Google revoke). Concurrent
   reconnects can race on read-then-upsert (Google refresh is stable).
-  YouTube still uses `request.url` origin, not `resolveOrigin`. Code
-  exchange still happens before session check (TikTok binds first).
-- Follow-up: legacy `app/calendar/page.tsx` treats login as "YouTube
-  Connected" (Public/deployment or Scheduler).
+  YouTube start/callback now use `resolveOrigin` (`test:youtube-oauth`).
+  Code exchange still happens before session check (TikTok binds first;
+  out of scope).
+- Follow-up: legacy `/calendar` YouTube-connected-on-login accepted; the
+  orphan page is gone (`/calendar` → `/tools/scheduler/calendar`,
+  `test:legacy-calendar-badge`).
 - Verification: `npm run test:youtube-oauth` (red on refresh wipe, then
   green), `npm run test:tiktok-oauth`, `npm run test:auth`,
   `npm run test:post-ownership`, `npm run lint` (0 errors; 11 pre-existing
@@ -683,8 +692,9 @@ the runbook.
   `/api/connections/status`. Signed-in users without YouTube get Connect
   YouTube (`/api/connections/youtube/start`); signed-out users get Sign in.
 - Accepted risks: brief "Connect YouTube" flash while status loads (fail-closed).
-  `/calendar` remains an orphaned duplicate of the in-app calendar.
-- Follow-up: consider redirecting `/calendar` → `/tools/scheduler/calendar`
+  `/calendar` permanently redirects to `/tools/scheduler/calendar`
+  (`next.config.mjs`; query preserved). The orphan page was removed.
+- Follow-up: `/calendar` redirect closed (`test:legacy-calendar-badge`).
   (Public/deployment). Admin and Public/deployment queues remain.
 - Verification: `npm run test:legacy-calendar-badge` (red on login-as-connected,
   then green), `npm run test:youtube-oauth`, `npm run test:post-ownership`,
@@ -704,7 +714,8 @@ the runbook.
   path ownership. StatsRow is a profile-scoped GET.
 - Accepted risks: `caption` query length is uncapped (cosmetic). Deep-link
   `assetUrl` can be a raw path in the address bar.
-- Follow-up: legacy `/calendar` YouTube-connected-on-login remains.
+- Follow-up: legacy `/calendar` orphan closed (permanent redirect;
+  `test:legacy-calendar-badge`). YouTube-connected-on-login accepted.
 - Verification: review-only; `npm run test:post-ownership` and
   `npm run test:storage-sign-ownership` already green on `7818f07`.
 - Security: 0 critical, 0 high, 0 unaccepted medium.
@@ -719,7 +730,7 @@ the runbook.
   PATCH; `canEdit` locks published and active claims; server 409 is toasted.
 - Accepted risks: no dedicated Retry button (failed posts re-arm via edit or
   drag). After 409 the modal is not auto-refreshed.
-- Follow-up: cross-tool handoff and legacy `/calendar` remain.
+- Follow-up: legacy `/calendar` closed (`test:legacy-calendar-badge`).
 - Verification: review-only; neighboring `npm run test:post-ownership` already
   green on `1d00e75`.
 - Security: 0 critical, 0 high, 0 unaccepted medium (docs-only checkpoint).
@@ -736,7 +747,7 @@ the runbook.
   idempotency was already correct.
 - Accepted risks: `httpKind === "loading"` does not block schedule if a prior
   privacy level is already set (same-user only; cron still publishes).
-- Follow-up: in-app calendar UI, handoff, and legacy `/calendar` remain.
+- Follow-up: legacy `/calendar` closed (`test:legacy-calendar-badge`).
   Browser E2E of the 409/502 banners was not run (no live TikTok 409).
 - Verification: `npm run test:tiktok-creator-info` (red on 409-as-loading,
   then green), `npm run test:tiktok-oauth`, `npm run test:post-ownership`,
@@ -783,13 +794,12 @@ the runbook.
 - Accepted risks: `CRON_SECRET` open when unset (documented). YouTube
   upload-then-persist can duplicate if the function dies after upload
   (`scheduler-cron-reliability` residual; `maxDuration=60`). TikTok
-  refresh-then-persist is required by token rotation. Success UPDATE is
-  `.eq("id")` only; a live worker cannot outlive the 10-minute stale window
-  under the current 60s cap. Claim lock + `MAX_POSTS_PER_RUN=1` unchanged.
-- Follow-up: Instagram missing-video is still transient in
-  `isInstagramPermanentFailure` (cleanup/cron adjacent). Stack traces and
-  share-URL `console.warn(err)` stay Admin log redaction. Failed-post
-  storage cleanup and scheduler/calendar UI remain.
+  refresh-then-persist is required by token rotation.   Success UPDATE re-checks status and the held claim so a stale-window
+  cancel/re-arm cannot be overwritten. Claim lock + `MAX_POSTS_PER_RUN=1`
+  unchanged.
+- Follow-up: Instagram missing/unreadable video is permanent
+  (`isInstagramPermanentFailure`, `test:instagram-publish`). Stack traces
+  and share-URL `console.warn` stay Admin log redaction (accepted).
 - Verification: `npm run test:cron-publish` (red on photo-path and signed
   URL log, then green), `npm run test:post-ownership`,
   `npm run test:tiktok-publish`, `npm run test:instagram-publish`,
@@ -810,10 +820,9 @@ the runbook.
 - Accepted risks: wrong-owner PATCH stays 403 after fetch-by-id. Authenticated
   hosted `http` `video_url` remains a cron fetch flow. Live `posts_status_check`
   already allows `canceled` (088).
-- Follow-up: after the 10-minute stale window, PATCH can cancel while a cron
-  worker may still be uploading — cron success updates do not re-check status
-  (Publisher cron). `isTikTokPermanentFailure` regex, token-preview logs, and
-  claim/idempotency stay Publisher cron.
+- Follow-up: cron success now re-checks `status=scheduled` and the held
+  `publish_started_at` (`markPublishedIfClaimHeld`, `test:cron-publish`).
+  TikTok classifier / token-preview logs accepted in later slices.
 - Verification: `npm run test:post-ownership` (red on hosted-URL 401 and claim
   race, then green), `npm run test:storage-sign-ownership`, `npm run test:auth`,
   `npm run test:tiktok-publish`, `npm run test:youtube-publish`,
@@ -1130,11 +1139,11 @@ the runbook.
   display and checkout now fail closed, full-set saves are transactional,
   welcome values are bounded on write/read, and both legacy/current grant keys
   fence eligibility.
-- Accepted risks: welcome eligibility versus first-job creation remains a
-  non-atomic TOCTOU; idempotency prevents duplicate grants, and a durable fix
-  requires an atomic claim RPC. Clients may briefly render seed packs before the
-  first fetch, but checkout always re-resolves the live active row. Pack numeric
-  maxima beyond Postgres constraints remain an admin-trust policy choice.
+- Accepted risks: welcome eligibility versus first-job creation TOCTOU is
+  closed by `krakatoa_claim_welcome_video_offer` (`097`). Clients may briefly
+  render seed packs before the first fetch, but checkout always re-resolves
+  the live active row. Pack numeric maxima beyond Postgres constraints remain
+  an admin-trust policy choice.
 - Verification: `npm run test:admin-platform-settings` (red then green),
   `test:doku-fulfillment`, `test:admin-auth`, `test:rpc-grants`,
   `test:migration-catalog`, `npm run lint` (0 errors; 11 pre-existing warnings),
@@ -1330,9 +1339,9 @@ the runbook.
   billing settings drive Suggest only, while explicit/default Credits persist.
 - Accepted risks: detailed generation errors remain in service-role tables for
   admin monitoring; best-effort failure persistence can still wait for reconcile
-  if the failure write itself is unavailable. The documented welcome-claim
-  TOCTOU, bounded metrics windows, incremental expiry cleanup, and admin-trust
-  configuration choices remain accepted in their individual slices.
+  if the failure write itself is unavailable. Bounded metrics windows,
+  incremental expiry cleanup, and admin-trust configuration choices remain
+  accepted in their individual slices. Welcome-claim TOCTOU is closed.
 - Verification: all Admin-focused checks passed, including admin auth/metrics,
   Config validation/toggles/tree/persistence, platform settings, skills,
   monitoring/prompt/log redaction, dev-blank, migration/RPC checks, expiry,
@@ -1812,6 +1821,45 @@ the runbook.
 - Security: dedicated review classified this as an accepted external
   low-to-medium entitlement risk, not an application auth bypass, with 0
   critical, 0 high, and 0 unaccepted medium findings.
+
+### Audit follow-ups closeout (items 1–10)
+
+- Date: 2026-09-13
+- Base: local `main` after `/audit-repo` complete
+- Final commit: this PR (audit follow-up closeout)
+- Scope: remaining open follow-ups from this file, verified against current
+  code. Early "Follow-up: next slice" notes and the skip list were left
+  closed/accepted.
+- Findings:
+  1. Welcome claim is atomic (`097_atomic_welcome_video_claim.sql`,
+     `claimWelcomeVideoOffer`, jobs `BEFORE INSERT` profile lock). Live MCP
+     apply `atomic_welcome_video_claim`; RPCs service_role-only.
+     `test:admin-platform-settings`.
+  2. Canvas-text spend keys skipped — already `spend:canvas_text:${jobId}`
+     after `createJob` (`test:generation-commit`).
+  3. `scripts/reconcile-doku-orders.mjs` uses `dokuPaidAmountMatchesOrder`
+     and `:base`/`:bonus` keys (`test:doku-fulfillment`).
+  4. `collectStorageReferences` pages with `.range()` (`test:storage-sweep`).
+  5. Expiry deletes storage only when `pathPrefixOwnedByUser`
+     (`test:creation-expiry`).
+  6. `.tiktok.jpg` siblings swept/cleaned with source; leftover skill thumbs
+     listed after replace (`test:storage-sweep`, `test:post-cleanup`).
+  7. YouTube start/callback use `resolveOrigin` (`test:youtube-oauth`).
+  8. `/calendar` → `/tools/scheduler/calendar` permanent; orphan page
+     removed (`test:legacy-calendar-badge`).
+  9. Instagram missing/unreadable video is permanent
+     (`test:instagram-publish`).
+  10. Cron success binds `status=scheduled` + held `publish_started_at`
+      (`test:cron-publish`).
+- Out of scope left: Instagram Phase 3 long-lived token refresh; YouTube
+  code-exchange after session check; concurrent creator-info + cron refresh
+  lock.
+- Verification: focused tests above, plus `test:post-ownership`,
+  `test:rpc-grants` not re-run after 092 (new migration has its own grants),
+  `npm run lint` (0 errors; 11 pre-existing warnings), `npm run build`,
+  `git diff --check`.
+- Security: 0 critical, 0 high, 0 unaccepted medium. Owner-only residuals:
+  GitHub required checks + branch protection; Supabase HIBP after Pro.
 
 ## Deferred
 

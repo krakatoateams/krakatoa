@@ -1,4 +1,29 @@
 import { isResumablePath, isVideosTempPath } from "@/lib/storage-buckets";
+import { convertedTikTokSiblingPath } from "@/lib/post-storage-cleanup-pure";
+
+export { convertedTikTokSiblingPath };
+
+export function tiktokSiblingSourcePrefix(siblingPath: string): string | null {
+  if (!siblingPath.endsWith(".tiktok.jpg")) return null;
+  return siblingPath.slice(0, -".tiktok.jpg".length);
+}
+
+export function shouldSweepConvertedTikTokSibling(opts: {
+  siblingPath: string;
+  listedPaths: Set<string>;
+  cutoffMs: number;
+  createdAtMs: number | null;
+}): boolean {
+  const prefix = tiktokSiblingSourcePrefix(opts.siblingPath);
+  if (!prefix) return false;
+  const isOldEnough = opts.createdAtMs !== null && opts.createdAtMs < opts.cutoffMs;
+  if (!isOldEnough) return false;
+  for (const path of opts.listedPaths) {
+    if (path === opts.siblingPath) continue;
+    if (path.startsWith(`${prefix}.`)) return false;
+  }
+  return true;
+}
 
 export type SweepDecision =
   | { action: "keep" }

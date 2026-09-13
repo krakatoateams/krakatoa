@@ -6,6 +6,7 @@ import {
   POST_CLEANUP_RECLAIM_STATUSES,
   cleanupLogVideoRef,
   isSchedulerRawPhotoUpload,
+  storageCleanupPaths,
 } from "@/lib/post-storage-cleanup-pure";
 
 /**
@@ -103,6 +104,7 @@ export async function cleanupPostPhotos(postId: string, photoUrls: string[] | nu
     return;
   }
 
-  await removeStorageObjects(toDelete);
-  console.log(`[post-cleanup] storage objects removed for post ${postId}:`, toDelete);
+  const paths = storageCleanupPaths(toDelete);
+  await removeStorageObjects(paths);
+  console.log(`[post-cleanup] storage objects removed for post ${postId}:`, paths);
 }

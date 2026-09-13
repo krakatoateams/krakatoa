@@ -1,4 +1,9 @@
-import { classifySweepObject } from "./storage-sweep-pure";
+import { readFileSync } from "node:fs";
+import {
+  classifySweepObject,
+  convertedTikTokSiblingPath,
+  shouldSweepConvertedTikTokSibling,
+} from "./storage-sweep-pure";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`storage-sweep self-check: ${message}`);
@@ -67,6 +72,48 @@ export function storageSweepSelfCheck(): void {
     refBlob: "",
   });
   assert(missingTs.action === "keep", "missing timestamp must be kept");
+
+  const sibling = convertedTikTokSiblingPath(`${userId}/photos/uploads/scheduler/shot.png`);
+  assert(
+    sibling === `${userId}/photos/uploads/scheduler/shot.tiktok.jpg`,
+    "TikTok JPEG siblings must sit next to the source",
+  );
+  assert(
+    shouldSweepConvertedTikTokSibling({
+      siblingPath: sibling,
+      listedPaths: new Set([sibling]),
+      cutoffMs,
+      createdAtMs: oldMs,
+    }),
+    "converted .tiktok.jpg must be swept when the source object is gone",
+  );
+  assert(
+    !shouldSweepConvertedTikTokSibling({
+      siblingPath: sibling,
+      listedPaths: new Set([sibling, `${userId}/photos/uploads/scheduler/shot.png`]),
+      cutoffMs,
+      createdAtMs: oldMs,
+    }),
+    "converted .tiktok.jpg must stay while the source object remains",
+  );
+
+  const auditSource = readFileSync(
+    new URL("./storage-orphan-audit.ts", import.meta.url),
+    "utf8",
+  );
+  assert(
+    /\.range\(from, from \+ STORAGE_REF_PAGE_SIZE - 1\)/.test(auditSource),
+    "collectStorageReferences must page past PostgREST's default row cap",
+  );
+
+  const skillConfigs = readFileSync(
+    new URL("./skill-configs-db.ts", import.meta.url),
+    "utf8",
+  );
+  assert(
+    /removeLeftoverSkillThumbs/.test(skillConfigs),
+    "thumb replace must sweep unused prior objects under platform/skills/{slug}/",
+  );
 }
 
 storageSweepSelfCheck();

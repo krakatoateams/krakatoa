@@ -12,8 +12,11 @@ import { instagramTokenExchangeErrorDetail } from "@/lib/instagram-oauth-pure";
 import {
   instagramGraphErrorDetail,
   instagramStorageCheckError,
+  isInstagramPermanentFailure,
   parseInstagramGraphJson,
 } from "@/lib/instagram-publish-pure";
+
+export { isInstagramPermanentFailure };
 
 export {
   INSTAGRAM_CONTENT_PUBLISH_SCOPE,
@@ -381,27 +384,4 @@ export async function publishContainer(
   }
 
   return { mediaId: json.id };
-}
-
-/**
- * Classifies an Instagram publish failure, mirroring isTikTokPermanentFailure
- * / isPermanentFailure in app/api/cron/route.ts: auth/permission problems
- * (token invalid/expired, missing scope) are permanent — retrying wastes an
- * attempt on something that cannot self-heal without reconnecting. Rate-limit
- * responses (Instagram's 100-posts/24h cap) and network/5xx errors are
- * transient — see design.md Decision 8 (Phase 1): no pre-flight rate-limit
- * check, just classify a real rate-limit error as retry-later.
- */
-export function isInstagramPermanentFailure(_err: unknown, message: string): boolean {
-  const m = message.toLowerCase();
-  if (/re-?authori|reconnect|access token|oauthexception|permission|invalid_business_account|not a professional account/.test(m)) {
-    return true;
-  }
-  if (/jpeg is the only image format|unsupported media type|invalid image format/.test(m)) {
-    return true;
-  }
-  if (/could not read photo from storage|no publishable video location/.test(m)) {
-    return true;
-  }
-  return false;
 }

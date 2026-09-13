@@ -38,6 +38,26 @@ const baseUrl = env.DOKU_API_BASE?.trim()
 
 const ts = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+/** Same fail-closed amount bind as webhook/reconcile (lib/doku-fulfillment-pure.ts). */
+function dokuPaidAmountMatchesOrder(paidAmount, expectedAmount) {
+  return (
+    paidAmount !== null &&
+    Number.isFinite(paidAmount) &&
+    paidAmount === expectedAmount
+  );
+}
+
+function splitOrderCredits(order) {
+  const metaBase =
+    typeof order.metadata?.baseCredits === "number" && Number.isFinite(order.metadata.baseCredits)
+      ? order.metadata.baseCredits
+      : null;
+  const rawBase = metaBase ?? order.credits;
+  const base = Math.max(0, Math.min(rawBase, order.credits));
+  const bonus = Math.max(0, order.credits - base);
+  return { base, bonus };
+}
+
 async function checkStatus(invoice) {
   const target = `/orders/v1/status/${invoice}`;
   const requestId = crypto.randomUUID();
@@ -61,14 +81,14 @@ async function checkStatus(invoice) {
   return {
     txn: (json.transaction?.status ?? "").toUpperCase(),
     order: json.order?.status ?? null,
-    amount: Number(json.order?.amount),
+    amount: Number.isFinite(Number(json.order?.amount)) ? Number(json.order?.amount) : null,
     method: json.channel?.id ?? json.acquirer?.id ?? null,
   };
 }
 
 const { data: pending } = await sb
   .from("credit_orders")
-  .select("id, invoice_number, profile_id, pack_id, credits, amount_idr, doku_token_id")
+  .select("id, invoice_number, profile_id, pack_id, credits, amount_idr, doku_token_id, metadata")
   .eq("status", "pending");
 
 console.log(`Reconciling ${pending?.length ?? 0} pending orders against ${baseUrl}\n`);
@@ -77,32 +97,54 @@ for (const o of pending ?? []) {
   const s = await checkStatus(o.invoice_number);
 
   if (s.txn === "SUCCESS") {
-    if (Number.isFinite(s.amount) && s.amount !== o.amount_idr) {
+    if (!dokuPaidAmountMatchesOrder(s.amount, o.amount_idr)) {
       console.log(`SKIP  ${o.invoice_number} amount mismatch doku=${s.amount} ours=${o.amount_idr}`);
       continue;
     }
+    const { base, bonus } = splitOrderCredits(o);
+    const baseMeta = {
+      source: "doku",
+      invoiceNumber: o.invoice_number,
+      packId: o.pack_id,
+      amountIdr: o.amount_idr,
+      paymentMethod: s.method,
+      reconciled: true,
+    };
     const { data: rpc, error: rpcErr } = await sb.rpc("krakatoa_apply_credit_transaction", {
       p_profile_id: o.profile_id,
-      p_amount: o.credits,
+      p_amount: base,
       p_direction: "credit",
       p_type: "purchase",
       p_status: "succeeded",
-      p_description: `Credit pack ${o.pack_id} (${o.credits} credits)`,
-      p_metadata: {
-        source: "doku",
-        invoiceNumber: o.invoice_number,
-        packId: o.pack_id,
-        amountIdr: o.amount_idr,
-        paymentMethod: s.method,
-        reconciled: true,
-      },
-      p_idempotency_key: `purchase:doku:${o.invoice_number}`,
+      p_description: `Credit pack ${o.pack_id} — base (${base} credits)`,
+      p_metadata: { ...baseMeta, portion: "base" },
+      p_idempotency_key: `purchase:doku:${o.invoice_number}:base`,
       p_job_id: null,
       p_asset_id: null,
+      p_source: "regular",
     });
     if (rpcErr) {
       console.log(`ERROR ${o.invoice_number} rpc: ${rpcErr.message}`);
       continue;
+    }
+    if (bonus > 0) {
+      const { error: bonusErr } = await sb.rpc("krakatoa_apply_credit_transaction", {
+        p_profile_id: o.profile_id,
+        p_amount: bonus,
+        p_direction: "credit",
+        p_type: "purchase",
+        p_status: "succeeded",
+        p_description: `Credit pack ${o.pack_id} — bonus (${bonus} credits)`,
+        p_metadata: { ...baseMeta, portion: "bonus" },
+        p_idempotency_key: `purchase:doku:${o.invoice_number}:bonus`,
+        p_job_id: null,
+        p_asset_id: null,
+        p_source: "purchase_bonus",
+      });
+      if (bonusErr) {
+        console.log(`ERROR ${o.invoice_number} bonus rpc: ${bonusErr.message}`);
+        continue;
+      }
     }
     const txId = rpc?.transaction?.id ?? null;
     const { error: updErr } = await sb

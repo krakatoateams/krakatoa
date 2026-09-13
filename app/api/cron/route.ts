@@ -52,6 +52,36 @@ const MAX_POSTS_PER_RUN = 1;
 // re-claimed by a later run.
 const CLAIM_STALE_MS = 10 * 60 * 1000;
 
+async function markPublishedIfClaimHeld(
+  postId: string,
+  claimedAt: string,
+  extra: Record<string, unknown> = {},
+): Promise<boolean> {
+  const { data, error } = await supabaseServer
+    .from("posts")
+    .update({
+      status: "published",
+      last_error: null,
+      publish_started_at: null,
+      publish_attempts: 0,
+      ...extra,
+    })
+    .eq("id", postId)
+    .eq("status", "scheduled")
+    .eq("publish_started_at", claimedAt)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.error(`[cron] success update failed for post ${postId}:`, error.message);
+    return false;
+  }
+  if (!data) {
+    console.log(`[cron] Post ${postId} was canceled or re-armed — not marking published`);
+    return false;
+  }
+  return true;
+}
+
 // Transient failures are retried up to this many attempts before giving up.
 const MAX_PUBLISH_ATTEMPTS = 3;
 
@@ -205,13 +235,11 @@ export async function GET(req: NextRequest) {
     // here.
     if (post.platform !== "tiktok" && claimed.youtube_video_id) {
       console.log(`[cron] Post ${post.id} already has a youtube publish ID — marking published, no re-upload`);
-      await supabaseServer
-        .from("posts")
-        .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
-        .eq("id", post.id);
-      await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-      await cleanupPostPhotos(post.id, post.photo_urls);
-      published++;
+      if (await markPublishedIfClaimHeld(post.id, now)) {
+        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+        await cleanupPostPhotos(post.id, post.photo_urls);
+        published++;
+      }
       continue;
     }
 
@@ -500,22 +528,17 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        await supabaseServer
-          .from("posts")
-          .update({
-            status: "published",
-            last_error: null,
-            publish_started_at: null,
-            publish_attempts: 0,
+        if (
+          await markPublishedIfClaimHeld(post.id, now, {
             tiktok_share_url: shareUrl,
             tiktok_rate_limited_first_attempted_at: null,
             tiktok_rate_limit_retry_after: null,
           })
-          .eq("id", post.id);
-
-        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-        await cleanupPostPhotos(post.id, post.photo_urls);
-        published++;
+        ) {
+          await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+          await cleanupPostPhotos(post.id, post.photo_urls);
+          published++;
+        }
         continue;
       }
 
@@ -523,13 +546,11 @@ export async function GET(req: NextRequest) {
         // ── Idempotency: already fully published ──────────────────────────
         if (claimed.instagram_media_id) {
           console.log(`[cron] Post ${post.id} already has an Instagram media ID — marking published, no re-publish`);
-          await supabaseServer
-            .from("posts")
-            .update({ status: "published", last_error: null, publish_started_at: null, publish_attempts: 0 })
-            .eq("id", post.id);
-          await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-          await cleanupPostPhotos(post.id, post.photo_urls);
-          published++;
+          if (await markPublishedIfClaimHeld(post.id, now)) {
+            await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+            await cleanupPostPhotos(post.id, post.photo_urls);
+            published++;
+          }
           continue;
         }
 
@@ -666,20 +687,15 @@ export async function GET(req: NextRequest) {
         const { mediaId } = await publishContainer(igUserId, token.access_token, containerId);
         console.log(`[cron] ✓ Post ${post.id} published → Instagram media ID: ${mediaId}`);
 
-        await supabaseServer
-          .from("posts")
-          .update({
-            status: "published",
+        if (
+          await markPublishedIfClaimHeld(post.id, now, {
             instagram_media_id: mediaId,
-            last_error: null,
-            publish_started_at: null,
-            publish_attempts: 0,
           })
-          .eq("id", post.id);
-
-        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-        await cleanupPostPhotos(post.id, post.photo_urls);
-        published++;
+        ) {
+          await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+          await cleanupPostPhotos(post.id, post.photo_urls);
+          published++;
+        }
         continue;
       }
 
@@ -707,20 +723,15 @@ export async function GET(req: NextRequest) {
       console.log(`[cron] ✓ Post ${post.id} published → YouTube ID: ${youtubeId}`);
 
       // ── Mark published and store YouTube video ID ───────────────────────────
-      await supabaseServer
-        .from("posts")
-        .update({
-          status: "published",
+      if (
+        await markPublishedIfClaimHeld(post.id, now, {
           youtube_video_id: youtubeId,
-          last_error: null,
-          publish_started_at: null,
-          publish_attempts: 0,
         })
-        .eq("id", post.id);
-
-      await cleanupPostVideo(post.id, post.video_url, post.asset_id);
-      await cleanupPostPhotos(post.id, post.photo_urls);
-      published++;
+      ) {
+        await cleanupPostVideo(post.id, post.video_url, post.asset_id);
+        await cleanupPostPhotos(post.id, post.photo_urls);
+        published++;
+      }
     } catch (err) {
       // A classified TikTok creator-info error (currently only the "banned"
       // severity reaches here — rate_limited is fully handled inline in the

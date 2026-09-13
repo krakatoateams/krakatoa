@@ -3,6 +3,8 @@
  * connection. YouTube is a separate platform_tokens row.
  */
 
+import { readFileSync } from "node:fs";
+
 export type LegacyCalendarYoutubeBadge =
   | "signed-out"
   | "youtube-connected"
@@ -35,6 +37,17 @@ export function legacyCalendarBadgeSelfCheck(): void {
     legacyCalendarYoutubeBadge({ authenticated: false, youtubeConnected: false }) ===
       "signed-out",
     "signed-out users must see the sign-in CTA",
+  );
+
+  const nextConfig = readFileSync(
+    new URL("../next.config.mjs", import.meta.url),
+    "utf8",
+  );
+  assert(
+    /source:\s*"\/calendar"/.test(nextConfig) &&
+      /destination:\s*"\/tools\/scheduler\/calendar"/.test(nextConfig) &&
+      /permanent:\s*true/.test(nextConfig),
+    "/calendar must permanently redirect to /tools/scheduler/calendar",
   );
 }
 

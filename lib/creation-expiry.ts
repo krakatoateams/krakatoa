@@ -5,6 +5,7 @@ import {
   getExpirySettings,
 } from "@/lib/expiry-settings-db";
 import { errorLogSafe } from "@/lib/error-log-safe";
+import { pathPrefixOwnedByUser } from "@/lib/storage-sign-ownership-pure";
 
 /**
  * Creation expiry enforcement (Expiry Management).
@@ -54,7 +55,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-type CreationRow = { id: string; storage_path: string | null };
+type CreationRow = { id: string; storage_path: string | null; user_id: string };
 const CREATION_EXPIRY_BATCH_SIZE = 200;
 const DEFAULT_MAX_BATCHES = 5;
 const CRON_MAX_BATCHES_PER_TARGET = 2;
@@ -151,7 +152,7 @@ export async function runCreationExpiry(
   while (batches < maxBatches) {
     const { data, error } = await supabaseServer
       .from(USER_CREATIONS_TABLE)
-      .select("id, storage_path")
+      .select("id, storage_path, user_id")
       .eq("media_type", mediaType)
       .lt("created_at", cutoff)
       .order("created_at", { ascending: true })
@@ -173,14 +174,25 @@ export async function runCreationExpiry(
         "id",
         rows.map((row) => row.id)
       )
-      .select("id, storage_path");
+      .select("id, storage_path, user_id");
     if (delErr) throw new Error(delErr.message);
 
     const deleted = (removed as CreationRow[] | null) ?? [];
     deletedRows += deleted.length;
     const paths = deleted
-      .map((row) => row.storage_path)
-      .filter((path): path is string => !!path);
+      .filter(
+        (row): row is CreationRow & { storage_path: string } =>
+          !!row.storage_path && pathPrefixOwnedByUser(row.storage_path, row.user_id)
+      )
+      .map((row) => row.storage_path);
+    const skippedUnowned = deleted.filter(
+      (row) => row.storage_path && !pathPrefixOwnedByUser(row.storage_path, row.user_id)
+    ).length;
+    if (skippedUnowned > 0) {
+      console.warn(
+        `[creation-expiry] skipped ${skippedUnowned} storage_path(s) not owner-scoped to user_id`
+      );
+    }
     if (paths.length === 0) continue;
 
     // 2) Soft-delete matching platform assets (best-effort).

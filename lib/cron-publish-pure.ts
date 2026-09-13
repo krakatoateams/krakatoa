@@ -4,6 +4,7 @@
  * the real provider error strings.
  */
 
+import { readFileSync } from "node:fs";
 import { redactPublishMediaRef } from "@/lib/tiktok-publish-pure";
 
 /** Log-safe token summary — never include access or refresh token material. */
@@ -67,6 +68,14 @@ export function isPermanentFailure(err: unknown, message: string): boolean {
   const status = (err as { response?: { status?: number } })?.response?.status;
   if (status === 401 || status === 403) return true;
   return false;
+}
+
+/** Success may apply only while this worker still holds the original claim. */
+export function cronSuccessUpdateApplies(
+  row: { status: string; publish_started_at: string | null },
+  claimedAt: string,
+): boolean {
+  return row.status === "scheduled" && row.publish_started_at === claimedAt;
 }
 
 /**
@@ -136,6 +145,27 @@ export function cronPublishSelfCheck(): void {
     isPermanentFailure(null, "Video file no longer exists in storage — it was deleted or swept before publishing."),
     "missing video must be permanent",
   );
+  assert(
+    cronSuccessUpdateApplies(
+      { status: "scheduled", publish_started_at: "2026-09-12T00:00:00.000Z" },
+      "2026-09-12T00:00:00.000Z",
+    ),
+    "cron success may apply while the same claim is still held",
+  );
+  assert(
+    !cronSuccessUpdateApplies(
+      { status: "canceled", publish_started_at: "2026-09-12T00:00:00.000Z" },
+      "2026-09-12T00:00:00.000Z",
+    ),
+    "cron success must not overwrite a canceled row",
+  );
+  assert(
+    !cronSuccessUpdateApplies(
+      { status: "scheduled", publish_started_at: null },
+      "2026-09-12T00:00:00.000Z",
+    ),
+    "cron success must not overwrite a re-armed row",
+  );
 
   const logged = cronTokenLogSafe({
     refresh_token: "secret-refresh-token-value",
@@ -181,6 +211,17 @@ export function cronPublishSelfCheck(): void {
   assert(
     errorLogged.includes("Could not fetch video from storage"),
     "cron error logs must keep the failure reason",
+  );
+
+  const cronRoute = readFileSync(
+    new URL("../app/api/cron/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert(
+    /markPublishedIfClaimHeld/.test(cronRoute) &&
+      /\.eq\("publish_started_at", claimedAt\)/.test(cronRoute) &&
+      /\.eq\("status", "scheduled"\)/.test(cronRoute),
+    "cron success must re-check status and the held claim before overwriting",
   );
 }
 

@@ -36,6 +36,11 @@ assert.doesNotMatch(
   /opts\?\.cutoff/,
   "callers must not be able to supply an arbitrary destructive cutoff"
 );
+assert.match(
+  expirySource,
+  /pathPrefixOwnedByUser/,
+  "expiry must assert storage_path is owner-scoped to the row user_id before delete"
+);
 
 const rowDeleteIndex = expirySource.indexOf(
   `.from(USER_CREATIONS_TABLE)\n      .delete()`
