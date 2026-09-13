@@ -108,7 +108,7 @@ the runbook.
   - [x] Deployment CI quality-gate automation
   - [x] Site-wide security headers and CSP
   - [x] Logged-out middleware route matrix and draft hand-off
-  - [ ] Auth modal forms and password lifecycle
+  - [x] Auth modal forms and password lifecycle
   - [ ] Standalone auth pages and redirect chain
   - [ ] Public unauthenticated read APIs
   - [ ] Marketing landing and legal pages
@@ -1507,6 +1507,42 @@ the runbook.
   query preservation.
 - Security: repeated final review found no issues and no unresolved critical,
   high, or medium finding.
+
+### Public/deployment: auth modal forms and password lifecycle
+
+- Date: 2026-09-13
+- Base: `77941224bf77a8b87b340ded132c83cdddc569ae`
+- Final commit: `7abffbae2fcb092c1357d322b9af73d2befbff4c`
+- Scope: shared auth modal shell/provider, sign-in/sign-up/forgot/reset forms,
+  password and Google entry, PKCE callback recovery handling, password-reset
+  destination continuity, sign-in lockout responses, and recovery-session
+  access to app pages and APIs.
+- Findings: forgot-password dropped the original gated destination, expired and
+  invalid retries also lost it, OAuth start errors were silent, and view changes
+  could bypass per-form loading locks. Centralized nested reset URLs preserve
+  only sanitized destinations; forms now surface OAuth start failures and share
+  a modal-wide in-flight lock. A normal authenticated session could previously
+  open the trusted reset UI with only a query flag, while a recovery link minted
+  a full Supabase session that remained usable if reset was dismissed. Modern
+  recovery callbacks now set an HttpOnly proof bound to the reset landing; the
+  modal requires proof plus session, middleware holds proof-bearing sessions on
+  that landing and rejects app APIs, and the terminal endpoint clears proof only
+  after password update or successful local sign-out. Failed sign-in responses
+  no longer expose their remaining lockout count.
+- Accepted risks: Supabase recovery links are bearer authentication credentials
+  and GoTrue still issues a full session before password update; the application
+  proof gate constrains Krakatoa pages/APIs but cannot scope the upstream token
+  itself. Legacy already-sent `/reset-password` links remain compatible without
+  the new proof. Provider probing and distinct unconfirmed/duplicate account
+  messages remain the documented, rate-limited login UX tradeoff.
+- Verification: each destination, OAuth failure, modal race, invalid retry,
+  proof, middleware gate, and terminal-settlement seam failed before its fix,
+  then `test:auth` and `test:public-auth-flow` passed. TypeScript and edited-file
+  diagnostics were clean. `ci:checks` passed with 0 dependency vulnerabilities,
+  lint at 0 errors and 11 pre-existing warnings, a successful production build,
+  `git diff --check`, and the CLAUDE.md under-200-line guard.
+- Security: the final review confirmed the proof-clear and failed-sign-out
+  bypasses closed, with 0 critical, 0 high, and 0 unaccepted medium findings.
 
 ## Deferred
 
