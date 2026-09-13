@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import Grainient from "@/components/Grainient";
 import { useSkillsCatalog } from "@/app/(app)/tools/skills/SkillsCatalogProvider";
-import { catalogSkillsForDisplay } from "@/lib/skills-catalog-display";
 
 /** Scrolling feature ticker items. */
 const TICKER: { icon: LucideIcon; text: string }[] = [
@@ -68,7 +67,7 @@ function SkillsHeroReel() {
     [visible]
   );
 
-  const rows = catalogSkillsForDisplay(items, ready);
+  const rows = ready ? items : [];
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [instant, setInstant] = useState(false);
