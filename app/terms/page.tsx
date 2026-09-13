@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Syarat dan Ketentuan Layanan",
-    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
+    effectiveDate: "Terakhir diperbarui: 13 September 2026",
     intro: "Dengan mengakses atau menggunakan Kelolako (\"Layanan\", \"kami\", \"Kelolako\"), Anda menyetujui untuk terikat oleh Syarat dan Ketentuan (\"Syarat\") ini. Jika Anda tidak menyetujui Syarat ini, mohon untuk tidak menggunakan Layanan kami. Layanan ini dioperasikan oleh Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta, selanjutnya disebut \"Kelolako\".",
     sections: [
       {
@@ -21,7 +21,7 @@ const content: LegalContent = {
             "Menghasilkan caption/keterangan konten secara otomatis;",
             "Menjadwalkan dan mempublikasikan konten secara otomatis ke platform media sosial pihak ketiga, termasuk namun tidak terbatas pada YouTube dan TikTok (\"Platform Terhubung\").",
           ]},
-          { type: "p", text: "Kami berencana untuk menambahkan Instagram sebagai platform publikasi tambahan di masa mendatang; ketentuan yang mengatur data yang diproses melalui integrasi tersebut akan berlaku sejak fitur itu diaktifkan." },
+          { type: "p", text: "Layanan juga mendukung koneksi akun Instagram Business/Creator. Ketersediaan penjadwalan dan publikasi Instagram dapat berbeda menurut akun, konfigurasi, dan antarmuka Layanan yang Anda gunakan." },
           { type: "p", text: "Kelolako dapat menambah, mengubah, atau menghentikan fitur tertentu dari Layanan kapan saja dengan atau tanpa pemberitahuan sebelumnya." },
         ],
       },
@@ -68,7 +68,7 @@ const content: LegalContent = {
       {
         heading: "6. Koneksi ke Platform Pihak Ketiga",
         blocks: [
-          { type: "p", text: "Fitur penjadwalan dan publikasi otomatis Kelolako memerlukan Anda untuk menghubungkan (\"Connect\") akun Platform Terhubung Anda (misalnya YouTube) melalui proses otorisasi OAuth. Dengan menghubungkan akun tersebut, Anda memberikan izin kepada Kelolako untuk mempublikasikan konten atas nama Anda sesuai instruksi yang Anda berikan melalui Layanan." },
+          { type: "p", text: "Fitur koneksi, penjadwalan, dan publikasi Kelolako memerlukan Anda untuk menghubungkan (\"Connect\") akun Platform Terhubung Anda (YouTube, TikTok, atau Instagram) melalui proses otorisasi OAuth. Dengan menghubungkan akun tersebut, Anda memberikan izin kepada Kelolako untuk menjalankan tindakan yang Anda instruksikan dan yang tersedia pada Layanan." },
           { type: "p", text: "Anda dapat memutuskan koneksi (\"Disconnect\") kapan saja melalui halaman pengaturan akun Anda. Kelolako tidak bertanggung jawab atas perubahan kebijakan, gangguan, atau penghentian layanan dari pihak Platform Terhubung yang berada di luar kendali kami." },
         ],
       },
@@ -79,7 +79,7 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Harga Kredit dapat berubah sewaktu-waktu dengan pemberitahuan yang wajar;",
             "Kredit yang telah dibeli bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali diwajibkan oleh hukum yang berlaku atau sebagaimana diatur dalam ketentuan ini. Baik Kredit reguler (hasil pembelian) maupun Kredit bonus (seperti bonus pendaftaran atau bonus pembelian) memiliki masa berlaku sebagaimana tercantum pada halaman akun Anda, dan akan hangus secara otomatis setelah masa berlaku tersebut berakhir tanpa kompensasi apapun. Kredit dengan masa berlaku yang lebih dekat akan digunakan terlebih dahulu.",
-            "Jika proses pembuatan konten AI gagal karena kesalahan sistem kami, Kredit yang terpakai untuk proses tersebut akan dikembalikan secara otomatis ke akun Anda.",
+            "Kelayakan pengembalian Kredit bergantung pada tahap pemrosesan. Kegagalan sebelum output utama penyedia AI berhasil dikomit umumnya dikembalikan secara otomatis. Setelah output utama dikomit dan biaya eksternal timbul, pembatalan pengguna atau kegagalan pemrosesan lanjutan tidak otomatis memenuhi syarat pengembalian. Upaya yang dapat dipulihkan (recoverable) menahan Kredit untuk percobaan ulang; Kredit dikembalikan hanya jika Layanan kemudian mengklasifikasikan pengiriman sebagai kegagalan terminal yang memenuhi syarat pengembalian.",
             "Kelolako tidak menyimpan detail kartu pembayaran Anda — seluruh pemrosesan pembayaran ditangani oleh penyedia gerbang pembayaran kami (saat ini DOKU) sesuai kebijakan privasi masing-masing.",
           ]},
         ],
@@ -134,7 +134,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Terms of Service",
-    effectiveDate: "Last updated: August 24, 2026",
+    effectiveDate: "Last updated: September 13, 2026",
     intro: "By accessing or using Kelolako (\"Service\", \"we\", \"Kelolako\"), you agree to be bound by these Terms of Service (\"Terms\"). If you do not agree to these Terms, please do not use our Service. The Service is operated by an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta, hereinafter referred to as \"Kelolako\".",
     sections: [
       {
@@ -146,7 +146,7 @@ const content: LegalContent = {
             "Automatically generate captions/descriptions for content;",
             "Schedule and automatically publish content to third-party social media platforms, including but not limited to YouTube and TikTok (\"Connected Platforms\").",
           ]},
-          { type: "p", text: "We plan to add Instagram as an additional publishing destination in the future; terms governing data processed through this integration will take effect once the feature is active." },
+          { type: "p", text: "The Service also supports connecting an Instagram Business/Creator account. Instagram scheduling and publishing availability may vary by account, configuration, and the Service interface you use." },
           { type: "p", text: "Kelolako may add, modify, or discontinue certain features of the Service at any time, with or without prior notice." },
         ],
       },
@@ -193,7 +193,7 @@ const content: LegalContent = {
       {
         heading: "6. Connections to Third-Party Platforms",
         blocks: [
-          { type: "p", text: "Kelolako's scheduling and auto-publishing features require you to connect your Connected Platform accounts (e.g., YouTube) through an OAuth authorization process. By connecting such accounts, you authorize Kelolako to publish content on your behalf according to the instructions you provide through the Service." },
+          { type: "p", text: "Kelolako's connection, scheduling, and publishing features require you to connect your Connected Platform accounts (YouTube, TikTok, or Instagram) through an OAuth authorization process. By connecting an account, you authorize Kelolako to perform the actions you instruct that are available through the Service." },
           { type: "p", text: "You may disconnect at any time via your account settings page. Kelolako is not responsible for policy changes, disruptions, or discontinuation of service by Connected Platforms that are outside our control." },
         ],
       },
@@ -204,7 +204,7 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Credit pricing may change from time to time with reasonable notice;",
             "Purchased Credits are final and non-refundable, except where required by applicable law or as otherwise stated in these Terms. Both regular (purchased) Credits and Bonus Credits (such as welcome bonuses or purchase bonuses) have a validity period as shown on your account page, and will automatically forfeit upon expiration with no compensation. Credits with an earlier expiration date will be used first.",
-            "If an AI content generation process fails due to an error on our part, the Credit consumed for that process will be automatically refunded to your account.",
+            "Credit refund eligibility depends on the processing stage. Failures before primary provider output is committed are generally refunded automatically. Once primary provider output is committed and external cost is incurred, user cancellation or a later processing failure does not automatically qualify for a refund. Recoverable attempts retain Credits for retry; Credits are refunded only if the Service later classifies delivery as a refundable terminal failure.",
             "Kelolako does not store your payment card details — all payment processing is handled by our payment gateway provider(s) (currently DOKU) under their respective privacy policies.",
           ]},
         ],

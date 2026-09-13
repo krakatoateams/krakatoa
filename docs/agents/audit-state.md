@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Marketing landing and legal pages
+- Base: `ef5052cfe8319931518b6fcef316626da4bd725c`
+- Branch: `audit-repo/public-marketing-legal`
 
 ## Queue
 

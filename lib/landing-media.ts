@@ -67,16 +67,13 @@ export const LANDING_SHOWREEL: { model: string; src: string }[] = [
 ];
 
 /**
- * Subset of LANDING_SHOWREEL for surfaces that specifically claim "these are
- * our video models" (the auth modal's sign-in promo panel) — excludes "Nano
- * Banana 2" on purpose. It's a Product Photo *image* model
- * (google/nano-banana-2, see lib/product-photo.ts), not a video model, so
- * pairing it with a video clip in a video-model showcase would be factually
- * wrong, not just stale (its LANDING_SHOWREEL entry is only a stand-in clip
- * to begin with — see the comment above). See
- * openspec/changes/auth-modal-promo-panels/design.md, "Open Questions —
- * resolved during apply" #3.
+ * Truthful subset for surfaces that pair each clip with its generating video
+ * model. Nano Banana 2 is an image model, so its stand-in clip stays available
+ * to generic media rotations but never appears in a video-model selector.
  */
-export const AUTH_MODAL_SHOWREEL = LANDING_SHOWREEL.filter(
+export const VIDEO_MODEL_SHOWREEL = LANDING_SHOWREEL.filter(
   (entry) => entry.model === "Kling 3" || entry.model === "Seedance 2",
 );
+
+/** @deprecated Use VIDEO_MODEL_SHOWREEL for model-labelled video surfaces. */
+export const AUTH_MODAL_SHOWREEL = VIDEO_MODEL_SHOWREEL;

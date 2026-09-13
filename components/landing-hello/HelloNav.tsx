@@ -126,6 +126,7 @@ export function HelloNav() {
             : "pointer-events-none opacity-0"
         }`}
         aria-hidden={!menuOpen}
+        inert={!menuOpen}
       >
         <div
           className="absolute inset-0 bg-N0/70 backdrop-blur-[15px]"

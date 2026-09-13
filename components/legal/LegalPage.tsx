@@ -23,17 +23,23 @@ export type LegalContent = {
   english: LangContent;
 };
 
-function renderBlock(block: Block, idx: number) {
+function renderBlock(
+  block: Block,
+  idx: number,
+  blockHeadingLevel: "h3" | "h4",
+) {
   switch (block.type) {
-    case "h3":
+    case "h3": {
+      const BlockHeading = blockHeadingLevel;
       return (
-        <h3
+        <BlockHeading
           key={idx}
           className="font-display mt-5 text-base font-semibold text-N900"
         >
           {block.text}
-        </h3>
+        </BlockHeading>
       );
+    }
     case "p":
       return (
         <p key={idx} className="mt-3 text-text-secondary leading-relaxed">
@@ -63,10 +69,24 @@ function renderBlock(block: Block, idx: number) {
   }
 }
 
-function LangSection({ content }: { content: LangContent }) {
+function LangSection({
+  content,
+  lang,
+  titleLevel,
+}: {
+  content: LangContent;
+  lang: "id" | "en";
+  titleLevel: "h1" | "h2";
+}) {
+  const Title = titleLevel;
+  const SectionHeading = titleLevel === "h1" ? "h2" : "h3";
+  const BlockHeading = titleLevel === "h1" ? "h3" : "h4";
+
   return (
-    <div>
-      <h1 className="font-display text-3xl font-bold text-N900">{content.pageTitle}</h1>
+    <div lang={lang}>
+      <Title className="font-display text-3xl font-bold text-N900">
+        {content.pageTitle}
+      </Title>
       {content.effectiveDate && (
         <p className="mt-1.5 text-sm text-text-disabled">{content.effectiveDate}</p>
       )}
@@ -76,10 +96,14 @@ function LangSection({ content }: { content: LangContent }) {
       <div className="mt-8 space-y-8">
         {content.sections.map((section, sIdx) => (
           <section key={sIdx}>
-            <h2 className="font-display text-lg font-semibold text-N900">
+            <SectionHeading className="font-display text-lg font-semibold text-N900">
               {section.heading}
-            </h2>
-            <div>{section.blocks.map((block, bIdx) => renderBlock(block, bIdx))}</div>
+            </SectionHeading>
+            <div>
+              {section.blocks.map((block, bIdx) =>
+                renderBlock(block, bIdx, BlockHeading),
+              )}
+            </div>
           </section>
         ))}
       </div>
@@ -104,7 +128,11 @@ export function LegalPage({ content }: { content: LegalContent }) {
 
       <main className="mx-auto max-w-3xl px-6 py-12">
         {/* Indonesian content */}
-        <LangSection content={content.indonesian} />
+        <LangSection
+          content={content.indonesian}
+          lang="id"
+          titleLevel="h1"
+        />
 
         {/* Language divider */}
         <div className="my-14 flex items-center gap-4">
@@ -116,17 +144,11 @@ export function LegalPage({ content }: { content: LegalContent }) {
         </div>
 
         {/* English content */}
-        <LangSection content={content.english} />
+        <LangSection content={content.english} lang="en" titleLevel="h2" />
 
         {/* Footer */}
         <div className="mt-16 border-t border-white/10 pt-6 text-center text-xs text-text-disabled">
-          <p>
-            Informasi pada halaman ini dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya.
-          </p>
-          <p className="mt-1">
-            Information on this page is subject to change at any time without prior notice.
-          </p>
-          <p className="mt-4">© {new Date().getFullYear()} Kelolako. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Kelolako. All rights reserved.</p>
         </div>
       </main>
     </div>

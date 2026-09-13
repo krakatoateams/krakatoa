@@ -8,7 +8,7 @@ export const NAV_LINKS = [
   { label: "Testimonials", href: "#testimonials" },
 ];
 
-/** Nav bar CTA. Guests still point at /dashboard; middleware funnels them to login. */
+/** Nav CTA. Guests open `/dashboard`'s logged-out shell and sign-in modal. */
 export const NAV_CTA = {
   authed: { label: "Dashboard", href: "/dashboard" },
   guest: { label: "Start creating free", href: "/dashboard" },
@@ -92,7 +92,6 @@ export const HERO_SUBCOPY =
   "Kelolako simplifies content creation for creators & brands, letting them generate scroll-stopping reels, studio-grade product photos, and ready-to-post captions in minutes, all from a single prompt.";
 
 export const AI_MODELS_LABEL = "Powered by leading AI models";
-export const AI_MODELS = ["Nano Banana 2", "Kling 3", "Seedance 2"];
 
 /* -------------------------------------------------------------------------- */
 /* About                                                                      */
@@ -178,11 +177,12 @@ export const PRICING_ASIDE = {
     "Mix & match across reels, photos, and captions",
     "Better value on larger packs",
     "No monthly commitment",
-    "2-year validity from redemption",
+    "Purchased and bonus credits may expire on different dates",
   ],
-  rateNote: "~50 credits per AI reel · 4 per product photo · 1 per caption",
+  rateNote:
+    "Costs vary by model, duration, and resolution. Each tool shows the required credits before generation.",
   disclaimer:
-    "Credits cannot be exchanged for memberships, nor refunded, transferred, or withdrawn.",
+    "Purchased Credits are otherwise non-refundable except where required by law. Generation-failure refunds depend on the processing stage under our Terms.",
   policyLinkLabel: "Credits Policy",
 };
 
@@ -190,10 +190,11 @@ export const CREDIT_POLICY = {
   title: "Credits Policy",
   dismissLabel: "Got it",
   items: [
-    "Credits are non-refundable, non-transferable, and cannot be withdrawn or exchanged for cash.",
+    "Credits are non-refundable except where required by law, non-transferable, and cannot be withdrawn or exchanged for cash.",
     "Credits cannot be exchanged for memberships or subscription plans.",
-    "Credits are valid for 2 years from the date of redemption.",
+    "Regular and bonus Credits may have different expiry dates. Your account shows the applicable date for each balance.",
     "Spent credits are consumed at generation time and are not returned for outputs you choose not to use.",
+    "Generation failures before the AI provider delivers its primary output are generally refunded. Later and recoverable outcomes follow the stage-based policy in our Terms.",
     "Kelolako may adjust credit pricing for future purchases; credits already purchased keep their granted value.",
   ],
 };
@@ -201,16 +202,6 @@ export const CREDIT_POLICY = {
 // Where the "Purchase" CTA sends signed-in visitors. Guests never navigate —
 // HelloPricing's CreditRow opens the sign-in modal in place instead.
 export const CREDIT_CTA_HREF_AUTHED = "/dashboard/settings?tab=credits";
-
-// Rough spend rates used only to estimate what a pack buys (matches the copy in
-// the aside: ~50 credits per AI reel · 4 per product photo).
-//
-// Static on purpose, so keep them in step with `pricing_configs` by hand. Real
-// billing resolves per generation in lib/pricing-resolver.ts and varies with
-// model and length — video is charged PER SECOND (4-7 credits/s), so 50 stands
-// in for a short reel, and 4 is the cheapest product-photo tier.
-export const CREDITS_PER_IMAGE = 4;
-export const CREDITS_PER_VIDEO = 50;
 
 // Subscription plans are hidden for now — only credit packs are offered.
 // Flip this to re-enable the Plans/Credits toggle and the plan tier cards.
@@ -293,6 +284,8 @@ export type Testimonial = {
 };
 
 export const TESTIMONIALS_HEADING = "Creators ship more with Kelolako.";
+export const TESTIMONIALS_DISCLAIMER =
+  "Illustrative creator scenarios; individual results vary.";
 
 export const TESTIMONIALS: Testimonial[] = [
   {
