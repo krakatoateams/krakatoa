@@ -209,6 +209,50 @@ export async function meteredLifecycleSelfCheck(): Promise<void> {
     `402 order (no asset): ${insufficientLog.join(",")}`,
   );
 
+  const jobSetupFailureLog: CallLog = [];
+  const jobSetupFailureOps = makeFakeOps(jobSetupFailureLog);
+  jobSetupFailureOps.createJob = async () => {
+    jobSetupFailureLog.push("createJob");
+    throw new Error("database unavailable");
+  };
+  let jobSetupFailure: unknown;
+  try {
+    await beginMeteredAttemptWithOps(
+      {
+        profileId: "p1",
+        idempotency: {
+          key: "k1",
+          routeKey: "test",
+          toolKey: "photo",
+          requestHash: "h1",
+        },
+        job: {
+          required: true,
+          tool: "photo",
+          jobType: "product_photo",
+          provider: "replicate",
+          model: "m",
+          input: {},
+        },
+        spend: {
+          amount: 10,
+          jobType: "product_photo",
+          description: "test",
+          metadata: {},
+        },
+      },
+      jobSetupFailureOps,
+    );
+  } catch (error) {
+    jobSetupFailure = error;
+  }
+  assert(jobSetupFailure instanceof Error, "job setup failure must still reject");
+  assert(
+    jobSetupFailureLog.join(",") ===
+      "beginGenerationRequest,createJob,finishGenerationRequestFailure",
+    `job setup failure must release idempotency: ${jobSetupFailureLog.join(",")}`,
+  );
+
   const replayLog: CallLog = [];
   const replayOps = makeFakeOps(replayLog);
   replayOps.beginGenerationRequest = async () => {

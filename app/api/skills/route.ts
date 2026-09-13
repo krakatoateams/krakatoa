@@ -5,6 +5,7 @@ import {
   listCatalogSkills,
   parseCustomSkillBody,
 } from "@/lib/skill-configs-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function GET() {
     const skills = await listCatalogSkills({ viewerProfileId: profile?.id ?? null });
     return NextResponse.json({ skills });
   } catch (e) {
-    console.error("[api/skills] failed:", e);
+    console.error("[api/skills] failed:", errorLogSafe(e));
     return NextResponse.json({ error: "Failed to load skills." }, { status: 500 });
   }
 }
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     if (/up to \d+ of your own skills/i.test(message)) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
-    console.error("[api/skills] create failed:", e);
+    console.error("[api/skills] create failed:", errorLogSafe(e));
     return NextResponse.json(
       { error: "Failed to create skill." },
       { status: 500 }
