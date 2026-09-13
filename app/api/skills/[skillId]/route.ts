@@ -8,6 +8,7 @@ import {
   updateOwnedSkill,
   type SkillConfigPatch,
 } from "@/lib/skill-configs-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import { SKILL_CATEGORIES, isSkillSlug, type SkillCategoryId } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,10 @@ export async function GET(
     if (!skill) return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     return NextResponse.json({ skill });
   } catch (e) {
-    return authError(e) ?? NextResponse.json({ error: "Failed to load skill." }, { status: 500 });
+    const unauthorized = authError(e);
+    if (unauthorized) return unauthorized;
+    console.error("[api/skills] load failed:", errorLogSafe(e));
+    return NextResponse.json({ error: "Failed to load skill." }, { status: 500 });
   }
 }
 
@@ -157,7 +161,8 @@ export async function PATCH(
     if (message === "Unknown skill.") {
       return NextResponse.json({ error: message }, { status: 404 });
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("[api/skills] update failed:", errorLogSafe(e));
+    return NextResponse.json({ error: "Failed to update skill." }, { status: 500 });
   }
 }
 
@@ -179,6 +184,7 @@ export async function DELETE(
     if (message === "Unknown skill.") {
       return NextResponse.json({ error: message }, { status: 404 });
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("[api/skills] delete failed:", errorLogSafe(e));
+    return NextResponse.json({ error: "Failed to delete skill." }, { status: 500 });
   }
 }

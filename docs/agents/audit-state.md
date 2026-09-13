@@ -14,10 +14,10 @@ the runbook.
 
 ## Active slice
 
-- Domain: Admin
-- Slice: Log redaction — secondary generation and admin test route
-- Base: `81e6f67342c698ed8acc0542fd1ae4a88085bfb9`
-- Branch: `audit-repo/secondary-generation-log-redaction`
+- Domain: Public/deployment
+- Slice: Auth UI, redirects, headers, dependencies, and secrets
+- Base: pending from synchronized `main`
+- Branch: pending
 
 ## Queue
 
@@ -84,7 +84,7 @@ the runbook.
   - [x] Migration catalog integrity (duplicate prefixes, stale `FROM users`
         backfills, 001–003 bootstrap)
   - [x] Live Supabase security advisors
-- [ ] Admin: configuration, monitoring, prompt exposure, and log redaction
+- [x] Admin: configuration, monitoring, prompt exposure, and log redaction
   - [x] Monitoring: cross-user job reads and detail disclosure
   - [x] Monitoring: anomaly classification
   - [x] Prompt capture: primary generation routes
@@ -1299,6 +1299,43 @@ the runbook.
   warnings), `npm run build`, `git diff --check`, and edited-file diagnostics
   passed.
 - Security: final review found 0 critical, 0 high, and 0 medium findings.
+
+### Admin: domain closeout
+
+- Date: 2026-09-13
+- Base: `7533792b590199bed1ddeb78506e255d24363eaf`
+- Final commit: `944fc05`
+- Scope: the complete Admin delta since
+  `72b9893d0a64bde6e12d8700d199380578b80503`, final combined tests, live
+  migration/config/grant checks, and residual metered-lifecycle plus owner-skill
+  failure paths.
+- Findings: a required job setup failure could leave its generation request
+  locked until reconcile even though spend had not started. Setup failures now
+  fail any created job, close the idempotency row, and rethrow for the existing
+  generic owner response. Owner skill list/create/thumb logs still emitted raw
+  operational errors, while skill PATCH/DELETE could return PostgREST text as a
+  400; those logs now use `errorLogSafe` and unexpected persistence failures use
+  generic 500 responses. A review claim that pricing materialization must use
+  live billing settings was rejected against the authoritative Option A spec:
+  billing settings drive Suggest only, while explicit/default Credits persist.
+- Accepted risks: detailed generation errors remain in service-role tables for
+  admin monitoring; best-effort failure persistence can still wait for reconcile
+  if the failure write itself is unavailable. The documented welcome-claim
+  TOCTOU, bounded metrics windows, incremental expiry cleanup, and admin-trust
+  configuration choices remain accepted in their individual slices.
+- Verification: all Admin-focused checks passed, including admin auth/metrics,
+  Config validation/toggles/tree/persistence, platform settings, skills,
+  monitoring/prompt/log redaction, dev-blank, migration/RPC checks, expiry,
+  metered/workflow/commit and active-generation contracts. `npm run lint`
+  passed with 0 errors and 11 pre-existing warnings; `npm run build`,
+  `git diff --check`, and edited-file diagnostics passed. Supabase MCP verified
+  both `schedule_gpt5_model_config` and `atomic_credit_pack_replace` applied,
+  Scheduler on `replicate/openai/gpt-5`, four active packs, and the replacement
+  RPC as SECURITY INVOKER with service-role-only EXECUTE.
+- Security: final full-domain and closeout re-reviews found 0 critical, 0 high,
+  and 0 unaccepted medium findings. Live advisors show only the expected
+  deny-by-default RLS INFO notices and leaked-password protection WARN; the
+  latter belongs to Public/deployment.
 
 ## Deferred
 

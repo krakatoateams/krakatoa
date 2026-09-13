@@ -11,6 +11,7 @@ import {
   getOwnedSkillOverride,
   replaceOwnedSkillThumb,
 } from "@/lib/skill-configs-db";
+import { errorLogSafe } from "@/lib/error-log-safe";
 import { isSkillSlug } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +58,7 @@ export async function POST(
       upsert: false,
     });
     if (error) {
-      console.error("[skills/thumb] upload failed:", error.message);
+      console.error("[skills/thumb] upload failed:", errorLogSafe(error));
       return NextResponse.json({ error: "Thumbnail upload failed." }, { status: 500 });
     }
 
@@ -76,7 +77,7 @@ export async function POST(
     if (message === "Unknown skill.") {
       return NextResponse.json({ error: message }, { status: 404 });
     }
-    console.error("[skills/thumb] persistence failed:", message);
+    console.error("[skills/thumb] persistence failed:", errorLogSafe(e));
     return NextResponse.json(
       { error: "Failed to upload thumbnail." },
       { status: 500 }

@@ -281,39 +281,24 @@ export async function beginMeteredAttemptWithOps(
   const generationRequestId = begin.id;
   let jobId: string | null = null;
 
-  if (input.createJobFn) {
-    jobId = await input.createJobFn(generationRequestId);
-    if (!jobId) {
-      throw new Error("Failed to create generation job.");
-    }
-  } else if (input.job) {
-    const jobInput = input.job;
-    const attach = async (id: string) => {
-      await ops.attachGenerationRequestJob({
-        id: generationRequestId,
-        profileId: input.profileId,
-        jobId: id,
-      });
-    };
+  try {
+    if (input.createJobFn) {
+      jobId = await input.createJobFn(generationRequestId);
+      if (!jobId) {
+        throw new Error("Failed to create generation job.");
+      }
+    } else if (input.job) {
+      const jobInput = input.job;
+      const attach = async (id: string) => {
+        await ops.attachGenerationRequestJob({
+          id: generationRequestId,
+          profileId: input.profileId,
+          jobId: id,
+        });
+      };
 
-    if (jobInput.required) {
-      const job = await ops.createJob({
-        profileId: input.profileId,
-        tool: jobInput.tool,
-        jobType: jobInput.jobType,
-        provider: jobInput.provider,
-        model: jobInput.model,
-        input: jobInput.input,
-        ...(jobInput.executionBackend
-          ? { executionBackend: jobInput.executionBackend }
-          : {}),
-      });
-      jobId = job.id;
-      await ops.startJob(input.profileId, jobId);
-      await attach(jobId);
-    } else {
-      const job = await safeIo("createJob", () =>
-        ops.createJob({
+      if (jobInput.required) {
+        const job = await ops.createJob({
           profileId: input.profileId,
           tool: jobInput.tool,
           jobType: jobInput.jobType,
@@ -323,23 +308,60 @@ export async function beginMeteredAttemptWithOps(
           ...(jobInput.executionBackend
             ? { executionBackend: jobInput.executionBackend }
             : {}),
-        }),
-      );
-      if (job) {
+        });
         jobId = job.id;
-        await safeIo("startJob", () => ops.startJob(input.profileId, jobId!));
-        await safeIo("attachJob", () => attach(jobId!));
+        await ops.startJob(input.profileId, jobId);
+        await attach(jobId);
+      } else {
+        const job = await safeIo("createJob", () =>
+          ops.createJob({
+            profileId: input.profileId,
+            tool: jobInput.tool,
+            jobType: jobInput.jobType,
+            provider: jobInput.provider,
+            model: jobInput.model,
+            input: jobInput.input,
+            ...(jobInput.executionBackend
+              ? { executionBackend: jobInput.executionBackend }
+              : {}),
+          }),
+        );
+        if (job) {
+          jobId = job.id;
+          await safeIo("startJob", () => ops.startJob(input.profileId, jobId!));
+          await safeIo("attachJob", () => attach(jobId!));
+        }
       }
     }
+
+    if (!input.spend.skip && !jobId) {
+      throw new Error("Cannot spend credits without a generation job.");
+    }
+  } catch (error) {
+    const errorJson = {
+      code: "GENERATION_SETUP_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+    };
+    if (jobId) {
+      await safeIo("failJobSetup", () =>
+        ops.failJob(input.profileId, jobId!, errorJson),
+      );
+    }
+    await safeIo("idemFailSetup", () =>
+      ops.finishGenerationRequestFailure({
+        id: generationRequestId,
+        profileId: input.profileId,
+        jobId,
+        errorJson,
+      }),
+    );
+    throw error;
   }
 
   let creditsSpent = false;
   let creditsAmount = 0;
 
   if (!input.spend.skip) {
-    if (!jobId) {
-      throw new Error("Cannot spend credits without a generation job.");
-    }
     try {
       await ops.spendCredits({
         profileId: input.profileId,

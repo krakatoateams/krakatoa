@@ -56,6 +56,9 @@ for (const relativePath of [
   "../app/api/admin/me/route.ts",
   "../app/api/admin/skills/route.ts",
   "../app/api/admin/skills/[skillId]/thumb/route.ts",
+  "../app/api/skills/route.ts",
+  "../app/api/skills/[skillId]/route.ts",
+  "../app/api/skills/[skillId]/thumb/route.ts",
   "../app/api/cron/creation-expiry/route.ts",
   "../app/api/cron/credit-expiry/route.ts",
   "../app/api/cron/generation-reconcile/route.ts",
@@ -109,6 +112,16 @@ assert.doesNotMatch(
   adminSkillDetailRoute,
   /Failed to delete skill[\s\S]*?error: message/,
   "unexpected admin delete failures must reach the generic withAdmin 500 path"
+);
+
+const ownerSkillDetailRoute = readFileSync(
+  new URL("../app/api/skills/[skillId]/route.ts", import.meta.url),
+  "utf8"
+);
+assert.doesNotMatch(
+  ownerSkillDetailRoute,
+  /NextResponse\.json\(\{ error: message \}, \{ status: 400 \}\)/,
+  "owner skill mutations must not return raw persistence errors"
 );
 
 console.log("admin log redaction self-check passed");
