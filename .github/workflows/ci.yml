@@ -18,8 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Build-only hostname used by next.config.mjs. CI never contacts this host.
-      NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
+      # Build-only placeholders. The reserved .invalid host cannot reach a project.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-placeholder
+      SUPABASE_SERVICE_ROLE_KEY: eyJci-service-role-placeholder
     steps:
       - name: Check out the committed patch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

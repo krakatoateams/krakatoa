@@ -82,9 +82,17 @@ export function deploymentCiSelfCheck(): void {
     "CI must fetch comparison history without stored credentials and use the deployment Node runtime",
   );
   assert(
-    ciWorkflow.includes("NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co") &&
+    ciWorkflow.includes(
+      "NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.invalid",
+    ) &&
+      ciWorkflow.includes(
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-placeholder",
+      ) &&
+      ciWorkflow.includes(
+        "SUPABASE_SERVICE_ROLE_KEY: eyJci-service-role-placeholder",
+      ) &&
       !ciWorkflow.includes("${{ secrets."),
-    "quality CI must use a non-secret build placeholder and no deployment secrets",
+    "quality CI must use reserved non-secret build placeholders and no deployment secrets",
   );
   assert(
     ciWorkflow.includes("run: npm ci") &&
