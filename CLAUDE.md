@@ -6,7 +6,7 @@ keeps only the rules needed on most engineering tasks.
 
 ## Stack
 
-- Next.js 15 App Router, React 19, Node.js 20.9+, TypeScript, Tailwind CSS
+- Next.js 15 App Router, React 19, Node.js 24+, TypeScript, Tailwind CSS
 - Supabase Auth via `@supabase/ssr` with Google OAuth and email/password
 - Supabase Postgres and private Storage
 - Replicate for AI models and Rendi for cloud FFmpeg

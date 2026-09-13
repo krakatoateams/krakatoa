@@ -34,8 +34,9 @@ export function deploymentCiSelfCheck(): void {
   const ciWorkflowUrl = new URL(".github/workflows/ci.yml", rootUrl);
 
   assert(
-    rootPackage.engines?.node === lock.packages?.[""]?.engines?.node,
-    "package.json and package-lock.json must declare the same Node engine",
+    rootPackage.engines?.node === ">=24.0.0" &&
+      rootPackage.engines.node === lock.packages?.[""]?.engines?.node,
+    "package.json and package-lock.json must require the deployment Node runtime",
   );
   assert(
     rootPackage.scripts?.["ci:checks"] ===
@@ -76,9 +77,9 @@ export function deploymentCiSelfCheck(): void {
   assert(
     ciWorkflow.includes("fetch-depth: 0") &&
       ciWorkflow.includes("persist-credentials: false") &&
-      ciWorkflow.includes('node-version: "20.9.0"') &&
+      ciWorkflow.includes('node-version: "24"') &&
       ciWorkflow.includes("cache: npm"),
-    "CI must fetch comparison history without stored credentials and use the minimum Node runtime",
+    "CI must fetch comparison history without stored credentials and use the deployment Node runtime",
   );
   assert(
     ciWorkflow.includes("NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co") &&

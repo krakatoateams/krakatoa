@@ -6,7 +6,7 @@ Krakatoa is a premium AI-powered platform tailored for content creators. It feat
 The platform foundation (profiles, projects, jobs, job_steps, assets, asset_relations, posts platform linkage, credit_wallets, credit_transactions, usage_events) is complete (Phase 1–7). The Dummy Credit Integration is live for internal testing — every existing profile holds 500 dummy credits and the four credit-charged generation routes spend/refund through the ledger RPC before any provider call. No payment gateway/Xendit/subscription system is wired yet.
 
 ## Tech Stack
-- **Framework**: Next.js 15.5 (App Router), React 19, Node.js 20.9+
+- **Framework**: Next.js 15.5 (App Router), React 19, Node.js 24+
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide React
 - **Language**: TypeScript

@@ -16,7 +16,7 @@ A premium AI-powered platform for content creators. Krakatoa hosts multiple AI t
 
 ## Tech Stack
 
-- **Framework**: Next.js 15.5 (App Router) + React 19 + TypeScript
+- **Framework**: Next.js 15.5 (App Router) + React 19 + Node.js 24+ + TypeScript
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide React
 - **Storage / DB**: Supabase
