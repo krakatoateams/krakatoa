@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Site-wide security headers and CSP
+- Base: `0581431667d91f087ab3efa3fa868bff703560e0`
+- Branch: `audit-repo/public-security-headers`
 
 ## Queue
 

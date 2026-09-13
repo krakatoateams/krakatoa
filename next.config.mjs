@@ -1,4 +1,5 @@
 import { withWorkflow } from "workflow/next";
+import { securityHeaders } from "./lib/security-headers.mjs";
 
 function supabaseStorageImagePattern() {
   const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -33,9 +34,21 @@ function supabaseStorageImagePattern() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["shaders", "@xyflow/react"],
+  poweredByHeader: false,
   // Former design-variant route; homepage is only `/` now.
   async redirects() {
     return [{ source: "/hello", destination: "/", permanent: true }];
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders({
+          isProduction: process.env.NODE_ENV === "production",
+          supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        }),
+      },
+    ];
   },
   images: {
     remotePatterns: [

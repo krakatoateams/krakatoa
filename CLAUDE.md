@@ -92,6 +92,7 @@ keeps only the rules needed on most engineering tasks.
 - Interpolate concrete prompt values and validate parsed model output.
 - Keep heavy Vercel routes within the current plan's supported duration.
 - Deployed cron routes must fail closed when `CRON_SECRET` is absent.
+- Keep browser allowlists in `lib/security-headers.mjs`; run `test:security-headers`.
 - Do not hardcode credit prices, storage cache-control values, or secrets.
 - Server routes using the Supabase service role must enforce ownership in code.
 - Run focused self-checks plus build/lint in proportion to the change.
