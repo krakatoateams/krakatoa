@@ -91,8 +91,9 @@ export function deploymentCiSelfCheck(): void {
       ciWorkflow.includes(
         "SUPABASE_SERVICE_ROLE_KEY: eyJci-service-role-placeholder",
       ) &&
-      !ciWorkflow.includes("${{ secrets."),
-    "quality CI must use reserved non-secret build placeholders and no deployment secrets",
+      !ciWorkflow.includes("${{ secrets.") &&
+      !ciWorkflow.includes("${{ vars."),
+    "quality CI must use reserved placeholders without repository secrets or variables",
   );
   assert(
     ciWorkflow.includes("run: npm ci") &&
