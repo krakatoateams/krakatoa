@@ -31,6 +31,24 @@ export function instagramStorageCheckError(storagePath: string): string {
   return `Could not read photo from storage for Instagram format check: ${redactPublishMediaRef(storagePath)}`;
 }
 
+export function isInstagramPermanentFailure(_err: unknown, message: string): boolean {
+  const m = message.toLowerCase();
+  if (/re-?authori|reconnect|access token|oauthexception|permission|invalid_business_account|not a professional account/.test(m)) {
+    return true;
+  }
+  if (/jpeg is the only image format|unsupported media type|invalid image format/.test(m)) {
+    return true;
+  }
+  if (
+    /could not read photo from storage|no publishable video location|video file no longer exists in storage|could not fetch video from storage/.test(
+      m,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function instagramPublishSelfCheck(): void {
   const graphBody = JSON.stringify({
     error: {
@@ -72,6 +90,26 @@ export function instagramPublishSelfCheck(): void {
   }
   if (instagramGraphErrorDetail("<html>gateway</html>") !== "unknown") {
     throw new Error("non-JSON Graph errors must report unknown, not the body");
+  }
+
+  if (
+    !isInstagramPermanentFailure(
+      null,
+      "Video file no longer exists in storage — it was deleted or swept before publishing.",
+    )
+  ) {
+    throw new Error("Instagram missing-video must be permanent, not retry-forever");
+  }
+  if (
+    !isInstagramPermanentFailure(
+      null,
+      "Could not fetch video from storage (HTTP 404)",
+    )
+  ) {
+    throw new Error("Instagram unreadable video must be permanent");
+  }
+  if (isInstagramPermanentFailure(null, "network timeout")) {
+    throw new Error("generic Instagram network errors must stay transient");
   }
 }
 

@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { addBonusCredits } from "@/lib/credits-db";
 import { unauthenticatedProviderHttp } from "@/lib/provider-route-auth-pure";
-import {
-  getWelcomeVideoOfferEligibility,
-  welcomeVideoClaimIdempotencyKey,
-} from "@/lib/welcome-video-offer";
+import { claimWelcomeVideoOffer } from "@/lib/welcome-video-offer";
 import { WELCOME_VIDEO_SKILL_ID, skillHref } from "@/lib/skills";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +14,9 @@ export const dynamic = "force-dynamic";
  * after the offer was disabled, or after the user already generated
  * something elsewhere) can't grant credits it shouldn't.
  *
- * The actual grant (addBonusCredits) is idempotent via
- * welcomeVideoClaimIdempotencyKey — a duplicate/racing call is a no-op, not
- * a double-grant, so this is safe to retry.
+ * Eligibility + first-job check + grant run in one RPC under a profile
+ * row lock (see krakatoa_claim_welcome_video_offer). Job inserts take the
+ * same lock, so this cannot grant after the account has already generated.
  */
 export async function POST() {
   let profile;
@@ -35,25 +31,17 @@ export async function POST() {
     throw e;
   }
 
-  const { eligible, creditAmount } = await getWelcomeVideoOfferEligibility(profile.id);
-  if (!eligible || creditAmount <= 0) {
+  const result = await claimWelcomeVideoOffer(profile.id);
+  if (!result.granted || result.creditAmount <= 0) {
     return NextResponse.json(
       { error: "This account is not eligible for the welcome video offer." },
       { status: 409 }
     );
   }
 
-  await addBonusCredits({
-    profileId: profile.id,
-    amount: creditAmount,
-    idempotencyKey: welcomeVideoClaimIdempotencyKey(profile.id),
-    description: "Welcome bonus — claimed",
-    metadata: { source: "welcome_video_claim" },
-  });
-
   return NextResponse.json({
     granted: true,
-    creditAmount,
+    creditAmount: result.creditAmount,
     href: skillHref(WELCOME_VIDEO_SKILL_ID),
   });
 }

@@ -1,7 +1,10 @@
 import { hasAnyJobs } from "@/lib/jobs-db";
 import { hasCreditTransaction } from "@/lib/credits-db";
+import { supabaseServer } from "@/lib/supabase-server";
 import { getWelcomeBonusSettings } from "@/lib/welcome-bonus-settings-db";
 import { isWelcomeVideoOfferEligible } from "@/lib/welcome-video-offer-pure";
+
+export const CLAIM_WELCOME_VIDEO_RPC = "krakatoa_claim_welcome_video_offer";
 
 /**
  * Idempotency key for the on-demand welcome-video grant (see migration 089
@@ -62,4 +65,36 @@ export async function getWelcomeVideoOfferEligibility(
     }),
     creditAmount,
   };
+}
+
+export type WelcomeVideoClaimResult =
+  | { granted: true; creditAmount: number }
+  | { granted: false; creditAmount: number };
+
+/**
+ * Atomically re-check eligibility and grant. The RPC holds the profile row
+ * lock; job inserts take the same lock in a BEFORE INSERT trigger, so a
+ * concurrent first job cannot sneak in after a stale GET/eligibility read.
+ */
+export async function claimWelcomeVideoOffer(
+  profileId: string
+): Promise<WelcomeVideoClaimResult> {
+  const { data, error } = await supabaseServer.rpc(CLAIM_WELCOME_VIDEO_RPC, {
+    p_profile_id: profileId,
+  });
+
+  if (error) {
+    throw new Error(error.message || "Failed to claim the welcome video offer.");
+  }
+
+  const row = (data ?? {}) as {
+    granted?: boolean;
+    creditAmount?: number;
+    credit_amount?: number;
+  };
+  const creditAmount = Number(row.creditAmount ?? row.credit_amount ?? 0);
+  if (row.granted === true && creditAmount > 0) {
+    return { granted: true, creditAmount };
+  }
+  return { granted: false, creditAmount: Number.isFinite(creditAmount) ? creditAmount : 0 };
 }

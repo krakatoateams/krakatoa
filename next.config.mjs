@@ -37,7 +37,14 @@ const nextConfig = {
   poweredByHeader: false,
   // Former design-variant route; homepage is only `/` now.
   async redirects() {
-    return [{ source: "/hello", destination: "/", permanent: true }];
+    return [
+      { source: "/hello", destination: "/", permanent: true },
+      {
+        source: "/calendar",
+        destination: "/tools/scheduler/calendar",
+        permanent: true,
+      },
+    ];
   },
   async headers() {
     return [

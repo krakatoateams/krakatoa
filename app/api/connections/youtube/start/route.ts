@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getSessionUserId } from "@/lib/resolve-user";
+import { resolveOrigin } from "@/lib/http";
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  const { origin } = new URL(request.url);
+  const origin = resolveOrigin(request);
   const state = crypto.randomUUID();
 
   const auth = new google.auth.OAuth2(

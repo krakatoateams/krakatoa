@@ -109,5 +109,70 @@ assert.match(
   /seed:welcome_bonus:/,
   "legacy automatic welcome grants must block a second on-demand claim"
 );
+assert.match(
+  welcomeOfferSource,
+  /krakatoa_claim_welcome_video_offer/,
+  "welcome claim must go through the atomic eligibility+grant RPC"
+);
+assert.doesNotMatch(
+  welcomeOfferSource,
+  /addBonusCredits/,
+  "welcome claim must not grant after a separate JS eligibility read"
+);
+
+const welcomeClaimRoute = readFileSync(
+  new URL("../app/api/welcome-video-offer/claim/route.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  welcomeClaimRoute,
+  /claimWelcomeVideoOffer/,
+  "claim route must call the atomic welcome-claim helper"
+);
+assert.doesNotMatch(
+  welcomeClaimRoute,
+  /addBonusCredits/,
+  "claim route must not grant credits outside the atomic RPC"
+);
+
+const welcomeClaimSql = readFileSync(
+  new URL("../supabase/migrations/097_atomic_welcome_video_claim.sql", import.meta.url),
+  "utf8"
+);
+assert.match(
+  welcomeClaimSql,
+  /before insert on public\.jobs/i,
+  "job inserts must take the same profile row lock as welcome claim"
+);
+assert.match(
+  welcomeClaimSql,
+  /for update/i,
+  "claim RPC must lock the profile row"
+);
+assert.match(
+  welcomeClaimSql,
+  /from public\.jobs/i,
+  "claim RPC must re-check first-job eligibility in the same transaction"
+);
+assert.match(
+  welcomeClaimSql,
+  /bonus:welcome_video_claim:/,
+  "claim RPC must honor the on-demand idempotency key"
+);
+assert.match(
+  welcomeClaimSql,
+  /seed:welcome_bonus:/,
+  "claim RPC must honor the legacy auto-grant key"
+);
+assert.match(
+  welcomeClaimSql,
+  /krakatoa_apply_credit_transaction/,
+  "claim RPC must grant through the ledger RPC"
+);
+assert.match(
+  welcomeClaimSql,
+  /to service_role/,
+  "claim RPC must stay service-role-only"
+);
 
 console.log("admin platform settings self-check passed");

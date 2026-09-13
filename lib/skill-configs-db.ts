@@ -1,6 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import {
+  PLATFORM_SKILLS_PREFIX,
   STORAGE_BUCKET,
   isPlatformSkillThumbPath,
 } from "@/lib/storage-buckets";
@@ -583,6 +584,35 @@ async function removeSkillThumb(path: string | null | undefined): Promise<void> 
   }
 }
 
+async function removeLeftoverSkillThumbs(
+  skillId: string,
+  keepPath: string | null | undefined
+): Promise<void> {
+  const prefix = `${PLATFORM_SKILLS_PREFIX}${skillId}`;
+  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).list(prefix);
+  if (error) {
+    console.warn(
+      "[skill-configs] leftover thumb list failed:",
+      errorLogSafe(error)
+    );
+    return;
+  }
+  const leftovers = ((data ?? []) as { id: string | null; name: string }[])
+    .filter((entry) => entry.id !== null)
+    .map((entry) => `${prefix}/${entry.name}`)
+    .filter((path) => isPlatformSkillThumbPath(path) && path !== keepPath);
+  if (leftovers.length === 0) return;
+  const { error: removeError } = await supabaseServer.storage
+    .from(STORAGE_BUCKET)
+    .remove(leftovers);
+  if (removeError) {
+    console.warn(
+      "[skill-configs] leftover thumb remove failed:",
+      errorLogSafe(removeError)
+    );
+  }
+}
+
 export async function replaceCatalogSkillThumb(
   skillId: SkillId,
   newPath: string,
@@ -602,6 +632,7 @@ export async function replaceCatalogSkillThumb(
   if (previous?.thumbPath !== newPath) {
     await removeSkillThumb(previous?.thumbPath);
   }
+  await removeLeftoverSkillThumbs(skillId, newPath);
 }
 
 export async function replaceOwnedSkillThumb(
@@ -623,6 +654,7 @@ export async function replaceOwnedSkillThumb(
   if (previous.thumbPath !== newPath) {
     await removeSkillThumb(previous.thumbPath);
   }
+  await removeLeftoverSkillThumbs(skillId, newPath);
   return skill;
 }
 

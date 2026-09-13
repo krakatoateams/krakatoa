@@ -5,7 +5,7 @@
  * X-Forwarded-Proto directly matches what the browser actually requested,
  * and still resolves correctly in production (Vercel sets both headers).
  *
- * Shared across every OAuth connect flow (TikTok, Instagram, ...) — not
+ * Shared across every OAuth connect flow (TikTok, Instagram, YouTube, ...) — not
  * provider-specific despite originating in lib/tiktok.ts.
  */
 export function resolveOrigin(request: Request): string {

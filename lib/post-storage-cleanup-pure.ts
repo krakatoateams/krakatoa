@@ -18,6 +18,20 @@ export function isSchedulerRawPhotoUpload(path: string): boolean {
   return path.includes("/uploads/scheduler/");
 }
 
+/** Sibling written by TikTok JPEG conversion (`foo.png` → `foo.tiktok.jpg`). */
+export function convertedTikTokSiblingPath(sourcePath: string): string {
+  return `${sourcePath.replace(/\.[^./]+$/, "")}.tiktok.jpg`;
+}
+
+export function storageCleanupPaths(sourcePaths: string[]): string[] {
+  const out = new Set<string>();
+  for (const path of sourcePaths) {
+    out.add(path);
+    out.add(convertedTikTokSiblingPath(path));
+  }
+  return [...out];
+}
+
 export function cleanupLogVideoRef(videoUrl: string): string {
   return redactPublishMediaRef(videoUrl);
 }
@@ -46,6 +60,16 @@ export function postStorageCleanupSelfCheck(): void {
   assert(
     isSchedulerRawPhotoUpload("u1/photos/generated/product/shot.jpg") === false,
     "library photos must not be deleted",
+  );
+  assert(
+    convertedTikTokSiblingPath("u1/photos/uploads/scheduler/shot.png") ===
+      "u1/photos/uploads/scheduler/shot.tiktok.jpg",
+    "cleanup must know the converted TikTok JPEG sibling",
+  );
+  assert(
+    storageCleanupPaths(["u1/photos/uploads/scheduler/shot.png"]).join(",") ===
+      "u1/photos/uploads/scheduler/shot.png,u1/photos/uploads/scheduler/shot.tiktok.jpg",
+    "photo cleanup must also remove the converted TikTok sibling",
   );
   const signed =
     "https://example.supabase.co/storage/v1/object/sign/krakatoa/u1/videos/clip.mp4?token=secret-jwt";

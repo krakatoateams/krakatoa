@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   commitLockedFromCancelAllowed,
   isRefundableUserCancellationPure,
@@ -46,6 +47,20 @@ export function generationCommitSelfCheck(): void {
     })
   ) {
     throw new Error("post-commit failure must not refund spent credits");
+  }
+
+  const canvasRoute = readFileSync(
+    new URL("../app/api/generate-canvas-text/route.ts", import.meta.url),
+    "utf8",
+  );
+  if (!/spend:canvas_text:\$\{jobId\}/.test(canvasRoute)) {
+    throw new Error("canvas-text spend keys must be scoped to the job id");
+  }
+  if (/spend:canvas_text:\$\{Date\.now/.test(canvasRoute)) {
+    throw new Error("canvas-text must not mint spend keys from Date.now()");
+  }
+  if (/spendCredits\([\s\S]*?Date\.now\(\)/.test(canvasRoute)) {
+    throw new Error("canvas-text must not spend without a stable job-scoped key");
   }
 }
 

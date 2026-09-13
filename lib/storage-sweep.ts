@@ -5,7 +5,10 @@ import {
   collectStorageReferences,
   listAllUserMediaObjects,
 } from "@/lib/storage-orphan-audit";
-import { classifySweepObject } from "@/lib/storage-sweep-pure";
+import {
+  classifySweepObject,
+  shouldSweepConvertedTikTokSibling,
+} from "@/lib/storage-sweep-pure";
 
 /**
  * Storage hygiene sweep (see openspec/changes/storage-hygiene).
@@ -65,11 +68,13 @@ export async function planStorageSweep(
     collectStorageReferences(),
   ]);
   const objects = allObjects.filter((o) => o.root === "videos");
+  const listedPaths = new Set(allObjects.map((o) => o.path));
 
   const cutoffMs = Date.now() - minAgeHours * 60 * 60 * 1000;
 
   const keep: SweepObject[] = [];
   const deletable: Array<SweepObject & { reason: "temp" | "orphan" }> = [];
+  const deletablePaths = new Set<string>();
 
   for (const obj of objects) {
     const decision = classifySweepObject({
@@ -80,8 +85,24 @@ export async function planStorageSweep(
     });
     if (decision.action === "delete") {
       deletable.push({ ...obj, reason: decision.reason });
+      deletablePaths.add(obj.path);
     } else {
       keep.push(obj);
+    }
+  }
+
+  for (const obj of allObjects) {
+    if (!obj.path.endsWith(".tiktok.jpg") || deletablePaths.has(obj.path)) continue;
+    if (
+      shouldSweepConvertedTikTokSibling({
+        siblingPath: obj.path,
+        listedPaths,
+        cutoffMs,
+        createdAtMs: obj.createdAtMs,
+      })
+    ) {
+      deletable.push({ ...obj, reason: "orphan" });
+      deletablePaths.add(obj.path);
     }
   }
 

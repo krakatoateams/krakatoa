@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
+import { resolveOrigin } from "@/lib/http";
 import {
   youtubeRefreshLookupDenied,
   youtubeRefreshTokenForUpsert,
@@ -15,7 +16,8 @@ function clearState(response: NextResponse): NextResponse {
 }
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  const origin = resolveOrigin(request);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const storedState = request.cookies.get(STATE_COOKIE)?.value;

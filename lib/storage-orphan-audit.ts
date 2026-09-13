@@ -147,29 +147,40 @@ export function isReferenced(path: string, refBlob: string): boolean {
   return bn.length > 0 && refBlob.includes(bn);
 }
 
+export const STORAGE_REF_PAGE_SIZE = 1000;
+
+function pushRef(refs: string[], value: unknown): void {
+  if (typeof value !== "string" || !value) return;
+  refs.push(value);
+  try {
+    const decoded = decodeURIComponent(value);
+    if (decoded !== value) refs.push(decoded);
+  } catch {
+    // ignore malformed URI
+  }
+}
+
 /** Every DB string that may reference a bucket object. */
 export async function collectStorageReferences(): Promise<string> {
   const refs: string[] = [];
 
   async function pull(table: string, columns: string[]): Promise<void> {
-    const { data, error } = await supabaseServer.from(table).select(columns.join(","));
-    if (error) {
-      console.warn(`[orphan-audit] skip table ${table}: ${error.message}`);
-      return;
-    }
-    for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
-      for (const col of columns) {
-        const v = row[col];
-        if (typeof v === "string" && v) {
-          refs.push(v);
-          try {
-            const decoded = decodeURIComponent(v);
-            if (decoded !== v) refs.push(decoded);
-          } catch {
-            // ignore malformed URI
-          }
-        }
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabaseServer
+        .from(table)
+        .select(columns.join(","))
+        .range(from, from + STORAGE_REF_PAGE_SIZE - 1);
+      if (error) {
+        console.warn(`[orphan-audit] skip table ${table}: ${error.message}`);
+        return;
       }
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
+      for (const row of rows) {
+        for (const col of columns) pushRef(refs, row[col]);
+      }
+      if (rows.length < STORAGE_REF_PAGE_SIZE) break;
+      from += STORAGE_REF_PAGE_SIZE;
     }
   }
 
@@ -178,22 +189,29 @@ export async function collectStorageReferences(): Promise<string> {
   await pull("posts", ["video_url"]);
   await pull("storyboards", ["video_url", "storyboard_url"]);
 
-  const { data: jobRows, error: jobsError } = await supabaseServer
-    .from("jobs")
-    .select("output")
-    .in("status", ["running", "recoverable"])
-    .limit(500);
-  if (!jobsError && jobRows) {
-    for (const row of jobRows as { output?: Record<string, unknown> }[]) {
+  let jobFrom = 0;
+  for (;;) {
+    const { data: jobRows, error: jobsError } = await supabaseServer
+      .from("jobs")
+      .select("output")
+      .in("status", ["running", "recoverable"])
+      .range(jobFrom, jobFrom + STORAGE_REF_PAGE_SIZE - 1);
+    if (jobsError) {
+      console.warn(`[orphan-audit] skip table jobs: ${jobsError.message}`);
+      break;
+    }
+    const rows = (jobRows ?? []) as { output?: Record<string, unknown> }[];
+    for (const row of rows) {
       const out = row.output;
       if (!out) continue;
       const recovery = out.recovery;
       if (recovery && typeof recovery === "object") {
-        const prefix = (recovery as { storagePrefix?: string }).storagePrefix;
-        if (prefix) refs.push(prefix);
+        pushRef(refs, (recovery as { storagePrefix?: string }).storagePrefix);
       }
-      if (typeof out.storagePath === "string") refs.push(out.storagePath);
+      pushRef(refs, out.storagePath);
     }
+    if (rows.length < STORAGE_REF_PAGE_SIZE) break;
+    jobFrom += STORAGE_REF_PAGE_SIZE;
   }
 
   return refs.join("\n");

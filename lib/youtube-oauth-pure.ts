@@ -7,6 +7,8 @@
  * hold a valid refresh — the upsert must not replace it with null.
  */
 
+import { readFileSync } from "node:fs";
+
 export function youtubeRefreshTokenForUpsert(
   incoming: string | null | undefined,
   existing: string | null | undefined,
@@ -49,6 +51,19 @@ export function youtubeOAuthSelfCheck(): void {
   }
   if (youtubeRefreshLookupDenied(null, null)) {
     throw new Error("a successful lookup without a new refresh must proceed to preserve");
+  }
+
+  for (const relative of [
+    "../app/api/connections/youtube/start/route.ts",
+    "../app/api/connections/youtube/callback/route.ts",
+  ]) {
+    const source = readFileSync(new URL(relative, import.meta.url), "utf8");
+    if (!source.includes("resolveOrigin")) {
+      throw new Error(`${relative} must use resolveOrigin like TikTok`);
+    }
+    if (/const \{[^}]*origin[^}]*\} = new URL\(request\.url\)/.test(source)) {
+      throw new Error(`${relative} must not bind OAuth origin from request.url`);
+    }
   }
 }
 
