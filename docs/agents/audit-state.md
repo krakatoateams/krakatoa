@@ -14,7 +14,13 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Client bundle versus server-secret boundary (delivery)
+- Status: `blocked`
+- Blocker: [PR #192](https://github.com/krakatoateams/krakatoa/pull/192)
+  is clean and its quality gate passed, but GitHub reports a partial system
+  outage and both GraphQL and REST merge endpoints return HTTP 502.
+- Safest next command: `gh pr merge 192 --merge --delete-branch`
 
 ## Queue
 
@@ -112,7 +118,7 @@ the runbook.
   - [x] Standalone auth pages and redirect chain
   - [x] Public unauthenticated read APIs
   - [x] Marketing landing and legal pages
-  - [ ] Client bundle versus server-secret boundary
+  - [x] Client bundle versus server-secret boundary
   - [ ] PWA install surface
   - [ ] Internal and dev-only route obscurity
   - [ ] Supabase Auth leaked-password protection
@@ -1649,6 +1655,44 @@ the runbook.
   0 high, and 0 unaccepted medium findings. The dedicated security review found
   no critical/high issue; its media-disclosure medium was fixed and its
   cosmetic promo-pricing medium is the explicit accepted product risk above.
+
+### Public/deployment: client bundle versus server-secret boundary
+
+- Date: 2026-09-13
+- Base: `f4995097ae17b2aa6b7281db7fe0a3fbc3dd7f72`
+- Final commit: `abe910c`
+- Scope: every `use client` root and transitive local runtime import under
+  `app`, `components`, and `lib`; browser environment access; service-role,
+  provider, payment, OAuth, and cron credential adapters; Next configuration,
+  production browser source maps, tracked secret-like artifacts, dotenv/key
+  ignore rules, private Supabase Storage setup, and CI integration.
+- Findings: no current privileged module or non-public credential was reachable
+  from the 235-module client graph, and no tracked dotenv, private-key, or source
+  map artifact was found. Shared credential-bearing modules nevertheless lacked
+  a fail-closed client-import boundary; nine now use Next's `server-only`
+  marker. The new AST self-check follows runtime imports/re-exports, rejects
+  Node runtime dependencies and non-public dot/bracket/destructured env reads,
+  pins the privileged markers and browser-source-map/config boundary, and runs
+  in CI. Setup docs now identify the service role as server-only and the media
+  bucket as private with user-first paths. Git ignored only `.env*.local`; all
+  dotenv variants and common private-key bundles are now excluded.
+- Accepted risks: `NEXT_PUBLIC_SUPABASE_URL` and the anon key are intentionally
+  browser-visible, and `SUPABASE_STORAGE_BUCKET` is a non-secret client path
+  constant. The graph resolves the repository's only configured alias (`@/`)
+  plus relative literal imports; package internals and non-literal dynamic
+  imports remain the production build's responsibility. The privileged-module
+  marker inventory must grow when a new shared credential adapter is added.
+  `.env.example` would require an explicit future ignore exception.
+- Verification: red/green `test:client-secret-boundary`; dependency,
+  deployment-CI, and security-header neighbors passed. Final `ci:checks` passed
+  with 0 dependency vulnerabilities, lint at 0 errors and 11 pre-existing
+  warnings, production build, and the CLAUDE.md size guard. `git diff --check`,
+  edited-file diagnostics, concrete `git check-ignore` probes, and the tracked
+  secret/source-map scan passed.
+- Security: independent review found 0 critical, 0 high, and 0 unaccepted
+  medium findings. Its static-check observations were either addressed
+  (bracket/destructured/dynamic env reads and directive prologue handling) or
+  recorded in the accepted limitations above.
 
 ## Deferred
 

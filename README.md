@@ -12,7 +12,7 @@ A premium AI-powered platform for content creators. Krakatoa hosts multiple AI t
   - Final MP4 stored in Supabase Storage and returned to the client.
 - **Live caption styler** with WYSIWYG preview (font, size, primary/highlight/outline colors, vertical margin).
 - **Premium dark-mode UI** with glassmorphism, built on Tailwind CSS.
-- **Platform foundation & dummy credits** — Phase 1–7 platform tables (`profiles`, `projects`, `jobs`, `job_steps`, `assets`, `asset_relations`, `credit_wallets`, `credit_transactions`, `usage_events`) plus a ledger-backed credit system. Existing profiles each hold 500 dummy credits; new profiles auto-receive 500 via an after-insert trigger. The credit-charged routes (`generate-reels`, `generate-storyboard`, `generate-storyboard-video`) spend credits **before** any provider call and best-effort refund on post-spend failure. See [`CLAUDE.md`](./CLAUDE.md) for the full contract.
+- **Platform foundation & credits** — jobs, assets, projects, scheduling, and a ledger-backed credit system. Regular users start at zero and may claim the configured welcome offer; internal admins retain the 500-credit test seed. Charged generation spends before provider work and follows the provider-commit/recovery refund policy in [`CLAUDE.md`](./CLAUDE.md).
 
 ## Tech Stack
 
@@ -44,6 +44,8 @@ REPLICATE_API_TOKEN=your_replicate_token
 RENDI_API_KEY=your_rendi_api_key
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_STORAGE_BUCKET=krakatoa
 
 # DOKU credit checkout (payments)
 DOKU_CLIENT_ID=your_doku_client_id
@@ -55,6 +57,10 @@ CRON_SECRET=your_random_cron_secret # required on deployment for GET /api/cron/*
 GENERATION_WEBHOOK_SECRET=your_random_webhook_secret # required in production
 ```
 
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are intentionally
+browser-visible. Never expose `SUPABASE_SERVICE_ROLE_KEY` or any provider,
+payment, OAuth, cron, or webhook secret through a `NEXT_PUBLIC_` variable.
+
 `DOKU_NOTIFICATION_URL` is handy for local development: set it to your public
 tunnel URL (e.g. `https://<id>.trycloudflare.com/api/payments/doku/webhook`) and
 every checkout overrides DOKU's Back Office notification URL for that request.
@@ -65,12 +71,15 @@ DOKU sends payment notifications to `POST /api/payments/doku/webhook` — regist
 this URL (and the success redirect `/dashboard/settings?tab=credits`) in the DOKU
 merchant dashboard. `NEXTAUTH_URL` is reused to build the absolute callback URLs.
 
-Create one **public** Supabase Storage bucket (default name: `krakatoa`, or set `SUPABASE_STORAGE_BUCKET` in `.env.local`). Use top-level folders per feature:
+Create one **private** Supabase Storage bucket (default name: `krakatoa`, or set
+`SUPABASE_STORAGE_BUCKET` in `.env.local`). Browser reads use owner-checked
+signed URLs. Canonical user media paths begin with `{userId}/`:
 
-| Folder | Feature |
+| Path | Feature |
 | --- | --- |
-| `videos/` | ReelsGen — `.ass` captions and final `.mp4` files |
-| `photos/` | Product Photo — uploads and generated images (separate from `videos/`) |
+| `{userId}/videos/` | Generated videos and temporary video inputs |
+| `{userId}/photos/` | Uploaded and generated images |
+| `{userId}/resumable/{jobId}/` | Temporary pipeline-recovery staging |
 
 ### 3. Apply database migrations
 
@@ -78,7 +87,11 @@ Create one **public** Supabase Storage bucket (default name: `krakatoa`, or set 
 npm run db:setup
 ```
 
-This applies every file in `supabase/migrations/` (currently up to `006_dummy_credits.sql`) — idempotent and safe to re-run. It creates the platform foundation tables, the credit ledger and RPC, and grants 500 dummy credits to every existing profile (and any future profile via an after-insert trigger). Requires `SUPABASE_ACCESS_TOKEN` or `DATABASE_URL` in `.env.local` — see [`scripts/setup-db.mjs`](scripts/setup-db.mjs) for details.
+This applies every file in `supabase/migrations/` in order. Migrations are
+idempotent and include the current private-storage, billing, auth, scheduling,
+and generation-workflow schema. The local script requires a supported Supabase
+Management API token or `DATABASE_URL`; repository agents use the configured
+Supabase MCP deployment workflow described in [`CLAUDE.md`](./CLAUDE.md).
 
 ### 4. Run the dev server
 

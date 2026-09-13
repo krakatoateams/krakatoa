@@ -1,3 +1,5 @@
+import "server-only";
+
 import { google } from "googleapis";
 import { Readable } from "stream";
 import { youtubeStorageFetchError } from "@/lib/youtube-publish-pure";

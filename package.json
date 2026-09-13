@@ -35,6 +35,7 @@
     "test:auth": "tsx lib/auth-session-self-check.ts",
     "test:public-auth-flow": "tsx lib/public-route-policy-self-check.ts && tsx lib/public-auth-flow-self-check.ts && tsx lib/auth-session-self-check.ts && tsx lib/pending-form-draft-self-check.ts",
     "test:dependency-security": "tsx lib/dependency-security-self-check.ts",
+    "test:client-secret-boundary": "tsx lib/client-secret-boundary-self-check.ts",
     "test:deployment-ci": "tsx lib/deployment-ci-self-check.ts",
     "test:security-headers": "tsx lib/security-headers-self-check.ts",
     "test:public-marketing": "tsx lib/public-marketing-self-check.ts",
@@ -73,7 +74,7 @@
     "test:post-cleanup": "tsx lib/post-storage-cleanup-pure.ts",
     "test:legacy-calendar-badge": "tsx lib/legacy-calendar-badge-pure.ts",
     "test:generation-workflows": "tsx lib/generation-workflows/control-policy-self-check.ts && tsx lib/generation-workflows/stop-settlement-self-check.ts && tsx lib/generation-workflows/submission-fence-self-check.ts && tsx lib/generation-workflows/submission-recovery-self-check.ts && tsx lib/generation-workflows/webhook-token-self-check.ts && tsx lib/generation-workflows/polling-self-check.ts && tsx lib/generation-workflows/finalization-self-check.ts && tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",
-    "ci:checks": "npm run test:deployment-ci && npm run test:dependency-security && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run build",
+    "ci:checks": "npm run test:deployment-ci && npm run test:dependency-security && npm run test:client-secret-boundary && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run build",
     "admin:probe-monitoring": "tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "tsx scripts/probe-signed-url-cache.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
@@ -90,6 +91,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "replicate": "^1.4.0",
+    "server-only": "^0.0.1",
     "shaders": "^2.5.126",
     "sharp": "0.35.4",
     "workflow": "^4.8.4"

@@ -3,6 +3,8 @@
 // JPEG-compatibility conversion, added below. Phase 3 (refreshLongLivedToken
 // call site + the daily proactive-refresh cron) is still not implemented.
 
+import "server-only";
+
 import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
