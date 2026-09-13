@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { passwordResetCallbackUrl } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/Button";
 
 /**
@@ -10,12 +11,24 @@ import { Button } from "@/components/ui/Button";
  * stays as a standalone fallback for direct links and the expired-link
  * redirect from app/auth/callback/route.ts — same pattern as /login.
  */
-export function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) {
+export function ForgotPasswordForm({
+  next = "/dashboard",
+  onBusyChange,
+  onBackToSignIn,
+}: {
+  next?: string;
+  onBusyChange?: (busy: boolean) => void;
+  onBackToSignIn: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const supabase = getSupabaseAuthBrowser();
+
+  useEffect(() => {
+    onBusyChange?.(loading);
+  }, [loading, onBusyChange]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +40,7 @@ export function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => v
     // than login, so unlike login's Case A+C this never distinguishes.
     try {
       await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/dashboard?resetPassword=1")}`,
+        redirectTo: passwordResetCallbackUrl(window.location.origin, next),
       });
     } catch {
       // Fail closed to the same success state.
@@ -59,6 +72,7 @@ export function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => v
         <button
           type="button"
           onClick={onBackToSignIn}
+          disabled={loading}
           className="text-body-3 text-brand-primary hover:text-brand-primary-hover"
         >
           Back to sign in
@@ -98,7 +112,8 @@ export function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => v
         <button
           type="button"
           onClick={onBackToSignIn}
-          className="text-brand-primary hover:text-brand-primary-hover"
+          disabled={loading}
+          className="text-brand-primary hover:text-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           Back to sign in
         </button>

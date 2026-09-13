@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { passwordResetDestination } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/Button";
 import { AuthModalShell } from "./AuthModalShell";
 
@@ -22,6 +23,7 @@ function ResetPasswordModalInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const supabase = getSupabaseAuthBrowser();
+  const next = passwordResetDestination(searchParams.get("next"));
 
   const [open, setOpen] = useState(false);
   const [sessionState, setSessionState] = useState<SessionState>("checking");
@@ -29,21 +31,62 @@ function ResetPasswordModalInner() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("resetPassword") !== "1") return;
     setOpen(true);
-    supabase.auth.getSession().then(({ data }) => {
-      setSessionState(data.session ? "valid" : "invalid");
-    });
+    Promise.all([
+      supabase.auth.getSession(),
+      fetch("/api/auth/recovery-state", { cache: "no-store" }),
+    ])
+      .then(async ([{ data }, response]) => {
+        const proof = response.ok
+          ? ((await response.json()) as { active?: boolean })
+          : null;
+        setSessionState(
+          data.session && proof?.active === true ? "valid" : "invalid",
+        );
+      })
+      .catch(() => setSessionState("invalid"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function close() {
+  async function cancelRecoverySession(): Promise<boolean> {
+    try {
+      const response = await fetch("/api/auth/recovery-state", {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function close() {
+    if (done) {
+      continueAfterReset();
+      return;
+    }
+
+    setClosing(true);
+    const cancelled = await cancelRecoverySession();
+    if (!cancelled) {
+      setClosing(false);
+      setError("Unable to end this recovery session. Please try again.");
+      return;
+    }
     setOpen(false);
-    // Strip the query param so a refresh or Back doesn't reopen this.
+    // A recovery link is an authentication factor. Dismissing before the
+    // password update must not leave that link-created session usable.
     router.replace("/dashboard");
+  }
+
+  function continueAfterReset() {
+    setOpen(false);
+    router.replace(next);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -56,13 +99,25 @@ function ResetPasswordModalInner() {
     }
 
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-
-    if (updateError) {
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/recovery-state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+    } catch {
       setLoading(false);
-      // Mirrors signup's Case F (weak password) — Supabase's message is
-      // already user-friendly, shown as-is.
-      setError(updateError.message);
+      setError("Network error. Please try again.");
+      return;
+    }
+
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    if (!response.ok) {
+      setLoading(false);
+      setError(data.error || "Unable to update your password.");
       return;
     }
 
@@ -71,7 +126,12 @@ function ResetPasswordModalInner() {
   }
 
   return (
-    <AuthModalShell open={open} onClose={close} ariaLabel="Reset password">
+    <AuthModalShell
+      open={open}
+      onClose={close}
+      closeDisabled={loading || closing}
+      ariaLabel="Reset password"
+    >
       {sessionState === "checking" && (
         <div className="py-8 text-center text-body-3 text-text-secondary">Checking link…</div>
       )}
@@ -81,7 +141,7 @@ function ResetPasswordModalInner() {
           <h1 className="font-display text-xl font-bold text-text-primary">Invalid link</h1>
           <p className="text-body-3 text-text-secondary">This link is invalid or has expired.</p>
           <Link
-            href="/forgot-password"
+            href={`/forgot-password?next=${encodeURIComponent(next)}`}
             className="block text-body-3 text-brand-primary hover:text-brand-primary-hover"
           >
             Request a new password reset link
@@ -98,8 +158,13 @@ function ResetPasswordModalInner() {
           <p className="text-body-3 text-text-secondary">
             Your password has been changed successfully.
           </p>
-          <Button variant="primary" size="md" className="w-full" onClick={close}>
-            Continue to dashboard
+          <Button
+            variant="primary"
+            size="md"
+            className="w-full"
+            onClick={continueAfterReset}
+          >
+            Continue
           </Button>
         </div>
       )}

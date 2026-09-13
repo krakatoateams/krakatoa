@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
@@ -80,6 +80,7 @@ export function SignInForm({
   callbackError,
   initialEmail = "",
   onSuccess,
+  onBusyChange,
   onForgotPassword,
   onSwitchToSignUp,
 }: {
@@ -87,6 +88,7 @@ export function SignInForm({
   callbackError?: string | null;
   initialEmail?: string;
   onSuccess?: () => void;
+  onBusyChange?: (busy: boolean) => void;
   /**
    * When set (i.e. rendered inside SignInModal), "Forgot password?" swaps
    * the modal's view in-place instead of navigating. Omit this to fall back
@@ -106,32 +108,56 @@ export function SignInForm({
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState<LoginError | null>(null);
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
 
   const supabase = getSupabaseAuthBrowser();
   const safeNext = sanitizeNextPath(next);
+  const busy = loading || oauthLoading || resending;
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   async function handleGoogleSignIn() {
     setLoginError(null);
-    // Optimistic — we're about to leave the page entirely for Google's
-    // consent screen, so there's no later point to set this from.
-    flagJustSignedIn();
+    setOauthLoading(true);
 
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        // Drafts remain in same-tab sessionStorage. Never copy user prompts or
-        // settings into this external OAuth redirect URL.
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
-        // Without this, Google silently reuses the browser's single active
-        // session + prior consent and skips the chooser entirely — fine with
-        // multiple Google accounts signed in (Google disambiguates on its
-        // own), but with just one it auto-logs in with no way to pick a
-        // different account.
-        queryParams: { prompt: "select_account" },
-      },
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          // Return the provider URL first so a local start failure can be
+          // surfaced instead of disappearing behind a navigation attempt.
+          skipBrowserRedirect: true,
+          // Drafts remain in same-tab sessionStorage. Never copy user prompts
+          // or settings into this external OAuth redirect URL.
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
+          // Without this, Google silently reuses the browser's single active
+          // session + prior consent and skips the chooser entirely.
+          queryParams: { prompt: "select_account" },
+        },
+      });
+
+      if (error || !data.url) {
+        setOauthLoading(false);
+        setLoginError({
+          kind: "other",
+          message: "Could not start Google sign-in. Please try again.",
+        });
+        return;
+      }
+
+      flagJustSignedIn();
+      window.location.assign(data.url);
+    } catch {
+      setOauthLoading(false);
+      setLoginError({
+        kind: "other",
+        message: "Could not start Google sign-in. Please try again.",
+      });
+    }
   }
 
   async function handleEmailSignIn(e: React.FormEvent) {
@@ -218,7 +244,8 @@ export function SignInForm({
             <button
               type="button"
               onClick={onSwitchToSignUp}
-              className="text-brand-primary hover:text-brand-primary-hover"
+              disabled={busy}
+              className="text-brand-primary hover:text-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Sign up here
             </button>
@@ -240,10 +267,11 @@ export function SignInForm({
       <button
         type="button"
         onClick={handleGoogleSignIn}
-        className="flex w-full items-center justify-center gap-3 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20"
+        disabled={busy}
+        className="flex w-full items-center justify-center gap-3 rounded-radius-xl border border-white/10 bg-white/10 px-4 py-2.5 text-body-3 font-medium text-text-primary transition-colors hover:bg-white/20 disabled:opacity-50"
       >
         <GoogleIcon />
-        Continue with Google
+        {oauthLoading ? "Connecting…" : "Continue with Google"}
       </button>
 
       <div className="flex items-center gap-3">
@@ -272,12 +300,16 @@ export function SignInForm({
               <button
                 type="button"
                 onClick={onForgotPassword}
-                className="text-small text-brand-primary hover:text-brand-primary-hover"
+                disabled={busy}
+                className="text-small text-brand-primary hover:text-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Forgot password?
               </button>
             ) : (
-              <Link href="/forgot-password" className="text-small text-brand-primary hover:text-brand-primary-hover">
+              <Link
+                href={`/forgot-password?next=${encodeURIComponent(safeNext)}`}
+                className="text-small text-brand-primary hover:text-brand-primary-hover"
+              >
                 Forgot password?
               </Link>
             )}
@@ -306,10 +338,11 @@ export function SignInForm({
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              className="flex w-full items-center justify-center gap-2.5 rounded-radius-xl bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100"
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-2.5 rounded-radius-xl bg-white px-4 py-2 text-body-3 font-medium text-gray-900 transition-colors hover:bg-gray-100 disabled:opacity-50"
             >
               <GoogleIcon className="h-4 w-4" />
-              Continue with Google
+              {oauthLoading ? "Connecting…" : "Continue with Google"}
             </button>
           </div>
         )}
@@ -369,7 +402,7 @@ export function SignInForm({
           variant="primary"
           size="md"
           loading={loading}
-          disabled={loginError?.kind === "too_many_attempts"}
+          disabled={busy || loginError?.kind === "too_many_attempts"}
           className="w-full"
         >
           Sign in

@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
+import { passwordResetCallbackUrl } from "@/lib/safe-redirect";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/Button";
 
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const expired = searchParams.get("error") === "expired";
+  const next = searchParams.get("next");
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -32,7 +34,7 @@ function ForgotPasswordForm() {
     // than login, so unlike login's Case A+C this never distinguishes.
     try {
       await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        redirectTo: passwordResetCallbackUrl(window.location.origin, next),
       });
     } catch {
       // Fail closed to the same success state.

@@ -13,6 +13,14 @@ function assert(condition: boolean, message: string): void {
 export function publicAuthFlowSelfCheck(): void {
   const signIn = read("components/auth/SignInForm.tsx");
   const signUp = read("components/auth/SignUpForm.tsx");
+  const signInModal = read("components/auth/SignInModal.tsx");
+  const forgotPassword = read("components/auth/ForgotPasswordForm.tsx");
+  const resetPassword = read("components/auth/ResetPasswordModal.tsx");
+  const recoveryStateRoute = read(
+    "app/api/auth/recovery-state/route.ts",
+  );
+  const signInRoute = read("app/api/auth/signin/route.ts");
+  const middleware = read("middleware.ts");
   const drafts = read("lib/pending-form-draft.ts");
   const photo = read("app/(app)/tools/photo-v2/page.tsx");
   const legacyPhoto = read("app/(app)/tools/photo/page.tsx");
@@ -77,6 +85,59 @@ export function publicAuthFlowSelfCheck(): void {
   assert(
     callback.includes("authCallbackFailureUrl(origin, next)"),
     "an OAuth retry must preserve its sanitized destination",
+  );
+  assert(
+    signInModal.includes("<ForgotPasswordForm") &&
+      signInModal.includes("next={next}") &&
+      forgotPassword.includes("passwordResetCallbackUrl(") &&
+      resetPassword.includes("passwordResetDestination("),
+    "modal password recovery must resume its sanitized gated destination",
+  );
+  assert(
+    signIn.includes("skipBrowserRedirect: true") &&
+      signUp.includes("skipBrowserRedirect: true") &&
+      signIn.includes("if (error || !data.url)") &&
+      signUp.includes("if (error || !data.url)") &&
+      signIn.includes("window.location.assign(data.url)") &&
+      signUp.includes("window.location.assign(data.url)"),
+    "Google OAuth must surface start failures before leaving the page",
+  );
+  assert(
+    signInModal.includes("onBusyChange={setBusy}") &&
+      signInModal.includes("closeDisabled={busy}") &&
+      resetPassword.includes(
+        'href={`/forgot-password?next=${encodeURIComponent(next)}`}',
+      ) &&
+      (signIn.match(/disabled=\{busy\}/g)?.length ?? 0) >= 2 &&
+      signIn.includes(
+        'disabled={busy || loginError?.kind === "too_many_attempts"}',
+      ),
+    "in-flight modal auth must stay locked and invalid reset retries must retain next",
+  );
+  assert(
+    callback.includes("PASSWORD_RECOVERY_PROOF_COOKIE") &&
+      callback.includes("httpOnly: true") &&
+      recoveryStateRoute.includes("PASSWORD_RECOVERY_PROOF_COOKIE") &&
+      recoveryStateRoute.includes('maxAge: 0') &&
+      recoveryStateRoute.includes("export async function PATCH") &&
+      recoveryStateRoute.includes("updateUser({ password })") &&
+      recoveryStateRoute.includes('signOut({ scope: "local" })') &&
+      signInRoute.includes("PASSWORD_RECOVERY_PROOF_COOKIE") &&
+      signInRoute.includes("maxAge: 0") &&
+      resetPassword.includes('fetch("/api/auth/recovery-state"') &&
+      resetPassword.includes('method: "PATCH"') &&
+      !resetPassword.includes("supabase.auth.updateUser"),
+    "password reset UI must require callback proof and sign out on dismissal",
+  );
+  assert(
+    !signInRoute.includes("attemptsRemaining:"),
+    "failed sign-in responses must not expose the lockout counter",
+  );
+  assert(
+    middleware.includes("passwordRecoveryDestinationFromProof") &&
+      middleware.includes("PASSWORD_RECOVERY_REQUIRED") &&
+      middleware.includes('"/api/:path*"'),
+    "a recovery-created session must stay gated from app pages and APIs until reset completes",
   );
 }
 

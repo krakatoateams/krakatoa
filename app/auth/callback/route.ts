@@ -3,8 +3,15 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import {
   authCallbackFailureUrl,
+  passwordResetRetryUrl,
   sanitizeNextPath,
 } from "@/lib/safe-redirect";
+import {
+  PASSWORD_RECOVERY_PROOF_COOKIE,
+  PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC,
+  passwordRecoveryDestinationFromLanding,
+  passwordRecoveryProofValue,
+} from "@/lib/password-recovery";
 import { SUPABASE_AUTH_CACHE_HEADERS } from "@/lib/supabase-auth-response";
 
 function authRedirect(url: string): NextResponse {
@@ -29,6 +36,7 @@ function authRedirect(url: string): NextResponse {
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const flow = searchParams.get("flow");
   // This route is a public, directly-reachable URL — reachable in practice
   // today only requires the calling browser to hold a matching PKCE
   // code_verifier, which it only would if it initiated the flow through our
@@ -62,7 +70,33 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return authRedirect(`${origin}${next}`);
+      const response = authRedirect(`${origin}${next}`);
+      const recoveryDestination =
+        flow === "recovery"
+          ? passwordRecoveryDestinationFromLanding(next)
+          : null;
+      if (recoveryDestination) {
+        response.cookies.set(
+          PASSWORD_RECOVERY_PROOF_COOKIE,
+          passwordRecoveryProofValue(recoveryDestination),
+          {
+            httpOnly: true,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            path: "/",
+            maxAge: PASSWORD_RECOVERY_PROOF_MAX_AGE_SEC,
+          },
+        );
+      } else {
+        response.cookies.set(PASSWORD_RECOVERY_PROOF_COOKIE, "", {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 0,
+        });
+      }
+      return response;
     }
   }
 
@@ -73,7 +107,7 @@ export async function GET(request: NextRequest) {
   // moved into a modal (app/reset-password/page.tsx stays as a fallback for
   // those), or /dashboard?resetPassword=1 for anything sent after.
   if (next.startsWith("/reset-password") || next.includes("resetPassword=")) {
-    return authRedirect(`${origin}/forgot-password?error=expired`);
+    return authRedirect(passwordResetRetryUrl(origin, next));
   }
 
   // Everything else (OAuth, signup confirmation) — go to login with an
