@@ -14,7 +14,22 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Supabase Auth leaked-password protection
+- Base: `68afea72b41aaea3f16d944732f01c515c3bb02b`
+- Branch: `audit-repo/public-leaked-password-protection`
+- Status: `blocked`
+- Evidence: the live Supabase security advisor reports
+  `auth_leaked_password_protection` (`WARN`, count 1). Supabase documents leaked
+  password checks through HaveIBeenPwned as available on Pro and above, while
+  organization `krakatoateams` currently reports plan `free`.
+- Blocker: upgrading the Supabase subscription and changing production Auth
+  settings are owner-controlled billing/configuration decisions outside the
+  audit runner's authorization.
+- Safest next action: either upgrade to Pro and enable leaked-password
+  protection in the project's Auth settings, then rerun the security advisor,
+  or explicitly accept the free-plan residual risk so this slice can be
+  checkpointed and the Public/deployment audit closed.
 
 ## Queue
 
