@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
@@ -94,7 +100,10 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft } from "@/lib/pending-form-draft";
+import {
+  consumePendingDraftForOwner,
+  pendingDraftOwner,
+} from "@/lib/pending-form-draft";
 import { isViralTemplateAssetPath } from "@/lib/trending-templates";
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
@@ -110,6 +119,10 @@ const CREATION_TYPES = [
   { id: "social-post", label: "Social media post", available: true },
 ] as const;
 type CreationTypeId = (typeof CREATION_TYPES)[number]["id"];
+const PHOTO_DRAFT_OWNER = {
+  storyboard: "photo:storyboard",
+  studio: "photo:studio",
+} as const;
 
 // Social media post batch: how many alternatives one submit may generate. Each
 // one is a separate provider call and is charged separately.
@@ -192,17 +205,16 @@ function StoryboardComposer({
   }, [loadMentionAssets, historyRefreshKey]);
 
   // Restore what was typed before a gated Generate click sent the visitor
-  // through sign-in (see lib/pending-form-draft.ts) — runs once on mount, so
-  // it only ever finds something after the Google OAuth round-trip (a full
-  // reload); email/password never unmounts this component in the first
-  // place, so the fields are already there.
+  // through sign-in (see lib/pending-form-draft.ts). Both password and Google
+  // sign-in finish with a full navigation, so the owner-scoped draft restores
+  // once when this composer remounts.
   useEffect(() => {
-    const draft = consumePendingDraft<{
+    const draft = consumePendingDraftForOwner<{
       theme?: string;
       style?: StoryboardStyleKey;
       aspect?: StoryboardAspectRatio;
       language?: StoryboardLanguageId;
-    }>(window.location.pathname);
+    }>(window.location.pathname, PHOTO_DRAFT_OWNER.storyboard);
     if (!draft) return;
     if (draft.theme) setTheme(draft.theme);
     if (draft.style) setStyle(draft.style);
@@ -218,7 +230,13 @@ function StoryboardComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { theme, style, aspect, language });
+      openSignInModal(undefined, {
+        draftOwner: PHOTO_DRAFT_OWNER.storyboard,
+        theme,
+        style,
+        aspect,
+        language,
+      });
       return;
     }
 
@@ -512,6 +530,15 @@ function PhotoOmniPage({
   const [characterName, setCharacterName] = useState("");
   const [creationType, setCreationType] = useState<CreationTypeId>(initialCreationType);
 
+  useLayoutEffect(() => {
+    if (
+      pendingDraftOwner(window.location.pathname) ===
+      PHOTO_DRAFT_OWNER.storyboard
+    ) {
+      setCreationType("storyboard");
+    }
+  }, []);
+
   const [poseId, setPoseId] = useState<ModelPoseId>(DEFAULT_MODEL_POSE);
   const [styleId, setStyleId] = useState<PhotoStyleId>(DEFAULT_PHOTO_STYLE);
   const [modelTier, setModelTier] = useState<ProductPhotoModelTier>(DEFAULT_PRODUCT_PHOTO_TIER);
@@ -551,7 +578,9 @@ function PhotoOmniPage({
   // visitor through sign-in — see the matching note in StoryboardComposer
   // above (lib/pending-form-draft.ts).
   useEffect(() => {
-    const draft = consumePendingDraft<{
+    const draft = consumePendingDraftForOwner<{
+      creationType?: CreationTypeId;
+      batchCount?: (typeof BATCH_COUNTS)[number];
       prompt?: string;
       characterName?: string;
       characterStyle?: CharacterStyleId;
@@ -562,8 +591,17 @@ function PhotoOmniPage({
       modelTier?: ProductPhotoModelTier;
       resolution?: ProductPhotoResolution;
       aspectRatio?: PhotoAspectRatio;
-    }>(window.location.pathname);
+    }>(window.location.pathname, PHOTO_DRAFT_OWNER.studio);
     if (!draft) return;
+    if (
+      draft.creationType &&
+      CREATION_TYPES.some(({ id }) => id === draft.creationType)
+    ) {
+      setCreationType(draft.creationType);
+    }
+    if (draft.batchCount && BATCH_COUNTS.includes(draft.batchCount)) {
+      setBatchCount(draft.batchCount);
+    }
     if (draft.prompt) setPrompt(draft.prompt);
     if (draft.characterName) setCharacterName(draft.characterName);
     if (draft.characterStyle) setCharacterStyle(draft.characterStyle);
@@ -787,6 +825,9 @@ function PhotoOmniPage({
     if (loading || !canGenerate) return;
     if (status !== "authenticated") {
       openSignInModal(undefined, {
+        draftOwner: PHOTO_DRAFT_OWNER.studio,
+        creationType,
+        batchCount,
         prompt,
         characterName,
         characterStyle,

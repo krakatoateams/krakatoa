@@ -28,7 +28,7 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { consumePendingDraft } from "@/lib/pending-form-draft";
+import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
 
 import { useVideoDurationSec } from "@/lib/use-video-duration";
 import { MOTION_CONTROL_MAX_RUNTIME_MS } from "@/lib/generation-workflows/motion-control-workflow-types";
@@ -62,6 +62,8 @@ import {
   MC_VIDEO_ACCEPT,
 } from "./shared";
 import type { CharacterSource, LibraryCharacter, VideoCreationTypeOption } from "./types";
+
+const DRAFT_OWNER = "video:motion-control";
 
 async function pollMotionControlResult(
   idempotencyKey: string,
@@ -146,12 +148,19 @@ export default function MotionControlComposer({
   // Restore what was typed before a gated Generate click sent the visitor
   // through sign-in — see lib/pending-form-draft.ts.
   useEffect(() => {
-    const draft = consumePendingDraft<{
+    const draft = consumePendingDraftForOwner<{
+      modelId?: MotionControlModelId;
       prompt?: string;
       mode?: MotionControlMode;
       keepOriginalSound?: boolean;
-    }>(window.location.pathname);
+    }>(window.location.pathname, DRAFT_OWNER);
     if (!draft) return;
+    if (
+      draft.modelId &&
+      MOTION_CONTROL_MODELS.some(({ id }) => id === draft.modelId)
+    ) {
+      setModelId(draft.modelId);
+    }
     if (draft.prompt) setPrompt(draft.prompt);
     if (draft.mode) setMode(draft.mode);
     if (typeof draft.keepOriginalSound === "boolean") setKeepOriginalSound(draft.keepOriginalSound);
@@ -256,7 +265,13 @@ export default function MotionControlComposer({
     e.preventDefault();
     if (!canGenerate) return;
     if (status !== "authenticated") {
-      openSignInModal(undefined, { prompt, mode, keepOriginalSound });
+      openSignInModal(undefined, {
+        draftOwner: DRAFT_OWNER,
+        modelId,
+        prompt,
+        mode,
+        keepOriginalSound,
+      });
       return;
     }
 

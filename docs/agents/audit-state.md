@@ -107,7 +107,7 @@ the runbook.
   - [x] Production secrets and fail-open deployment guards
   - [x] Deployment CI quality-gate automation
   - [x] Site-wide security headers and CSP
-  - [ ] Logged-out middleware route matrix and draft hand-off
+  - [x] Logged-out middleware route matrix and draft hand-off
   - [ ] Auth modal forms and password lifecycle
   - [ ] Standalone auth pages and redirect chain
   - [ ] Public unauthenticated read APIs
@@ -1470,6 +1470,42 @@ the runbook.
   enforced baseline on `/`, `/dashboard`, `/api/credits/packs`, `/sw.js`, and
   `/manifest.webmanifest`.
 - Security: final repeated review found no issues and no unresolved critical,
+  high, or medium finding.
+
+### Public/deployment: logged-out middleware route matrix and draft hand-off
+
+- Date: 2026-09-13
+- Base: `48ce0c020bbf74d5e85c6ee1fa2899c41a3dba82`
+- Final commit: `f7d15995d06e071a9e96297db7dbad38c5ce856f`
+- Scope: logged-out dashboard/tool routing, protected-route hand-off, auth modal
+  redirects, password/Google callback destinations, pending text/settings
+  drafts, shared-path Photo/Video composers, and public Scheduler actions.
+- Findings: raw drafts were copied into normal OAuth redirect URLs, exposing
+  prompts/settings to URL-history and external authentication/logging
+  boundaries. Removed that fallback and now ignore/strip legacy `kdraft`
+  payloads; same-tab sessionStorage is the only draft store. Photo's unscoped
+  parent could consume a Storyboard draft before its child mounted, and
+  UI-selected Photo/Video modes plus Motion model and Photo batch settings
+  could reset after sign-in. Added owner-scoped consumption and pre-paint mode
+  restoration. Extracted and tested the logged-out route matrix, made legacy
+  `/tools/photo` public while preserving its query redirect, retained protected
+  pathname+query only inside sanitized `next`, preserved callback retry
+  destinations, hardened encoded redirect separators/traversal, and gated both
+  Scheduler caption actions before upload/provider work.
+- Accepted risks: drafts are lost when sessionStorage is unavailable rather
+  than leaked through OAuth URLs. Files/blobs remain intentionally
+  non-serializable and must be re-attached; one latest draft exists per
+  pathname. Public tool UIs are not authorization boundaries, so mutating and
+  user-data APIs remain responsible for session, ownership, and credit checks.
+- Verification: three focused seams failed against the old route, URL-draft,
+  owner, settings, Scheduler, and redirect behavior, then passed after fixes.
+  `test:public-auth-flow`, `test:video-studio`, deployment/dependency/security
+  neighbors, a zero-vulnerability dependency audit, lint with 0 errors and 11
+  pre-existing warnings, production build, `git diff --check`, CLAUDE.md size,
+  and edited-file diagnostics passed. Production-server probes confirmed
+  public tool rendering, protected nested-query redirects, and legacy Photo
+  query preservation.
+- Security: repeated final review found no issues and no unresolved critical,
   high, or medium finding.
 
 ## Deferred

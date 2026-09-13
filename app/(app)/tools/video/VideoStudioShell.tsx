@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import CreationsHistory from "@/components/CreationsHistory";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -25,6 +25,7 @@ import {
   composerKeyForCreationType,
   selectActiveVideoComposer,
 } from "./composers/types";
+import { pendingDraftOwner } from "@/lib/pending-form-draft";
 
 export default function VideoStudioShell({
   historyRefreshKey,
@@ -80,6 +81,20 @@ export default function VideoStudioShell({
 
   const [creationType, setCreationType] = useState<VideoCreationType>(initialType);
   const [mentionAssets, setMentionAssets] = useState<MentionAsset[]>([]);
+
+  useLayoutEffect(() => {
+    const typeByOwner: Record<string, VideoCreationType> = {
+      "video:text-to-video": "text2video",
+      "video:image-to-video": "image2video",
+      "video:viral-template": "viral_template",
+      "video:motion-control": "motion_control",
+      "video:storyboard-import": "storyboard",
+      "video:storyboard-to-video": "storyboard",
+      "video:reels": "reels-creator",
+    };
+    const owner = pendingDraftOwner(window.location.pathname);
+    if (owner && typeByOwner[owner]) setCreationType(typeByOwner[owner]);
+  }, []);
 
   const [composerEnablement, setComposerEnablement] =
     useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);

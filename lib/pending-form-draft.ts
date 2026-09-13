@@ -3,9 +3,7 @@
  * kelolako-dashboard-nonlogin-plan): a logged-out visitor fills in a form,
  * hits the gated action (Generate/Schedule/...), gets the sign-in modal —
  * this stashes what they typed so it's still there after they sign in,
- * including the full page-reload round-trip Google OAuth causes (email/
- * password never leaves the page, so it doesn't strictly need this, but
- * restoring is harmless either way).
+ * including the full page-reload round-trip Google OAuth causes.
  *
  * sessionStorage, not localStorage: this is a short-lived, single-use draft
  * for one in-progress attempt, not something that should persist across
@@ -18,17 +16,11 @@
 
 const PREFIX = "kelolako:pending-draft:";
 
-// URL-embedded fallback for the Google OAuth round trip specifically — see
-// SignInForm.handleGoogleSignIn and consumePendingDraft's URL fallback below.
-// sessionStorage can fail to survive that redirect in some browser
-// configurations (Safari ITP, private browsing, a storage-blocking
-// extension); a copy riding in the actual navigation URL survives regardless
-// of storage API behavior. Not used for email/password, which never leaves
-// the page and so never loses its React state to begin with.
-const URL_FALLBACK_PARAM = "kdraft";
-// Keeps the redirect URL comfortably short — every draft payload observed in
-// this app (prompt/settings text, never a File) fits well under this.
-const URL_FALLBACK_MAX_CHARS = 4096;
+// An older flow copied draft JSON into `?kdraft=` during OAuth. That exposed
+// prompts/settings to browser, platform, and identity-provider URL logs.
+// Drafts are now same-tab sessionStorage only; strip legacy or attacker-crafted
+// params when a consumer mounts, but never read them.
+const LEGACY_URL_DRAFT_PARAM = "kdraft";
 
 // Set right before a sign-in attempt (SignInForm, both Google and
 // email/password) and checked by AuthModalProvider once `status` flips to
@@ -51,18 +43,13 @@ export function savePendingDraft(path: string, data: Record<string, unknown>): v
 }
 
 /**
- * Reads and clears in one step — a draft is only ever applied once. Tries
- * sessionStorage first (the normal path, and the only one email/password
- * needs); if that comes back empty, falls back to a copy riding in the
- * current URL's `kdraft` param (only ever present right after the Google
- * OAuth round trip — see SignInForm.handleGoogleSignIn) and strips it from
- * the visible URL afterward without a navigation.
+ * Reads and clears in one step — a draft is only ever applied once.
  */
 function stripDraftFromUrl(): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
-  if (!params.has(URL_FALLBACK_PARAM)) return;
-  params.delete(URL_FALLBACK_PARAM);
+  if (!params.has(LEGACY_URL_DRAFT_PARAM)) return;
+  params.delete(LEGACY_URL_DRAFT_PARAM);
   const query = params.toString();
   const cleanUrl =
     window.location.pathname + (query ? `?${query}` : "") + window.location.hash;
@@ -73,37 +60,26 @@ function consumePendingDraftMatching<T>(
   path: string,
   accepts: (draft: unknown) => boolean,
 ): T | null {
+  stripDraftFromUrl();
   try {
     const key = PREFIX + path;
     const raw = sessionStorage.getItem(key);
     if (raw) {
-      const parsed = JSON.parse(raw) as unknown;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw) as unknown;
+      } catch {
+        sessionStorage.removeItem(key);
+        return null;
+      }
       if (!accepts(parsed)) return null;
       sessionStorage.removeItem(key);
-      stripDraftFromUrl();
       return parsed as T;
     }
   } catch (e) {
     console.warn("[pending-form-draft] consume (sessionStorage) failed:", e);
   }
-
-  if (typeof window === "undefined") return null;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get(URL_FALLBACK_PARAM);
-    if (!raw) return null;
-    if (raw.length > URL_FALLBACK_MAX_CHARS) {
-      stripDraftFromUrl();
-      return null;
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!accepts(parsed)) return null;
-    stripDraftFromUrl();
-    return parsed as T;
-  } catch (e) {
-    console.warn("[pending-form-draft] consume (URL fallback) failed:", e);
-    return null;
-  }
+  return null;
 }
 
 export function consumePendingDraft<T = Record<string, unknown>>(path: string): T | null {
@@ -135,11 +111,7 @@ export function consumePendingDraftForOwner<T = Record<string, unknown>>(
  * draft exists, while leaving the actual one-time consume to whichever
  * component owns the fields the draft restores into.
  *
- * sessionStorage only — deliberately does NOT check the URL fallback the
- * way consumePendingDraft does: `kdraft` isn't namespaced by path, so on a
- * page with more than one independently-keyed draft (e.g. the video page's
- * per-composer keys vs. its storyboard-import sub-key) a URL fallback meant
- * for one key would false-positive every other key's existence check.
+ * SessionStorage only. URL-provided drafts are deliberately ignored.
  */
 export function hasPendingDraft(path: string): boolean {
   try {
@@ -149,7 +121,7 @@ export function hasPendingDraft(path: string): boolean {
   }
 }
 
-/** Non-consuming owner check, including the Google OAuth URL fallback. */
+/** Non-consuming owner check for a same-tab draft. */
 export function hasPendingDraftForOwner(path: string, owner: string): boolean {
   try {
     const raw = sessionStorage.getItem(PREFIX + path);
@@ -158,33 +130,36 @@ export function hasPendingDraftForOwner(path: string, owner: string): boolean {
       return parsed?.draftOwner === owner;
     }
   } catch {
-    // Fall through to the URL copy when storage is unavailable or malformed.
-  }
-
-  if (typeof window === "undefined") return false;
-  try {
-    const raw = new URLSearchParams(window.location.search).get(URL_FALLBACK_PARAM);
-    if (!raw || raw.length > URL_FALLBACK_MAX_CHARS) return false;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed?.draftOwner === owner;
-  } catch {
+    try {
+      sessionStorage.removeItem(PREFIX + path);
+    } catch {
+      // Storage unavailable.
+    }
     return false;
   }
+  return false;
 }
 
-/**
- * Raw (still-JSON, non-consuming) peek — used only to embed a copy of the
- * draft into the Google OAuth redirect URL right before leaving the page
- * (see SignInForm.handleGoogleSignIn). Returns null if there's no draft for
- * this path, sessionStorage is unavailable, or the draft is unexpectedly
- * large (keeps the redirect URL short).
- */
-export function peekPendingDraftRaw(path: string): string | null {
+/** Return a stored owner without consuming the draft. */
+export function pendingDraftOwner(path: string): string | null {
   try {
     const raw = sessionStorage.getItem(PREFIX + path);
-    if (!raw || raw.length > URL_FALLBACK_MAX_CHARS) return null;
-    return raw;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as Record<string, unknown>).draftOwner === "string"
+    ) {
+      return (parsed as Record<string, string>).draftOwner;
+    }
+    return null;
   } catch {
+    try {
+      sessionStorage.removeItem(PREFIX + path);
+    } catch {
+      // Storage unavailable.
+    }
     return null;
   }
 }

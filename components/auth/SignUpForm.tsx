@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { Button } from "@/components/ui/Button";
-import { JUST_SIGNED_IN_FLAG, peekPendingDraftRaw } from "@/lib/pending-form-draft";
+import { JUST_SIGNED_IN_FLAG } from "@/lib/pending-form-draft";
+import { sanitizeNextPath } from "@/lib/safe-redirect";
 
 function flagJustSignedIn() {
   try {
@@ -83,6 +84,7 @@ export function SignUpForm({
   const [loading, setLoading] = useState(false);
 
   const supabase = getSupabaseAuthBrowser();
+  const safeNext = sanitizeNextPath(next);
 
   async function handleGoogleSignUp() {
     setSignupError(null);
@@ -90,18 +92,12 @@ export function SignUpForm({
     // consent screen, so there's no later point to set this from.
     flagJustSignedIn();
 
-    // Same URL-embedded draft fallback as SignInForm's Google path — a
-    // gated action can land the visitor on either form, so both need it.
-    const draftPath = window.location.pathname;
-    const rawDraft = peekPendingDraftRaw(draftPath);
-    const nextWithDraft = rawDraft
-      ? `${next}${next.includes("?") ? "&" : "?"}kdraft=${encodeURIComponent(rawDraft)}`
-      : next;
-
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextWithDraft)}`,
+        // Drafts remain in same-tab sessionStorage. Never copy user prompts or
+        // settings into this external OAuth redirect URL.
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
         // Forces Google's account chooser every time — see SignInForm.tsx's
         // handleGoogleSignIn for why this is needed.
         queryParams: { prompt: "select_account" },
@@ -119,7 +115,7 @@ export function SignUpForm({
       password,
       options: {
         data: { full_name: fullName.trim() },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`,
       },
     });
 

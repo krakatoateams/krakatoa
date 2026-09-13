@@ -1,7 +1,7 @@
 import {
   consumePendingDraftForOwner,
   hasPendingDraftForOwner,
-  peekPendingDraftRaw,
+  pendingDraftOwner,
   savePendingDraft,
 } from "./pending-form-draft";
 
@@ -23,12 +23,17 @@ class MemoryStorage {
   removeItem(key: string): void {
     this.values.delete(key);
   }
+
+  has(key: string): boolean {
+    return this.values.has(key);
+  }
 }
 
 export function pendingFormDraftSelfCheck(): void {
+  const storage = new MemoryStorage();
   Object.defineProperty(globalThis, "sessionStorage", {
     configurable: true,
-    value: new MemoryStorage(),
+    value: storage,
   });
 
   const path = "/tools/video";
@@ -65,57 +70,56 @@ export function pendingFormDraftSelfCheck(): void {
     devBlank: false,
   });
   assert(
-    peekPendingDraftRaw(path) !== null,
-    "a maximum-length storyboard prompt must fit the OAuth URL fallback",
+    pendingDraftOwner(path) === "video:storyboard-to-video",
+    "a large text draft must stay available in same-tab session storage",
   );
   consumePendingDraftForOwner(path, "video:storyboard-to-video");
 
-  const oversizedDraft = JSON.stringify({
-    draftOwner: "video:image-to-video",
-    prompt: "x".repeat(5_000),
-  });
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      location: {
-        pathname: path,
-        search: `?kdraft=${encodeURIComponent(oversizedDraft)}`,
-        hash: "",
-      },
-      history: {
-        replaceState() {},
-      },
-    },
-  });
-  assert(
-    consumePendingDraftForOwner(path, "video:image-to-video") === null,
-    "an oversized URL fallback must be rejected before parsing",
-  );
-
-  const importDraft = JSON.stringify({
+  const externalDraft = JSON.stringify({
     draftOwner: "video:storyboard-import",
     description: "A rooftop chase",
   });
+  let cleanedUrl = "";
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
       location: {
         pathname: path,
-        search: `?kdraft=${encodeURIComponent(importDraft)}`,
+        search: `?kdraft=${encodeURIComponent(externalDraft)}`,
         hash: "",
       },
       history: {
-        replaceState() {},
+        replaceState(_state: unknown, _title: string, url: string) {
+          cleanedUrl = url;
+        },
       },
     },
   });
   assert(
-    hasPendingDraftForOwner(path, "video:storyboard-import"),
-    "an owner-scoped URL fallback must reopen the matching form",
+    !hasPendingDraftForOwner(path, "video:storyboard-import"),
+    "an unsigned URL must never count as a pending draft",
   );
   assert(
-    !hasPendingDraftForOwner(path, "video:storyboard-to-video"),
-    "an owner-scoped URL fallback must not reopen a sibling form",
+    consumePendingDraftForOwner(path, "video:storyboard-import") === null,
+    "URL-provided prompt/settings payloads must be ignored",
+  );
+  assert(
+    cleanedUrl === path,
+    "legacy or attacker-provided draft payloads must be stripped from the URL",
+  );
+
+  sessionStorage.setItem("kelolako:pending-draft:/broken", "{not-json");
+  assert(
+    pendingDraftOwner("/broken") === null &&
+      !storage.has("kelolako:pending-draft:/broken"),
+    "malformed stored drafts must be cleared instead of retried forever",
+  );
+
+  sessionStorage.setItem("kelolako:pending-draft:/broken-owner", "{not-json");
+  assert(
+    !hasPendingDraftForOwner("/broken-owner", "video:storyboard-import") &&
+      !storage.has("kelolako:pending-draft:/broken-owner"),
+    "owner checks must also clear malformed stored drafts",
   );
 }
 

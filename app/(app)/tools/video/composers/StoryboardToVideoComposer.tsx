@@ -164,8 +164,8 @@ function ImportStoryboardModal({
 
   // Restore what was typed before a gated Analyze click sent the visitor
   // through sign-in — see lib/pending-form-draft.ts. The owner marker keeps
-  // this modal's fields separate from the main storyboard-video form while
-  // still allowing Google's pathname-based URL fallback to carry the draft.
+  // this modal's sessionStorage fields separate from the main storyboard-video
+  // form on the shared pathname.
   useEffect(() => {
     const draft = consumePendingDraftForOwner<StoryboardImportPendingDraft>(
       window.location.pathname,
