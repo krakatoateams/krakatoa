@@ -35,6 +35,7 @@ import {
   isPermanentFailure,
   isTikTokPermanentFailure,
 } from "@/lib/cron-publish-pure";
+import { cronAuthorizationFailure } from "@/lib/cron-auth";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -121,22 +122,16 @@ const TIKTOK_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000;
  *  - Transient failures retry up to MAX_PUBLISH_ATTEMPTS; permanent failures
  *    (auth/quota) fail immediately. Failures store a reason in last_error.
  *
- * Protection: when CRON_SECRET is set in env, requests must include
- *   Authorization: Bearer <CRON_SECRET>
- * When CRON_SECRET is absent (local dev), all requests are allowed.
+ * Protection: deployed environments require CRON_SECRET and its Bearer header.
+ * Local development may omit the secret.
  *
  * Triggered by cron-job.org (~1 min, primary) and GitHub Actions (backup); see
  * .github/workflows/publish-cron.yml. Concurrent triggers are safe (claim-lock).
  */
 export async function GET(req: NextRequest) {
   // ── Auth guard ─────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
-  }
+  const authFailure = cronAuthorizationFailure(req);
+  if (authFailure) return authFailure;
 
   // ── Fetch a bounded batch of due posts ──────────────────────────────────────
   const nowMs = Date.now();

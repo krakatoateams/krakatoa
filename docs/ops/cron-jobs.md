@@ -6,7 +6,8 @@
 
 **Cron** = scheduler yang memanggil URL API tertentu secara berkala. Dipakai untuk hal yang tidak cocok di-request user: publish post terjadwal, bersihin storage, expire kredit, recovery generation stuck.
 
-Semua endpoint cron ada di `app/api/cron/` dan dilindungi **opsional** oleh `CRON_SECRET` (lihat bawah).
+Semua endpoint cron ada di `app/api/cron/`. `CRON_SECRET` **wajib** di
+deployment; hanya local development yang boleh berjalan tanpa secret.
 
 ---
 
@@ -24,7 +25,8 @@ Bukan token dari Vercel — **kamu buat sendiri** (string random panjang), lalu 
 **Aturan di code:**
 
 - `CRON_SECRET` **ada** → request harus kirim `Authorization: Bearer <secret>`, else **401**
-- `CRON_SECRET` **kosong** (biasanya local dev) → endpoint **terbuka** (tanpa auth)
+- `CRON_SECRET` **kosong di deployment** → endpoint fail closed dengan **503**
+- `CRON_SECRET` **kosong di local development** → endpoint terbuka untuk testing
 
 Generate contoh:
 
@@ -36,7 +38,7 @@ Setelah ubah env di Vercel → **redeploy**.
 
 ---
 
-## Daftar cron (5 endpoint)
+## Daftar cron (6 endpoint)
 
 ### 1. Publisher — `GET /api/cron`
 
@@ -102,7 +104,21 @@ Code: `app/api/cron/creation-expiry/route.ts`
 
 ---
 
-### 5. Generation reconcile — `GET /api/cron/generation-reconcile`
+### 5. Failed-post cleanup — `GET /api/cron/cleanup-failed-posts`
+
+**Untuk apa:** Hapus source media untuk post berstatus `failed` yang sudah
+ditinggalkan lebih dari 7 hari. Row dan metadata post tetap disimpan.
+
+**Jadwal Vercel:** setiap hari **04:30 UTC** (11:30 WIB)
+
+**Query params:** `dryRun=1` untuk laporan saja; `minDays=NN` untuk override
+threshold.
+
+Code: `app/api/cron/cleanup-failed-posts/route.ts`
+
+---
+
+### 6. Generation reconcile — `GET /api/cron/generation-reconcile`
 
 **Untuk apa:** Backstop kalau generate **mati** (Vercel timeout 300s, crash tanpa `catch`):
 
@@ -127,6 +143,7 @@ Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel
 | `/api/cron/storage-sweep` | Hapus video temp/orphan |
 | `/api/cron/credit-expiry` | Kredit kadaluarsa |
 | `/api/cron/creation-expiry` | History kreasi expired |
+| `/api/cron/cleanup-failed-posts` | Hapus media post gagal yang ditinggalkan |
 | `/api/cron/generation-reconcile` | Refund job generation stuck |
 
 ---
@@ -137,6 +154,7 @@ Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel
 storage-sweep         → 0 3 * * *    (harian 03:00 UTC)
 credit-expiry         → 30 3 * * *   (harian 03:30 UTC)
 creation-expiry       → 0 4 * * *    (harian 04:00 UTC)
+cleanup-failed-posts  → 30 4 * * *   (harian 04:30 UTC)
 generation-reconcile  → 0 5 * * *    (harian 05:00 UTC)
 ```
 
@@ -156,16 +174,18 @@ curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/generation-recon
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/storage-sweep?dryRun=1"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/credit-expiry?dryRun=1"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/creation-expiry?dryRun=1"
+curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron/cleanup-failed-posts?dryRun=1"
 curl -s -H "Authorization: Bearer $CRON_SECRET" "$BASE/api/cron"
 ```
 
-Tanpa `CRON_SECRET` di env, curl tanpa header juga jalan (dev only).
+Tanpa `CRON_SECRET`, curl tanpa header hanya jalan di local development.
+Deployment mengembalikan 503 sebelum menjalankan mutation.
 
 ---
 
 ## Production checklist
 
-1. Set `CRON_SECRET` di Vercel + redeploy
+1. Set `CRON_SECRET` di semua environment deployment yang dapat diakses + redeploy
 2. Samakan secret di GitHub Actions (`CRON_SECRET`, `CRON_TARGET_URL`) jika pakai scheduler publish
 3. Konfigurasi cron-job.org untuk `/api/cron` jika dipakai sebagai trigger utama publisher
 4. Pastikan cron Vercel di dashboard aktif (dari `vercel.json`)

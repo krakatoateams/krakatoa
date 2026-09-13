@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runGenerationReconcile } from "@/lib/generation-reconcile";
 import { errorLogSafe } from "@/lib/error-log-safe";
+import { cronAuthorizationFailure } from "@/lib/cron-auth";
 
 export const maxDuration = 120;
 
@@ -9,15 +10,11 @@ export const maxDuration = 120;
  *
  * Refunds stuck `running` jobs and closes stale `generation_requests` rows
  * (e.g. after Vercel function timeout without catch).
+ * Deployed environments require CRON_SECRET and its Bearer header.
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
-  }
+  const authFailure = cronAuthorizationFailure(req);
+  if (authFailure) return authFailure;
 
   try {
     const result = await runGenerationReconcile();
