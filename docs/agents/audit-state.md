@@ -14,7 +14,13 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Client bundle versus server-secret boundary (delivery)
+- Status: `blocked`
+- Blocker: [PR #192](https://github.com/krakatoateams/krakatoa/pull/192)
+  is clean and its quality gate passed, but GitHub reports a partial system
+  outage and both GraphQL and REST merge endpoints return HTTP 502.
+- Safest next command: `gh pr merge 192 --merge --delete-branch`
 
 ## Queue
 
