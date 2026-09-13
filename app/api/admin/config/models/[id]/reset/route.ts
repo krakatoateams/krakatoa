@@ -10,10 +10,8 @@ import { validateModelPatch } from "@/lib/admin-config-validation";
 // The default is run through the same validator the PATCH route uses.
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     const row = await getModelConfigById(params.id);
     if (!row) {

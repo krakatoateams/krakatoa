@@ -11,7 +11,7 @@ import { createSupabaseAuthServer } from "@/lib/supabase-auth-server";
  * the one-time ID cutover, so those rows now use auth.users.id too.
  */
 export async function getSessionUserId(): Promise<string | null> {
-  const supabase = createSupabaseAuthServer();
+  const supabase = await createSupabaseAuthServer();
   const {
     data: { user },
   } = await supabase.auth.getUser();

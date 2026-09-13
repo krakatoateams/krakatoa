@@ -10,10 +10,8 @@ import { validateToolPatch } from "@/lib/admin-config-validation";
 // PATCH route uses, so reset can never bypass validation.
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: { tool_key: string } }
-) {
+export async function POST(_req: Request, props: { params: Promise<{ tool_key: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     const def = getToolDefault(params.tool_key);
     if (!def) {

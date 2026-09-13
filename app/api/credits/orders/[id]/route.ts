@@ -10,10 +10,8 @@ export const dynamic = "force-dynamic";
  * `[id]` may be the order UUID or the invoice number (the redirect carries the
  * invoice). Returns just enough for the UI to show a banner + refresh balance.
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let profileId: string;
   try {
     const profile = await requireCurrentProfile();

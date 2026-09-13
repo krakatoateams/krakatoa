@@ -6,10 +6,8 @@ import { revokeAdminById } from "@/lib/admin-users-db";
 // refuses to revoke the last active admin (-> 409 via adminErrorResponse).
 export const dynamic = "force-dynamic";
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async () => {
     const admin = await revokeAdminById(params.id);
     return NextResponse.json({ admin });

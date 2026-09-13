@@ -15,10 +15,8 @@ import { validateModelPatch } from "@/lib/admin-config-validation";
 // changes may take up to ~60s (TTL cache). No external model validation is done.
 export const dynamic = "force-dynamic";
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     let body: Record<string, unknown>;
     try {

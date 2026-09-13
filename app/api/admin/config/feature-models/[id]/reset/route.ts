@@ -6,7 +6,8 @@ import { resetFeatureModelConfig } from "@/lib/feature-model-configs-db";
 // default flag follows lib/creation-features.ts). Admin only.
 export const dynamic = "force-dynamic";
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     const featureModel = await resetFeatureModelConfig(params.id, ctx.profile.id);
     if (!featureModel) {

@@ -22,10 +22,8 @@ function isCategoryId(value: string): value is SkillCategoryId {
   return SKILL_CATEGORIES.some((c) => c.id === value);
 }
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   return withAdmin(async () => {
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
@@ -40,10 +38,8 @@ export async function GET(
   });
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
@@ -181,10 +177,8 @@ export async function PATCH(
   });
 }
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { skillId: string } }
-) {
+export async function DELETE(_req: Request, props: { params: Promise<{ skillId: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });

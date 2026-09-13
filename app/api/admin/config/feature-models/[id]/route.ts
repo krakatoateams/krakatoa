@@ -8,7 +8,8 @@ import { updateFeatureModelConfig } from "@/lib/feature-model-configs-db";
 // Runtime reads are cached ~60s, so changes may take up to a minute to apply.
 export const dynamic = "force-dynamic";
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdmin(async (ctx) => {
     let body: Record<string, unknown>;
     try {

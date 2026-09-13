@@ -21,10 +21,8 @@ function projectIdOf(params: { projectId: string }): string | null {
   return UUID_RE.test(id) ? id : null;
 }
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     const id = projectIdOf(params);
@@ -42,10 +40,8 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     const id = projectIdOf(params);
@@ -79,10 +75,8 @@ export async function PUT(
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     const id = projectIdOf(params);
@@ -108,10 +102,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
   try {
     const profile = await requireCurrentProfile();
     const id = projectIdOf(params);

@@ -7,7 +7,7 @@ import { ImagePlus, Plus, Upload, Users, X } from "lucide-react";
 export type ImageUpload = {
   file: File | null;
   preview: string | null;
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   open: () => void;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   clear: () => void;
