@@ -14,10 +14,7 @@ the runbook.
 
 ## Active slice
 
-- Domain: Public/deployment
-- Slice: Auth UI, redirects, headers, dependencies, and secrets
-- Base: pending from synchronized `main`
-- Branch: pending
+- None.
 
 ## Queue
 
@@ -106,6 +103,18 @@ the runbook.
     - [x] Secondary generation and admin test route
   - [x] Admin dev-blank generation
 - [ ] Public/deployment: auth UI, redirects, headers, dependencies, and secrets
+  - [x] Dependency and Image Optimizer supply chain
+  - [ ] Production secrets and fail-open deployment guards
+  - [ ] Site-wide security headers and CSP
+  - [ ] Logged-out middleware route matrix and draft hand-off
+  - [ ] Auth modal forms and password lifecycle
+  - [ ] Standalone auth pages and redirect chain
+  - [ ] Public unauthenticated read APIs
+  - [ ] Marketing landing and legal pages
+  - [ ] Client bundle versus server-secret boundary
+  - [ ] PWA install surface
+  - [ ] Internal and dev-only route obscurity
+  - [ ] Supabase Auth leaked-password protection
 
 ## Completed
 
@@ -1336,6 +1345,35 @@ the runbook.
   and 0 unaccepted medium findings. Live advisors show only the expected
   deny-by-default RLS INFO notices and leaked-password protection WARN; the
   latter belongs to Public/deployment.
+
+### Public/deployment: dependency and Image Optimizer supply chain
+
+- Date: 2026-09-13
+- Base: `a18a3bfa07b4ba18d926b7693769b156f3b0f176`
+- Final commit: `6a96c405d2ac8732bf271e921df10ed900d61b20`
+- Scope: framework and locked dependencies, Next Image Optimizer remote-source
+  policy, signed-media egress, clean-install test tooling, and the Next 15 /
+  React 19 async request API compatibility boundary.
+- Findings: upgraded the unsupported vulnerable Next 14 stack to patched
+  Next 15.5.24 / React 19; patched and correctly classified Sharp and PostCSS;
+  replaced the cross-project Supabase wildcard with the configured host and
+  private-bucket signed path; migrated async cookies, headers, and dynamic route
+  params; pinned `tsx` and removed every `npx` network fallback from scripts.
+  A new self-check pins dependency floors, runtime placement, local tooling,
+  Image Optimizer scope, and the 30-day cache contract.
+- Accepted risks: UI signed URLs remain bearer links valid for 30 days so stable
+  optimizer caching prevents repeat Supabase egress; this is the existing
+  documented confidentiality tradeoff. The PostCSS override spans the build
+  tree but is pinned and passed clean install, lint, and production build.
+- Verification: red/green `npm run test:dependency-security`; clean `npm ci`;
+  `npm audit` reports 0 vulnerabilities; auth/admin, canvas/editor/skills,
+  ownership, DOKU, TikTok proxy/publish, Instagram publish, workflow, storage,
+  aspect-ratio, and Video Studio checks passed; the live signed-URL cache probe
+  passed. `npm run lint` passed with 0 errors and 11 pre-existing warnings;
+  `npm run build`, `git diff --check`, CLAUDE.md's under-200-line guard, and
+  edited-file diagnostics passed.
+- Security: final repeated reviews found 0 critical, 0 high, and 0 unaccepted
+  medium findings.
 
 ## Deferred
 
