@@ -14,7 +14,10 @@ the runbook.
 
 ## Active slice
 
-- None.
+- Domain: Public/deployment
+- Slice: Production secrets and fail-open deployment guards
+- Base: `9cfeaa4b4543c468cc028587f11883fa04170d70`
+- Branch: `audit-repo/public-secret-guards`
 
 ## Queue
 

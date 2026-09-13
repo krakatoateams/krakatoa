@@ -52,7 +52,10 @@ The endpoint SHALL accept a `?dryRun=1` query parameter that returns the planned
 
 ### Requirement: Protected trigger
 
-When `CRON_SECRET` is set, the endpoint SHALL require an `Authorization: Bearer <CRON_SECRET>` header and SHALL reject mismatches with HTTP 401. When `CRON_SECRET` is unset (local dev), the endpoint SHALL allow the request.
+The endpoint SHALL require an `Authorization: Bearer <CRON_SECRET>` header
+whenever the secret is configured and SHALL reject mismatches with HTTP 401.
+When the secret is missing in a deployed environment, the endpoint SHALL fail
+closed with HTTP 503. Only local development SHALL allow an unset secret.
 
 #### Scenario: Unauthorized request is rejected
 - **WHEN** `CRON_SECRET` is set and a request arrives without the matching Bearer token
@@ -61,3 +64,7 @@ When `CRON_SECRET` is set, the endpoint SHALL require an `Authorization: Bearer 
 #### Scenario: Authorized request proceeds
 - **WHEN** `CRON_SECRET` is set and the request carries the matching Bearer token
 - **THEN** the sweep runs
+
+#### Scenario: Deployed secret misconfiguration fails closed
+- **WHEN** the endpoint runs in a deployed environment without `CRON_SECRET`
+- **THEN** it responds with HTTP 503 and performs no deletion

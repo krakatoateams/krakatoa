@@ -37,7 +37,12 @@ A normal session (drop → caption → schedule) completes in minutes, so a fres
 `lib/storage-sweep.ts` exposes `planStorageSweep()` → `{ keep, deletable, ... }` (pure-ish: lists storage + reads DB, no deletes) and `runStorageSweep({ dryRun, minAgeHours })` which plans then deletes in batches of 100. The route `GET /api/cron/storage-sweep` only does auth + param parsing + calls the lib + returns JSON.
 
 ### 5. Secret-protected, dry-run-able, daily cron
-Auth mirrors `/api/cron`: if `CRON_SECRET` is set, require `Authorization: Bearer <CRON_SECRET>`. `?dryRun=1` returns the plan without deleting. `vercel.json` schedules it daily (`0 3 * * *`); 24h threshold tolerates once-daily cadence. Can also be triggered manually for the first verified run.
+Auth uses the shared cron policy: deployed environments require
+`CRON_SECRET` plus `Authorization: Bearer <CRON_SECRET>` and return 503 before
+deletion when the secret is missing; local development may omit it.
+`?dryRun=1` returns the plan without deleting. `vercel.json` schedules it
+daily (`0 3 * * *`); 24h threshold tolerates once-daily cadence. It can also be
+triggered manually for the first verified run.
 
 ## Risks / Trade-offs
 

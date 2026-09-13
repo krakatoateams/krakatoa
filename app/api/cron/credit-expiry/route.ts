@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { expireCreditLots } from "@/lib/credits-db";
 import { errorLogSafe } from "@/lib/error-log-safe";
+import { cronAuthorizationFailure } from "@/lib/cron-auth";
 
 // Ledger writes + wallet updates per expired lot — give it headroom.
 export const maxDuration = 120;
@@ -14,20 +15,14 @@ export const maxDuration = 120;
  * Query params:
  *   - dryRun=1 → report the counts that WOULD expire, mutate nothing.
  *
- * Protection: when CRON_SECRET is set, requests must include
- *   Authorization: Bearer <CRON_SECRET>
- * When CRON_SECRET is absent (local dev), all requests are allowed.
+ * Protection: deployed environments require CRON_SECRET and its Bearer header.
+ * Local development may omit the secret.
  *
  * Scheduled via vercel.json crons (daily).
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
-  }
+  const authFailure = cronAuthorizationFailure(req);
+  if (authFailure) return authFailure;
 
   const { searchParams } = new URL(req.url);
   const dryRun = searchParams.get("dryRun") === "1";

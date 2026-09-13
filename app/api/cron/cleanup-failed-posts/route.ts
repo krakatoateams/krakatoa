@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { cleanupPostVideo, cleanupPostPhotos } from "@/lib/post-storage-cleanup";
 import { errorLogSafe } from "@/lib/error-log-safe";
+import { cronAuthorizationFailure } from "@/lib/cron-auth";
 
 // Reads a small batch + a handful of storage deletes — comfortable headroom.
 export const maxDuration = 60;
@@ -33,20 +34,14 @@ const BATCH_LIMIT = 50;
  *   - dryRun=1       → report which posts would be cleaned, delete nothing
  *   - minDays=NN     → override the age threshold (default 7)
  *
- * Protection: when CRON_SECRET is set, requests must include
- *   Authorization: Bearer <CRON_SECRET>
- * When CRON_SECRET is absent (local dev), all requests are allowed.
+ * Protection: deployed environments require CRON_SECRET and its Bearer header.
+ * Local development may omit the secret.
  *
  * Schedule via vercel.json crons (daily is plenty for a 7-day threshold).
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
-  }
+  const authFailure = cronAuthorizationFailure(req);
+  if (authFailure) return authFailure;
 
   const { searchParams } = new URL(req.url);
   const dryRun = searchParams.get("dryRun") === "1";

@@ -51,7 +51,8 @@ DOKU_SECRET_KEY=your_doku_secret_key
 DOKU_ENV=sandbox            # or "production"
 # DOKU_API_BASE=             # optional override; defaults by DOKU_ENV
 # DOKU_NOTIFICATION_URL=     # optional per-request webhook override (same PATH as Back Office)
-# CRON_SECRET=               # Bearer token for GET /api/cron/* — see docs/ops/cron-jobs.md
+CRON_SECRET=your_random_cron_secret # required on deployment for GET /api/cron/*
+GENERATION_WEBHOOK_SECRET=your_random_webhook_secret # required in production
 ```
 
 `DOKU_NOTIFICATION_URL` is handy for local development: set it to your public

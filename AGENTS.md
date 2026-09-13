@@ -241,7 +241,8 @@ Checks: `npm run test:monitoring-flags` (no DB needed), `npm run admin:probe-mon
    - `SUPABASE_STORAGE_BUCKET` — Optional override for the Storage bucket name (default `krakatoa`, private).
    - `NEXTAUTH_URL` — legacy-named canonical site URL; `NEXTAUTH_SECRET` is only a non-production fallback for setup/webhook secrets, not session auth.
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Google OAuth (scheduler / YouTube flows).
-   - `CRON_SECRET` — Bearer token untuk semua `GET /api/cron/*` (lihat [`docs/ops/cron-jobs.md`](docs/ops/cron-jobs.md)).
+   - `CRON_SECRET` — wajib di deployment; Bearer token untuk semua `GET /api/cron/*` (lihat [`docs/ops/cron-jobs.md`](docs/ops/cron-jobs.md)).
+   - `GENERATION_WEBHOOK_SECRET` — wajib di production untuk mengikat callback Replicate ke submission.
  - `DOKU_CLIENT_ID`, `DOKU_SECRET_KEY` — DOKU Checkout credentials (credit purchases).
  - `DOKU_ENV` — `sandbox` (default) or `production`; selects the DOKU API base URL.
  - `DOKU_API_BASE` — Optional explicit DOKU API base URL override (otherwise derived from `DOKU_ENV`).
