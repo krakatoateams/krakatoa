@@ -1,3 +1,5 @@
+import "server-only";
+
 import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
