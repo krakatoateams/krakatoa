@@ -2,6 +2,7 @@
 
 import {
   TESTIMONIALS,
+  TESTIMONIALS_DISCLAIMER,
   TESTIMONIALS_HEADING,
   type Testimonial,
 } from "@/lib/landing-content";
@@ -55,7 +56,7 @@ function MarqueeRow({
   return (
     <div className="group/marquee relative">
       <div
-        className={`flex w-max gap-4 sm:gap-5 ${animationClass} group-hover/marquee:[animation-play-state:paused]`}
+        className={`flex w-max gap-4 motion-reduce:animate-none sm:gap-5 ${animationClass} group-hover/marquee:[animation-play-state:paused]`}
       >
         {[...items, ...items].map((t, i) => (
           <TestimonialCard key={`${t.handle}-${i}`} t={t} />
@@ -80,6 +81,9 @@ export function HelloTestimonials() {
           >
             {TESTIMONIALS_HEADING}
           </h2>
+          <p className="mt-3 text-xs text-text-disabled">
+            {TESTIMONIALS_DISCLAIMER}
+          </p>
         </div>
       </div>
 

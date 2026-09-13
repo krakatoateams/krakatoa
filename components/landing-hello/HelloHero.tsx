@@ -5,7 +5,7 @@ import { ArrowDown } from "lucide-react";
 import { TextRollButton } from "@/components/landing/TextRollButton";
 import { HeroSeeHowCta } from "@/components/landing/HeroSeeHowCta";
 import { VideoBackdrop } from "@/components/landing/HeroSectionVideo";
-import { LANDING_SHOWREEL } from "@/lib/landing-media";
+import { VIDEO_MODEL_SHOWREEL } from "@/lib/landing-media";
 import {
   AI_MODELS_LABEL,
   HERO_HEADLINE_LINES,
@@ -20,7 +20,7 @@ import { ctaAccent, ctaGhost } from "./theme";
  */
 const VIDEO_OVERLAY = "bg-N0/15";
 
-const SHOWREEL_SRCS = LANDING_SHOWREEL.map((entry) => entry.src);
+const SHOWREEL_SRCS = VIDEO_MODEL_SHOWREEL.map((entry) => entry.src);
 
 /**
  * Variant-specific, so deliberately not the shared PRIMARY_CTA: /dashboard for
@@ -43,7 +43,7 @@ function ModelStrip({
         {AI_MODELS_LABEL}
       </span>
       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 sm:gap-x-14">
-        {LANDING_SHOWREEL.map(({ model }, i) => {
+        {VIDEO_MODEL_SHOWREEL.map(({ model }, i) => {
           const active = i === activeIndex;
           return (
             <button

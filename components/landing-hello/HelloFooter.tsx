@@ -58,9 +58,7 @@ export function HelloFooter() {
         </a>
       </div>
 
-      {/* Legal links — required to be visible on the homepage without login
-          for Google OAuth verification (the app requests the youtube.upload
-          scope, which Google reviews against this). */}
+      {/* Legal links stay visible without login for connected-platform review. */}
       <div className="mx-auto mt-6 flex items-center gap-4 text-[11px] font-medium text-text-disabled">
         <Link href="/privacy" className="transition-colors hover:text-N900">
           Privacy Policy
@@ -70,6 +68,12 @@ export function HelloFooter() {
         </span>
         <Link href="/terms" className="transition-colors hover:text-N900">
           Terms of Service
+        </Link>
+        <span aria-hidden className="text-white/20">
+          ·
+        </span>
+        <Link href="/data-deletion" className="transition-colors hover:text-N900">
+          Data Deletion
         </Link>
       </div>
     </footer>

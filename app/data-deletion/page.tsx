@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Instruksi Penghapusan Data",
-    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
-    intro: "Halaman ini menjelaskan cara meminta penghapusan data pribadi Anda dari Kelolako, termasuk data yang terhubung melalui platform yang Anda hubungkan, seperti YouTube dan TikTok.",
+    effectiveDate: "Terakhir diperbarui: 13 September 2026",
+    intro: "Halaman ini menjelaskan cara meminta penghapusan data pribadi Anda dari Kelolako, termasuk data yang terhubung melalui platform yang Anda hubungkan, seperti YouTube, TikTok, dan Instagram.",
     sections: [
       {
         heading: "1. Cara Meminta Penghapusan Data",
@@ -25,11 +25,11 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Informasi akun (email, nama, foto profil);",
             "Konten yang Anda unggah maupun yang dihasilkan melalui fitur AI kami (video, foto, caption);",
-            "Token otorisasi platform terhubung yang sudah aktif (YouTube, TikTok);",
+            "Token otorisasi platform terhubung (YouTube, TikTok, dan Instagram);",
             "Riwayat transaksi kredit.",
           ]},
           { type: "p", text: "Catatan: data transaksi yang tersimpan di sistem penyedia pembayaran kami (saat ini DOKU, atau penyedia lain yang kami gunakan di masa mendatang) tunduk pada kebijakan retensi dan hukum mereka masing-masing, dan mungkin tidak terhapus sepenuhnya melalui permintaan ini." },
-          { type: "p", text: "Instagram direncanakan sebagai integrasi platform tambahan di masa mendatang. Kami belum mengumpulkan atau menyimpan data otorisasi apa pun untuk Instagram, sehingga tidak ada data Instagram yang perlu dihapus saat ini." },
+          { type: "p", text: "Penghapusan token Instagram mencakup token akses yang disimpan untuk akun Instagram Business/Creator yang pernah Anda hubungkan." },
         ],
       },
       {
@@ -41,15 +41,15 @@ const content: LegalContent = {
       {
         heading: "4. Memutuskan Koneksi Platform Terhubung Secara Mandiri",
         blocks: [
-          { type: "p", text: "Jika Anda hanya ingin memutuskan koneksi salah satu platform terhubung Anda (tanpa menghapus seluruh akun Kelolako), Anda dapat melakukannya kapan saja melalui Pengaturan → Connections → Disconnect di dalam aplikasi Kelolako. Ini berlaku untuk YouTube dan TikTok, dan akan langsung menghapus token otorisasi platform terkait dari sistem kami. Instagram belum tersedia untuk dihubungkan atau diputuskan, karena integrasinya masih dalam tahap perencanaan." },
+          { type: "p", text: "Jika Anda hanya ingin memutuskan koneksi salah satu platform terhubung Anda (tanpa menghapus seluruh akun Kelolako), Anda dapat melakukannya kapan saja melalui Pengaturan → Connections → Disconnect di dalam aplikasi Kelolako. Ini berlaku untuk YouTube, TikTok, dan Instagram, dan akan menghapus token otorisasi platform terkait dari sistem kami." },
         ],
       },
     ],
   },
   english: {
     pageTitle: "Data Deletion Instructions",
-    effectiveDate: "Last updated: August 24, 2026",
-    intro: "This page explains how to request deletion of your personal data from Kelolako, including data connected via platforms you've linked, such as YouTube and TikTok.",
+    effectiveDate: "Last updated: September 13, 2026",
+    intro: "This page explains how to request deletion of your personal data from Kelolako, including data connected via platforms you've linked, such as YouTube, TikTok, and Instagram.",
     sections: [
       {
         heading: "1. How to Request Data Deletion",
@@ -64,11 +64,11 @@ const content: LegalContent = {
           { type: "ul", items: [
             "Account information (email, name, profile photo);",
             "Content you've uploaded as well as content generated through our AI features (videos, photos, captions);",
-            "Authorization tokens for connected platforms that are already active (YouTube, TikTok);",
+            "Authorization tokens for connected platforms (YouTube, TikTok, and Instagram);",
             "Credit transaction history.",
           ]},
           { type: "p", text: "Note: transaction data held by our payment provider(s) (currently DOKU, or any additional providers we may use in the future) is subject to their own retention policies and applicable regulations, and may not be fully deleted through this request." },
-          { type: "p", text: "Instagram is planned as an additional platform integration in the future. We do not yet collect or store any authorization data for Instagram, so there is no Instagram data to delete at this time." },
+          { type: "p", text: "Deleting Instagram tokens includes the access token stored for any Instagram Business/Creator account you previously connected." },
         ],
       },
       {
@@ -80,7 +80,7 @@ const content: LegalContent = {
       {
         heading: "4. Self-Service Disconnect for Connected Platforms",
         blocks: [
-          { type: "p", text: "If you only want to disconnect one of your connected platforms (without deleting your entire Kelolako account), you can do so anytime via Settings → Connections → Disconnect within the Kelolako app. This applies to YouTube and TikTok, and immediately removes the relevant platform's authorization token from our system. Instagram is not yet available to connect or disconnect, as that integration is still in the planning stage." },
+          { type: "p", text: "If you only want to disconnect one of your connected platforms (without deleting your entire Kelolako account), you can do so anytime via Settings → Connections → Disconnect within the Kelolako app. This applies to YouTube, TikTok, and Instagram, and removes the relevant platform authorization token from our system." },
         ],
       },
     ],

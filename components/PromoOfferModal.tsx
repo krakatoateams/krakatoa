@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Check, Loader2, X } from "lucide-react";
 import { useCreditPacks } from "@/lib/use-credit-packs";
-import { CREDITS_PER_IMAGE, CREDITS_PER_VIDEO } from "@/lib/landing-content";
 import type { CreditPack } from "@/lib/credit-packs";
 import {
   PROMO_COPY,
@@ -195,11 +194,7 @@ export default function PromoOfferModal({
                       )}
                     </div>
                     <p className="mt-0.5 text-[11px] text-text-disabled">
-                      {total.toLocaleString()} credits · ≈{" "}
-                      {Math.floor(total / CREDITS_PER_IMAGE).toLocaleString()}{" "}
-                      images ·{" "}
-                      {Math.floor(total / CREDITS_PER_VIDEO).toLocaleString()}{" "}
-                      videos
+                      {total.toLocaleString()} credits
                     </p>
                   </div>
 

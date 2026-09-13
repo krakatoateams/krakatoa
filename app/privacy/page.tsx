@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const content: LegalContent = {
   indonesian: {
     pageTitle: "Kebijakan Privasi",
-    effectiveDate: "Terakhir diperbarui: 24 Agustus 2026",
+    effectiveDate: "Terakhir diperbarui: 13 September 2026",
     intro: "Kebijakan Privasi ini menjelaskan bagaimana Kelolako (\"kami\") mengumpulkan, menggunakan, menyimpan, dan melindungi informasi Anda saat menggunakan platform Kelolako (\"Layanan\"). Pengendali data untuk Layanan ini adalah Usaha Perorangan atas nama Muhammad Septian Hadiguna, dengan Nomor Induk Berusaha (NIB) 0307260041044, berkedudukan di Jakarta Barat, DKI Jakarta.",
     sections: [
       {
@@ -18,7 +18,7 @@ const content: LegalContent = {
           { type: "h3", text: "1.1 Informasi Akun" },
           { type: "ul", items: [
             "Alamat email, nama lengkap, dan foto profil (jika mendaftar melalui Google);",
-            "Alamat email, nama lengkap, dan kata sandi terenkripsi (jika mendaftar melalui email).",
+            "Alamat email, nama lengkap, dan kredensial autentikasi yang dikelola oleh Supabase Auth (jika mendaftar melalui email). Kelolako tidak menyimpan kata sandi Anda dalam bentuk teks biasa.",
           ]},
           { type: "h3", text: "1.2 Konten Pengguna" },
           { type: "ul", items: [
@@ -27,8 +27,7 @@ const content: LegalContent = {
           ]},
           { type: "h3", text: "1.3 Data Koneksi Platform Pihak Ketiga" },
           { type: "ul", items: [
-            "Token otorisasi OAuth (access token, refresh token) untuk platform yang sudah aktif dan Anda hubungkan — YouTube dan TikTok — digunakan semata-mata untuk mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
-            "Instagram direncanakan sebagai integrasi platform tambahan di masa mendatang; kami belum mengumpulkan atau menyimpan data otorisasi apa pun untuk Instagram sampai fitur tersebut aktif.",
+            "Token otorisasi OAuth (access token dan, jika diterbitkan oleh platform, refresh token) untuk akun YouTube, TikTok, dan Instagram yang Anda hubungkan. Token digunakan untuk menjaga koneksi dan menjalankan tindakan publikasi yang Anda instruksikan melalui Layanan.",
           ]},
           { type: "h3", text: "1.4 Data Transaksi dan Kredit" },
           { type: "ul", items: [
@@ -46,7 +45,7 @@ const content: LegalContent = {
         blocks: [
           { type: "ul", items: [
             "Menyediakan dan mengoperasikan Layanan, termasuk pembuatan konten AI dan penjadwalan publikasi;",
-            "Memproses konten Anda melalui penyedia AI pihak ketiga (Replicate, termasuk Google Gemini dan OpenAI Whisper) untuk menghasilkan caption dan mentranskripsi audio;",
+            "Memproses konten Anda melalui Replicate dan model pihak ketiga yang tersedia melaluinya untuk menghasilkan atau mengolah video, foto, teks, suara, dan transkripsi;",
             "Memproses video melalui penyedia pemrosesan video pihak ketiga (Rendi) untuk ekstraksi audio dan operasi video lainnya;",
             "Mempublikasikan konten Anda ke Platform Terhubung sesuai instruksi Anda;",
             "Memproses pembayaran Kredit melalui penyedia gerbang pembayaran kami (saat ini DOKU);",
@@ -60,15 +59,16 @@ const content: LegalContent = {
         blocks: [
           { type: "p", text: "Untuk mengoperasikan Layanan, kami membagikan data yang relevan (sebatas yang diperlukan) kepada penyedia layanan berikut:" },
           { type: "ul", items: [
-            "Google — untuk otentikasi (Google Sign-In) dan publikasi konten via YouTube Data API;",
+            "Google — untuk otentikasi (Google Sign-In), publikasi konten via YouTube Data API, dan sematan video pemasaran YouTube setelah Anda memilih untuk memutarnya;",
             "Supabase — penyedia basis data, penyimpanan file, dan sistem autentikasi kami;",
-            "Replicate — penyedia model AI untuk pembuatan video, foto, dan caption (termasuk model Google Gemini dan OpenAI Whisper);",
+            "Replicate — penyedia akses model AI pihak ketiga untuk pembuatan dan pengolahan video, foto, teks, suara, dan transkripsi;",
             "Rendi — penyedia pemrosesan video (ekstraksi audio, dll.);",
             "DOKU — penyedia gerbang pembayaran kami saat ini untuk pembelian Kredit; penyedia tambahan dapat digunakan di masa mendatang dan akan dicantumkan di sini apabila diterapkan.",
             "Resend — penyedia layanan pengiriman email untuk email otentikasi (verifikasi akun, reset kata sandi, dan notifikasi terkait akun lainnya);",
-            "Vercel — penyedia hosting infrastruktur aplikasi kami;",
+            "Vercel — penyedia hosting infrastruktur aplikasi dan Vercel Analytics untuk analitik penggunaan web;",
+            "Cloudflare dan Amazon CloudFront — jaringan pengiriman konten (CDN) untuk media publik pada situs pemasaran kami;",
             "TikTok — untuk otentikasi (TikTok Login Kit) serta publikasi video dan foto melalui TikTok Content Posting API; kami menyimpan token akses dan token refresh yang diperlukan untuk menjaga koneksi Anda tetap aktif dan mempublikasikan konten atas nama Anda sesuai instruksi Anda.",
-            "Instagram/Meta — direncanakan sebagai integrasi mendatang; belum ada data yang dibagikan ke pihak ini hingga fitur tersebut aktif.",
+            "Instagram/Meta — untuk Instagram Business Login, menjaga koneksi akun Instagram Business/Creator Anda, dan publikasi yang Anda instruksikan ketika fitur tersebut tersedia pada antarmuka yang Anda gunakan.",
           ]},
           { type: "p", text: "Setiap penyedia layanan di atas memiliki kebijakan privasi masing-masing yang independen dari kebijakan ini." },
         ],
@@ -95,7 +95,7 @@ const content: LegalContent = {
             "Mengakses dan meminta salinan data pribadi Anda;",
             "Meminta koreksi data yang tidak akurat;",
             "Meminta penghapusan akun dan data Anda;",
-            "Memutuskan koneksi (\"Disconnect\") Platform Terhubung kapan saja melalui pengaturan akun Anda, yang akan menghapus token otorisasi terkait dari sistem kami.",
+            "Memutuskan koneksi (\"Disconnect\") YouTube, TikTok, atau Instagram kapan saja melalui pengaturan akun Anda, yang akan menghapus token otorisasi terkait dari sistem kami.",
           ]},
         ],
       },
@@ -116,7 +116,7 @@ const content: LegalContent = {
   },
   english: {
     pageTitle: "Privacy Policy",
-    effectiveDate: "Last updated: August 24, 2026",
+    effectiveDate: "Last updated: September 13, 2026",
     intro: "This Privacy Policy explains how Kelolako (\"we\") collects, uses, stores, and protects your information when you use the Kelolako platform (\"Service\"). The data controller for this Service is an Individual Business (Usaha Perorangan) registered under the name Muhammad Septian Hadiguna, with Business Identification Number (NIB) 0307260041044, domiciled in West Jakarta, DKI Jakarta.",
     sections: [
       {
@@ -125,7 +125,7 @@ const content: LegalContent = {
           { type: "h3", text: "1.1 Account Information" },
           { type: "ul", items: [
             "Email address, full name, and profile photo (if registering via Google);",
-            "Email address, full name, and encrypted password (if registering via email).",
+            "Email address, full name, and authentication credentials managed by Supabase Auth (if registering via email). Kelolako does not store your password in plaintext.",
           ]},
           { type: "h3", text: "1.2 User Content" },
           { type: "ul", items: [
@@ -134,8 +134,7 @@ const content: LegalContent = {
           ]},
           { type: "h3", text: "1.3 Third-Party Platform Connection Data" },
           { type: "ul", items: [
-            "OAuth authorization tokens (access token, refresh token) for platforms that are already active and that you connect — YouTube and TikTok — used solely to publish content on your behalf according to your instructions.",
-            "Instagram is planned as an additional platform integration in the future; we do not yet collect or store any authorization data for Instagram until that feature is active.",
+            "OAuth authorization tokens (access tokens and, where issued by a platform, refresh tokens) for YouTube, TikTok, and Instagram accounts that you connect. Tokens are used to maintain the connection and perform publishing actions that you instruct through the Service.",
           ]},
           { type: "h3", text: "1.4 Transaction and Credit Data" },
           { type: "ul", items: [
@@ -153,7 +152,7 @@ const content: LegalContent = {
         blocks: [
           { type: "ul", items: [
             "To provide and operate the Service, including AI content generation and publishing scheduling;",
-            "To process your content through third-party AI providers (Replicate, including Google Gemini and OpenAI Whisper) to generate captions and transcribe audio;",
+            "To process your content through Replicate and the third-party models available through it to generate or process video, images, text, speech, and transcription;",
             "To process video through our third-party video processing provider (Rendi) for audio extraction and other video operations;",
             "To publish your content to Connected Platforms according to your instructions;",
             "To process Credit payments through our payment gateway provider(s) (currently DOKU);",
@@ -167,15 +166,16 @@ const content: LegalContent = {
         blocks: [
           { type: "p", text: "To operate the Service, we share relevant data (limited to what is necessary) with the following service providers:" },
           { type: "ul", items: [
-            "Google — for authentication (Google Sign-In) and content publishing via the YouTube Data API;",
+            "Google — for authentication (Google Sign-In), content publishing via the YouTube Data API, and optional YouTube marketing video embeds after you choose to play them;",
             "Supabase — our database, file storage, and authentication system provider;",
-            "Replicate — AI model provider for video, photo, and caption generation (including Google Gemini and OpenAI Whisper models);",
+            "Replicate — access provider for third-party AI models used to generate and process video, images, text, speech, and transcription;",
             "Rendi — video processing provider (audio extraction, etc.);",
             "DOKU — our current payment gateway provider for Credit purchases; additional providers may be used in the future and will be listed here if adopted.",
             "Resend — email delivery service provider for authentication emails (account verification, password reset, and other account-related notifications);",
-            "Vercel — our application hosting infrastructure provider;",
+            "Vercel — our application hosting infrastructure provider and Vercel Analytics for web usage analytics;",
+            "Cloudflare and Amazon CloudFront — content delivery networks (CDNs) for public media on our marketing site;",
             "TikTok — for authentication (TikTok Login Kit) and video and photo publishing via the TikTok Content Posting API; we store the access and refresh tokens needed to keep your connection active and publish content on your behalf according to your instructions.",
-            "Instagram/Meta — planned as a future integration; no data is shared with this party until that feature is active.",
+            "Instagram/Meta — for Instagram Business Login, maintaining your connected Instagram Business/Creator account, and publishing that you instruct when the feature is available in the interface you use.",
           ]},
           { type: "p", text: "Each service provider listed above has its own privacy policy independent of this one." },
         ],
@@ -202,7 +202,7 @@ const content: LegalContent = {
             "Access and request a copy of your personal data;",
             "Request correction of inaccurate data;",
             "Request deletion of your account and data;",
-            "Disconnect Connected Platforms at any time via your account settings, which will remove the associated authorization tokens from our system.",
+            "Disconnect YouTube, TikTok, or Instagram at any time via your account settings, which will remove the associated authorization tokens from our system.",
           ]},
         ],
       },

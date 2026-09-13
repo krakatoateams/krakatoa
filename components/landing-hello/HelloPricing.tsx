@@ -7,13 +7,10 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import {
   formatIdr,
   packBonusValueIdr,
-  packTotalCredits,
   type CreditPack,
 } from "@/lib/credit-packs";
 import { useCreditPacks } from "@/lib/use-credit-packs";
 import {
-  CREDITS_PER_IMAGE,
-  CREDITS_PER_VIDEO,
   CREDIT_CTA_HREF_AUTHED,
   CREDIT_POLICY,
   PLANS,
@@ -50,9 +47,8 @@ function CreditRow({
   authed: boolean;
   onGuestClick: () => void;
 }) {
-  const total = packTotalCredits(pack);
   const label = `Purchase ${pack.credits.toLocaleString()} credits (${pack.label}) for ${formatIdr(pack.priceIdr)}`;
-  const content = <CreditRowContent pack={pack} total={total} />;
+  const content = <CreditRowContent pack={pack} />;
 
   // Guests never leave the page — clicking "Purchase" opens the sign-in
   // modal instead of navigating to /login, same as the nav CTA.
@@ -71,7 +67,7 @@ function CreditRow({
   );
 }
 
-function CreditRowContent({ pack, total }: { pack: CreditPack; total: number }) {
+function CreditRowContent({ pack }: { pack: CreditPack }) {
   return (
     <>
       <div className="min-w-0 flex-1">
@@ -93,10 +89,7 @@ function CreditRowContent({ pack, total }: { pack: CreditPack; total: number }) 
             </span>
           )}
         </div>
-        <p className="mt-1.5 text-[12px] text-text-disabled">
-          ≈ {Math.floor(total / CREDITS_PER_IMAGE).toLocaleString()} images ·{" "}
-          {Math.floor(total / CREDITS_PER_VIDEO).toLocaleString()} videos
-        </p>
+        <p className="mt-1.5 text-[12px] text-text-disabled">{pack.label} pack</p>
       </div>
 
       <div className="flex shrink-0 items-center gap-3 sm:gap-5">

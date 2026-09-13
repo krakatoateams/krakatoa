@@ -37,6 +37,7 @@
     "test:dependency-security": "tsx lib/dependency-security-self-check.ts",
     "test:deployment-ci": "tsx lib/deployment-ci-self-check.ts",
     "test:security-headers": "tsx lib/security-headers-self-check.ts",
+    "test:public-marketing": "tsx lib/public-marketing-self-check.ts",
     "test:auth-users-fk": "tsx lib/auth-users-fk-cutover-self-check.ts",
     "test:rpc-grants": "tsx lib/rpc-grant-lockdown-self-check.ts",
     "test:deny-by-default-rls": "tsx lib/deny-by-default-rls-self-check.ts",
@@ -72,7 +73,7 @@
     "test:post-cleanup": "tsx lib/post-storage-cleanup-pure.ts",
     "test:legacy-calendar-badge": "tsx lib/legacy-calendar-badge-pure.ts",
     "test:generation-workflows": "tsx lib/generation-workflows/control-policy-self-check.ts && tsx lib/generation-workflows/stop-settlement-self-check.ts && tsx lib/generation-workflows/submission-fence-self-check.ts && tsx lib/generation-workflows/submission-recovery-self-check.ts && tsx lib/generation-workflows/webhook-token-self-check.ts && tsx lib/generation-workflows/polling-self-check.ts && tsx lib/generation-workflows/finalization-self-check.ts && tsx lib/generation-workflows/motion-control-route-failure-self-check.ts",
-    "ci:checks": "npm run test:deployment-ci && npm run test:dependency-security && npm run test:security-headers && npm run test:public-auth-flow && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run build",
+    "ci:checks": "npm run test:deployment-ci && npm run test:dependency-security && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run build",
     "admin:probe-monitoring": "tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "tsx scripts/probe-signed-url-cache.ts",
     "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
