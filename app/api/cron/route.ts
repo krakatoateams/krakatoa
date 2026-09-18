@@ -360,6 +360,12 @@ export async function GET(req: NextRequest) {
                 if (path) await assertPathOwnedByUser(path, post.user_id);
               }
             }
+            // TikTok's "Creator labeled as AI-generated" disclosure. True only
+            // for a genuine Krakatoa generation hand-off (post.asset_id set),
+            // not a raw file the user uploaded straight into the Scheduler —
+            // see the isAigc comment on TikTokPublishParams for the full
+            // reasoning and the photo-carousel limitation.
+            const isAigc = Boolean(post.asset_id);
             publishId = isPhotoPost
               ? await publishPhotoToTikTok({
                   accessToken: refreshed.accessToken,
@@ -371,6 +377,7 @@ export async function GET(req: NextRequest) {
                   brandContentToggle: !!post.tiktok_brand_content_toggle,
                   disableComment: !!post.tiktok_disable_comment,
                   origin: resolveOrigin(req),
+                  isAigc,
                 })
               : await publishToTikTok({
                   accessToken: refreshed.accessToken,
@@ -384,6 +391,7 @@ export async function GET(req: NextRequest) {
                   disableComment: !!post.tiktok_disable_comment,
                   disableDuet: !!post.tiktok_disable_duet,
                   disableStitch: !!post.tiktok_disable_stitch,
+                  isAigc,
                 });
           } catch (publishErr) {
             // spam_risk_too_many_posts (daily cap) gets its own bounded

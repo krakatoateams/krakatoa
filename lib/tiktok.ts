@@ -321,6 +321,15 @@ export interface TikTokPublishParams {
   disableComment: boolean;
   disableDuet: boolean;
   disableStitch: boolean;
+  /**
+   * TikTok's "Creator labeled as AI-generated" disclosure. Set by the caller
+   * from Boolean(post.asset_id) — true only for a genuine Krakatoa
+   * generation hand-off, not a raw file the user uploaded directly into the
+   * Scheduler. Nested inside post_info for video (confirmed against
+   * developers.tiktok.com/doc/content-posting-api-reference-direct-post) —
+   * the photo endpoint puts this at the top level instead, see initPhotoPost.
+   */
+  isAigc: boolean;
 }
 
 interface RawInitResponse {
@@ -354,6 +363,7 @@ async function initDirectPost(params: {
   disableComment: boolean;
   disableDuet: boolean;
   disableStitch: boolean;
+  isAigc: boolean;
 }): Promise<{ publishId: string; uploadUrl: string }> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
 
@@ -372,6 +382,7 @@ async function initDirectPost(params: {
         disable_comment: params.disableComment,
         disable_duet: params.disableDuet,
         disable_stitch: params.disableStitch,
+        is_aigc: params.isAigc,
       },
       source_info: {
         source: "FILE_UPLOAD",
@@ -463,6 +474,7 @@ export async function publishToTikTok(params: TikTokPublishParams): Promise<stri
     disableComment: params.disableComment,
     disableDuet: params.disableDuet,
     disableStitch: params.disableStitch,
+    isAigc: params.isAigc,
   });
 
   await uploadVideoChunks(uploadUrl, video, chunkSize, totalChunkCount);
@@ -492,6 +504,7 @@ async function initPhotoPost(params: {
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
   disableComment: boolean;
+  isAigc: boolean;
 }): Promise<{ publishId: string }> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
 
@@ -520,6 +533,12 @@ async function initPhotoPost(params: {
         // with a generic "review our integration guidelines" error — do not
         // add them back here.
       },
+      // is_aigc lives at the TOP LEVEL for photo posts, unlike video where
+      // it's nested inside post_info — confirmed against TikTok's Photo
+      // Post API reference. Nesting it inside post_info here would silently
+      // no-op (TikTok ignores unknown post_info fields rather than
+      // rejecting), so this is easy to get wrong without checking the docs.
+      is_aigc: params.isAigc,
       source_info: {
         source: "PULL_FROM_URL",
         // Cover photo picker is out of scope for this change — always the
@@ -659,6 +678,15 @@ export interface TikTokPhotoPublishParams {
   /** This app's own origin (e.g. from resolveOrigin(request) in the cron
    * route) — used to build the verified-domain proxy URL for each photo. */
   origin: string;
+  /**
+   * TikTok's "Creator labeled as AI-generated" disclosure — see the same
+   * field on TikTokPublishParams. One flag for the whole carousel: a post
+   * built from a genuine Krakatoa asset hand-off (post.asset_id set) is
+   * true; a manually multi-uploaded carousel is false even if some of its
+   * images happen to be AI-generated, since posts.photo_urls carries no
+   * per-image provenance to check.
+   */
+  isAigc: boolean;
 }
 
 /**
@@ -696,6 +724,7 @@ export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Pr
     brandOrganicToggle: params.brandOrganicToggle,
     brandContentToggle: params.brandContentToggle,
     disableComment: params.disableComment,
+    isAigc: params.isAigc,
   });
 
   return publishId;
