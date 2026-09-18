@@ -41,6 +41,7 @@ import {
   ArrowRight,
   Info,
   Music2,
+  Camera,
   Image as ImageIcon,
   Plus,
   FolderOpen,
@@ -126,7 +127,10 @@ interface VideoItem {
   // handleScheduleAll). TikTok-only fields below are only meaningful when
   // "tiktok" is included and are never defaulted silently — the user must
   // choose them (see openspec/changes/tiktok-publish/design.md).
-  platforms: Array<"youtube" | "tiktok">;
+  // "instagram" added per openspec/changes/connect-instagram Phase 4 task
+  // 9.1 — single-mode selectable only so far (see PlatformFields'
+  // instagramConnected prop); bulk mode intentionally not wired yet.
+  platforms: Array<"youtube" | "tiktok" | "instagram">;
   // YouTube-only. Unlike tiktokPrivacyLevel this always has a value — it
   // defaults to "public" (the prior hardcoded behavior) rather than forcing
   // a choice, since there's no external API call needed to know the options.
@@ -151,7 +155,7 @@ interface VideoItem {
   tiktokConsentChecked: boolean;
   // Per-platform submission outcome, so a retry only resends to platforms
   // that haven't already succeeded.
-  platformResults: Partial<Record<"youtube" | "tiktok", PlatformResult>>;
+  platformResults: Partial<Record<"youtube" | "tiktok" | "instagram", PlatformResult>>;
   // TikTok-only (openspec/changes/tiktok-photo-post): "photo" swaps the single
   // video for a multi-photo carousel (photoUrls, 1-35, first = cover).
   // Auto-derived from whatever file/asset was actually dropped or picked
@@ -1278,9 +1282,10 @@ const YOUTUBE_PRIVACY_LABELS: Record<"public" | "unlisted" | "private", string> 
   private: "Private",
 };
 
-const PLATFORM_LABELS: Record<"youtube" | "tiktok", string> = {
+const PLATFORM_LABELS: Record<"youtube" | "tiktok" | "instagram", string> = {
   youtube: "YouTube",
   tiktok: "TikTok",
+  instagram: "Instagram",
 };
 
 const TIKTOK_MUSIC_USAGE_URL = "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en";
@@ -1406,6 +1411,8 @@ function PlatformFields({
   onChange,
   tiktokConnected,
   tiktokCreatorInfo,
+  instagramConnected,
+  photoCount,
   contentType,
   videoDurationSec,
   format,
@@ -1429,6 +1436,19 @@ function PlatformFields({
   onChange: (patch: PlatformPatch) => void;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
+  // Optional and single-mode-only for now (openspec/changes/connect-instagram
+  // Phase 4, task 9.1-9.2): BulkVideoCard never passes this prop, so the
+  // checkbox below structurally cannot render there yet — bulk mode's own
+  // Instagram wiring (content-type gating, carousel limits) is a separate,
+  // later task.
+  instagramConnected?: boolean;
+  // How many photos are currently staged — used only to warn (not block)
+  // when Instagram is targeted with more than one, since Instagram has no
+  // carousel support (see the isPhoto/platformPhotoUrls handling in
+  // ScheduleCard's handleSubmit, which already silently sends just the
+  // first photo — this warning tells the user that before they submit).
+  // Optional/undefined in BulkVideoCard, same reasoning as instagramConnected.
+  photoCount?: number;
   // openspec/changes/tiktok-photo-post (Decision 6, revised): content type is
   // derived from what was actually dropped, never chosen here — this only
   // reads it, to gray out YouTube (no photo-post support) when it's "photo".
@@ -1450,6 +1470,7 @@ function PlatformFields({
   const isPhoto = contentType === "photo";
   const hasYoutube = !isPhoto && platforms.includes("youtube");
   const hasTiktok = platforms.includes("tiktok");
+  const hasInstagram = platforms.includes("instagram");
 
   // Unchecking a platform also clears its stale result — otherwise re-checking
   // it later could be silently skipped on the next submit as "already succeeded".
@@ -1457,6 +1478,15 @@ function PlatformFields({
     onChange({
       platforms: checked ? [...platforms, "youtube"] : platforms.filter((p) => p !== "youtube"),
       platformResults: checked ? platformResults : { ...platformResults, youtube: undefined },
+    });
+  };
+  // No Instagram-specific fields to clear on uncheck (unlike TikTok) — this
+  // step is selection only, per openspec/changes/connect-instagram Phase 4
+  // task 9.1-9.2. Content-type gating and carousel limits are a later task.
+  const toggleInstagram = (checked: boolean) => {
+    onChange({
+      platforms: checked ? [...platforms, "instagram"] : platforms.filter((p) => p !== "instagram"),
+      platformResults: checked ? platformResults : { ...platformResults, instagram: undefined },
     });
   };
   const toggleTiktok = (checked: boolean) => {
@@ -1522,12 +1552,40 @@ function PlatformFields({
               TikTok
             </label>
           )}
+
+          {instagramConnected && (
+            <label
+              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+                hasInstagram ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={hasInstagram}
+                onChange={(e) => toggleInstagram(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+              />
+              <Camera className="h-4 w-4 text-fuchsia-400" />
+              Instagram
+            </label>
+          )}
         </div>
         {!tiktokConnected && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect TikTok in Settings to publish there too.</p>
         )}
+        {!instagramConnected && status === "authenticated" && (
+          <p className="mt-1 text-xs text-text-disabled">Connect Instagram in Settings to publish there too.</p>
+        )}
         {isPhoto && (
           <p className="mt-1 text-xs text-text-disabled">YouTube doesn&apos;t support photo posts.</p>
+        )}
+        {/* Non-blocking — Instagram still gets the cover photo, matching
+            ScheduleCard's own platformPhotoUrls.slice(0, 1) for Instagram.
+            Not a disable, since a single photo is perfectly valid there. */}
+        {hasInstagram && isPhoto && (photoCount ?? 0) > 1 && (
+          <p className="mt-1 text-xs text-warning">
+            Instagram supports only 1 photo — additional photos won&apos;t be included.
+          </p>
         )}
         {platforms.length === 0 && (
           <p className="mt-1 text-xs text-warning">Select at least one platform.</p>
@@ -1854,6 +1912,7 @@ interface ScheduleCardProps {
   ) => void;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
+  instagramConnected?: boolean;
   // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
   // contentType is derived from what was dropped/picked (UploadCard + the
   // top-level handlers), never set from within ScheduleCard itself.
@@ -1892,6 +1951,7 @@ function ScheduleCard({
   onMediaUploaded,
   tiktokConnected,
   tiktokCreatorInfo,
+  instagramConnected,
   contentType,
   photoUrls,
 }: ScheduleCardProps) {
@@ -2006,16 +2066,26 @@ function ScheduleCard({
           // YouTube-only — format/#Shorts is not a TikTok concept.
           const description = p === "youtube" && format === "short" ? withShortsTag(caption) : caption;
 
-          // A TikTok photo post sends photo_urls instead of video_url — never
-          // both. YouTube always sends video_url (no photo-post concept).
-          const isPhoto = p === "tiktok" && contentType === "photo";
+          // A TikTok or Instagram photo post sends photo_urls instead of
+          // video_url — never both. YouTube always sends video_url (no
+          // photo-post concept). Previously TikTok-only, which silently sent
+          // an empty video_url for an Instagram photo post instead — Instagram
+          // supports photo mode too, just without TikTok's carousel.
+          const isPhoto = (p === "tiktok" || p === "instagram") && contentType === "photo";
+          // Instagram has no carousel support (single image only — see
+          // connect-instagram/design.md Non-Goals and the server-side
+          // "exactly one photo" check in app/api/posts/route.ts): only the
+          // first (cover) photo is sent, extra ones are dropped here rather
+          // than triggering that check's 400. The checkbox-level warning
+          // below tells the user this before they ever submit.
+          const platformPhotoUrls = p === "instagram" ? effectivePhotoUrls.slice(0, 1) : effectivePhotoUrls;
 
           const res = await fetch("/api/posts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...(isPhoto
-                ? { photo_urls: effectivePhotoUrls }
+                ? { photo_urls: platformPhotoUrls }
                 : effectiveStoragePath
                   ? { storage_path: effectiveStoragePath }
                   : { video_url: effectiveVideoUrl }),
@@ -2050,7 +2120,7 @@ function ScheduleCard({
 
       // Merge this attempt's outcomes into any results carried over from a
       // prior partial failure, so the summary below reflects the whole set.
-      const newResults: Partial<Record<"youtube" | "tiktok", PlatformResult>> = {};
+      const newResults: Partial<Record<"youtube" | "tiktok" | "instagram", PlatformResult>> = {};
       results.forEach((r, i) => {
         const p = pendingPlatforms[i];
         newResults[p] =
@@ -2130,6 +2200,8 @@ function ScheduleCard({
           onChange={onPlatformPatch}
           tiktokConnected={tiktokConnected}
           tiktokCreatorInfo={tiktokCreatorInfo}
+          instagramConnected={instagramConnected}
+          photoCount={photoUrls.length}
           contentType={contentType}
           videoDurationSec={videoDuration}
           format={format}
@@ -3357,12 +3429,23 @@ export default function SchedulerDashboardPage() {
   // ── TikTok connection + creator info (Decisions 4, 7) ──
   const [tiktokConnected, setTiktokConnected] = useState(false);
   const [tiktokCreatorInfo, setTiktokCreatorInfo] = useState<TikTokCreatorInfoState>(DEFAULT_TIKTOK_CREATOR_INFO);
+  // Instagram connection only, no creator-info equivalent yet — this step is
+  // selectability only (openspec/changes/connect-instagram Phase 4, task
+  // 9.1-9.2). Same /api/connections/status response as tiktokConnected, it
+  // already returns both keys, so this is one fetch, not two.
+  const [instagramConnected, setInstagramConnected] = useState(false);
 
   useEffect(() => {
     fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { tiktok: false }))
-      .then((data: { tiktok?: boolean }) => setTiktokConnected(Boolean(data.tiktok)))
-      .catch(() => setTiktokConnected(false));
+      .then((res) => (res.ok ? res.json() : { tiktok: false, instagram: false }))
+      .then((data: { tiktok?: boolean; instagram?: boolean }) => {
+        setTiktokConnected(Boolean(data.tiktok));
+        setInstagramConnected(Boolean(data.instagram));
+      })
+      .catch(() => {
+        setTiktokConnected(false);
+        setInstagramConnected(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -3801,7 +3884,7 @@ export default function SchedulerDashboardPage() {
 
       // Merge this attempt's outcomes into any results carried over from a
       // prior partial failure.
-      const newResults: Partial<Record<"youtube" | "tiktok", PlatformResult>> = {};
+      const newResults: Partial<Record<"youtube" | "tiktok" | "instagram", PlatformResult>> = {};
       results.forEach((r, i2) => {
         const p = pendingPlatforms[i2];
         newResults[p] =
@@ -3927,6 +4010,7 @@ export default function SchedulerDashboardPage() {
                 onMediaUploaded={handleItem0PlatformPatch}
                 tiktokConnected={tiktokConnected}
                 tiktokCreatorInfo={tiktokCreatorInfo}
+                instagramConnected={instagramConnected}
                 contentType={item0.contentType}
                 photoUrls={item0.photoUrls}
               />
