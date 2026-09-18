@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import PageContainer from "../../../dashboard/PageContainer";
-import { YoutubeIcon } from "@/components/ConnectionStatusBadge";
+import { YoutubeIcon, InstagramIcon } from "@/components/ConnectionStatusBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -340,6 +340,11 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
               <>
                 <Music2 className="h-5 w-5 text-pink-400" />
                 <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">TikTok</span>
+              </>
+            ) : post.platform === "instagram" ? (
+              <>
+                <InstagramIcon className="h-5 w-5 text-fuchsia-400" />
+                <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">Instagram</span>
               </>
             ) : (
               <>
