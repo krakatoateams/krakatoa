@@ -22,6 +22,7 @@ import {
   type TikTokCreatorInfoHttpKind,
 } from "@/lib/tiktok-creator-info-pure";
 import CreationsHistory from "@/components/CreationsHistory";
+import { ConnectionStatusBadge, InstagramIcon } from "@/components/ConnectionStatusBadge";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
 import {
@@ -41,7 +42,6 @@ import {
   ArrowRight,
   Info,
   Music2,
-  Camera,
   Image as ImageIcon,
   Plus,
   FolderOpen,
@@ -1510,6 +1510,22 @@ function PlatformFields({
 
   return (
     <div className="space-y-4">
+      {/* Which account is actually connected per platform, and a one-click
+          way to switch/reconnect — ConnectionStatusBadge already exists
+          (used on the Calendar page) and fetches its own status
+          independently, so this needs no new props or plumbing here. Shown
+          above the checkboxes themselves so it reads as "here's who you're
+          posting as," not a setting buried elsewhere. */}
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-text-secondary">
+          Connected accounts
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <ConnectionStatusBadge platform="youtube" />
+          <ConnectionStatusBadge platform="tiktok" />
+          <ConnectionStatusBadge platform="instagram" />
+        </div>
+      </div>
       <div>
         <label className="mb-1.5 block text-xs font-medium text-text-secondary">
           Platform <span className="text-error" aria-hidden>*</span>
@@ -1565,7 +1581,7 @@ function PlatformFields({
                 onChange={(e) => toggleInstagram(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
               />
-              <Camera className="h-4 w-4 text-fuchsia-400" />
+              <InstagramIcon className="h-4 w-4 text-fuchsia-400" />
               Instagram
             </label>
           )}
