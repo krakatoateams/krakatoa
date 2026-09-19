@@ -17,6 +17,7 @@ import {
   createMediaContainer,
   getContainerStatus,
   publishContainer,
+  getMediaPermalink,
   isInstagramPermanentFailure,
 } from "@/lib/instagram";
 import {
@@ -680,9 +681,23 @@ export async function GET(req: NextRequest) {
         const { mediaId } = await publishContainer(igUserId, token.access_token, containerId);
         console.log(`[cron] ✓ Post ${post.id} published → Instagram media ID: ${mediaId}`);
 
+        // Best-effort, mirroring TikTok's own share-URL fetch just above —
+        // a failure here must never turn an already-confirmed publish into
+        // a failed post.
+        let permalink: string | null = null;
+        try {
+          permalink = await getMediaPermalink(token.access_token, mediaId);
+        } catch (err) {
+          console.warn(
+            `[cron] Post ${post.id} — failed to fetch Instagram permalink (non-blocking):`,
+            cronErrorLogSafe(err),
+          );
+        }
+
         if (
           await markPublishedIfClaimHeld(post.id, now, {
             instagram_media_id: mediaId,
+            instagram_permalink: permalink,
           })
         ) {
           await cleanupPostVideo(post.id, post.video_url, post.asset_id);

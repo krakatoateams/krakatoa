@@ -2,6 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "crypto";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { resolveOrigin } from "@/lib/tiktok";
+import { getCurrentAdmin } from "@/lib/admin-auth";
+import { getPlatformAvailability } from "@/lib/platform-availability-db";
+import { isPlatformUsable } from "@/lib/platform-availability-pure";
 
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_SCOPES = "user.info.basic,video.publish";
@@ -10,6 +13,15 @@ export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  // Platform availability (see CONTEXT.md) — TikTok defaults enabled, but
+  // gated here too for consistency: whichever platform an admin later
+  // disables gets the same real, server-side block, not just TikTok being a
+  // hardcoded special case.
+  const [availability, admin] = await Promise.all([getPlatformAvailability(), getCurrentAdmin()]);
+  if (!isPlatformUsable(availability.tiktok, !!admin)) {
+    return NextResponse.json({ error: "TikTok isn't available yet." }, { status: 403 });
   }
 
   const origin = resolveOrigin(request);

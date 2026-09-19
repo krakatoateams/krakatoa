@@ -420,3 +420,70 @@ export async function publishContainer(
 
   return { mediaId: json.id };
 }
+
+interface RawMediaPermalinkResponse extends RawInstagramApiError {
+  permalink?: string;
+}
+
+/**
+ * Fetches the real, public permalink for a just-published media object
+ * (GET /{media-id}?fields=permalink — confirmed against Meta's IG Media
+ * field reference). Used for the Calendar's "View on Instagram" button,
+ * mirroring tiktok_share_url's role. Callers should treat this as
+ * best-effort, same as TikTok's own share-URL fetch: a failure here must
+ * never turn an already-confirmed publish into a failed post.
+ */
+export async function getMediaPermalink(
+  accessToken: string,
+  mediaId: string,
+): Promise<string> {
+  const url = `${INSTAGRAM_GRAPH_BASE}/${mediaId}?fields=permalink`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const rawText = await res.text();
+  const json = parseInstagramGraphJson(rawText) as RawMediaPermalinkResponse | null;
+
+  if (!json || !res.ok || !json.permalink) {
+    throw new Error(
+      `Instagram permalink fetch failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
+  }
+
+  return json.permalink;
+}
+
+interface RawAccountUsernameResponse extends RawInstagramApiError {
+  username?: string;
+}
+
+/**
+ * Fetches the connected account's own @username (GET /{ig-user-id}?fields=
+ * username — confirmed against Meta's IG User field reference). Called once
+ * at connect time (see app/api/connections/instagram/callback/route.ts) and
+ * stored in platform_tokens.username, the same pattern used for YouTube's
+ * channel title and TikTok's creator nickname, so the Scheduler's "Connected
+ * accounts" row can show who you're actually posting as without a live call
+ * on every page load.
+ */
+export async function getAccountUsername(
+  accessToken: string,
+  igUserId: string,
+): Promise<string> {
+  const url = `${INSTAGRAM_GRAPH_BASE}/${igUserId}?fields=username`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const rawText = await res.text();
+  const json = parseInstagramGraphJson(rawText) as RawAccountUsernameResponse | null;
+
+  if (!json || !res.ok || !json.username) {
+    throw new Error(
+      `Instagram username fetch failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
+  }
+
+  return json.username;
+}

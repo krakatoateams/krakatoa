@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { exchangeCodeForToken, getCreatorInfo, resolveOrigin } from "@/lib/tiktok";
+import { updatePlatformUsername } from "@/lib/platform-tokens";
 
 const STATE_COOKIE = "tiktok_oauth_state";
 const VERIFIER_COOKIE = "tiktok_code_verifier";
@@ -65,9 +66,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Best-effort validation — catches scope/Sandbox misconfiguration early.
-    // Must never block or fail the connect flow itself.
+    // Must never block or fail the connect flow itself. Also captures the
+    // creator nickname for the Scheduler's "Connected accounts" row —
+    // previously this call's result was discarded entirely once validation
+    // passed.
     try {
-      await getCreatorInfo(tokens.accessToken);
+      const info = await getCreatorInfo(tokens.accessToken);
+      await updatePlatformUsername(userId, "tiktok", info.creatorNickname);
     } catch (err) {
       console.warn("[tiktok-connect] creator info validation failed:", err);
     }
