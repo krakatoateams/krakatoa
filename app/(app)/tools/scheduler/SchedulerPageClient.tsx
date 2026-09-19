@@ -1561,7 +1561,7 @@ function PlatformFields({
   // Platform availability (see CONTEXT.md) — a coming-soon platform still
   // renders here (per the grilled decision to reuse the sidebar's Soon-badge
   // pattern) but disabled, unless the caller is an admin (Admin preview).
-  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
+  platformAvailability: { platforms: Record<Platform, boolean>; canBypass: Record<Platform, boolean> };
 }) {
   const { status } = useCurrentUser();
   const discloseOpen = tiktokDiscloseOpen;
@@ -1570,18 +1570,18 @@ function PlatformFields({
   const hasYoutube = !isPhoto && platforms.includes("youtube");
   const hasTiktok = platforms.includes("tiktok");
   const hasInstagram = platforms.includes("instagram");
-  const youtubeUsable = isPlatformUsable(platformAvailability.platforms.youtube, platformAvailability.isAdmin);
-  const tiktokUsable = isPlatformUsable(platformAvailability.platforms.tiktok, platformAvailability.isAdmin);
-  const instagramUsable = isPlatformUsable(platformAvailability.platforms.instagram, platformAvailability.isAdmin);
+  const youtubeUsable = isPlatformUsable(platformAvailability.platforms.youtube, platformAvailability.canBypass.youtube);
+  const tiktokUsable = isPlatformUsable(platformAvailability.platforms.tiktok, platformAvailability.canBypass.tiktok);
+  const instagramUsable = isPlatformUsable(platformAvailability.platforms.instagram, platformAvailability.canBypass.instagram);
   // Bulk mode never wires Instagram at all yet (instagramConnected stays
   // undefined there — see the prop's own comment) — a coming-soon lock icon
   // would be misleading there since Instagram isn't a selectable option in
   // bulk mode regardless of availability. Single mode always passes an
   // explicit boolean, so this only actually gates in bulk mode.
   const instagramSupported = instagramConnected !== undefined;
-  const youtubeBadge = platformBadge(platformAvailability.platforms.youtube, platformAvailability.isAdmin);
-  const tiktokBadge = platformBadge(platformAvailability.platforms.tiktok, platformAvailability.isAdmin);
-  const instagramBadge = platformBadge(platformAvailability.platforms.instagram, platformAvailability.isAdmin);
+  const youtubeBadge = platformBadge(platformAvailability.platforms.youtube, platformAvailability.canBypass.youtube);
+  const tiktokBadge = platformBadge(platformAvailability.platforms.tiktok, platformAvailability.canBypass.tiktok);
+  const instagramBadge = platformBadge(platformAvailability.platforms.instagram, platformAvailability.canBypass.instagram);
 
   // Unchecking a platform also clears its stale result — otherwise re-checking
   // it later could be silently skipped on the next submit as "already succeeded".
@@ -1642,71 +1642,66 @@ function PlatformFields({
           Platform <span className="text-error" aria-hidden>*</span>
         </label>
         <div className="flex flex-wrap gap-2">
-          <label
-            title={isPhoto ? "YouTube doesn't support photo posts" : !youtubeUsable ? "YouTube is coming soon" : undefined}
-            className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-              isPhoto || !youtubeUsable
-                ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
-                : hasYoutube
-                  ? "cursor-pointer border-white/30 bg-white/10 text-N900"
-                  : "cursor-pointer border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={hasYoutube}
-              disabled={isPhoto || !youtubeUsable}
-              onChange={(e) => toggleYoutube(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
-            />
-            <YoutubeIcon className={`h-4 w-4 ${isPhoto || !youtubeUsable ? "text-text-disabled" : "text-red-400"}`} />
-            YouTube
-            {youtubeBadge !== "none" && <PlatformSoonBadge kind={youtubeBadge} />}
-          </label>
-
-          {(tiktokConnected || !tiktokUsable) && (
+          {/* Coming-soon platforms don't render here at all for a regular
+              user (a grilled reversal of the earlier "visible but locked"
+              design, after seeing it live read as confusing/misleading —
+              see CONTEXT.md) — an admin or preview-allowlisted account still
+              sees it, enabled, with a "Preview" badge. */}
+          {youtubeUsable && (
             <label
-              title={!tiktokUsable ? "TikTok is coming soon" : undefined}
+              title={isPhoto ? "YouTube doesn't support photo posts" : undefined}
               className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-                !tiktokUsable
+                isPhoto
                   ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
-                  : hasTiktok
+                  : hasYoutube
                     ? "cursor-pointer border-white/30 bg-white/10 text-N900"
                     : "cursor-pointer border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={hasYoutube}
+                disabled={isPhoto}
+                onChange={(e) => toggleYoutube(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+              />
+              <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-text-disabled" : "text-red-400"}`} />
+              YouTube
+              {youtubeBadge !== "none" && <PlatformSoonBadge kind={youtubeBadge} />}
+            </label>
+          )}
+
+          {tiktokConnected && tiktokUsable && (
+            <label
+              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+                hasTiktok ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
               <input
                 type="checkbox"
                 checked={hasTiktok}
-                disabled={!tiktokUsable}
                 onChange={(e) => toggleTiktok(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
               />
-              <Music2 className={`h-4 w-4 ${tiktokUsable ? "text-pink-400" : "text-text-disabled"}`} />
+              <Music2 className="h-4 w-4 text-pink-400" />
               TikTok
               {tiktokBadge !== "none" && <PlatformSoonBadge kind={tiktokBadge} />}
             </label>
           )}
 
-          {(instagramConnected || (instagramSupported && !instagramUsable)) && (
+          {instagramConnected && instagramUsable && (
             <label
-              title={!instagramUsable ? "Instagram is coming soon" : undefined}
-              className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-                !instagramUsable
-                  ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
-                  : hasInstagram
-                    ? "cursor-pointer border-white/30 bg-white/10 text-N900"
-                    : "cursor-pointer border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
+              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+                hasInstagram ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
               <input
                 type="checkbox"
                 checked={hasInstagram}
-                disabled={!instagramUsable}
                 onChange={(e) => toggleInstagram(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
               />
-              <InstagramIcon className={`h-4 w-4 ${instagramUsable ? "text-fuchsia-400" : "text-text-disabled"}`} />
+              <InstagramIcon className="h-4 w-4 text-fuchsia-400" />
               Instagram
               {instagramBadge !== "none" && <PlatformSoonBadge kind={instagramBadge} />}
             </label>
@@ -2102,7 +2097,7 @@ interface ScheduleCardProps {
   // top-level handlers), never set from within ScheduleCard itself.
   contentType: VideoItem["contentType"];
   photoUrls: string[];
-  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
+  platformAvailability: { platforms: Record<Platform, boolean>; canBypass: Record<Platform, boolean> };
 }
 
 function ScheduleCard({
@@ -2922,7 +2917,7 @@ interface BulkVideoCardProps {
   // Set for ALL unready cards at once (a grilled decision — see CONTEXT.md),
   // not just the first, so one click surfaces the whole picture.
   showErrors: boolean;
-  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
+  platformAvailability: { platforms: Record<Platform, boolean>; canBypass: Record<Platform, boolean> };
 }
 
 function BulkVideoCard({
@@ -3789,19 +3784,40 @@ export default function SchedulerDashboardPage() {
   // falsely locks the compose checkboxes for a platform that's actually open.
   const [platformAvailability, setPlatformAvailability] = useState<{
     platforms: Record<Platform, boolean>;
-    isAdmin: boolean;
-  }>({ platforms: { tiktok: true, instagram: true, youtube: true }, isAdmin: false });
+    canBypass: Record<Platform, boolean>;
+  }>({
+    platforms: { tiktok: true, instagram: true, youtube: true },
+    canBypass: { tiktok: false, instagram: false, youtube: false },
+  });
 
   useEffect(() => {
     fetch("/api/platform-availability")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { platforms?: Record<Platform, boolean>; isAdmin?: boolean } | null) => {
-        if (data?.platforms) {
-          setPlatformAvailability({ platforms: data.platforms, isAdmin: !!data.isAdmin });
+      .then((data: { platforms?: Record<Platform, boolean>; canBypass?: Record<Platform, boolean> } | null) => {
+        if (data?.platforms && data.canBypass) {
+          setPlatformAvailability({ platforms: data.platforms, canBypass: data.canBypass });
         }
       })
       .catch(() => {});
   }, []);
+
+  // A coming-soon platform must never stay selected/submittable for a
+  // non-bypassed user — a disabled checkbox only stops NEW clicks, it
+  // doesn't retroactively clear a platform already in a draft's default
+  // selection (makeDraft() below defaults every new item to ["youtube"],
+  // which is "coming soon" out of the box today). Strip it the moment real
+  // availability data arrives; a no-op for anyone isPlatformUsable bypasses
+  // (admin, or a platform-scoped tool_preview_access allowlist entry).
+  useEffect(() => {
+    setItems((prev) =>
+      prev.map((it) => {
+        const usable = it.platforms.filter((p) =>
+          isPlatformUsable(platformAvailability.platforms[p], platformAvailability.canBypass[p]),
+        );
+        return usable.length === it.platforms.length ? it : { ...it, platforms: usable };
+      }),
+    );
+  }, [platformAvailability]);
 
   useEffect(() => {
     if (!tiktokConnected) {

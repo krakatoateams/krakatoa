@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Music2 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
+import { isPlatformUsable, platformBadge } from "@/lib/platform-availability-pure";
 
 // ─── YoutubeIcon ─────────────────────────────────────────────────────────────
 // lucide-react doesn't ship brand/logo icons (trademark reasons), hence this
@@ -66,10 +67,12 @@ const CONNECTION_BADGE_CONFIG: Record<
 };
 
 type ConnectionState = { connected: boolean; username: string | null };
+type Availability = { enabled: boolean; canBypass: boolean } | null;
 
 export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatform }) {
   const { status } = useCurrentUser();
   const [state, setState] = useState<ConnectionState | null>(null);
+  const [availability, setAvailability] = useState<Availability>(null);
   const { label, icon: Icon } = CONNECTION_BADGE_CONFIG[platform];
 
   useEffect(() => {
@@ -87,6 +90,29 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
           }),
       )
       .catch(() => setState({ connected: false, username: null }));
+  }, [status, platform]);
+
+  // Platform availability (see CONTEXT.md) — a disconnected, coming-soon
+  // platform must never offer a "Connect" link that just dead-ends on a
+  // coming-soon page; below renders a plain "Coming soon" badge instead,
+  // unless this caller is bypassed (admin or the preview allowlist).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/platform-availability")
+      .then((res) => (res.ok ? res.json() : null))
+      .then(
+        (
+          data: {
+            platforms?: Partial<Record<ConnectionPlatform, boolean>>;
+            canBypass?: Partial<Record<ConnectionPlatform, boolean>>;
+          } | null,
+        ) => {
+          if (data?.platforms) {
+            setAvailability({ enabled: !!data.platforms[platform], canBypass: !!data.canBypass?.[platform] });
+          }
+        },
+      )
+      .catch(() => {});
   }, [status, platform]);
 
   if (status === "loading" || state === null) {
@@ -111,11 +137,27 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
       </Link>
     );
   }
-  // Not connected — same pill, but doubles as the CTA: no extra banner/alert
-  // element, just made clickable with a shorter, action-first label and a
-  // hover state to signal it. Deliberately stays neutral gray rather than
-  // switching to an alarm color, so a row of several disconnected platforms
-  // doesn't read as a wall of warnings.
+  // Not connected. Coming-soon (and not bypassed): a plain, non-clickable
+  // badge — a "Connect" link here would just dead-end on a coming-soon page
+  // (see CONTEXT.md's Platform availability). Still loading availability:
+  // render the skeleton pill rather than briefly showing the wrong state.
+  if (availability === null) {
+    return <div className="h-9 w-44 animate-pulse rounded-lg bg-white/10" />;
+  }
+  if (!isPlatformUsable(availability.enabled, availability.canBypass)) {
+    return (
+      <span className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+        <Icon className="h-3.5 w-3.5 text-text-disabled" />
+        <span className="text-xs font-medium text-text-disabled">{label} coming soon</span>
+      </span>
+    );
+  }
+  const badge = platformBadge(availability.enabled, availability.canBypass);
+  // Same pill, but doubles as the CTA: no extra banner/alert element, just
+  // made clickable with a shorter, action-first label and a hover state to
+  // signal it. Deliberately stays neutral gray rather than switching to an
+  // alarm color, so a row of several disconnected platforms doesn't read as
+  // a wall of warnings.
   return (
     <Link
       href="/dashboard/settings?tab=connections"
@@ -123,6 +165,9 @@ export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatfo
     >
       <Icon className="h-3.5 w-3.5 text-text-secondary" />
       <span className="text-xs font-medium text-text-secondary">Connect {label}</span>
+      {badge === "preview" && (
+        <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Preview</span>
+      )}
     </Link>
   );
 }

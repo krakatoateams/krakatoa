@@ -11,15 +11,15 @@ function ConnectAction({
   availability,
 }: {
   platform: Platform;
-  availability: { platforms: Record<Platform, boolean>; isAdmin: boolean } | null;
+  availability: { platforms: Record<Platform, boolean>; canBypass: Record<Platform, boolean> } | null;
 }) {
   if (!availability) {
     return <div className="h-6 w-20 animate-pulse rounded-radius-xl bg-white/10" />;
   }
   const enabled = availability.platforms[platform];
-  const isAdmin = availability.isAdmin;
-  const badge = platformBadge(enabled, isAdmin);
-  if (!isPlatformUsable(enabled, isAdmin)) {
+  const canBypass = availability.canBypass[platform];
+  const badge = platformBadge(enabled, canBypass);
+  if (!isPlatformUsable(enabled, canBypass)) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-radius-xl border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-text-disabled">
         Coming soon
@@ -55,6 +55,12 @@ export default function ConnectionsTab() {
   const [disconnectingInstagram, setDisconnectingInstagram] = useState(false);
   const [confirmDisconnectInstagram, setConfirmDisconnectInstagram] = useState(false);
 
+  // TikTok creator nickname / Instagram @username — best-effort, can stay
+  // null even for a connected account (see supabase/migrations/100_platform_tokens_username.sql).
+  // Never populated for YouTube (see that migration's own comment).
+  const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
+  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
 
   // Platform availability (see CONTEXT.md) — "coming soon" actually blocks
@@ -64,16 +70,16 @@ export default function ConnectionsTab() {
   // briefly shows a coming-soon platform as connectable.
   const [platformAvailability, setPlatformAvailability] = useState<{
     platforms: Record<Platform, boolean>;
-    isAdmin: boolean;
+    canBypass: Record<Platform, boolean>;
   } | null>(null);
 
   useEffect(() => {
     if (authStatus !== "authenticated") return;
     fetch("/api/platform-availability")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { platforms?: Record<Platform, boolean>; isAdmin?: boolean } | null) => {
-        if (data?.platforms) {
-          setPlatformAvailability({ platforms: data.platforms, isAdmin: !!data.isAdmin });
+      .then((data: { platforms?: Record<Platform, boolean>; canBypass?: Record<Platform, boolean> } | null) => {
+        if (data?.platforms && data.canBypass) {
+          setPlatformAvailability({ platforms: data.platforms, canBypass: data.canBypass });
         }
       })
       .catch(() => {});
@@ -107,11 +113,20 @@ export default function ConnectionsTab() {
     }
     fetch("/api/connections/status")
       .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false, instagram: false }))
-      .then((data: { youtube?: boolean; tiktok?: boolean; instagram?: boolean }) => {
-        setYoutubeConnected(Boolean(data.youtube));
-        setTiktokConnected(Boolean(data.tiktok));
-        setInstagramConnected(Boolean(data.instagram));
-      })
+      .then(
+        (data: {
+          youtube?: boolean;
+          tiktok?: boolean;
+          instagram?: boolean;
+          usernames?: { tiktok?: string | null; instagram?: string | null };
+        }) => {
+          setYoutubeConnected(Boolean(data.youtube));
+          setTiktokConnected(Boolean(data.tiktok));
+          setInstagramConnected(Boolean(data.instagram));
+          setTiktokUsername(data.usernames?.tiktok ?? null);
+          setInstagramUsername(data.usernames?.instagram ?? null);
+        },
+      )
       .catch(() => {
         setYoutubeConnected(false);
         setTiktokConnected(false);
@@ -273,7 +288,9 @@ export default function ConnectionsTab() {
                 <p className="text-sm font-medium text-N900">Instagram</p>
                 <p className="truncate text-xs text-text-disabled">
                   {instagramConnected
-                    ? "Instagram publishing enabled"
+                    ? instagramUsername
+                      ? `@${instagramUsername}`
+                      : "Instagram publishing enabled"
                     : "Instagram publishing not yet connected"}
                 </p>
               </div>
@@ -337,7 +354,9 @@ export default function ConnectionsTab() {
                 <p className="text-sm font-medium text-N900">TikTok</p>
                 <p className="truncate text-xs text-text-disabled">
                   {tiktokConnected
-                    ? "TikTok publishing enabled"
+                    ? tiktokUsername
+                      ? `@${tiktokUsername}`
+                      : "TikTok publishing enabled"
                     : "TikTok publishing not yet connected"}
                 </p>
               </div>
