@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { resolveOrigin } from "@/lib/http";
+import { getCurrentAdmin } from "@/lib/admin-auth";
+import { getPlatformAvailability } from "@/lib/platform-availability-db";
+import { isPlatformUsable } from "@/lib/platform-availability-pure";
 
 const INSTAGRAM_AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_SCOPES = "instagram_business_basic,instagram_business_content_publish";
@@ -9,6 +12,14 @@ export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  // Platform availability (see CONTEXT.md) — "coming soon" actually blocks
+  // connecting for a regular user; admins bypass it to test before flipping
+  // the flag for everyone.
+  const [availability, admin] = await Promise.all([getPlatformAvailability(), getCurrentAdmin()]);
+  if (!isPlatformUsable(availability.instagram, !!admin)) {
+    return NextResponse.json({ error: "Instagram isn't available yet." }, { status: 403 });
   }
 
   const origin = resolveOrigin(request);

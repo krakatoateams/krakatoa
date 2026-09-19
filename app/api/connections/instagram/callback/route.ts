@@ -6,6 +6,7 @@ import {
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   hasBusinessContentPublishPermission,
+  getAccountUsername,
 } from "@/lib/instagram";
 
 const STATE_COOKIE = "instagram_oauth_state";
@@ -60,6 +61,16 @@ export async function GET(request: NextRequest) {
     const longLived = await exchangeForLongLivedToken(shortLived.accessToken);
     const expiresAt = new Date(Date.now() + longLived.expiresIn * 1000).toISOString();
 
+    // Best-effort — the @username is only for display (Scheduler's
+    // "Connected accounts" row); a failure here must never block the
+    // connect flow itself.
+    let username: string | null = null;
+    try {
+      username = await getAccountUsername(longLived.accessToken, shortLived.userId);
+    } catch (err) {
+      console.warn("[instagram-connect] username fetch failed:", err);
+    }
+
     const { error: upsertErr } = await supabaseServer
       .from("platform_tokens")
       .upsert(
@@ -79,6 +90,7 @@ export async function GET(request: NextRequest) {
           // the eligibility check, meaning publish could never have actually
           // worked without this fix.
           platform_user_id: shortLived.userId,
+          ...(username ? { username } : {}),
         },
         { onConflict: "user_id,platform" },
       );

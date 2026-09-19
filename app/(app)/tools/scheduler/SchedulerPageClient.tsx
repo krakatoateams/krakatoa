@@ -23,6 +23,9 @@ import {
 } from "@/lib/tiktok-creator-info-pure";
 import CreationsHistory from "@/components/CreationsHistory";
 import { ConnectionStatusBadge, InstagramIcon } from "@/components/ConnectionStatusBadge";
+import { planDroppedItems, splitCarouselPhotos } from "@/lib/scheduler-carousel-pure";
+import { getMissingFields, MISSING_FIELD_MESSAGES, type MissingField } from "@/lib/schedule-validation-pure";
+import { isPlatformUsable, platformBadge, type Platform } from "@/lib/platform-availability-pure";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
 import {
@@ -464,9 +467,9 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 
 // ─── Card shell ───────────────────────────────────────────────────────────────
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function Card({ children, className = "", id }: { children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <div className={`rounded-xl bg-white/[0.04] ${className}`}>
+    <div id={id} className={`rounded-xl bg-white/[0.04] ${className}`}>
       {children}
     </div>
   );
@@ -531,6 +534,10 @@ interface UploadCardProps {
   contentType?: "video" | "photo";
   photoUrls?: string[];
   onPhotoUrlsChange?: (urls: string[]) => void;
+  // Undo for handleFilesAdded's "2+ photos become one carousel" default —
+  // optional/undefined for the same reason as onPhotoUrlsChange above
+  // (bulk mode's own "add more videos" UploadCard never sets it).
+  onSplitCarousel?: () => void;
 }
 
 function UploadCard({
@@ -547,6 +554,7 @@ function UploadCard({
   contentType = "video",
   photoUrls = [],
   onPhotoUrlsChange,
+  onSplitCarousel,
 }: UploadCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
@@ -746,9 +754,24 @@ function UploadCard({
               is always the eventual cover (position 0 once uploaded). */}
           {(photoUrls.length > 0 || file) && (
             <div className="mb-4">
-              <p className="mb-2 text-sm font-semibold text-N900">
-                {photoCountLabel(photoUrls.length + (file ? 1 : 0))}
-              </p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-N900">
+                  {photoCountLabel(photoUrls.length + (file ? 1 : 0))}
+                </p>
+                {/* Undo for the "2+ photos become one carousel" default
+                    (handleFilesAdded's makeCarousel) — visible, not buried,
+                    since it's a real reversal of what just happened, not a
+                    minor setting. */}
+                {photoUrls.length > 1 && onSplitCarousel && (
+                  <button
+                    type="button"
+                    onClick={onSplitCarousel}
+                    className="shrink-0 text-xs font-medium text-text-secondary underline decoration-dotted transition-colors hover:text-text-primary"
+                  >
+                    Split into separate posts
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                 {file && previewUrl && (
                   <div className="group relative aspect-[4/5] overflow-hidden rounded-lg border border-white/10 bg-N0">
@@ -914,7 +937,7 @@ function UploadCard({
   }
 
   return (
-    <Card>
+    <Card id="upload-media-card">
       <CardHeader title="Upload Media" icon={<FileVideo className="h-4 w-4" />} />
       <div className="p-5">
         <div className="mb-4 inline-flex rounded-lg border border-white/10 bg-white/10 p-0.5">
@@ -1063,12 +1086,13 @@ function UploadCard({
         <p className="mt-3 text-center text-xs text-text-disabled">
           Up to 5 items · Video: MP4, MOV, AVI (≤ 50MB, Shorts ≤ 3 min) · Photo: JPEG, PNG, WebP (≤ 10MB)
         </p>
-        {/* openspec/changes/tiktok-photo-post: dropping N photos at once makes
-            N separate single-photo cards (one-file-per-card model) — not one
-            N-photo carousel. Clarify the combine path since it's not obvious
-            on first use. */}
+        {/* Reversed from the original tiktok-photo-post design: dropping 2+
+            photos together now merges them into one carousel post, not N
+            separate single-photo cards — see handleFilesAdded's makeCarousel
+            branch. A single photo still stages normally; grow it afterward
+            via "pick more from history" on that card. */}
         <p className="mt-1 text-center text-xs text-text-disabled">
-          Dropping multiple photos creates separate posts — to combine photos into one carousel, drop one first, then add more with &ldquo;pick more from history&rdquo; on that card.
+          Dropping multiple photos combines them into one carousel post — add more later with &ldquo;pick more from history&rdquo; on that card.
         </p>
       </div>
     </Card>
@@ -1300,13 +1324,20 @@ function TikTokConsentDeclaration({
   brandContentToggle,
   checked,
   onCheckedChange,
+  showError = false,
+  idPrefix = "",
 }: {
   brandContentToggle: boolean;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  showError?: boolean;
+  idPrefix?: string;
 }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-3">
+    <div
+      id={`${idPrefix}tiktok-consent`}
+      className={`space-y-1.5 rounded-lg border bg-white/5 px-3.5 py-3 ${showError ? "border-error" : "border-white/10"}`}
+    >
       <p className="text-[11px] text-text-disabled">Processing on TikTok can take a few minutes after you post.</p>
       <label className="flex cursor-pointer items-start gap-2 text-xs text-text-secondary">
         <input
@@ -1336,6 +1367,7 @@ function TikTokConsentDeclaration({
           .
         </span>
       </label>
+      {showError && <p className="text-xs text-error">{MISSING_FIELD_MESSAGES.tiktokConsent}</p>}
     </div>
   );
 }
@@ -1392,6 +1424,49 @@ const DEFAULT_TIKTOK_CREATOR_INFO: TikTokCreatorInfoState = {
   httpKind: "loading",
 };
 
+// Anchor DOM ids used to scroll to the first missing field when Schedule is
+// clicked with the form incomplete — the Schedule button itself is always
+// enabled (see CONTEXT.md-adjacent grilling decision: anchor + inline error
+// beats a silently-disabled button). Several of these ids live outside
+// PlatformFields/ScheduleCard (upload-media-card is on the sibling Upload
+// Media card) — that's fine, scrollIntoView works across component
+// boundaries via a plain DOM id lookup.
+const MISSING_FIELD_ANCHOR: Record<MissingField, string> = {
+  platforms: "post-platforms",
+  tiktokPrivacy: "tiktok-privacy",
+  tiktokBlocked: "tiktok-fields",
+  tiktokDuration: "tiktok-fields",
+  tiktokDisclosure: "tiktok-fields",
+  media: "upload-media-card",
+  title: "post-title",
+  date: "schedule-date",
+  time: "schedule-time",
+  tiktokConsent: "tiktok-consent",
+  alreadyPosted: "post-platforms",
+};
+
+function scrollToFirstMissingField(missing: MissingField[]): void {
+  const first = missing[0];
+  if (!first) return;
+  document.getElementById(MISSING_FIELD_ANCHOR[first])?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// "Soon" for a regular user (the platform is genuinely locked); "Preview"
+// for an admin viewing a coming-soon platform they can actually use anyway
+// (see CONTEXT.md's Admin preview) — same visual language, different label
+// so an admin doesn't forget mid-testing that this isn't live for everyone.
+function PlatformSoonBadge({ kind }: { kind: "soon" | "preview" }) {
+  return (
+    <span
+      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+        kind === "preview" ? "bg-warning/15 text-warning" : "bg-white/10 text-text-disabled"
+      }`}
+    >
+      {kind === "preview" ? "Preview" : "Soon"}
+    </span>
+  );
+}
+
 // Shared by ScheduleCard (single mode) and BulkVideoCard (bulk mode) so both
 // stay in sync with the same platform-choice + TikTok privacy/disclosure
 // rules (see openspec/changes/tiktok-publish/design.md, Decisions 4, 4a, 7).
@@ -1412,12 +1487,21 @@ function PlatformFields({
   tiktokConnected,
   tiktokCreatorInfo,
   instagramConnected,
+  instagramUsername,
   photoCount,
   contentType,
   videoDurationSec,
   format,
   onFormatChange,
   shortWarn,
+  errorFields = [],
+  // Bulk mode renders many PlatformFields at once — fixed ids like
+  // "post-platforms" would collide across cards (invalid HTML, and
+  // getElementById would only ever find the first one). Single mode (the
+  // only caller that actually scrolls to these ids — see
+  // MISSING_FIELD_ANCHOR) leaves this at its default "".
+  idPrefix = "",
+  platformAvailability,
 }: {
   platforms: VideoItem["platforms"];
   platformResults: VideoItem["platformResults"];
@@ -1442,6 +1526,10 @@ function PlatformFields({
   // Instagram wiring (content-type gating, carousel limits) is a separate,
   // later task.
   instagramConnected?: boolean;
+  // Instagram's own "posting as @username" panel, parity with TikTok's
+  // (which sources its nickname from tiktokCreatorInfo instead). Optional,
+  // same single-mode-only reasoning as instagramConnected above.
+  instagramUsername?: string | null;
   // How many photos are currently staged — used only to warn (not block)
   // when Instagram is targeted with more than one, since Instagram has no
   // carousel support (see the isPhoto/platformPhotoUrls handling in
@@ -1463,6 +1551,17 @@ function PlatformFields({
   format?: VideoFormat;
   onFormatChange?: (next: VideoFormat) => void;
   shortWarn?: string | null;
+  // Which fields to actually flag as errors right now — computed via
+  // getMissingFields, but only passed non-empty once the user has attempted
+  // to schedule (see ScheduleCard/BulkVideoCard's showErrors state). Always
+  // enabled Schedule button + anchor-and-flag-on-click, not silently
+  // disabled — a grilled decision, see CONTEXT.md.
+  errorFields?: MissingField[];
+  idPrefix?: string;
+  // Platform availability (see CONTEXT.md) — a coming-soon platform still
+  // renders here (per the grilled decision to reuse the sidebar's Soon-badge
+  // pattern) but disabled, unless the caller is an admin (Admin preview).
+  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
 }) {
   const { status } = useCurrentUser();
   const discloseOpen = tiktokDiscloseOpen;
@@ -1471,6 +1570,18 @@ function PlatformFields({
   const hasYoutube = !isPhoto && platforms.includes("youtube");
   const hasTiktok = platforms.includes("tiktok");
   const hasInstagram = platforms.includes("instagram");
+  const youtubeUsable = isPlatformUsable(platformAvailability.platforms.youtube, platformAvailability.isAdmin);
+  const tiktokUsable = isPlatformUsable(platformAvailability.platforms.tiktok, platformAvailability.isAdmin);
+  const instagramUsable = isPlatformUsable(platformAvailability.platforms.instagram, platformAvailability.isAdmin);
+  // Bulk mode never wires Instagram at all yet (instagramConnected stays
+  // undefined there — see the prop's own comment) — a coming-soon lock icon
+  // would be misleading there since Instagram isn't a selectable option in
+  // bulk mode regardless of availability. Single mode always passes an
+  // explicit boolean, so this only actually gates in bulk mode.
+  const instagramSupported = instagramConnected !== undefined;
+  const youtubeBadge = platformBadge(platformAvailability.platforms.youtube, platformAvailability.isAdmin);
+  const tiktokBadge = platformBadge(platformAvailability.platforms.tiktok, platformAvailability.isAdmin);
+  const instagramBadge = platformBadge(platformAvailability.platforms.instagram, platformAvailability.isAdmin);
 
   // Unchecking a platform also clears its stale result — otherwise re-checking
   // it later could be silently skipped on the next submit as "already succeeded".
@@ -1526,15 +1637,15 @@ function PlatformFields({
           <ConnectionStatusBadge platform="instagram" />
         </div>
       </div>
-      <div>
+      <div id={`${idPrefix}post-platforms`}>
         <label className="mb-1.5 block text-xs font-medium text-text-secondary">
           Platform <span className="text-error" aria-hidden>*</span>
         </label>
         <div className="flex flex-wrap gap-2">
           <label
-            title={isPhoto ? "YouTube doesn't support photo posts" : undefined}
+            title={isPhoto ? "YouTube doesn't support photo posts" : !youtubeUsable ? "YouTube is coming soon" : undefined}
             className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-              isPhoto
+              isPhoto || !youtubeUsable
                 ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
                 : hasYoutube
                   ? "cursor-pointer border-white/30 bg-white/10 text-N900"
@@ -1544,52 +1655,67 @@ function PlatformFields({
             <input
               type="checkbox"
               checked={hasYoutube}
-              disabled={isPhoto}
+              disabled={isPhoto || !youtubeUsable}
               onChange={(e) => toggleYoutube(e.target.checked)}
               className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
             />
-            <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-text-disabled" : "text-red-400"}`} />
+            <YoutubeIcon className={`h-4 w-4 ${isPhoto || !youtubeUsable ? "text-text-disabled" : "text-red-400"}`} />
             YouTube
+            {youtubeBadge !== "none" && <PlatformSoonBadge kind={youtubeBadge} />}
           </label>
 
-          {tiktokConnected && (
+          {(tiktokConnected || !tiktokUsable) && (
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-                hasTiktok ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
+              title={!tiktokUsable ? "TikTok is coming soon" : undefined}
+              className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+                !tiktokUsable
+                  ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
+                  : hasTiktok
+                    ? "cursor-pointer border-white/30 bg-white/10 text-N900"
+                    : "cursor-pointer border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
               <input
                 type="checkbox"
                 checked={hasTiktok}
+                disabled={!tiktokUsable}
                 onChange={(e) => toggleTiktok(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
               />
-              <Music2 className="h-4 w-4 text-pink-400" />
+              <Music2 className={`h-4 w-4 ${tiktokUsable ? "text-pink-400" : "text-text-disabled"}`} />
               TikTok
+              {tiktokBadge !== "none" && <PlatformSoonBadge kind={tiktokBadge} />}
             </label>
           )}
 
-          {instagramConnected && (
+          {(instagramConnected || (instagramSupported && !instagramUsable)) && (
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
-                hasInstagram ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
+              title={!instagramUsable ? "Instagram is coming soon" : undefined}
+              className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+                !instagramUsable
+                  ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
+                  : hasInstagram
+                    ? "cursor-pointer border-white/30 bg-white/10 text-N900"
+                    : "cursor-pointer border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
               <input
                 type="checkbox"
                 checked={hasInstagram}
+                disabled={!instagramUsable}
                 onChange={(e) => toggleInstagram(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
               />
-              <InstagramIcon className="h-4 w-4 text-fuchsia-400" />
+              <InstagramIcon className={`h-4 w-4 ${instagramUsable ? "text-fuchsia-400" : "text-text-disabled"}`} />
               Instagram
+              {instagramBadge !== "none" && <PlatformSoonBadge kind={instagramBadge} />}
             </label>
           )}
         </div>
-        {!tiktokConnected && status === "authenticated" && (
+        {!tiktokConnected && tiktokUsable && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect TikTok in Settings to publish there too.</p>
         )}
-        {!instagramConnected && status === "authenticated" && (
+        {instagramSupported && !instagramConnected && instagramUsable && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect Instagram in Settings to publish there too.</p>
         )}
         {isPhoto && (
@@ -1605,6 +1731,9 @@ function PlatformFields({
         )}
         {platforms.length === 0 && (
           <p className="mt-1 text-xs text-warning">Select at least one platform.</p>
+        )}
+        {errorFields.includes("alreadyPosted") && (
+          <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.alreadyPosted}</p>
         )}
       </div>
 
@@ -1654,7 +1783,7 @@ function PlatformFields({
 
       {/* Every TikTok-only setting lives in this one block, same reasoning. */}
       {hasTiktok && (
-        <div className="space-y-3 rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
+        <div id={`${idPrefix}tiktok-fields`} className="space-y-3 rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-N900">
             <Music2 className="h-3.5 w-3.5 text-pink-400" />
             TikTok
@@ -1690,7 +1819,7 @@ function PlatformFields({
                 </div>
               )}
 
-              <div>
+              <div id={`${idPrefix}tiktok-privacy`}>
                 <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                   Privacy <span className="text-error" aria-hidden>*</span>
                 </label>
@@ -1705,7 +1834,11 @@ function PlatformFields({
                         : { tiktokPrivacyLevel: next },
                     );
                   }}
-                  className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+                  className={`w-full rounded-radius-xl border bg-white/10 px-3.5 py-2.5 text-sm text-text-primary transition-colors focus:outline-none focus:ring-1 ${
+                    errorFields.includes("tiktokPrivacy")
+                      ? "border-error focus:border-error focus:ring-error"
+                      : "border-white/10 focus:border-white/40 focus:ring-white/30"
+                  }`}
                 >
                   <option value="" disabled>
                     {tiktokCreatorInfoPrivacyPlaceholder({
@@ -1719,6 +1852,9 @@ function PlatformFields({
                     </option>
                   ))}
                 </select>
+                {errorFields.includes("tiktokPrivacy") && (
+                  <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.tiktokPrivacy}</p>
+                )}
               </div>
 
               {/* TikTok's own max_video_post_duration_sec check — blocking,
@@ -1757,6 +1893,17 @@ function PlatformFields({
                       </p>
                     )}
                   </div>
+
+                  {/* auto_add_music is always sent true for photo posts (see
+                      lib/tiktok.ts's initPhotoPost) — TikTok's API has no
+                      field to pick a specific track, only this on/off, so
+                      the honest thing to tell the user is where they CAN
+                      actually choose a song. */}
+                  {isPhoto && (
+                    <p className="text-[11px] text-text-disabled">
+                      TikTok will add recommended music automatically — you can change the song afterward in the TikTok app.
+                    </p>
+                  )}
 
                   {!isPhoto && (
                     <>
@@ -1873,6 +2020,26 @@ function PlatformFields({
           )}
         </div>
       )}
+
+      {/* Instagram parity with TikTok's "posting as" line above — no other
+          settings yet (no privacy level, no interaction toggles for
+          Instagram in this app today), so this panel is deliberately just
+          the identity line. YouTube gets no equivalent (decided against
+          broadening its OAuth scope — see the connect-instagram Phase 4
+          work earlier this session). */}
+      {hasInstagram && (
+        <div className="rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-N900">
+            <InstagramIcon className="h-3.5 w-3.5 text-fuchsia-400" />
+            Instagram
+            {instagramUsername && (
+              <span className="font-normal text-text-secondary">
+                · posting as @{instagramUsername}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1929,11 +2096,13 @@ interface ScheduleCardProps {
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
   instagramConnected?: boolean;
+  instagramUsername?: string | null;
   // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
   // contentType is derived from what was dropped/picked (UploadCard + the
   // top-level handlers), never set from within ScheduleCard itself.
   contentType: VideoItem["contentType"];
   photoUrls: string[];
+  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
 }
 
 function ScheduleCard({
@@ -1968,8 +2137,10 @@ function ScheduleCard({
   tiktokConnected,
   tiktokCreatorInfo,
   instagramConnected,
+  instagramUsername,
   contentType,
   photoUrls,
+  platformAvailability,
 }: ScheduleCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
@@ -1982,6 +2153,12 @@ function ScheduleCard({
   // looking frozen.
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [confirmEmptyCaption, setConfirmEmptyCaption] = useState(false);
+  // Schedule Post stays clickable even when the form is incomplete — a
+  // grilled decision (see CONTEXT.md's Platform availability neighbors):
+  // clicking while incomplete anchors to and flags every missing field at
+  // once, instead of the button silently disabling with a single generic
+  // hint. showErrors gates whether missingFields renders as visible errors.
+  const [showErrors, setShowErrors] = useState(false);
 
   // TikTok-only gates — each is vacuously true when TikTok isn't a selected
   // platform, so they never affect a YouTube-only schedule.
@@ -1998,6 +2175,28 @@ function ScheduleCard({
     !tiktokTargeted || !tiktokDiscloseOpen || tiktokBrandOrganicToggle || tiktokBrandContentToggle;
   const tiktokConsentOk = !tiktokTargeted || tiktokConsentChecked;
 
+  // Retry-safe: only submit platforms that haven't already succeeded on a
+  // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
+  const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
+  // A staged raw file (not yet uploaded — upload is deferred until submit)
+  // counts as "has media" too, alongside an already-resolved ref.
+  const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
+  const missingFields = getMissingFields({
+    hasMedia,
+    title,
+    date: form.date,
+    time: form.time,
+    platformCount: platforms.length,
+    pendingPlatformCount: pendingPlatforms.length,
+    targetsTikTok: tiktokTargeted,
+    tiktokPrivacyLevel,
+    tiktokNotBlocked,
+    tiktokDurationOk,
+    tiktokDiscloseComplete,
+    tiktokConsentOk,
+  });
+  const errorFields = showErrors ? missingFields : [];
+
   const set = (key: keyof ScheduleForm) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
@@ -2012,19 +2211,12 @@ function ScheduleCard({
   };
 
   const handleSubmit = async () => {
-    // Retry-safe: only submit platforms that haven't already succeeded on a
-    // prior attempt (see openspec/changes/fix-schedule-retry-duplication).
-    const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-    // A staged raw file (not yet uploaded — upload is deferred until this
-    // click) counts as "has media" too, alongside an already-resolved ref.
-    const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
-
-    if (
-      !hasMedia || !title.trim() || !form.date || !form.time || platforms.length === 0 || pendingPlatforms.length === 0 ||
-      !tiktokNotBlocked || !tiktokDurationOk || !tiktokDiscloseComplete || !tiktokConsentOk
-    ) {
+    if (missingFields.length > 0) {
+      setShowErrors(true);
+      scrollToFirstMissingField(missingFields);
       return;
     }
+    setShowErrors(false);
 
     if (status !== "authenticated") {
       openSignInModal(undefined, { title, tags, caption });
@@ -2178,20 +2370,6 @@ function ScheduleCard({
     }
   };
 
-  // The general Shorts-format duration warning below is advisory-only and
-  // never blocks scheduling. TikTok's own max_video_post_duration_sec check
-  // (tiktokDurationOk) is different — TikTok's guideline requires it to
-  // actually block, since a too-long video would just fail on their end.
-  // A TikTok-targeted post also requires a chosen privacy level (never
-  // defaulted — see design.md Decision 4).
-  const pendingPlatforms = platforms.filter((p) => platformResults[p]?.status !== "success");
-  const hasMedia = contentType === "photo" ? (photoUrls.length > 0 || !!file) : !!(storagePath || videoUrl || file);
-  const isReady =
-    hasMedia && !!title.trim() && !!form.date && !!form.time && platforms.length > 0 &&
-    pendingPlatforms.length > 0 &&
-    (!platforms.includes("tiktok") || !!tiktokPrivacyLevel) &&
-    tiktokNotBlocked && tiktokDurationOk && tiktokDiscloseComplete && tiktokConsentOk;
-
   // Advisory (non-blocking) warnings for Shorts only.
   const shortWarn = formatWarning(format, videoDuration, videoAspect);
   const bestTime = bestTimeSlot();
@@ -2217,13 +2395,20 @@ function ScheduleCard({
           tiktokConnected={tiktokConnected}
           tiktokCreatorInfo={tiktokCreatorInfo}
           instagramConnected={instagramConnected}
+          instagramUsername={instagramUsername}
           photoCount={photoUrls.length}
           contentType={contentType}
           videoDurationSec={videoDuration}
           format={format}
           onFormatChange={onFormatChange}
           shortWarn={shortWarn}
+          errorFields={errorFields}
+          platformAvailability={platformAvailability}
         />
+
+        {errorFields.includes("media") && (
+          <p className="-mt-3 text-xs text-error">{MISSING_FIELD_MESSAGES.media} in the Upload Media card.</p>
+        )}
 
         {/* Title */}
         <div>
@@ -2236,8 +2421,15 @@ function ScheduleCard({
             value={title}
             onChange={(e) => onTitleChange(e.target.value)}
             placeholder="My awesome video title"
-            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3.5 py-2.5 text-sm text-text-primary placeholder-text-disabled transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+            className={`w-full rounded-radius-xl border bg-white/10 px-3.5 py-2.5 text-sm text-text-primary placeholder-text-disabled transition-colors focus:outline-none focus:ring-1 ${
+              errorFields.includes("title")
+                ? "border-error focus:border-error focus:ring-error"
+                : "border-white/10 focus:border-white/40 focus:ring-white/30"
+            }`}
           />
+          {errorFields.includes("title") && (
+            <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.title}</p>
+          )}
         </div>
 
         {/* Tags */}
@@ -2268,7 +2460,10 @@ function ScheduleCard({
               Date <span className="text-error" aria-hidden>*</span>
             </label>
             <input id="schedule-date" type="date" value={form.date} min={today} onChange={set("date")}
-              className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30 [color-scheme:dark]" />
+              className={`w-full rounded-radius-xl border bg-white/10 px-3 py-2.5 text-sm text-text-primary transition-colors focus:outline-none focus:ring-1 [color-scheme:dark] ${
+                errorFields.includes("date") ? "border-error focus:border-error focus:ring-error" : "border-white/10 focus:border-white/40 focus:ring-white/30"
+              }`} />
+            {errorFields.includes("date") && <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.date}</p>}
           </div>
           <div>
             <label htmlFor="schedule-time" className="mb-1.5 block text-xs font-medium text-text-secondary">
@@ -2276,7 +2471,10 @@ function ScheduleCard({
               Time <span className="text-error" aria-hidden>*</span>
             </label>
             <input id="schedule-time" type="time" value={form.time} onChange={set("time")}
-              className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30 [color-scheme:dark]" />
+              className={`w-full rounded-radius-xl border bg-white/10 px-3 py-2.5 text-sm text-text-primary transition-colors focus:outline-none focus:ring-1 [color-scheme:dark] ${
+                errorFields.includes("time") ? "border-error focus:border-error focus:ring-error" : "border-white/10 focus:border-white/40 focus:ring-white/30"
+              }`} />
+            {errorFields.includes("time") && <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.time}</p>}
           </div>
         </div>
 
@@ -2306,14 +2504,16 @@ function ScheduleCard({
             brandContentToggle={tiktokBrandContentToggle}
             checked={tiktokConsentChecked}
             onCheckedChange={(checked) => onPlatformPatch({ tiktokConsentChecked: checked })}
+            showError={errorFields.includes("tiktokConsent")}
           />
         )}
 
-        {/* Submit */}
+        {/* Submit — always enabled; clicking while incomplete anchors to and
+            flags every missing field at once instead of silently disabling. */}
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!isReady || submitting}
+          disabled={submitting}
           className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-3 text-sm font-semibold text-text-static-black shadow-lg shadow-N0/30 transition-all duration-200 hover:bg-N800 hover:shadow-N0/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
           {uploadingMedia
@@ -2323,15 +2523,9 @@ function ScheduleCard({
               : <><Calendar className="h-4 w-4" />Schedule Post</>}
         </button>
 
-        <p className="text-center text-xs text-text-disabled">
-          {!hasMedia ? (contentType === "photo" ? "Add a photo to enable scheduling" : "Add a video to enable scheduling")
-            : !title.trim() ? "Add a title to schedule"
-            : tiktokTargeted && !tiktokNotBlocked ? "This TikTok account can't publish right now"
-            : tiktokTargeted && !tiktokDurationOk ? "Video is too long for TikTok"
-            : tiktokTargeted && !tiktokDiscloseComplete ? "Choose how this content is disclosed on TikTok"
-            : tiktokTargeted && !tiktokConsentOk ? "Agree to TikTok's terms to schedule"
-            : ""}
-        </p>
+        {errorFields.length > 0 && (
+          <p className="text-center text-xs text-error">Fix the highlighted fields above to schedule.</p>
+        )}
       </div>
     </Card>
   );
@@ -2352,12 +2546,11 @@ const STATUS_CFG = {
 
 interface RecentPostsCardProps {
   posts: Post[];
-  totalCount: number;
   loading: boolean;
   onRetry: (postId: string) => void;
 }
 
-function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCardProps) {
+function RecentPostsCard({ posts, loading, onRetry }: RecentPostsCardProps) {
   return (
     <Card>
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -2365,7 +2558,16 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
           <span className="text-text-secondary"><CalendarDays className="h-4 w-4" /></span>
           <h2 className="text-sm font-semibold text-N900">Your Recent Posts</h2>
         </div>
-        {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-text-disabled" />}
+        <div className="flex items-center gap-3">
+          {loading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-text-disabled" />}
+          <Link
+            href="/tools/scheduler/calendar"
+            className="flex items-center gap-1.5 text-xs text-text-secondary transition-colors hover:text-N900"
+          >
+            View all in Calendar
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
       </div>
 
       <div className="divide-y divide-white/10">
@@ -2428,18 +2630,6 @@ function RecentPostsCard({ posts, totalCount, loading, onRetry }: RecentPostsCar
         })}
       </div>
 
-      {/* Task 5.8: "View all" link if more posts exist */}
-      {totalCount > 5 && (
-        <div className="border-t border-white/10 px-5 py-3">
-          <Link
-            href="/tools/scheduler/calendar"
-            className="flex items-center gap-1.5 text-xs text-text-secondary transition-colors hover:text-text-secondary"
-          >
-            View all in Calendar
-            <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-      )}
     </Card>
   );
 }
@@ -2722,9 +2912,31 @@ interface BulkVideoCardProps {
   onRemove: () => void;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
+  // Undo for handleFilesAdded's makeCarousel default — a carousel can land
+  // inside a bulk batch just as easily as single mode (2+ photos merge
+  // regardless of how many other items already exist), so this needs the
+  // same escape hatch. Caller supplies item.id already bound.
+  onSplitCarousel: () => void;
+  // True once "Schedule All" has been clicked with this card still unready —
+  // gates whether this card's own missing fields render as visible errors.
+  // Set for ALL unready cards at once (a grilled decision — see CONTEXT.md),
+  // not just the first, so one click surfaces the whole picture.
+  showErrors: boolean;
+  platformAvailability: { platforms: Record<Platform, boolean>; isAdmin: boolean };
 }
 
-function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokConnected, tiktokCreatorInfo }: BulkVideoCardProps) {
+function BulkVideoCard({
+  item,
+  index,
+  captionMode,
+  onUpdate,
+  onRemove,
+  tiktokConnected,
+  tiktokCreatorInfo,
+  onSplitCarousel,
+  showErrors,
+  platformAvailability,
+}: BulkVideoCardProps) {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -2732,6 +2944,34 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
   const ai = useCaptionAI();
   const [uploadingForCaption, setUploadingForCaption] = useState(false);
   const tiktokTargeted = item.platforms.includes("tiktok");
+  const tiktokNotBlocked = !tiktokTargeted || !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo);
+  const tiktokDurationOk =
+    !tiktokTargeted ||
+    !item.duration ||
+    !tiktokCreatorInfo.maxVideoPostDurationSec ||
+    item.duration <= tiktokCreatorInfo.maxVideoPostDurationSec;
+  const tiktokDiscloseComplete =
+    !tiktokTargeted || !item.tiktokDiscloseOpen || item.tiktokBrandOrganicToggle || item.tiktokBrandContentToggle;
+  const tiktokConsentOk = !tiktokTargeted || item.tiktokConsentChecked;
+  const hasMedia = item.contentType === "photo" ? (item.photoUrls.length > 0 || !!item.file) : !!(item.storagePath || item.videoUrl || item.file);
+  const missingFields = getMissingFields({
+    hasMedia,
+    title: item.title,
+    date: item.date,
+    time: item.time,
+    platformCount: item.platforms.length,
+    // Bulk mode retries at the whole-card level (scheduleStatus), not per
+    // platform like single mode's platformResults — never reports "already
+    // posted" here.
+    pendingPlatformCount: item.platforms.length,
+    targetsTikTok: tiktokTargeted,
+    tiktokPrivacyLevel: item.tiktokPrivacyLevel,
+    tiktokNotBlocked,
+    tiktokDurationOk,
+    tiktokDiscloseComplete,
+    tiktokConsentOk,
+  });
+  const errorFields = showErrors ? missingFields : [];
   // Choice-first "add more photos" flow (mirrors UploadCard's single-mode
   // photo picker) — collapsed to one button, only reveals the upload-vs-library
   // choice, then the relevant UI, once asked for.
@@ -2871,7 +3111,7 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
   const frameClass = item.format === "short" ? "aspect-[9/16]" : "aspect-video";
 
   return (
-    <Card className="p-4">
+    <Card id={`bulk-card-${item.id}`} className="p-4">
       <div className="flex flex-col gap-4 sm:flex-row">
         {/* Left: compact thumbnail + meta */}
         <div className="w-full shrink-0 space-y-1.5 sm:w-36">
@@ -3031,8 +3271,11 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 value={item.title}
                 onChange={(e) => onUpdate({ title: e.target.value })}
                 placeholder="My awesome video title"
-                className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-sm text-text-primary placeholder-text-disabled focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+                className={`w-full rounded-radius-xl border bg-white/10 px-3 py-2 text-sm text-text-primary placeholder-text-disabled focus:outline-none focus:ring-1 ${
+                  errorFields.includes("title") ? "border-error focus:border-error focus:ring-error" : "border-white/10 focus:border-white/40 focus:ring-white/30"
+                }`}
               />
+              {errorFields.includes("title") && <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.title}</p>}
             </div>
             <div>
               <label className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
@@ -3057,9 +3300,20 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               jumping straight to the library grid. */}
           {item.contentType === "photo" && (
             <div>
-              <p className="mb-1.5 text-xs text-text-disabled">
-                {photoCountLabel(item.photoUrls.length + (item.file ? 1 : 0))}
-              </p>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <p className="text-xs text-text-disabled">
+                  {photoCountLabel(item.photoUrls.length + (item.file ? 1 : 0))}
+                </p>
+                {item.photoUrls.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={onSplitCarousel}
+                    className="shrink-0 text-xs font-medium text-text-secondary underline decoration-dotted transition-colors hover:text-text-primary"
+                  >
+                    Split into separate posts
+                  </button>
+                )}
+              </div>
               {item.photoUrls.length === 0 && !item.file && (
                 <p className="mb-1.5 text-xs text-warning">Add at least one photo to schedule this post.</p>
               )}
@@ -3194,6 +3448,9 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
             tiktokCreatorInfo={tiktokCreatorInfo}
             contentType={item.contentType}
             videoDurationSec={item.duration}
+            errorFields={errorFields}
+            idPrefix={`${item.id}-`}
+            platformAvailability={platformAvailability}
           />
 
           {tiktokTargeted && !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo) && (
@@ -3201,6 +3458,8 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
               brandContentToggle={item.tiktokBrandContentToggle}
               checked={item.tiktokConsentChecked}
               onCheckedChange={(checked) => onUpdate({ tiktokConsentChecked: checked })}
+              showError={errorFields.includes("tiktokConsent")}
+              idPrefix={`${item.id}-`}
             />
           )}
 
@@ -3215,8 +3474,11 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 value={item.date}
                 min={today}
                 onChange={(e) => onUpdate({ date: e.target.value })}
-                className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-2.5 py-2 text-sm text-text-primary [color-scheme:dark] focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+                className={`w-full rounded-radius-xl border bg-white/10 px-2.5 py-2 text-sm text-text-primary [color-scheme:dark] focus:outline-none focus:ring-1 ${
+                  errorFields.includes("date") ? "border-error focus:border-error focus:ring-error" : "border-white/10 focus:border-white/40 focus:ring-white/30"
+                }`}
               />
+              {errorFields.includes("date") && <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.date}</p>}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-text-secondary">
@@ -3227,10 +3489,16 @@ function BulkVideoCard({ item, index, captionMode, onUpdate, onRemove, tiktokCon
                 type="time"
                 value={item.time}
                 onChange={(e) => onUpdate({ time: e.target.value })}
-                className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-2.5 py-2 text-sm text-text-primary [color-scheme:dark] focus:border-white/40 focus:outline-none focus:ring-1 focus:ring-white/30"
+                className={`w-full rounded-radius-xl border bg-white/10 px-2.5 py-2 text-sm text-text-primary [color-scheme:dark] focus:outline-none focus:ring-1 ${
+                  errorFields.includes("time") ? "border-error focus:border-error focus:ring-error" : "border-white/10 focus:border-white/40 focus:ring-white/30"
+                }`}
               />
+              {errorFields.includes("time") && <p className="mt-1 text-xs text-error">{MISSING_FIELD_MESSAGES.time}</p>}
             </div>
           </div>
+          {errorFields.includes("media") && (
+            <p className="text-xs text-error">{MISSING_FIELD_MESSAGES.media} above.</p>
+          )}
 
           <div>
             <textarea
@@ -3318,7 +3586,6 @@ export default function SchedulerDashboardPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
   // Task 5.1: posts state
   const [posts, setPosts] = useState<Post[]>([]);
-  const [totalPostCount, setTotalPostCount] = useState(0);
   const [postsLoading, setPostsLoading] = useState(false);
 
   const single = items.length <= 1;
@@ -3440,6 +3707,45 @@ export default function SchedulerDashboardPage() {
     (urls: string[]) => updateItem(item0Id, { photoUrls: urls }),
     [updateItem, item0Id],
   );
+  // Undo for handleFilesAdded's makeCarousel default (Q2 decision, see
+  // CONTEXT.md's Carousel/Separate posts entries): replaces one carousel
+  // item with N single-photo items, spaced the same way a multi-file drop
+  // already is. Each new item inherits the source item's title/tags/caption
+  // as a starting point (all photos were meant for one post a moment ago)
+  // rather than blanking them out — bulk mode lets the user edit each
+  // individually afterward.
+  //
+  // Takes an itemId (not just item0) — code review on this same change
+  // caught that a carousel can land inside a bulk batch too (handleFilesAdded
+  // merges 2+ photos regardless of how many other items already exist), and
+  // the original item0-only version had no undo path for that case at all.
+  // Splices the split-out items into the original item's position so
+  // sibling bulk items are preserved, not dropped.
+  const handleSplitCarousel = useCallback(
+    (itemId: string) => {
+      setItems((prev) => {
+        const idx = prev.findIndex((it) => it.id === itemId);
+        if (idx === -1) return prev;
+        const target = prev[idx];
+        const groups = splitCarouselPhotos(target.photoUrls);
+        if (groups.length < 2) return prev;
+        const split: VideoItem[] = groups.map((urls, k) => ({
+          ...makeDraft(today),
+          file: null,
+          uploadStatus: "done",
+          contentType: "photo",
+          photoUrls: urls,
+          platforms: ["tiktok"],
+          title: target.title,
+          tags: target.tags,
+          caption: target.caption,
+          ...spacedSlot(target.date, k),
+        }));
+        return [...prev.slice(0, idx), ...split, ...prev.slice(idx + 1)];
+      });
+    },
+    [today],
+  );
   const noop = useCallback(() => {}, []);
 
   // ── TikTok connection + creator info (Decisions 4, 7) ──
@@ -3450,18 +3756,51 @@ export default function SchedulerDashboardPage() {
   // 9.1-9.2). Same /api/connections/status response as tiktokConnected, it
   // already returns both keys, so this is one fetch, not two.
   const [instagramConnected, setInstagramConnected] = useState(false);
+  // Instagram's own "posting as @username" panel (parity with TikTok's,
+  // which sources its nickname from the live creator-info fetch below
+  // instead — TikTok doesn't need this state). YouTube excluded on purpose
+  // (decided against broadening its OAuth scope — see the connect-instagram
+  // Phase 4 work earlier this session).
+  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/connections/status")
       .then((res) => (res.ok ? res.json() : { tiktok: false, instagram: false }))
-      .then((data: { tiktok?: boolean; instagram?: boolean }) => {
-        setTiktokConnected(Boolean(data.tiktok));
-        setInstagramConnected(Boolean(data.instagram));
-      })
+      .then(
+        (data: {
+          tiktok?: boolean;
+          instagram?: boolean;
+          usernames?: { instagram?: string | null };
+        }) => {
+          setTiktokConnected(Boolean(data.tiktok));
+          setInstagramConnected(Boolean(data.instagram));
+          setInstagramUsername(data.usernames?.instagram ?? null);
+        },
+      )
       .catch(() => {
         setTiktokConnected(false);
         setInstagramConnected(false);
+        setInstagramUsername(null);
       });
+  }, []);
+
+  // Platform availability (see CONTEXT.md) — defaults every platform to
+  // available while loading/on error, so a slow or failed fetch never
+  // falsely locks the compose checkboxes for a platform that's actually open.
+  const [platformAvailability, setPlatformAvailability] = useState<{
+    platforms: Record<Platform, boolean>;
+    isAdmin: boolean;
+  }>({ platforms: { tiktok: true, instagram: true, youtube: true }, isAdmin: false });
+
+  useEffect(() => {
+    fetch("/api/platform-availability")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { platforms?: Record<Platform, boolean>; isAdmin?: boolean } | null) => {
+        if (data?.platforms) {
+          setPlatformAvailability({ platforms: data.platforms, isAdmin: !!data.isAdmin });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -3533,7 +3872,6 @@ export default function SchedulerDashboardPage() {
       const sorted = [...all].sort(
         (a, b) => new Date(b.scheduled_time).getTime() - new Date(a.scheduled_time).getTime(),
       );
-      setTotalPostCount(sorted.length);
       setPosts(sorted.slice(0, 5));
     } finally {
       setPostsLoading(false);
@@ -3575,7 +3913,10 @@ export default function SchedulerDashboardPage() {
       }
       if (valid.length === 0) return;
 
-      const existingReal = items.filter((i) => i.file);
+      // A carousel item has no `.file` (its photos are uploaded immediately,
+      // below) — must count it as "real" too, or a second handleFilesAdded
+      // call would under-count how many item-slots are already used.
+      const existingReal = items.filter((i) => i.file || i.photoUrls.length > 0);
       const slots = MAX_VIDEOS - existingReal.length;
       if (slots <= 0) {
         setToast({ type: "error", message: `Max ${MAX_VIDEOS} items reached.` });
@@ -3586,28 +3927,82 @@ export default function SchedulerDashboardPage() {
         setToast({ type: "error", message: `Max ${MAX_VIDEOS} items — extra files were skipped.` });
       }
 
-      const newItems: VideoItem[] = accepted.map(({ file, contentType }) => ({
-        ...makeDraft(today),
-        file,
-        // Upload is deferred until "Schedule" is clicked (see
-        // ScheduleCard.handleSubmit / handleScheduleAll) — selecting a file
-        // here only stages it locally; its preview renders straight from the
-        // File object (URL.createObjectURL), no network call yet.
-        uploadStatus: "idle",
-        contentType,
-        // Photo posts are TikTok-only — YouTube has no photo-post concept
-        // (PlatformFields also disables/grays the YouTube checkbox for this
-        // card). Default to TikTok directly rather than defaulting to the
-        // usual YouTube and forcing the user to fix an unselectable state.
-        platforms: contentType === "photo" ? ["tiktok"] : ["youtube"],
-      }));
+      // 2+ photos dropped in the same batch become ONE carousel post instead
+      // of N separate ones. Uploaded immediately here (unlike the deferred
+      // single-file path below) because photoUrls holds real storage paths,
+      // not staged File objects — mirrors handleAddPhotoFiles' upload-now
+      // pattern (the existing "add more to this card" mechanism) for the
+      // same reason. A single photo keeps the old deferred behavior
+      // unchanged, so "pick more from history" afterward still works exactly
+      // as before.
+      const acceptedPhotos = accepted.filter((a) => a.contentType === "photo");
+      const acceptedVideos = accepted.filter((a) => a.contentType === "video");
+      // The carousel-vs-separate decision itself is tested in isolation —
+      // see lib/scheduler-carousel-pure.ts's planDroppedItems and
+      // npm run test:scheduler-carousel — rather than re-deriving the same
+      // ">= 2" rule inline here with nothing checking it stays right.
+      const makeCarousel = planDroppedItems(accepted.map((a) => a.contentType)).some(
+        (i) => i.kind === "carousel",
+      );
+
+      const newItems: VideoItem[] = [];
+
+      if (makeCarousel) {
+        const uploaded: string[] = [];
+        let firstError: string | null = null;
+        for (const { file } of acceptedPhotos) {
+          try {
+            const { storagePath } = await signAndUploadFile(file, "image");
+            uploaded.push(storagePath);
+          } catch (err) {
+            firstError = err instanceof Error ? err.message : "Upload failed.";
+          }
+        }
+        if (uploaded.length > 0) {
+          newItems.push({
+            ...makeDraft(today),
+            file: null,
+            uploadStatus: "done",
+            contentType: "photo",
+            photoUrls: uploaded,
+            platforms: ["tiktok"],
+          });
+        }
+        if (firstError) {
+          setToast({ type: "error", message: firstError });
+        }
+      } else {
+        for (const { file, contentType } of acceptedPhotos) {
+          newItems.push({
+            ...makeDraft(today),
+            file,
+            uploadStatus: "idle",
+            contentType,
+            platforms: ["tiktok"],
+          });
+        }
+      }
+
+      for (const { file, contentType } of acceptedVideos) {
+        newItems.push({
+          ...makeDraft(today),
+          // Upload is deferred until "Schedule" is clicked (see
+          // ScheduleCard.handleSubmit / handleScheduleAll) — selecting a
+          // file here only stages it locally; its preview renders straight
+          // from the File object (URL.createObjectURL), no network call yet.
+          file,
+          uploadStatus: "idle",
+          contentType,
+          platforms: ["youtube"],
+        });
+      }
 
       // Auto-space (Prompt 4): once the batch reaches 2+ items, lay the NEW
       // cards into 2-per-day slots (12:00 / 18:00), continuing from the existing
       // count and anchored to the first card's date. Existing cards keep their
       // date/time so any manual edits are preserved.
       const willBeBulk = existingReal.length + newItems.length >= 2;
-      const anchorDate = (existingReal[0] ?? newItems[0]).date;
+      const anchorDate = (existingReal[0] ?? newItems[0])?.date ?? today;
       const spacedNew = willBeBulk
         ? newItems.map((it, k) => ({
             ...it,
@@ -3737,35 +4132,54 @@ export default function SchedulerDashboardPage() {
   const [schedulingAll, setSchedulingAll] = useState(false);
   // Empty caption is confirmed once for the whole batch, not per card.
   const [confirmEmptyBatch, setConfirmEmptyBatch] = useState(false);
+  // Set once Schedule All has been clicked with at least one card unready —
+  // flags ALL unready cards at once (a grilled decision, see CONTEXT.md),
+  // not just the first, so one click surfaces the whole picture instead of a
+  // fix-one-click-again loop across multiple cards.
+  const [bulkShowErrors, setBulkShowErrors] = useState(false);
 
   // A card is schedulable when it has hosted media (a video URL, or at least
   // one photo for a photo-typed card — openspec/changes/tiktok-photo-post
-  // Decision 7's empty-photo-card guard, mirroring single-mode
-  // ScheduleCard.isReady), a title, and a date/time. Duration no longer gates
-  // scheduling.
-  const itemReady = useCallback(
-    (i: VideoItem) => {
-      // A staged raw file (not yet uploaded — upload is deferred until
-      // Schedule All is clicked) counts as "has media" too.
+  // Decision 7's empty-photo-card guard), a title, and a date/time — shares
+  // its actual rule-set with single mode's ScheduleCard via
+  // getMissingFields (lib/schedule-validation-pure.ts) rather than a second,
+  // independently-maintained boolean expression.
+  const getItemMissingFields = useCallback(
+    (i: VideoItem): MissingField[] => {
       const hasMedia = i.contentType === "photo" ? (i.photoUrls.length > 0 || !!i.file) : !!(i.storagePath || i.videoUrl || i.file);
-      const essentialsOk = hasMedia && !!i.title.trim() && !!i.date && !!i.time && i.platforms.length > 0;
-      if (!essentialsOk) return false;
-      if (!i.platforms.includes("tiktok")) return true;
-
-      const durationOk =
-        !i.duration || !tiktokCreatorInfo.maxVideoPostDurationSec || i.duration <= tiktokCreatorInfo.maxVideoPostDurationSec;
-      const discloseComplete = !i.tiktokDiscloseOpen || i.tiktokBrandOrganicToggle || i.tiktokBrandContentToggle;
-      return !!i.tiktokPrivacyLevel && !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo) && durationOk && discloseComplete && i.tiktokConsentChecked;
+      const targetsTikTok = i.platforms.includes("tiktok");
+      const tiktokNotBlocked = !targetsTikTok || !tiktokCreatorInfoBlocksSchedule(tiktokCreatorInfo);
+      const tiktokDurationOk =
+        !targetsTikTok || !i.duration || !tiktokCreatorInfo.maxVideoPostDurationSec || i.duration <= tiktokCreatorInfo.maxVideoPostDurationSec;
+      const tiktokDiscloseComplete =
+        !targetsTikTok || !i.tiktokDiscloseOpen || i.tiktokBrandOrganicToggle || i.tiktokBrandContentToggle;
+      const tiktokConsentOk = !targetsTikTok || i.tiktokConsentChecked;
+      return getMissingFields({
+        hasMedia,
+        title: i.title,
+        date: i.date,
+        time: i.time,
+        platformCount: i.platforms.length,
+        // Bulk mode retries at the whole-card level (scheduleStatus), not
+        // per-platform like single mode's platformResults.
+        pendingPlatformCount: i.platforms.length,
+        targetsTikTok,
+        tiktokPrivacyLevel: i.tiktokPrivacyLevel,
+        tiktokNotBlocked,
+        tiktokDurationOk,
+        tiktokDiscloseComplete,
+        tiktokConsentOk,
+      });
     },
     [tiktokCreatorInfo],
   );
+  const itemReady = useCallback((i: VideoItem) => getItemMissingFields(i).length === 0, [getItemMissingFields]);
 
   // Targets = ready cards not already scheduled (so a re-run retries failures too).
   const scheduleTargets = items.filter(
     (i) => itemReady(i) && i.scheduleStatus !== "scheduled",
   );
   const hasScheduled = items.some((i) => i.scheduleStatus === "scheduled");
-  const canScheduleAll = scheduleTargets.length > 0 && !schedulingAll;
 
   // Reset the batch confirm if the set of empty-caption targets changes underneath.
   useEffect(() => {
@@ -3778,6 +4192,15 @@ export default function SchedulerDashboardPage() {
     const targets = items.filter(
       (i) => itemReady(i) && i.scheduleStatus !== "scheduled",
     );
+    const unready = items.filter(
+      (i) => !itemReady(i) && i.scheduleStatus !== "scheduled",
+    );
+    if (unready.length > 0) {
+      setBulkShowErrors(true);
+      document.getElementById(`bulk-card-${unready[0].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      setBulkShowErrors(false);
+    }
     if (targets.length === 0 || schedulingAll) return;
 
     if (status !== "authenticated") {
@@ -3978,6 +4401,7 @@ export default function SchedulerDashboardPage() {
                 contentType={item0.contentType}
                 photoUrls={item0.photoUrls}
                 onPhotoUrlsChange={handleItem0PhotoUrls}
+                onSplitCarousel={() => handleSplitCarousel(item0Id)}
               />
               <DescriptionCard
                 caption={item0.caption}
@@ -4027,8 +4451,10 @@ export default function SchedulerDashboardPage() {
                 tiktokConnected={tiktokConnected}
                 tiktokCreatorInfo={tiktokCreatorInfo}
                 instagramConnected={instagramConnected}
+                instagramUsername={instagramUsername}
                 contentType={item0.contentType}
                 photoUrls={item0.photoUrls}
+                platformAvailability={platformAvailability}
               />
             </div>
           </div>
@@ -4135,6 +4561,9 @@ export default function SchedulerDashboardPage() {
                   onRemove={() => removeItem(it.id)}
                   tiktokConnected={tiktokConnected}
                   tiktokCreatorInfo={tiktokCreatorInfo}
+                  onSplitCarousel={() => handleSplitCarousel(it.id)}
+                  showErrors={bulkShowErrors}
+                  platformAvailability={platformAvailability}
                 />
               ))}
             </div>
@@ -4156,7 +4585,7 @@ export default function SchedulerDashboardPage() {
               <button
                 type="button"
                 onClick={handleScheduleAll}
-                disabled={!canScheduleAll}
+                disabled={schedulingAll}
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-bg-static-white px-4 py-3 text-sm font-semibold text-text-static-black shadow-lg shadow-N0/30 transition-all duration-200 hover:bg-N800 hover:shadow-N0/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 {schedulingAll ? (
@@ -4171,6 +4600,9 @@ export default function SchedulerDashboardPage() {
                   </>
                 )}
               </button>
+              {bulkShowErrors && scheduleTargets.length < items.filter((i) => i.scheduleStatus !== "scheduled").length && (
+                <p className="text-center text-xs text-error">Fix the highlighted card(s) above to schedule everything.</p>
+              )}
 
               {hasScheduled && !schedulingAll && (
                 <button
@@ -4197,7 +4629,6 @@ export default function SchedulerDashboardPage() {
         <div className="mt-6">
           <RecentPostsCard
             posts={posts}
-            totalCount={totalPostCount}
             loading={postsLoading}
             onRetry={handleRetry}
           />

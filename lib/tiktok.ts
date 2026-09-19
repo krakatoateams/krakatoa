@@ -522,6 +522,11 @@ async function initPhotoPost(params: {
         brand_organic_toggle: params.brandOrganicToggle,
         brand_content_toggle: params.brandContentToggle,
         disable_comment: params.disableComment,
+        // Photos have no inherent audio — TikTok picks recommended music for
+        // the carousel automatically; the poster can still change it in-app
+        // afterward. Confirmed nested in post_info (not top-level, unlike
+        // is_aigc below) against TikTok's Photo Post API reference.
+        auto_add_music: true,
         // Duet and Stitch are not a photo-post concept in TikTok's UX
         // guideline, but critically that's a UI rule, not part of this
         // endpoint's actual request schema — TikTok's Photo Post post_info

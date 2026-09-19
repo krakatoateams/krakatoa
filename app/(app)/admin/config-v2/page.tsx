@@ -31,6 +31,7 @@ import {
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
+import type { Platform } from "@/lib/platform-availability-pure";
 
 const INPUT =
   "w-full min-h-[36px] rounded border border-white/10 bg-white/[0.02] px-2 py-1 text-sm text-white outline-none focus:border-white/30";
@@ -941,6 +942,79 @@ function ToolSection({
   );
 }
 
+const PLATFORM_LABELS: Record<Platform, string> = { tiktok: "TikTok", instagram: "Instagram", youtube: "YouTube" };
+
+/**
+ * Platform availability (see CONTEXT.md) — a single per-platform flag,
+ * product-wide, governing both connecting the account (Settings) and
+ * selecting it in Schedule (currently the only consumer of these
+ * connections). Deliberately self-contained (own fetch/save via
+ * /api/platform-availability) rather than woven into ToolSection's autosave
+ * machinery, since this isn't actually tool-scoped data.
+ */
+function PlatformAvailabilitySection() {
+  const [platforms, setPlatforms] = useState<Record<Platform, boolean> | null>(null);
+  const [saving, setSaving] = useState<Platform | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/platform-availability")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load"))))
+      .then((data: { platforms: Record<Platform, boolean> }) => setPlatforms(data.platforms))
+      .catch(() => setError("Failed to load platform availability."));
+  }, []);
+
+  const toggle = async (platform: Platform, enabled: boolean) => {
+    if (!platforms) return;
+    const prev = platforms;
+    setPlatforms({ ...platforms, [platform]: enabled });
+    setSaving(platform);
+    setError(null);
+    try {
+      const res = await fetch("/api/platform-availability", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to save.");
+    } catch {
+      setPlatforms(prev);
+      setError(`Failed to update ${PLATFORM_LABELS[platform]}.`);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border border-white/10 p-3">
+      <h3 className="text-sm font-semibold text-white">Platform availability</h3>
+      <p className="mt-0.5 text-xs text-gray-500">
+        Controls whether each platform can be connected (Settings) and selected (Schedule) at all, for everyone except
+        admins — admins always see a &quot;Preview&quot; badge and can use it anyway.
+      </p>
+      {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
+      <div className="mt-3 flex flex-wrap gap-4">
+        {platforms === null
+          ? Object.keys(PLATFORM_LABELS).map((platform) => (
+              <div key={platform} className="h-4 w-20 animate-pulse rounded bg-white/10" />
+            ))
+          : (Object.keys(PLATFORM_LABELS) as Platform[]).map((platform) => (
+              <label key={platform} className="inline-flex items-center gap-1.5 text-xs text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={platforms[platform]}
+                  disabled={saving === platform}
+                  onChange={(e) => toggle(platform, e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-white/20 bg-white/[0.02]"
+                />
+                {PLATFORM_LABELS[platform]}
+              </label>
+            ))}
+      </div>
+    </section>
+  );
+}
+
 export default function AdminConfigV2Page() {
   const [tools, setTools] = useState<AdminToolNode[]>([]);
   const toolsRef = useRef(tools);
@@ -1303,20 +1377,29 @@ export default function AdminConfigV2Page() {
 
       <div className="space-y-2">
           {tools.map((tool) => (
-            <ToolSection
-              key={tool.toolKey}
-              tool={tool}
-              billingSettings={billingSettings}
-              saving={saving}
-              savedPricing={savedPricing}
-              onChange={(patch) => patchTool(tool.toolKey, patch)}
-              onCommitTool={(fields) => commitTool(tool.toolKey, fields)}
-              onSaveVariant={saveVariant}
-              onToggleVariant={toggleVariant}
-              onCommitMode={commitFeatureMode}
-              onCommitCatalog={commitModelCatalog}
-              onCommitPipelineRole={commitPipelineRole}
-            />
+            <>
+              <ToolSection
+                key={tool.toolKey}
+                tool={tool}
+                billingSettings={billingSettings}
+                saving={saving}
+                savedPricing={savedPricing}
+                onChange={(patch) => patchTool(tool.toolKey, patch)}
+                onCommitTool={(fields) => commitTool(tool.toolKey, fields)}
+                onSaveVariant={saveVariant}
+                onToggleVariant={toggleVariant}
+                onCommitMode={commitFeatureMode}
+                onCommitCatalog={commitModelCatalog}
+                onCommitPipelineRole={commitPipelineRole}
+              />
+              {/* Platform availability (see CONTEXT.md) is product-wide, not
+                  tool-scoped (Schedule is the only current consumer of these
+                  connections) — placed right after the Schedule tool's own
+                  section since that's the natural place an admin looks for
+                  it, kept as its own self-contained fetch/save rather than
+                  woven into ToolSection's autosave machinery. */}
+              {tool.toolKey === "schedule" && <PlatformAvailabilitySection key="platform-availability" />}
+            </>
           ))}
       </div>
       </div>

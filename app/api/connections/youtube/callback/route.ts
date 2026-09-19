@@ -72,6 +72,12 @@ export async function GET(request: NextRequest) {
       ? new Date(tokens.expiry_date).toISOString()
       : new Date(Date.now() + 3_600_000).toISOString();
 
+    // No channel-title capture here on purpose: reading it (channels.list)
+    // needs at least the youtube.readonly scope, and this app only ever
+    // requests youtube.upload — broadening that would mean every user
+    // re-consenting and possibly a Google OAuth re-verification, decided
+    // against for now. The YouTube badge just shows "Connected" with no
+    // name, unlike TikTok/Instagram.
     const { error: upsertErr } = await supabaseServer
       .from("platform_tokens")
       .upsert(

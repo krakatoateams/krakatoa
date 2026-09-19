@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { getCreatorInfo, TikTokCreatorInfoError, type TikTokCreatorInfo } from "@/lib/tiktok";
 import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
 import { refreshTikTokTokensLocked } from "@/lib/tiktok-refresh-locked";
+import { updatePlatformUsername } from "@/lib/platform-tokens";
 
 function successResponse(info: TikTokCreatorInfo) {
   return NextResponse.json({
@@ -66,6 +67,7 @@ export async function GET() {
 
   try {
     const info = await getCreatorInfo(token.access_token);
+    await updatePlatformUsername(userId, "tiktok", info.creatorNickname);
     return successResponse(info);
   } catch (err) {
     if (err instanceof TikTokCreatorInfoError) {
@@ -86,6 +88,7 @@ export async function GET() {
       }
 
       const info = await getCreatorInfo(refreshed.accessToken);
+      await updatePlatformUsername(userId, "tiktok", info.creatorNickname);
       return successResponse(info);
     } catch (retryErr) {
       if (retryErr instanceof TikTokCreatorInfoError) {

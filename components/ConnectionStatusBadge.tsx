@@ -65,29 +65,50 @@ const CONNECTION_BADGE_CONFIG: Record<
   instagram: { label: "Instagram", icon: InstagramIcon },
 };
 
+type ConnectionState = { connected: boolean; username: string | null };
+
 export function ConnectionStatusBadge({ platform }: { platform: ConnectionPlatform }) {
   const { status } = useCurrentUser();
-  const [connected, setConnected] = useState<boolean | null>(null);
+  const [state, setState] = useState<ConnectionState | null>(null);
   const { label, icon: Icon } = CONNECTION_BADGE_CONFIG[platform];
 
   useEffect(() => {
     if (status === "loading") return;
-    if (status === "unauthenticated") { setConnected(false); return; }
+    if (status === "unauthenticated") { setState({ connected: false, username: null }); return; }
     fetch("/api/connections/status")
       .then((res) => (res.ok ? res.json() : {}))
-      .then((data: Partial<Record<ConnectionPlatform, boolean>>) => setConnected(Boolean(data[platform])))
-      .catch(() => setConnected(false));
+      .then(
+        (data: Partial<Record<ConnectionPlatform, boolean>> & {
+          usernames?: Partial<Record<ConnectionPlatform, string | null>>;
+        }) =>
+          setState({
+            connected: Boolean(data[platform]),
+            username: data.usernames?.[platform] ?? null,
+          }),
+      )
+      .catch(() => setState({ connected: false, username: null }));
   }, [status, platform]);
 
-  if (status === "loading" || connected === null) {
+  if (status === "loading" || state === null) {
     return <div className="h-9 w-44 animate-pulse rounded-lg bg-white/10" />;
   }
-  if (connected) {
+  if (state.connected) {
+    // Clickable too (not just the disconnected state below) — lets someone
+    // reconnect a different account without hunting for Settings first; see
+    // the "switch account" half of this component's reason for existing.
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-1.5">
+      <Link
+        href="/dashboard/settings?tab=connections"
+        className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-1.5 transition-colors hover:border-success/50 hover:bg-success/15"
+      >
         <Icon className="h-3.5 w-3.5 text-success" />
-        <span className="text-xs font-medium text-success">{label} Connected</span>
-      </div>
+        <span className="text-xs font-medium text-success">
+          {label} Connected
+          {/* Best-effort (see each OAuth callback route) — omitted rather
+              than shown as a placeholder when it never got fetched. */}
+          {state.username ? <span className="text-success/70"> · {state.username}</span> : null}
+        </span>
+      </Link>
     );
   }
   // Not connected — same pill, but doubles as the CTA: no extra banner/alert
