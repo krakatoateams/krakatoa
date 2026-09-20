@@ -279,6 +279,12 @@ export async function ensureInstagramCompatibleImage(storagePath: string): Promi
 
 export type InstagramMediaType = "IMAGE" | "REELS";
 
+// Re-exported (not redefined) so the constant lives in exactly one place —
+// see lib/instagram-publish-pure.ts, which is safe for client code too
+// (this module is server-only) — used directly by
+// SchedulerPageClient.tsx's compose UI, not just here and the cron route.
+export { INSTAGRAM_CAROUSEL_MAX_ITEMS } from "@/lib/instagram-publish-pure";
+
 export interface CreateMediaContainerParams {
   igUserId: string;
   accessToken: string;
@@ -288,6 +294,10 @@ export interface CreateMediaContainerParams {
    * first) before calling this. */
   mediaUrl: string;
   caption: string;
+  /** True for one of a carousel's child containers — per Meta's own
+   * documented example request, a child container carries no caption at
+   * all; only the parent CAROUSEL container does (see createCarouselContainer). */
+  isCarouselItem?: boolean;
 }
 
 interface RawInstagramApiError {
@@ -311,8 +321,13 @@ export async function createMediaContainer(
   const url = `${INSTAGRAM_GRAPH_BASE}/${params.igUserId}/media`;
   const body: Record<string, string> = {
     media_type: params.mediaType,
-    caption: params.caption,
+    // A carousel child carries no caption — only the parent CAROUSEL
+    // container does (see createCarouselContainer).
+    ...(params.isCarouselItem ? {} : { caption: params.caption }),
   };
+  if (params.isCarouselItem) {
+    body.is_carousel_item = "true";
+  }
   if (params.mediaType === "IMAGE") {
     body.image_url = params.mediaUrl;
   } else {
@@ -334,6 +349,49 @@ export async function createMediaContainer(
   if (!json || !res.ok || !json.id) {
     throw new Error(
       `Instagram container creation failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
+    );
+  }
+
+  return { containerId: json.id };
+}
+
+/**
+ * Creates the parent carousel container (POST /{ig-user-id}/media,
+ * media_type: CAROUSEL) once every child container (created via
+ * createMediaContainer with isCarouselItem: true) has reached FINISHED —
+ * per Meta's docs, children must be ready before the parent can reference
+ * them. Returns a container_id that behaves exactly like a single-image/
+ * video container from this point on: the existing getContainerStatus /
+ * publishContainer flow polls and publishes it unchanged.
+ */
+export async function createCarouselContainer(
+  igUserId: string,
+  accessToken: string,
+  childContainerIds: string[],
+  caption: string,
+): Promise<{ containerId: string }> {
+  const url = `${INSTAGRAM_GRAPH_BASE}/${igUserId}/media`;
+  const body = {
+    media_type: "CAROUSEL",
+    children: childContainerIds.join(","),
+    caption,
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const rawText = await res.text();
+  const json = parseInstagramGraphJson(rawText) as RawCreateContainerResponse | null;
+
+  if (!json || !res.ok || !json.id) {
+    throw new Error(
+      `Instagram carousel container creation failed: HTTP ${res.status} ${instagramGraphErrorDetail(rawText)}`,
     );
   }
 
