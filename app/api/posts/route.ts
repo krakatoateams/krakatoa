@@ -10,6 +10,7 @@ import {
   resolveSignedMediaUrl,
   resolveStoragePath,
 } from "@/lib/storage-signed-url";
+import { INSTAGRAM_CAROUSEL_MAX_ITEMS } from "@/lib/instagram";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -79,6 +80,7 @@ export async function POST(req: NextRequest) {
       tiktok_disable_comment,
       tiktok_disable_duet,
       tiktok_disable_stitch,
+      tiktok_auto_add_music,
       youtube_privacy_status,
     } = body as {
       video_url?: string;
@@ -98,6 +100,7 @@ export async function POST(req: NextRequest) {
       tiktok_disable_comment?: boolean;
       tiktok_disable_duet?: boolean;
       tiktok_disable_stitch?: boolean;
+      tiktok_auto_add_music?: boolean;
       youtube_privacy_status?: string;
     };
 
@@ -127,15 +130,13 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
-      // Instagram's Content Publishing API has no carousel support in this
-      // integration (single image only — see connect-instagram/design.md
-      // Non-Goals); reject a multi-photo Instagram post outright rather than
-      // silently publishing only the first photo, which the cron already
-      // does defensively but which would otherwise be a confusing surprise
-      // discovered only after scheduling.
-      if (platform === "instagram" && photo_urls.length > 1) {
+      // Instagram carousel — bounded to Meta's own documented max (see
+      // lib/instagram.ts's INSTAGRAM_CAROUSEL_MAX_ITEMS), lower than
+      // TikTok's 35. Reject outright rather than silently truncating, which
+      // would be a confusing surprise discovered only after scheduling.
+      if (platform === "instagram" && photo_urls.length > INSTAGRAM_CAROUSEL_MAX_ITEMS) {
         return NextResponse.json(
-          { error: "Instagram photo posts support exactly one photo (no carousel)." },
+          { error: `Instagram carousels support at most ${INSTAGRAM_CAROUSEL_MAX_ITEMS} photos.` },
           { status: 400 },
         );
       }
@@ -353,10 +354,15 @@ export async function POST(req: NextRequest) {
       // layers agreeing beats one implicit default.
       insertRow.tiktok_disable_duet = hasPhotoUrls ? true : Boolean(tiktok_disable_duet);
       insertRow.tiktok_disable_stitch = hasPhotoUrls ? true : Boolean(tiktok_disable_stitch);
+      // Photo-post-only concept (see lib/tiktok.ts's initPhotoPost) — null
+      // for a video post rather than a meaningless true/false. Missing/
+      // undefined defaults to true, matching the previously-hardcoded
+      // behavior for anyone whose client hasn't sent an explicit choice.
+      insertRow.tiktok_auto_add_music = hasPhotoUrls ? Boolean(tiktok_auto_add_music ?? true) : null;
       if (ownedPhotoUrls) insertRow.photo_urls = ownedPhotoUrls;
     }
     // Instagram has no privacy-level/disclosure-toggle equivalent — just the
-    // shared photo_urls column (validated above as exactly one entry).
+    // shared photo_urls column (validated above against INSTAGRAM_CAROUSEL_MAX_ITEMS).
     if (platform === "instagram" && ownedPhotoUrls) {
       insertRow.photo_urls = ownedPhotoUrls;
     }

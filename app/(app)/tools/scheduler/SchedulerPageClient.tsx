@@ -25,7 +25,8 @@ import CreationsHistory from "@/components/CreationsHistory";
 import { ConnectionStatusBadge, InstagramIcon } from "@/components/ConnectionStatusBadge";
 import { planDroppedItems, splitCarouselPhotos } from "@/lib/scheduler-carousel-pure";
 import { getMissingFields, MISSING_FIELD_MESSAGES, type MissingField } from "@/lib/schedule-validation-pure";
-import { isPlatformUsable, platformBadge, type Platform } from "@/lib/platform-availability-pure";
+import { isPlatformUsable, platformBadge, soleSelectablePlatform, type Platform } from "@/lib/platform-availability-pure";
+import { INSTAGRAM_CAROUSEL_MAX_ITEMS } from "@/lib/instagram-publish-pure";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
 import {
@@ -151,6 +152,10 @@ interface VideoItem {
   tiktokAllowComment: boolean;
   tiktokAllowDuet: boolean;
   tiktokAllowStitch: boolean;
+  // Photo-post only (see contentType below): whether to let TikTok auto-add
+  // recommended music to the carousel. Defaults true, matching the
+  // previously-hardcoded behavior — now a real, cancelable choice instead.
+  tiktokAutoAddMusic: boolean;
   // Express consent for TikTok's Music Usage Confirmation declaration — an
   // act, not real data (never sent to the API), but lifted here rather than
   // local component state so bulk mode's "Schedule All" gate can check it
@@ -212,6 +217,7 @@ function makeDraft(date: string, time: string = nextScheduleSlot().time): VideoI
     tiktokAllowComment: false,
     tiktokAllowDuet: false,
     tiktokAllowStitch: false,
+    tiktokAutoAddMusic: true,
     tiktokConsentChecked: false,
     platformResults: {},
     contentType: "video",
@@ -237,7 +243,10 @@ function creationPhotoRef(item: CreationHistoryItem): string {
 function photoCountLabel(count: number): string {
   if (count === 0) return "Pick photos for this TikTok post — the first one you select is the cover.";
   if (count === 1) return "1 photo selected · add more to create a carousel (up to 35)";
-  return `${count}/35 photos selected · first = cover`;
+  // Explicit, not just implied by the "Split into separate posts" undo
+  // button's wording — a grilled decision after live feedback that the
+  // default (one combined post) wasn't stated up front.
+  return `These ${count} photos will be posted together as one carousel (max 35) · first = cover`;
 }
 
 // Direct-to-Supabase upload: the server only mints a tiny signed-URL payload
@@ -1384,6 +1393,7 @@ type PlatformPatch = Partial<
     | "tiktokAllowComment"
     | "tiktokAllowDuet"
     | "tiktokAllowStitch"
+    | "tiktokAutoAddMusic"
     | "tiktokConsentChecked"
     | "platformResults"
   >
@@ -1483,6 +1493,7 @@ function PlatformFields({
   tiktokAllowComment,
   tiktokAllowDuet,
   tiktokAllowStitch,
+  tiktokAutoAddMusic,
   onChange,
   tiktokConnected,
   tiktokCreatorInfo,
@@ -1517,6 +1528,7 @@ function PlatformFields({
   tiktokAllowComment: boolean;
   tiktokAllowDuet: boolean;
   tiktokAllowStitch: boolean;
+  tiktokAutoAddMusic: boolean;
   onChange: (patch: PlatformPatch) => void;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
@@ -1583,6 +1595,30 @@ function PlatformFields({
   const tiktokBadge = platformBadge(platformAvailability.platforms.tiktok, platformAvailability.canBypass.tiktok);
   const instagramBadge = platformBadge(platformAvailability.platforms.instagram, platformAvailability.canBypass.instagram);
 
+  // When exactly one platform is selectable at all (today: TikTok, once
+  // YouTube/Instagram are coming-soon and/or not yet connected), there's no
+  // real choice to make — auto-select it and skip the checkbox chooser
+  // entirely (a grilled decision after live feedback that a permanently-
+  // checked, non-interactive checkbox read as confusing). Matches each
+  // checkbox's own render condition below exactly.
+  const onlyPlatform = soleSelectablePlatform({
+    youtube: youtubeUsable && !isPhoto,
+    tiktok: tiktokConnected && tiktokUsable,
+    instagram: instagramConnected && instagramUsable,
+  });
+
+  // Actually select it in state, not just visually — the submit/validation
+  // path reads `platforms`, not this render-time computation. Depends only
+  // on `onlyPlatform` (not `platforms`/`onChange`) so it fires once when the
+  // sole option first becomes known, not on every keystroke elsewhere on
+  // the card.
+  useEffect(() => {
+    if (onlyPlatform && (platforms.length !== 1 || platforms[0] !== onlyPlatform)) {
+      onChange({ platforms: [onlyPlatform] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyPlatform]);
+
   // Unchecking a platform also clears its stale result — otherwise re-checking
   // it later could be silently skipped on the next submit as "already succeeded".
   const toggleYoutube = (checked: boolean) => {
@@ -1639,8 +1675,19 @@ function PlatformFields({
       </div>
       <div id={`${idPrefix}post-platforms`}>
         <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-          Platform <span className="text-error" aria-hidden>*</span>
+          Platform {!onlyPlatform && <span className="text-error" aria-hidden>*</span>}
         </label>
+        {onlyPlatform ? (
+          // Exactly one platform is selectable — nothing to choose between,
+          // so no checkbox at all (a grilled decision: a permanently-checked,
+          // non-interactive checkbox reads as confusing, see CONTEXT.md).
+          <div className="flex items-center gap-2 rounded-radius-xl border border-white/30 bg-white/10 px-3.5 py-2.5 text-sm text-N900">
+            {onlyPlatform === "youtube" && <YoutubeIcon className="h-4 w-4 text-red-400" />}
+            {onlyPlatform === "tiktok" && <Music2 className="h-4 w-4 text-pink-400" />}
+            {onlyPlatform === "instagram" && <InstagramIcon className="h-4 w-4 text-fuchsia-400" />}
+            {PLATFORM_LABELS[onlyPlatform]}
+          </div>
+        ) : (
         <div className="flex flex-wrap gap-2">
           {/* Coming-soon platforms don't render here at all for a regular
               user (a grilled reversal of the earlier "visible but locked"
@@ -1707,24 +1754,27 @@ function PlatformFields({
             </label>
           )}
         </div>
-        {!tiktokConnected && tiktokUsable && status === "authenticated" && (
+        )}
+        {/* These hints only make sense when there's an actual choice to
+            explain — moot once onlyPlatform has already made the pick. */}
+        {!onlyPlatform && !tiktokConnected && tiktokUsable && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect TikTok in Settings to publish there too.</p>
         )}
-        {instagramSupported && !instagramConnected && instagramUsable && status === "authenticated" && (
+        {!onlyPlatform && instagramSupported && !instagramConnected && instagramUsable && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect Instagram in Settings to publish there too.</p>
         )}
-        {isPhoto && (
+        {!onlyPlatform && isPhoto && (
           <p className="mt-1 text-xs text-text-disabled">YouTube doesn&apos;t support photo posts.</p>
         )}
-        {/* Non-blocking — Instagram still gets the cover photo, matching
-            ScheduleCard's own platformPhotoUrls.slice(0, 1) for Instagram.
-            Not a disable, since a single photo is perfectly valid there. */}
-        {hasInstagram && isPhoto && (photoCount ?? 0) > 1 && (
+        {/* Non-blocking — Instagram now posts a real carousel too (grilled
+            decision, see CONTEXT.md), just capped lower than TikTok's 35.
+            Matches ScheduleCard's own platformPhotoUrls.slice(0, 10). */}
+        {hasInstagram && isPhoto && (photoCount ?? 0) > INSTAGRAM_CAROUSEL_MAX_ITEMS && (
           <p className="mt-1 text-xs text-warning">
-            Instagram supports only 1 photo — additional photos won&apos;t be included.
+            Instagram carousels support up to {INSTAGRAM_CAROUSEL_MAX_ITEMS} photos — additional photos won&apos;t be included.
           </p>
         )}
-        {platforms.length === 0 && (
+        {!onlyPlatform && platforms.length === 0 && (
           <p className="mt-1 text-xs text-warning">Select at least one platform.</p>
         )}
         {errorFields.includes("alreadyPosted") && (
@@ -1889,15 +1939,28 @@ function PlatformFields({
                     )}
                   </div>
 
-                  {/* auto_add_music is always sent true for photo posts (see
-                      lib/tiktok.ts's initPhotoPost) — TikTok's API has no
-                      field to pick a specific track, only this on/off, so
-                      the honest thing to tell the user is where they CAN
-                      actually choose a song. */}
+                  {/* TikTok's API has no field to pick a specific track —
+                      only this on/off (see lib/tiktok.ts's initPhotoPost) —
+                      so this is a real choice, not just informational: skip
+                      TikTok's auto-picked music entirely, or let it add one
+                      (still changeable afterward in the TikTok app either
+                      way). Previously hardcoded true with no opt-out. */}
                   {isPhoto && (
-                    <p className="text-[11px] text-text-disabled">
-                      TikTok will add recommended music automatically — you can change the song afterward in the TikTok app.
-                    </p>
+                    <div>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={tiktokAutoAddMusic}
+                          onChange={(e) => onChange({ tiktokAutoAddMusic: e.target.checked })}
+                          className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                        />
+                        Let TikTok add recommended music
+                      </label>
+                      <p className="mt-0.5 pl-5.5 text-[11px] text-text-disabled">
+                        TikTok picks the song itself — there&apos;s no way to choose a specific track here or see the name in
+                        advance, but you can always change it afterward in the TikTok app.
+                      </p>
+                    </div>
                   )}
 
                   {!isPhoto && (
@@ -2080,6 +2143,7 @@ interface ScheduleCardProps {
   tiktokAllowComment: boolean;
   tiktokAllowDuet: boolean;
   tiktokAllowStitch: boolean;
+  tiktokAutoAddMusic: boolean;
   tiktokConsentChecked: boolean;
   onPlatformPatch: (patch: PlatformPatch) => void;
   // Persists the result of the deferred upload (see handleSubmit) into the
@@ -2126,6 +2190,7 @@ function ScheduleCard({
   tiktokAllowComment,
   tiktokAllowDuet,
   tiktokAllowStitch,
+  tiktokAutoAddMusic,
   tiktokConsentChecked,
   onPlatformPatch,
   onMediaUploaded,
@@ -2275,13 +2340,14 @@ function ScheduleCard({
           // an empty video_url for an Instagram photo post instead — Instagram
           // supports photo mode too, just without TikTok's carousel.
           const isPhoto = (p === "tiktok" || p === "instagram") && contentType === "photo";
-          // Instagram has no carousel support (single image only — see
-          // connect-instagram/design.md Non-Goals and the server-side
-          // "exactly one photo" check in app/api/posts/route.ts): only the
-          // first (cover) photo is sent, extra ones are dropped here rather
-          // than triggering that check's 400. The checkbox-level warning
-          // below tells the user this before they ever submit.
-          const platformPhotoUrls = p === "instagram" ? effectivePhotoUrls.slice(0, 1) : effectivePhotoUrls;
+          // Instagram carousel support (grilled decision — see CONTEXT.md):
+          // same full photo set TikTok gets, bounded to Instagram's own
+          // lower max (10, vs TikTok's 35 — see lib/instagram.ts's
+          // INSTAGRAM_CAROUSEL_MAX_ITEMS, the source of truth for this
+          // number) rather than TikTok's own, higher limit. Extra photos
+          // are dropped here rather than triggering the server's 400 — the
+          // warning below tells the user this before they ever submit.
+          const platformPhotoUrls = p === "instagram" ? effectivePhotoUrls.slice(0, INSTAGRAM_CAROUSEL_MAX_ITEMS) : effectivePhotoUrls;
 
           const res = await fetch("/api/posts", {
             method: "POST",
@@ -2311,6 +2377,7 @@ function ScheduleCard({
                     // initPhotoPost hardcoding them too.
                     tiktok_disable_duet: isPhoto ? true : !tiktokAllowDuet,
                     tiktok_disable_stitch: isPhoto ? true : !tiktokAllowStitch,
+                    ...(isPhoto ? { tiktok_auto_add_music: tiktokAutoAddMusic } : {}),
                   }
                 : {}),
             }),
@@ -2386,6 +2453,7 @@ function ScheduleCard({
           tiktokAllowComment={tiktokAllowComment}
           tiktokAllowDuet={tiktokAllowDuet}
           tiktokAllowStitch={tiktokAllowStitch}
+          tiktokAutoAddMusic={tiktokAutoAddMusic}
           onChange={onPlatformPatch}
           tiktokConnected={tiktokConnected}
           tiktokCreatorInfo={tiktokCreatorInfo}
@@ -3438,6 +3506,7 @@ function BulkVideoCard({
             tiktokAllowComment={item.tiktokAllowComment}
             tiktokAllowDuet={item.tiktokAllowDuet}
             tiktokAllowStitch={item.tiktokAllowStitch}
+            tiktokAutoAddMusic={item.tiktokAutoAddMusic}
             onChange={onUpdate}
             tiktokConnected={tiktokConnected}
             tiktokCreatorInfo={tiktokCreatorInfo}
@@ -3806,18 +3875,29 @@ export default function SchedulerDashboardPage() {
   // doesn't retroactively clear a platform already in a draft's default
   // selection (makeDraft() below defaults every new item to ["youtube"],
   // which is "coming soon" out of the box today). Strip it the moment real
-  // availability data arrives; a no-op for anyone isPlatformUsable bypasses
-  // (admin, or a platform-scoped tool_preview_access allowlist entry).
+  // availability data arrives, AND every time a new item is created (a video
+  // dropped after the initial load carries the same stale default, and
+  // platformAvailability itself won't change again to re-trigger this) — a
+  // no-op for anyone isPlatformUsable bypasses (admin, or a platform-scoped
+  // tool_preview_access allowlist entry). Depending on `items` here is safe
+  // from a re-render loop: the updater returns the exact same array
+  // reference when nothing needs stripping, and React bails out of
+  // re-rendering (and re-running this effect) on a referentially-equal
+  // functional update.
   useEffect(() => {
-    setItems((prev) =>
-      prev.map((it) => {
+    setItems((prev) => {
+      let changed = false;
+      const next = prev.map((it) => {
         const usable = it.platforms.filter((p) =>
           isPlatformUsable(platformAvailability.platforms[p], platformAvailability.canBypass[p]),
         );
-        return usable.length === it.platforms.length ? it : { ...it, platforms: usable };
-      }),
-    );
-  }, [platformAvailability]);
+        if (usable.length === it.platforms.length) return it;
+        changed = true;
+        return { ...it, platforms: usable };
+      });
+      return changed ? next : prev;
+    });
+  }, [platformAvailability, items]);
 
   useEffect(() => {
     if (!tiktokConnected) {
@@ -4327,6 +4407,7 @@ export default function SchedulerDashboardPage() {
                     tiktok_disable_comment: !it.tiktokAllowComment,
                     tiktok_disable_duet: isPhoto ? true : !it.tiktokAllowDuet,
                     tiktok_disable_stitch: isPhoto ? true : !it.tiktokAllowStitch,
+                    ...(isPhoto ? { tiktok_auto_add_music: it.tiktokAutoAddMusic } : {}),
                   }
                 : {}),
             }),
@@ -4461,6 +4542,7 @@ export default function SchedulerDashboardPage() {
                 tiktokAllowComment={item0.tiktokAllowComment}
                 tiktokAllowDuet={item0.tiktokAllowDuet}
                 tiktokAllowStitch={item0.tiktokAllowStitch}
+                tiktokAutoAddMusic={item0.tiktokAutoAddMusic}
                 tiktokConsentChecked={item0.tiktokConsentChecked}
                 onPlatformPatch={handleItem0PlatformPatch}
                 onMediaUploaded={handleItem0PlatformPatch}

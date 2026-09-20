@@ -504,6 +504,7 @@ async function initPhotoPost(params: {
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
   disableComment: boolean;
+  autoAddMusic: boolean;
   isAigc: boolean;
 }): Promise<{ publishId: string }> {
   assertDisclosurePrivacyCompatible(params.privacyLevel, params.brandContentToggle);
@@ -522,11 +523,13 @@ async function initPhotoPost(params: {
         brand_organic_toggle: params.brandOrganicToggle,
         brand_content_toggle: params.brandContentToggle,
         disable_comment: params.disableComment,
-        // Photos have no inherent audio — TikTok picks recommended music for
-        // the carousel automatically; the poster can still change it in-app
-        // afterward. Confirmed nested in post_info (not top-level, unlike
-        // is_aigc below) against TikTok's Photo Post API reference.
-        auto_add_music: true,
+        // Photos have no inherent audio — this lets the poster choose
+        // whether TikTok picks recommended music for the carousel
+        // automatically (still changeable in-app afterward either way).
+        // Confirmed nested in post_info (not top-level, unlike is_aigc
+        // below) against TikTok's Photo Post API reference. Previously
+        // hardcoded true with no opt-out — now a real user choice.
+        auto_add_music: params.autoAddMusic,
         // Duet and Stitch are not a photo-post concept in TikTok's UX
         // guideline, but critically that's a UI rule, not part of this
         // endpoint's actual request schema — TikTok's Photo Post post_info
@@ -680,6 +683,9 @@ export interface TikTokPhotoPublishParams {
   brandOrganicToggle: boolean;
   brandContentToggle: boolean;
   disableComment: boolean;
+  /** Whether TikTok should auto-add recommended music to this carousel —
+   * previously always true with no opt-out, now a real user choice. */
+  autoAddMusic: boolean;
   /** This app's own origin (e.g. from resolveOrigin(request) in the cron
    * route) — used to build the verified-domain proxy URL for each photo. */
   origin: string;
@@ -729,6 +735,7 @@ export async function publishPhotoToTikTok(params: TikTokPhotoPublishParams): Pr
     brandOrganicToggle: params.brandOrganicToggle,
     brandContentToggle: params.brandContentToggle,
     disableComment: params.disableComment,
+    autoAddMusic: params.autoAddMusic,
     isAigc: params.isAigc,
   });
 

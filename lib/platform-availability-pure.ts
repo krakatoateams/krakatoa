@@ -11,19 +11,34 @@ export type Platform = "tiktok" | "instagram" | "youtube";
 export type PlatformBadge = "none" | "soon" | "preview";
 
 /** Whether the given caller may actually use this platform right now. */
-export function isPlatformUsable(enabled: boolean, isAdmin: boolean): boolean {
-  return enabled || isAdmin;
+export function isPlatformUsable(enabled: boolean, canBypass: boolean): boolean {
+  return enabled || canBypass;
 }
 
 /**
  * Which badge (if any) a coming-soon platform's checkbox/connect-button
  * should show. "none" when the platform is enabled for everyone; "preview"
- * only for an admin viewing a disabled platform (so they don't forget mid-
- * testing that regular users can't see this yet); "soon" for everyone else.
+ * only for a bypassed caller (admin, or a platform-scoped preview grant)
+ * viewing a disabled platform, so they don't forget mid-testing that regular
+ * users can't see this yet; "soon" for everyone else.
  */
-export function platformBadge(enabled: boolean, isAdmin: boolean): PlatformBadge {
+export function platformBadge(enabled: boolean, canBypass: boolean): PlatformBadge {
   if (enabled) return "none";
-  return isAdmin ? "preview" : "soon";
+  return canBypass ? "preview" : "soon";
+}
+
+/**
+ * When exactly one platform is selectable at all (see CONTEXT.md: this is
+ * the common case once the others are coming-soon, or simply not yet
+ * connected), the caller should skip the platform chooser entirely and
+ * auto-select it — asking someone to "choose" between one real option and
+ * nothing is a choice they never actually have. Returns null when zero or
+ * more than one platform is selectable, since both cases genuinely need the
+ * normal chooser (nothing to auto-select, or a real decision to make).
+ */
+export function soleSelectablePlatform(selectable: Partial<Record<Platform, boolean>>): Platform | null {
+  const list = (Object.keys(selectable) as Platform[]).filter((p) => selectable[p]);
+  return list.length === 1 ? list[0] : null;
 }
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
@@ -44,6 +59,20 @@ export function platformAvailabilitySelfCheck(): void {
   assertEqual(platformBadge(true, true), "none", "enabled platform shows no badge for an admin either");
   assertEqual(platformBadge(false, false), "soon", "disabled platform shows Soon for a regular user");
   assertEqual(platformBadge(false, true), "preview", "disabled platform shows Preview for an admin");
+
+  assertEqual(soleSelectablePlatform({ tiktok: true }), "tiktok", "exactly one selectable platform is returned");
+  assertEqual(
+    soleSelectablePlatform({ tiktok: true, instagram: false, youtube: false }),
+    "tiktok",
+    "false entries don't count, only one true entry",
+  );
+  assertEqual(
+    soleSelectablePlatform({ tiktok: true, instagram: true }),
+    null,
+    "two selectable platforms means a real choice — no auto-select",
+  );
+  assertEqual(soleSelectablePlatform({}), null, "no platforms at all — nothing to auto-select");
+  assertEqual(soleSelectablePlatform({ tiktok: false }), null, "zero selectable platforms — nothing to auto-select");
 }
 
 if (require.main === module) {

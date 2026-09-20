@@ -15,10 +15,12 @@ import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
 import {
   ensureInstagramCompatibleImage,
   createMediaContainer,
+  createCarouselContainer,
   getContainerStatus,
   publishContainer,
   getMediaPermalink,
   isInstagramPermanentFailure,
+  INSTAGRAM_CAROUSEL_MAX_ITEMS,
 } from "@/lib/instagram";
 import {
   assertPathOwnedByUser,
@@ -211,7 +213,7 @@ export async function GET(req: NextRequest) {
       .eq("id", post.id)
       .eq("status", "scheduled")
       .or(`publish_started_at.is.null,publish_started_at.lt.${staleCutoff}`)
-      .select("id, youtube_video_id, tiktok_publish_id, tiktok_rate_limited_first_attempted_at, instagram_container_id, instagram_media_id, instagram_first_attempted_at")
+      .select("id, youtube_video_id, tiktok_publish_id, tiktok_rate_limited_first_attempted_at, instagram_container_id, instagram_media_id, instagram_first_attempted_at, instagram_carousel_child_ids")
       .maybeSingle();
 
     if (claimErr) {
@@ -377,6 +379,11 @@ export async function GET(req: NextRequest) {
                   brandOrganicToggle: !!post.tiktok_brand_organic_toggle,
                   brandContentToggle: !!post.tiktok_brand_content_toggle,
                   disableComment: !!post.tiktok_disable_comment,
+                  // Previously hardcoded true with no opt-out — nullable
+                  // column, so an existing pre-migration row (genuinely
+                  // published with auto_add_music: true) reads back the same
+                  // way rather than silently flipping to false.
+                  autoAddMusic: post.tiktok_auto_add_music ?? true,
                   origin: resolveOrigin(req),
                   isAigc,
                 })
@@ -562,13 +569,23 @@ export async function GET(req: NextRequest) {
         const igUserId = token.platform_user_id;
 
         let containerId: string | null = claimed.instagram_container_id ?? null;
+        let childIds: string[] | null = claimed.instagram_carousel_child_ids ?? null;
         const firstAttemptedAt = claimed.instagram_first_attempted_at ?? null;
+        // 2+ photos — grilled decision (see CONTEXT.md): Instagram now gets
+        // the same full photo set TikTok already does, bounded to its own
+        // (lower) max, instead of the old cover-photo-only stopgap.
+        const isCarousel = isPhotoPost && post.photo_urls.length > 1;
 
         // ── 10-minute wall-clock give-up (design.md Decision 6) ────────────
         // Independent of MAX_PUBLISH_ATTEMPTS, which counts thrown errors —
         // "still IN_PROGRESS" is neither a failure nor something that
-        // increments publish_attempts.
-        if (containerId && firstAttemptedAt && Date.now() - new Date(firstAttemptedAt).getTime() > INSTAGRAM_GIVE_UP_MS) {
+        // increments publish_attempts. Also covers a carousel stuck in the
+        // children-processing phase (childIds set, containerId/parent still
+        // null) — the same 10-minute budget as a single container, which may
+        // be tight for a large carousel (up to INSTAGRAM_CAROUSEL_MAX_ITEMS
+        // photos each needing to process); revisit if that proves too short
+        // in practice rather than guessing at a larger number now.
+        if ((containerId || childIds) && firstAttemptedAt && Date.now() - new Date(firstAttemptedAt).getTime() > INSTAGRAM_GIVE_UP_MS) {
           await supabaseServer
             .from("posts")
             .update({
@@ -577,6 +594,7 @@ export async function GET(req: NextRequest) {
               publish_started_at: null,
               publish_attempts: (post.publish_attempts ?? 0) + 1,
               instagram_container_id: null,
+              instagram_carousel_child_ids: null,
               instagram_first_attempted_at: null,
             })
             .eq("id", post.id);
@@ -585,15 +603,116 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
+        if (isCarousel && !containerId) {
+          // ── Carousel: N child containers must all reach FINISHED before
+          // the parent CAROUSEL container can be created. One phase per
+          // cron tick — create children this tick, start checking their
+          // status next tick — rather than create+poll in one request,
+          // since N containers makes that meaningfully more to get right
+          // than the single-container case below already does in one tick. ──
+          const targetPhotos = post.photo_urls.slice(0, INSTAGRAM_CAROUSEL_MAX_ITEMS);
+          if (!childIds || childIds.length < targetPhotos.length) {
+            // Resume-safe: only create the photos NOT already represented by
+            // an existing child container — a mid-loop crash/timeout on a
+            // prior tick must never lose already-created containers (they'd
+            // be orphaned on Instagram's side with no way back to them) or
+            // recreate them (duplicate containers). Persisted after EACH
+            // container, not once at the end — same "persist immediately,
+            // before doing anything else" principle the single-container
+            // path below already follows.
+            const alreadyCreated = childIds ?? [];
+            const remaining = targetPhotos.slice(alreadyCreated.length);
+            const updatedIds = [...alreadyCreated];
+            for (const rawPhoto of remaining) {
+              const photoStoragePath = resolveStoragePath(null, rawPhoto);
+              if (!photoStoragePath) {
+                throw new Error("Instagram carousel post has an unresolvable photo storage path.");
+              }
+              await assertPathOwnedByUser(photoStoragePath, post.user_id);
+              const compatiblePath = await ensureInstagramCompatibleImage(photoStoragePath);
+              const mediaUrl = await signOwnedStoragePathForPublish(compatiblePath, post.user_id);
+              const created = await createMediaContainer({
+                igUserId,
+                accessToken: token.access_token,
+                mediaType: "IMAGE",
+                mediaUrl,
+                caption: "",
+                isCarouselItem: true,
+              });
+              updatedIds.push(created.containerId);
+              await supabaseServer
+                .from("posts")
+                .update({
+                  instagram_carousel_child_ids: updatedIds,
+                  instagram_first_attempted_at: firstAttemptedAt ?? new Date().toISOString(),
+                })
+                .eq("id", post.id);
+            }
+            childIds = updatedIds;
+            console.log(`[cron] Post ${post.id} — Instagram carousel now has ${childIds.length}/${targetPhotos.length} child containers created`);
+            skipped++;
+            continue;
+          }
+
+          // Children already exist from a prior tick — one status check per
+          // child this tick, same "never an in-request polling loop" rule
+          // as the single-container case.
+          const childStatuses = await Promise.all(childIds.map((id) => getContainerStatus(token.access_token, id)));
+          console.log(`[cron] Instagram carousel children for post ${post.id}:`, childStatuses.join(", "));
+
+          if (childStatuses.some((s) => s === "ERROR" || s === "EXPIRED")) {
+            await supabaseServer
+              .from("posts")
+              .update({
+                status: "failed",
+                last_error: "Instagram reported an error while processing one of this carousel's photos.",
+                publish_started_at: null,
+                publish_attempts: (post.publish_attempts ?? 0) + 1,
+                instagram_container_id: null,
+                instagram_carousel_child_ids: null,
+                instagram_first_attempted_at: null,
+              })
+              .eq("id", post.id);
+            console.error(`[cron] ✗ Post ${post.id} — an Instagram carousel child container ERROR/EXPIRED`);
+            failed++;
+            continue;
+          }
+
+          if (!childStatuses.every((s) => s === "FINISHED")) {
+            const doneCount = childStatuses.filter((s) => s === "FINISHED").length;
+            console.warn(`[cron] ⏳ Post ${post.id} — ${doneCount}/${childIds.length} Instagram carousel photos ready, will recheck next run`);
+            await supabaseServer
+              .from("posts")
+              .update({
+                last_error: `Still processing on Instagram (${doneCount}/${childIds.length} photos ready) — checking again automatically.`,
+                publish_started_at: null,
+              })
+              .eq("id", post.id);
+            skipped++;
+            continue;
+          }
+
+          // Every child FINISHED — create the parent carousel container.
+          // From here on, this container behaves exactly like a single-image
+          // container to the rest of this function (poll, publish, give-up).
+          console.log(`[cron] All ${childIds.length} Instagram carousel children ready for post ${post.id} — creating parent container`);
+          const createdParent = await createCarouselContainer(igUserId, token.access_token, childIds, post.description ?? "");
+          containerId = createdParent.containerId;
+          await supabaseServer
+            .from("posts")
+            .update({ instagram_container_id: containerId })
+            .eq("id", post.id);
+        }
+
         if (!containerId) {
           // ── Create the container (or resume checking a prior attempt) ───
           const mediaType: "IMAGE" | "REELS" = isPhotoPost ? "IMAGE" : "REELS";
           let mediaUrl: string;
 
           if (isPhotoPost) {
-            // Single-image only (design.md Non-Goals) — always the first
-            // photo, same simplification TikTok's own cover-photo handling
-            // uses elsewhere in this codebase.
+            // Always the cover (first) photo — the isCarousel branch above
+            // already handles 2+ photos separately, so reaching here with
+            // isPhotoPost means exactly one photo.
             const rawPhoto = post.photo_urls[0];
             const photoStoragePath = resolveStoragePath(null, rawPhoto);
             if (!photoStoragePath) {
@@ -630,7 +749,7 @@ export async function GET(req: NextRequest) {
               instagram_first_attempted_at: firstAttemptedAt ?? new Date().toISOString(),
             })
             .eq("id", post.id);
-        } else {
+        } else if (!isCarousel) {
           console.log(
             `[cron] Post ${post.id} already has Instagram container ${containerId} from a prior attempt — re-checking status instead of recreating`,
           );
