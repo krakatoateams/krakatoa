@@ -57,6 +57,9 @@ export const metadata: Metadata = {
       { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
+  other: {
+    "facebook-domain-verification": "43lx22iwu3kwq40pvf8vlfv8ymeccc",
+  },
 };
 
 export const viewport: Viewport = {
