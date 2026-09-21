@@ -645,6 +645,19 @@ export async function GET(req: NextRequest) {
                 .update({
                   instagram_carousel_child_ids: updatedIds,
                   instagram_first_attempted_at: firstAttemptedAt ?? new Date().toISOString(),
+                  // Release the claim after EVERY child, not just at the end
+                  // of this tick's loop — a bug found live: leaving this
+                  // unset kept publish_started_at pinned to this tick's claim
+                  // time, which (a) blocked the next cron tick from
+                  // re-claiming the post until the 10-minute stale window
+                  // passed even if this tick's function simply ran out of
+                  // time partway through the loop, and (b) made the UI show
+                  // "Publishing" indefinitely instead of "Retrying", since
+                  // lib/post-status.ts's derivePostDisplayStatus reads a
+                  // recent publish_started_at as "actively publishing right
+                  // now" regardless of what's actually happening.
+                  publish_started_at: null,
+                  last_error: `Preparing Instagram carousel (${updatedIds.length}/${targetPhotos.length} photos uploaded) — continuing automatically.`,
                 })
                 .eq("id", post.id);
             }

@@ -2611,9 +2611,13 @@ interface RecentPostsCardProps {
   posts: Post[];
   loading: boolean;
   onRetry: (postId: string) => void;
+  onCancel: (postId: string) => void;
 }
 
-function RecentPostsCard({ posts, loading, onRetry }: RecentPostsCardProps) {
+function RecentPostsCard({ posts, loading, onRetry, onCancel }: RecentPostsCardProps) {
+  // Two-click confirm per card, same pattern as Calendar's confirmingCancel —
+  // tracked by post id here since this renders a whole list, not one post.
+  const [confirmingCancelId, setConfirmingCancelId] = useState<string | null>(null);
   return (
     <Card>
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -2648,6 +2652,8 @@ function RecentPostsCard({ posts, loading, onRetry }: RecentPostsCardProps) {
               <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${cfg.dot}`} />
               {post.platform === "tiktok" ? (
                 <Music2 className="h-3.5 w-3.5 shrink-0 text-pink-400" aria-label="TikTok" />
+              ) : post.platform === "instagram" ? (
+                <InstagramIcon className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" aria-label="Instagram" />
               ) : (
                 <YoutubeIcon className="h-3.5 w-3.5 shrink-0 text-red-400" aria-label="YouTube" />
               )}
@@ -2687,6 +2693,32 @@ function RecentPostsCard({ posts, loading, onRetry }: RecentPostsCardProps) {
                 >
                   Retry
                 </button>
+              )}
+              {/* Cancel — mirrors Calendar's own canEdit condition exactly:
+                  never while genuinely mid-claim ("publishing"), so this
+                  never race-conditions against an upload that's about to
+                  actually go live. A stuck "Publishing" that never resolves
+                  is a bug to fix (see the cron give-up/claim-release logic),
+                  not something a cancel button should paper over. */}
+              {(post.status === "scheduled" || post.status === "failed") && display !== "publishing" && (
+                confirmingCancelId === post.id ? (
+                  <button
+                    type="button"
+                    onClick={() => { onCancel(post.id); setConfirmingCancelId(null); }}
+                    className="shrink-0 cursor-pointer rounded-radius-xl border border-error/40 bg-error/10 px-2.5 py-1 text-xs text-error transition-colors hover:bg-error/20"
+                  >
+                    Confirm?
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingCancelId(post.id)}
+                    aria-label="Cancel this post"
+                    className="shrink-0 cursor-pointer rounded-radius-xl border border-white/10 px-2.5 py-1 text-xs text-text-secondary transition-colors hover:border-error/40 hover:text-error"
+                  >
+                    Cancel
+                  </button>
+                )
               )}
             </div>
           );
@@ -4473,6 +4505,31 @@ export default function SchedulerDashboardPage() {
     }
   }, [fetchPosts]);
 
+  // Cancel from Recent Posts — mirrors the Calendar page's existing
+  // handleCancelPost exactly (same endpoint, same status value). Unlike
+  // retry, a failed cancel must surface an error rather than fail silently —
+  // the user needs to know their post is still scheduled, not assume it's
+  // canceled. The backend (app/api/posts/[id]/route.ts's isActivePublishClaim
+  // guard) refuses this with a 409 while the post is genuinely mid-claim —
+  // RecentPostsCard only renders the button when derivePostDisplayStatus
+  // isn't "publishing", matching Calendar's own canEdit condition, so that
+  // 409 should be rare in practice, not the normal path.
+  const handleCancel = useCallback(async (postId: string) => {
+    try {
+      const res = await fetch(`/api/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Cancel failed.");
+      setToast({ type: "success", message: "Post canceled." });
+      fetchPosts();
+    } catch (err) {
+      setToast({ type: "error", message: err instanceof Error ? err.message : "Cancel failed." });
+    }
+  }, [fetchPosts]);
+
   return (
     <div className="min-h-screen">
       <Suspense fallback={null}>
@@ -4729,6 +4786,7 @@ export default function SchedulerDashboardPage() {
             posts={posts}
             loading={postsLoading}
             onRetry={handleRetry}
+            onCancel={handleCancel}
           />
         </div>
       </PageContainer>
