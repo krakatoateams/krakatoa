@@ -208,7 +208,12 @@ function makeDraft(date: string, time: string = nextScheduleSlot().time): VideoI
     time,
     scheduleStatus: "idle",
     scheduleError: null,
-    platforms: ["youtube"],
+    // Not ["youtube"] — a brand-new draft doesn't yet know which platforms
+    // are actually connected (that's an async fetch), so defaulting to a
+    // fixed platform risks preselecting one the user hasn't connected.
+    // `onlyPlatform` (PlatformFields) auto-selects once connection status is
+    // known, if exactly one connected+usable platform exists.
+    platforms: [],
     youtubePrivacyStatus: "public",
     tiktokPrivacyLevel: null,
     tiktokBrandOrganicToggle: false,
@@ -1495,10 +1500,10 @@ function PlatformFields({
   tiktokAllowStitch,
   tiktokAutoAddMusic,
   onChange,
+  youtubeConnected,
   tiktokConnected,
   tiktokCreatorInfo,
   instagramConnected,
-  instagramUsername,
   photoCount,
   contentType,
   videoDurationSec,
@@ -1530,6 +1535,11 @@ function PlatformFields({
   tiktokAllowStitch: boolean;
   tiktokAutoAddMusic: boolean;
   onChange: (patch: PlatformPatch) => void;
+  // YouTube has no per-account settings panel (privacy/format live directly
+  // on the checkbox's own block below), so unlike TikTok/Instagram it just
+  // gates whether the checkbox renders/auto-selects at all — a disconnected
+  // account must never show up as an already-checked platform.
+  youtubeConnected: boolean;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
   // Optional and single-mode-only for now (openspec/changes/connect-instagram
@@ -1538,10 +1548,6 @@ function PlatformFields({
   // Instagram wiring (content-type gating, carousel limits) is a separate,
   // later task.
   instagramConnected?: boolean;
-  // Instagram's own "posting as @username" panel, parity with TikTok's
-  // (which sources its nickname from tiktokCreatorInfo instead). Optional,
-  // same single-mode-only reasoning as instagramConnected above.
-  instagramUsername?: string | null;
   // How many photos are currently staged — used only to warn (not block)
   // when Instagram is targeted with more than one, since Instagram has no
   // carousel support (see the isPhoto/platformPhotoUrls handling in
@@ -1602,7 +1608,7 @@ function PlatformFields({
   // checked, non-interactive checkbox read as confusing). Matches each
   // checkbox's own render condition below exactly.
   const onlyPlatform = soleSelectablePlatform({
-    youtube: youtubeUsable && !isPhoto,
+    youtube: youtubeConnected && youtubeUsable && !isPhoto,
     tiktok: tiktokConnected && tiktokUsable,
     instagram: instagramConnected && instagramUsable,
   });
@@ -1694,10 +1700,10 @@ function PlatformFields({
               design, after seeing it live read as confusing/misleading —
               see CONTEXT.md) — an admin or preview-allowlisted account still
               sees it, enabled, with a "Preview" badge. */}
-          {youtubeUsable && (
+          {youtubeConnected && youtubeUsable && (
             <label
               title={isPhoto ? "YouTube doesn't support photo posts" : undefined}
-              className={`flex items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+              className={`flex items-start gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
                 isPhoto
                   ? "cursor-not-allowed border-white/10 bg-white/5 text-text-disabled"
                   : hasYoutube
@@ -1710,17 +1716,22 @@ function PlatformFields({
                 checked={hasYoutube}
                 disabled={isPhoto}
                 onChange={(e) => toggleYoutube(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
+                className="mt-0.5 h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30 disabled:cursor-not-allowed"
               />
-              <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-text-disabled" : "text-red-400"}`} />
-              YouTube
-              {youtubeBadge !== "none" && <PlatformSoonBadge kind={youtubeBadge} />}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <YoutubeIcon className={`h-4 w-4 ${isPhoto ? "text-text-disabled" : "text-red-400"}`} />
+                  YouTube
+                  {youtubeBadge !== "none" && <PlatformSoonBadge kind={youtubeBadge} />}
+                </div>
+                <p className="mt-0.5 text-xs text-text-disabled">Video only</p>
+              </div>
             </label>
           )}
 
           {tiktokConnected && tiktokUsable && (
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+              className={`flex cursor-pointer items-start gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
                 hasTiktok ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
@@ -1728,17 +1739,22 @@ function PlatformFields({
                 type="checkbox"
                 checked={hasTiktok}
                 onChange={(e) => toggleTiktok(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                className="mt-0.5 h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
               />
-              <Music2 className="h-4 w-4 text-pink-400" />
-              TikTok
-              {tiktokBadge !== "none" && <PlatformSoonBadge kind={tiktokBadge} />}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Music2 className="h-4 w-4 text-pink-400" />
+                  TikTok
+                  {tiktokBadge !== "none" && <PlatformSoonBadge kind={tiktokBadge} />}
+                </div>
+                <p className="mt-0.5 text-xs text-text-disabled">Photos (carousel, up to 35) or 1 video</p>
+              </div>
             </label>
           )}
 
           {instagramConnected && instagramUsable && (
             <label
-              className={`flex cursor-pointer items-center gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
+              className={`flex cursor-pointer items-start gap-2 rounded-radius-xl border px-3.5 py-2.5 text-sm transition-colors ${
                 hasInstagram ? "border-white/30 bg-white/10 text-N900" : "border-white/10 bg-white/10 text-text-secondary hover:border-white/20"
               }`}
             >
@@ -1746,17 +1762,27 @@ function PlatformFields({
                 type="checkbox"
                 checked={hasInstagram}
                 onChange={(e) => toggleInstagram(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
+                className="mt-0.5 h-3.5 w-3.5 rounded border-white/10 bg-white/10 text-N900 focus:ring-white/30"
               />
-              <InstagramIcon className="h-4 w-4 text-fuchsia-400" />
-              Instagram
-              {instagramBadge !== "none" && <PlatformSoonBadge kind={instagramBadge} />}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <InstagramIcon className="h-4 w-4 text-fuchsia-400" />
+                  Instagram
+                  {instagramBadge !== "none" && <PlatformSoonBadge kind={instagramBadge} />}
+                </div>
+                <p className="mt-0.5 text-xs text-text-disabled">
+                  Photos (carousel, up to {INSTAGRAM_CAROUSEL_MAX_ITEMS}) or 1 video
+                </p>
+              </div>
             </label>
           )}
         </div>
         )}
         {/* These hints only make sense when there's an actual choice to
             explain — moot once onlyPlatform has already made the pick. */}
+        {!onlyPlatform && !youtubeConnected && youtubeUsable && !isPhoto && status === "authenticated" && (
+          <p className="mt-1 text-xs text-text-disabled">Connect YouTube in Settings to publish there too.</p>
+        )}
         {!onlyPlatform && !tiktokConnected && tiktokUsable && status === "authenticated" && (
           <p className="mt-1 text-xs text-text-disabled">Connect TikTok in Settings to publish there too.</p>
         )}
@@ -2079,25 +2105,6 @@ function PlatformFields({
         </div>
       )}
 
-      {/* Instagram parity with TikTok's "posting as" line above — no other
-          settings yet (no privacy level, no interaction toggles for
-          Instagram in this app today), so this panel is deliberately just
-          the identity line. YouTube gets no equivalent (decided against
-          broadening its OAuth scope — see the connect-instagram Phase 4
-          work earlier this session). */}
-      {hasInstagram && (
-        <div className="rounded-radius-xl border border-white/10 bg-white/5 p-3.5">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-N900">
-            <InstagramIcon className="h-3.5 w-3.5 text-fuchsia-400" />
-            Instagram
-            {instagramUsername && (
-              <span className="font-normal text-text-secondary">
-                · posting as @{instagramUsername}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2152,10 +2159,10 @@ interface ScheduleCardProps {
   onMediaUploaded: (
     patch: Partial<Pick<VideoItem, "videoUrl" | "storagePath" | "photoUrls" | "file" | "uploadStatus">>,
   ) => void;
+  youtubeConnected: boolean;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
   instagramConnected?: boolean;
-  instagramUsername?: string | null;
   // TikTok photo posts (openspec/changes/tiktok-photo-post) — read-only here.
   // contentType is derived from what was dropped/picked (UploadCard + the
   // top-level handlers), never set from within ScheduleCard itself.
@@ -2194,10 +2201,10 @@ function ScheduleCard({
   tiktokConsentChecked,
   onPlatformPatch,
   onMediaUploaded,
+  youtubeConnected,
   tiktokConnected,
   tiktokCreatorInfo,
   instagramConnected,
-  instagramUsername,
   contentType,
   photoUrls,
   platformAvailability,
@@ -2455,10 +2462,10 @@ function ScheduleCard({
           tiktokAllowStitch={tiktokAllowStitch}
           tiktokAutoAddMusic={tiktokAutoAddMusic}
           onChange={onPlatformPatch}
+          youtubeConnected={youtubeConnected}
           tiktokConnected={tiktokConnected}
           tiktokCreatorInfo={tiktokCreatorInfo}
           instagramConnected={instagramConnected}
-          instagramUsername={instagramUsername}
           photoCount={photoUrls.length}
           contentType={contentType}
           videoDurationSec={videoDuration}
@@ -3005,6 +3012,7 @@ interface BulkVideoCardProps {
   captionMode: "individual" | "same";
   onUpdate: (patch: Partial<VideoItem>) => void;
   onRemove: () => void;
+  youtubeConnected: boolean;
   tiktokConnected: boolean;
   tiktokCreatorInfo: TikTokCreatorInfoState;
   // Undo for handleFilesAdded's makeCarousel default — a carousel can land
@@ -3026,6 +3034,7 @@ function BulkVideoCard({
   captionMode,
   onUpdate,
   onRemove,
+  youtubeConnected,
   tiktokConnected,
   tiktokCreatorInfo,
   onSplitCarousel,
@@ -3540,6 +3549,7 @@ function BulkVideoCard({
             tiktokAllowStitch={item.tiktokAllowStitch}
             tiktokAutoAddMusic={item.tiktokAutoAddMusic}
             onChange={onUpdate}
+            youtubeConnected={youtubeConnected}
             tiktokConnected={tiktokConnected}
             tiktokCreatorInfo={tiktokCreatorInfo}
             contentType={item.contentType}
@@ -3852,31 +3862,31 @@ export default function SchedulerDashboardPage() {
   // 9.1-9.2). Same /api/connections/status response as tiktokConnected, it
   // already returns both keys, so this is one fetch, not two.
   const [instagramConnected, setInstagramConnected] = useState(false);
-  // Instagram's own "posting as @username" panel (parity with TikTok's,
-  // which sources its nickname from the live creator-info fetch below
-  // instead — TikTok doesn't need this state). YouTube excluded on purpose
-  // (decided against broadening its OAuth scope — see the connect-instagram
-  // Phase 4 work earlier this session).
-  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
+  // YouTube connection only (no username tracked — the "Connected accounts"
+  // row's ConnectionStatusBadge already shows who's connected per platform;
+  // the status route returns this boolean too, it just wasn't being read
+  // here, so a disconnected YouTube fell through to the same gating as a
+  // connected one and could still render/preselect).
+  const [youtubeConnected, setYoutubeConnected] = useState(false);
 
   useEffect(() => {
     fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : { tiktok: false, instagram: false }))
+      .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false, instagram: false }))
       .then(
         (data: {
+          youtube?: boolean;
           tiktok?: boolean;
           instagram?: boolean;
-          usernames?: { instagram?: string | null };
         }) => {
+          setYoutubeConnected(Boolean(data.youtube));
           setTiktokConnected(Boolean(data.tiktok));
           setInstagramConnected(Boolean(data.instagram));
-          setInstagramUsername(data.usernames?.instagram ?? null);
         },
       )
       .catch(() => {
+        setYoutubeConnected(false);
         setTiktokConnected(false);
         setInstagramConnected(false);
-        setInstagramUsername(null);
       });
   }, []);
 
@@ -3904,14 +3914,13 @@ export default function SchedulerDashboardPage() {
 
   // A coming-soon platform must never stay selected/submittable for a
   // non-bypassed user — a disabled checkbox only stops NEW clicks, it
-  // doesn't retroactively clear a platform already in a draft's default
-  // selection (makeDraft() below defaults every new item to ["youtube"],
-  // which is "coming soon" out of the box today). Strip it the moment real
-  // availability data arrives, AND every time a new item is created (a video
-  // dropped after the initial load carries the same stale default, and
-  // platformAvailability itself won't change again to re-trigger this) — a
-  // no-op for anyone isPlatformUsable bypasses (admin, or a platform-scoped
-  // tool_preview_access allowlist entry). Depending on `items` here is safe
+  // doesn't retroactively clear a platform already selected (e.g. via
+  // handleFilesAdded's explicit `platforms: ["tiktok"]`/`["youtube"]`
+  // overrides, or `onlyPlatform` auto-select racing an availability change).
+  // Strip it the moment real availability data arrives, AND every time a new
+  // item is created — a no-op for anyone isPlatformUsable bypasses (admin,
+  // or a platform-scoped tool_preview_access allowlist entry). Depending on
+  // `items` here is safe
   // from a re-render loop: the updater returns the exact same array
   // reference when nothing needs stripping, and React bails out of
   // re-rendering (and re-running this effect) on a referentially-equal
@@ -4603,10 +4612,10 @@ export default function SchedulerDashboardPage() {
                 tiktokConsentChecked={item0.tiktokConsentChecked}
                 onPlatformPatch={handleItem0PlatformPatch}
                 onMediaUploaded={handleItem0PlatformPatch}
+                youtubeConnected={youtubeConnected}
                 tiktokConnected={tiktokConnected}
                 tiktokCreatorInfo={tiktokCreatorInfo}
                 instagramConnected={instagramConnected}
-                instagramUsername={instagramUsername}
                 contentType={item0.contentType}
                 photoUrls={item0.photoUrls}
                 platformAvailability={platformAvailability}
@@ -4714,6 +4723,7 @@ export default function SchedulerDashboardPage() {
                   captionMode={captionMode}
                   onUpdate={(patch) => updateItem(it.id, patch)}
                   onRemove={() => removeItem(it.id)}
+                  youtubeConnected={youtubeConnected}
                   tiktokConnected={tiktokConnected}
                   tiktokCreatorInfo={tiktokCreatorInfo}
                   onSplitCarousel={() => handleSplitCarousel(it.id)}
