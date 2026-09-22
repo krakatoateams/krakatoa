@@ -1,4 +1,4 @@
--- 099_skill_video_defaults.sql
+-- 105_skill_video_defaults.sql
 -- Master skills may pin video duration / resolution / aspect (e.g. Sailor Moon 15s 480p 9:16).
 -- Null = follow the live model defaults. User-owned skills ignore these.
 -- Additive, idempotent, non-destructive.
