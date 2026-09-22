@@ -2,6 +2,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes, createHash } from "crypto";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { resolveOrigin } from "@/lib/tiktok";
+import { getCurrentAdmin } from "@/lib/admin-auth";
+import { getCurrentProfile } from "@/lib/profiles-db";
+import { canPreviewPlatform } from "@/lib/tool-preview-access-db";
+import { getPlatformAvailability } from "@/lib/platform-availability-db";
+import { isPlatformUsable } from "@/lib/platform-availability-pure";
 
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_SCOPES = "user.info.basic,video.publish";
@@ -10,6 +15,21 @@ export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
+  // Platform availability (see CONTEXT.md) — TikTok defaults enabled, but
+  // gated here too for consistency: whichever platform an admin later
+  // disables gets the same real, server-side block, not just TikTok being a
+  // hardcoded special case. Bypassed by an admin, or a narrow email on the
+  // existing tool_preview_access allowlist.
+  const [availability, admin, profile] = await Promise.all([
+    getPlatformAvailability(),
+    getCurrentAdmin(),
+    getCurrentProfile(),
+  ]);
+  const canBypass = !!admin || (await canPreviewPlatform(profile?.email, "tiktok"));
+  if (!isPlatformUsable(availability.tiktok, canBypass)) {
+    return NextResponse.json({ error: "TikTok isn't available yet." }, { status: 403 });
   }
 
   const origin = resolveOrigin(request);

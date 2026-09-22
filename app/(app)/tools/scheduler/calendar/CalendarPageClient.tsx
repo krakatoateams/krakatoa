@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { derivePostDisplayStatus } from "@/lib/post-status";
 import PageContainer from "../../../dashboard/PageContainer";
-import { YoutubeIcon } from "@/components/ConnectionStatusBadge";
+import { YoutubeIcon, InstagramIcon } from "@/components/ConnectionStatusBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,8 @@ interface Post {
   youtube_video_id?: string | null;
   tiktok_publish_id?: string | null;
   tiktok_share_url?: string | null;
+  instagram_media_id?: string | null;
+  instagram_permalink?: string | null;
   title: string;
   description: string;
   tags: string;
@@ -222,9 +224,13 @@ interface PostModalProps {
   onClose: () => void;
   onUpdated: (post: Post) => void;
   onToast: (toast: ToastState) => void;
+  // Connected-account identity, TikTok/Instagram only — see
+  // SchedulerCalendarPage's connectedUsernames for why YouTube is excluded
+  // and why this is the current account, not a per-post snapshot.
+  connectedUsernames: { tiktok: string | null; instagram: string | null };
 }
 
-function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
+function PostModal({ post, onClose, onUpdated, onToast, connectedUsernames }: PostModalProps) {
   const cfg = STATUS_CFG[derivePostDisplayStatus(post)] ?? STATUS_CFG.draft;
   const tags = post.tags ? post.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
@@ -341,12 +347,26 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 <Music2 className="h-5 w-5 text-pink-400" />
                 <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">TikTok</span>
               </>
+            ) : post.platform === "instagram" ? (
+              <>
+                <InstagramIcon className="h-5 w-5 text-fuchsia-400" />
+                <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">Instagram</span>
+              </>
             ) : (
               <>
                 <YoutubeIcon className="h-5 w-5 text-R600" />
                 <span className="text-xs font-medium uppercase tracking-wider text-text-disabled">YouTube</span>
               </>
             )}
+            {/* Currently-connected account, not a per-post snapshot — see
+                connectedUsernames' doc comment. YouTube has none (excluded
+                by an earlier decision, not fetched at all). */}
+            {(post.platform === "tiktok" || post.platform === "instagram") &&
+              connectedUsernames[post.platform] && (
+                <span className="text-xs text-text-disabled">
+                  · posting as @{connectedUsernames[post.platform]}
+                </span>
+              )}
           </div>
           <div className="flex items-center gap-2">
             <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.badge}`}>
@@ -520,6 +540,20 @@ function PostModal({ post, onClose, onUpdated, onToast }: PostModalProps) {
                 >
                   <Music2 className="h-4 w-4" />
                   View on TikTok
+                </a>
+              )}
+              {/* Best-effort fetch (see app/api/cron/route.ts's getMediaPermalink
+                  call) — can legitimately be NULL even for a published post if
+                  that fetch failed, so there's intentionally no button then. */}
+              {post.status === "published" && post.instagram_permalink && (
+                <a
+                  href={post.instagram_permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-radius-xl bg-N0 px-4 py-2.5 text-sm font-medium text-N900 transition-colors hover:bg-N100"
+                >
+                  <InstagramIcon className="h-4 w-4" />
+                  View on Instagram
                 </a>
               )}
               {post.video_url && (
@@ -710,6 +744,29 @@ export default function SchedulerCalendarPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Connected-account identity for TikTok/Instagram (YouTube excluded —
+  // decided against broadening its OAuth scope earlier this session), shown
+  // in the post-detail modal. This reflects the CURRENTLY connected
+  // account, not necessarily the exact one a given post published from —
+  // acceptable since accounts rarely change, and posts.tiktok_publish_id/
+  // instagram_media_id don't carry a per-post username snapshot to show
+  // instead.
+  const [connectedUsernames, setConnectedUsernames] = useState<{
+    tiktok: string | null;
+    instagram: string | null;
+  }>({ tiktok: null, instagram: null });
+  useEffect(() => {
+    fetch("/api/connections/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { usernames?: { tiktok?: string | null; instagram?: string | null } } | null) => {
+        setConnectedUsernames({
+          tiktok: data?.usernames?.tiktok ?? null,
+          instagram: data?.usernames?.instagram ?? null,
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -967,6 +1024,7 @@ export default function SchedulerCalendarPage() {
           onClose={() => setSelectedPost(null)}
           onUpdated={handlePostUpdated}
           onToast={setToast}
+          connectedUsernames={connectedUsernames}
         />
       )}
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}

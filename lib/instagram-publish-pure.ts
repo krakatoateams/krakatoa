@@ -5,6 +5,14 @@ import { redactPublishMediaRef } from "@/lib/tiktok-publish-pure";
  * `posts.last_error`. Graph bodies and signed media URLs must not appear.
  */
 
+// Meta's Content Publishing API docs (developers.facebook.com/docs/instagram-platform/content-publishing,
+// checked 2026-09): "Carousels are limited to 10 images, videos, or a mix of
+// the two." Lives in this isomorphic-safe file (not lib/instagram.ts, which
+// is server-only) so the Scheduler's client-side UI and the server-side
+// publish/validation code share one source of truth instead of a duplicated
+// literal that could drift if this number ever changes.
+export const INSTAGRAM_CAROUSEL_MAX_ITEMS = 10;
+
 function redactUrlsInText(text: string): string {
   return text.replace(/https?:\/\/[^\s]+/gi, (url) => redactPublishMediaRef(url));
 }

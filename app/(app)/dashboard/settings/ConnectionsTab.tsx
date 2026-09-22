@@ -4,6 +4,40 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { Video, Camera, Music2, Check, X } from "lucide-react";
+import { isPlatformUsable, platformBadge, type Platform } from "@/lib/platform-availability-pure";
+
+function ConnectAction({
+  platform,
+  availability,
+}: {
+  platform: Platform;
+  availability: { platforms: Record<Platform, boolean>; canBypass: Record<Platform, boolean> } | null;
+}) {
+  if (!availability) {
+    return <div className="h-6 w-20 animate-pulse rounded-radius-xl bg-white/10" />;
+  }
+  const enabled = availability.platforms[platform];
+  const canBypass = availability.canBypass[platform];
+  const badge = platformBadge(enabled, canBypass);
+  if (!isPlatformUsable(enabled, canBypass)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-radius-xl border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-text-disabled">
+        Coming soon
+      </span>
+    );
+  }
+  return (
+    <a
+      href={`/api/connections/${platform}/start`}
+      className="inline-flex items-center gap-1.5 rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
+    >
+      Connect
+      {badge === "preview" && (
+        <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Preview</span>
+      )}
+    </a>
+  );
+}
 
 export default function ConnectionsTab() {
   const { status: authStatus } = useCurrentUser();
@@ -21,7 +55,35 @@ export default function ConnectionsTab() {
   const [disconnectingInstagram, setDisconnectingInstagram] = useState(false);
   const [confirmDisconnectInstagram, setConfirmDisconnectInstagram] = useState(false);
 
+  // TikTok creator nickname / Instagram @username — best-effort, can stay
+  // null even for a connected account (see supabase/migrations/100_platform_tokens_username.sql).
+  // Never populated for YouTube (see that migration's own comment).
+  const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
+  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
+
+  // Platform availability (see CONTEXT.md) — "coming soon" actually blocks
+  // connecting for a regular user; an admin sees a "Preview" badge instead
+  // and can connect anyway. Null while loading — rendered as a skeleton
+  // pill rather than defaulting to "available", so a slow fetch never
+  // briefly shows a coming-soon platform as connectable.
+  const [platformAvailability, setPlatformAvailability] = useState<{
+    platforms: Record<Platform, boolean>;
+    canBypass: Record<Platform, boolean>;
+  } | null>(null);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    fetch("/api/platform-availability")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { platforms?: Record<Platform, boolean>; canBypass?: Record<Platform, boolean> } | null) => {
+        if (data?.platforms && data.canBypass) {
+          setPlatformAvailability({ platforms: data.platforms, canBypass: data.canBypass });
+        }
+      })
+      .catch(() => {});
+  }, [authStatus]);
 
   // Surface redirect-back errors from the OAuth callback.
   useEffect(() => {
@@ -51,11 +113,20 @@ export default function ConnectionsTab() {
     }
     fetch("/api/connections/status")
       .then((res) => (res.ok ? res.json() : { youtube: false, tiktok: false, instagram: false }))
-      .then((data: { youtube?: boolean; tiktok?: boolean; instagram?: boolean }) => {
-        setYoutubeConnected(Boolean(data.youtube));
-        setTiktokConnected(Boolean(data.tiktok));
-        setInstagramConnected(Boolean(data.instagram));
-      })
+      .then(
+        (data: {
+          youtube?: boolean;
+          tiktok?: boolean;
+          instagram?: boolean;
+          usernames?: { tiktok?: string | null; instagram?: string | null };
+        }) => {
+          setYoutubeConnected(Boolean(data.youtube));
+          setTiktokConnected(Boolean(data.tiktok));
+          setInstagramConnected(Boolean(data.instagram));
+          setTiktokUsername(data.usernames?.tiktok ?? null);
+          setInstagramUsername(data.usernames?.instagram ?? null);
+        },
+      )
       .catch(() => {
         setYoutubeConnected(false);
         setTiktokConnected(false);
@@ -196,12 +267,7 @@ export default function ConnectionsTab() {
                   )}
                 </>
               ) : (
-                <a
-                  href="/api/connections/youtube/start"
-                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
-                >
-                  Connect
-                </a>
+                <ConnectAction platform="youtube" availability={platformAvailability} />
               )}
             </div>
           </div>
@@ -222,7 +288,9 @@ export default function ConnectionsTab() {
                 <p className="text-sm font-medium text-N900">Instagram</p>
                 <p className="truncate text-xs text-text-disabled">
                   {instagramConnected
-                    ? "Instagram publishing enabled"
+                    ? instagramUsername
+                      ? `@${instagramUsername}`
+                      : "Instagram publishing enabled"
                     : "Instagram publishing not yet connected"}
                 </p>
               </div>
@@ -265,12 +333,7 @@ export default function ConnectionsTab() {
                   )}
                 </>
               ) : (
-                <a
-                  href="/api/connections/instagram/start"
-                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
-                >
-                  Connect
-                </a>
+                <ConnectAction platform="instagram" availability={platformAvailability} />
               )}
             </div>
           </div>
@@ -291,7 +354,9 @@ export default function ConnectionsTab() {
                 <p className="text-sm font-medium text-N900">TikTok</p>
                 <p className="truncate text-xs text-text-disabled">
                   {tiktokConnected
-                    ? "TikTok publishing enabled"
+                    ? tiktokUsername
+                      ? `@${tiktokUsername}`
+                      : "TikTok publishing enabled"
                     : "TikTok publishing not yet connected"}
                 </p>
               </div>
@@ -334,12 +399,7 @@ export default function ConnectionsTab() {
                   )}
                 </>
               ) : (
-                <a
-                  href="/api/connections/tiktok/start"
-                  className="rounded-radius-xl border border-brand-primary/40 bg-brand-primary/10 px-3 py-1 text-xs font-medium text-brand-primary transition-colors hover:bg-brand-primary/20"
-                >
-                  Connect
-                </a>
+                <ConnectAction platform="tiktok" availability={platformAvailability} />
               )}
             </div>
           </div>
