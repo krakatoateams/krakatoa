@@ -7,7 +7,7 @@ import { ImagePlus, Plus, Upload, Users, X } from "lucide-react";
 export type ImageUpload = {
   file: File | null;
   preview: string | null;
-  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputRef: React.RefObject<HTMLInputElement>;
   open: () => void;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   clear: () => void;
@@ -39,7 +39,8 @@ export function useImageUpload(): ImageUpload {
   return {
     file,
     preview,
-    inputRef,
+    // React 19 types useRef(null) as RefObject<T | null>; cast for <input ref>.
+    inputRef: inputRef as React.RefObject<HTMLInputElement>,
     open: () => inputRef.current?.click(),
     onChange: (e) => {
       const next = e.target.files?.[0];

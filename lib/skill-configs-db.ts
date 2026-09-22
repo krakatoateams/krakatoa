@@ -26,13 +26,64 @@ import {
   type SkillMediaType,
 } from "@/lib/skills";
 import { isValidProductPhotoTier } from "@/lib/product-photo";
-import { isValidVideoModelId } from "@/lib/video-models";
+import {
+  isValidVideoModelId,
+  type VideoAspectRatio,
+  type VideoResolution,
+} from "@/lib/video-models";
 
 const TABLE = "skill_configs";
 const CACHE_TTL_MS = 60_000;
 export const MAX_USER_SKILLS = 24;
 const SELECT_COLS =
+  "skill_id, title, description, prompt_placeholder, recipe, thumb_path, category, badge, prompt_required, origin, media_type, inputs, icon, hidden, owner_profile_id, model_id, duration_sec, resolution, aspect_ratio";
+const SELECT_COLS_LEGACY =
   "skill_id, title, description, prompt_placeholder, recipe, thumb_path, category, badge, prompt_required, origin, media_type, inputs, icon, hidden, owner_profile_id, model_id";
+
+/** Once PostgREST reports the video-default columns are missing, stick to legacy. */
+let skillSelectCols = SELECT_COLS;
+
+function skillVideoDefaultsMissing(error: { message?: string; code?: string } | null): boolean {
+  if (!error?.message) return false;
+  return /duration_sec|aspect_ratio|Could not find the 'resolution' column/i.test(error.message);
+}
+
+async function selectSkillConfigRows(
+  build: (cols: string) => PromiseLike<{ data: unknown; error: { message?: string; code?: string } | null }>
+): Promise<{ data: SkillConfigRow[] | SkillConfigRow | null; error: { message?: string; code?: string } | null }> {
+  const first = await build(skillSelectCols);
+  if (!first.error) {
+    return { data: first.data as SkillConfigRow[] | SkillConfigRow | null, error: null };
+  }
+  if (skillSelectCols === SELECT_COLS && skillVideoDefaultsMissing(first.error)) {
+    skillSelectCols = SELECT_COLS_LEGACY;
+    const second = await build(SELECT_COLS_LEGACY);
+    return {
+      data: second.data as SkillConfigRow[] | SkillConfigRow | null,
+      error: second.error,
+    };
+  }
+  return { data: first.data as SkillConfigRow[] | SkillConfigRow | null, error: first.error };
+}
+
+/** Code-pinned video defaults for showcase skills until/alongside DB columns. */
+const CODE_VIDEO_DEFAULTS: Record<
+  string,
+  { duration: number; resolution: VideoResolution; aspectRatio: VideoAspectRatio }
+> = {
+  "sailor-moon": { duration: 15, resolution: "480p", aspectRatio: "9:16" },
+};
+
+function withCodeVideoDefaults(skill: CatalogSkill): CatalogSkill {
+  const pin = CODE_VIDEO_DEFAULTS[skill.id];
+  if (!pin) return skill;
+  return {
+    ...skill,
+    duration: skill.duration ?? pin.duration,
+    resolution: skill.resolution ?? pin.resolution,
+    aspectRatio: skill.aspectRatio ?? pin.aspectRatio,
+  };
+}
 
 const SKILL_ICONS: SkillIconName[] = [
   "scroll",
@@ -80,6 +131,9 @@ export type SkillConfigOverride = {
   hidden: boolean;
   ownerProfileId: string | null;
   modelId: string | null;
+  duration: number | null;
+  resolution: VideoResolution | null;
+  aspectRatio: VideoAspectRatio | null;
 };
 
 export type CatalogSkill = Skill & {
@@ -103,6 +157,9 @@ export type SkillConfigPatch = {
   icon?: SkillIconName | null;
   hidden?: boolean;
   modelId?: string | null;
+  duration?: number | null;
+  resolution?: VideoResolution | null;
+  aspectRatio?: VideoAspectRatio | null;
   revert?: boolean;
 };
 
@@ -118,6 +175,11 @@ export type CreateCustomSkillInput = {
   inputs: SkillInputSlot[];
   icon?: SkillIconName;
   modelId?: string | null;
+  /** Master skills only — private = off the shared catalog. */
+  hidden?: boolean;
+  duration?: number | null;
+  resolution?: VideoResolution | null;
+  aspectRatio?: VideoAspectRatio | null;
 };
 
 type SkillConfigRow = {
@@ -137,6 +199,9 @@ type SkillConfigRow = {
   hidden?: boolean | null;
   owner_profile_id?: string | null;
   model_id?: string | null;
+  duration_sec?: number | null;
+  resolution?: string | null;
+  aspect_ratio?: string | null;
 };
 
 let cache: { byId: Map<SkillId, SkillConfigOverride>; expiresAt: number } = {
@@ -212,6 +277,69 @@ function acceptedModelId(raw: unknown, mediaType: SkillMediaType | null): string
   if (!mediaType) return null;
   const parsed = parseSkillModelId(raw ?? null, mediaType);
   return "modelId" in parsed ? parsed.modelId : null;
+}
+
+const VIDEO_DURATION_OPTIONS = [5, 8, 10, 15] as const;
+const VIDEO_RESOLUTION_OPTIONS: VideoResolution[] = ["480p", "720p", "1080p", "4k"];
+const VIDEO_ASPECT_OPTIONS: VideoAspectRatio[] = [
+  "16:9",
+  "4:3",
+  "1:1",
+  "3:4",
+  "9:16",
+  "21:9",
+  "9:21",
+  "adaptive",
+];
+
+export function parseSkillDuration(
+  value: unknown
+): { error: string } | { duration: number | null } {
+  if (value === null || value === "") return { duration: null };
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || !VIDEO_DURATION_OPTIONS.includes(n as (typeof VIDEO_DURATION_OPTIONS)[number])) {
+    return { error: "Duration must be 5, 8, 10, or 15 seconds." };
+  }
+  return { duration: n };
+}
+
+export function parseSkillResolution(
+  value: unknown
+): { error: string } | { resolution: VideoResolution | null } {
+  if (value === null || value === "") return { resolution: null };
+  if (typeof value !== "string") return { error: "Invalid resolution." };
+  const id = value.trim() as VideoResolution;
+  if (!VIDEO_RESOLUTION_OPTIONS.includes(id)) {
+    return { error: "Resolution must be 480p, 720p, 1080p, or 4k." };
+  }
+  return { resolution: id };
+}
+
+export function parseSkillAspectRatio(
+  value: unknown
+): { error: string } | { aspectRatio: VideoAspectRatio | null } {
+  if (value === null || value === "") return { aspectRatio: null };
+  if (typeof value !== "string") return { error: "Invalid aspect ratio." };
+  const id = value.trim() as VideoAspectRatio;
+  if (!VIDEO_ASPECT_OPTIONS.includes(id)) {
+    return { error: "Unsupported aspect ratio." };
+  }
+  return { aspectRatio: id };
+}
+
+function acceptedDuration(raw: unknown): number | null {
+  const parsed = parseSkillDuration(raw ?? null);
+  return "duration" in parsed ? parsed.duration : null;
+}
+
+function acceptedResolution(raw: unknown): VideoResolution | null {
+  const parsed = parseSkillResolution(raw ?? null);
+  return "resolution" in parsed ? parsed.resolution : null;
+}
+
+function acceptedAspectRatio(raw: unknown): VideoAspectRatio | null {
+  const parsed = parseSkillAspectRatio(raw ?? null);
+  return "aspectRatio" in parsed ? parsed.aspectRatio : null;
 }
 
 export function parseCustomSkillBody(
@@ -300,6 +428,9 @@ function mapRow(row: SkillConfigRow): SkillConfigOverride | null {
     hidden: row.hidden === true,
     ownerProfileId: row.owner_profile_id || null,
     modelId: acceptedModelId(row.model_id, mediaType),
+    duration: acceptedDuration(row.duration_sec),
+    resolution: acceptedResolution(row.resolution),
+    aspectRatio: acceptedAspectRatio(row.aspect_ratio),
   };
 }
 
@@ -308,10 +439,9 @@ export async function getSkillOverrides(): Promise<Map<SkillId, SkillConfigOverr
   if (now < cache.expiresAt) return cache.byId;
 
   try {
-    const { data, error } = await supabaseServer
-      .from(TABLE)
-      .select(SELECT_COLS)
-      .is("owner_profile_id", null);
+    const { data, error } = await selectSkillConfigRows((cols) =>
+      supabaseServer.from(TABLE).select(cols).is("owner_profile_id", null)
+    );
 
     if (error) {
       console.warn(
@@ -322,8 +452,9 @@ export async function getSkillOverrides(): Promise<Map<SkillId, SkillConfigOverr
     }
 
     const byId = emptyCache();
-    for (const raw of data ?? []) {
-      const mapped = mapRow(raw as SkillConfigRow);
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    for (const raw of rows) {
+      const mapped = mapRow(raw);
       if (mapped) byId.set(mapped.skillId, mapped);
     }
     cache = { byId, expiresAt: now + CACHE_TTL_MS };
@@ -345,28 +476,33 @@ export async function getSkillOverride(skillId: SkillId): Promise<SkillConfigOve
 async function getGlobalSkillOverrideFresh(
   skillId: SkillId
 ): Promise<SkillConfigOverride | null> {
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .select(SELECT_COLS)
-    .eq("skill_id", skillId)
-    .is("owner_profile_id", null)
-    .maybeSingle();
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer
+      .from(TABLE)
+      .select(cols)
+      .eq("skill_id", skillId)
+      .is("owner_profile_id", null)
+      .maybeSingle()
+  );
   if (error) throw new Error(error.message);
   return data ? mapRow(data as SkillConfigRow) : null;
 }
 
 async function getOwnedOverrides(ownerProfileId: string): Promise<SkillConfigOverride[]> {
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .select(SELECT_COLS)
-    .eq("owner_profile_id", ownerProfileId)
-    .eq("origin", "custom");
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer
+      .from(TABLE)
+      .select(cols)
+      .eq("owner_profile_id", ownerProfileId)
+      .eq("origin", "custom")
+  );
   if (error) {
     console.warn("[skill-configs] owned read failed:", errorLogSafe(error));
     return [];
   }
-  return (data ?? [])
-    .map((raw) => mapRow(raw as SkillConfigRow))
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  return rows
+    .map((raw) => mapRow(raw))
     .filter((row): row is SkillConfigOverride => Boolean(row));
 }
 
@@ -374,13 +510,15 @@ export async function getOwnedSkillOverride(
   ownerProfileId: string,
   skillId: SkillId
 ): Promise<SkillConfigOverride | null> {
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .select(SELECT_COLS)
-    .eq("skill_id", skillId)
-    .eq("owner_profile_id", ownerProfileId)
-    .eq("origin", "custom")
-    .maybeSingle();
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer
+      .from(TABLE)
+      .select(cols)
+      .eq("skill_id", skillId)
+      .eq("owner_profile_id", ownerProfileId)
+      .eq("origin", "custom")
+      .maybeSingle()
+  );
   if (error) throw new Error(error.message);
   return data ? mapRow(data as SkillConfigRow) : null;
 }
@@ -420,6 +558,9 @@ export function mergeSkill(
     origin: override.origin === "custom" ? "custom" : "overlay",
     hidden: override.hidden,
     modelId: override.modelId ?? base.modelId,
+    duration: override.duration ?? base.duration,
+    resolution: override.resolution ?? base.resolution,
+    aspectRatio: override.aspectRatio ?? base.aspectRatio,
   };
 }
 
@@ -448,6 +589,9 @@ function customSkillFromOverride(
     hidden: override.hidden,
     owned: Boolean(override.ownerProfileId),
     modelId: override.modelId ?? undefined,
+    duration: override.duration ?? undefined,
+    resolution: override.resolution ?? undefined,
+    aspectRatio: override.aspectRatio ?? undefined,
   };
 }
 
@@ -484,30 +628,32 @@ export async function listCatalogSkills(opts?: {
       if (skill) skills.push({ ...skill, owned: true });
     }
   }
-  return skills;
+  return skills.map(withCodeVideoDefaults);
 }
 
 export async function resolveLiveSkill(
   id: string,
-  viewerProfileId?: string | null
+  viewerProfileId?: string | null,
+  opts?: { includeHidden?: boolean }
 ): Promise<CatalogSkill | null> {
+  const includeHidden = opts?.includeHidden === true;
   if (!isSkillSlug(id)) return null;
   if (viewerProfileId) {
     const owned = await getOwnedSkillOverride(viewerProfileId, id);
-    if (owned?.hidden) return null;
+    if (owned?.hidden && !includeHidden) return null;
     if (owned) {
       const skill = customSkillFromOverride(owned);
-      return skill ? { ...skill, owned: true } : null;
+      return skill ? withCodeVideoDefaults({ ...skill, owned: true }) : null;
     }
   }
   const override = await getSkillOverride(id);
   if (override?.ownerProfileId) return null;
-  if (override?.hidden) return null;
+  if (override?.hidden && !includeHidden) return null;
   const base = getSkill(id);
-  if (base) return mergeSkill(base, override);
+  if (base) return withCodeVideoDefaults(mergeSkill(base, override));
   if (override) {
     const skill = customSkillFromOverride(override);
-    return skill ? { ...skill, owned: false } : null;
+    return skill ? withCodeVideoDefaults({ ...skill, owned: false }) : null;
   }
   return null;
 }
@@ -527,6 +673,11 @@ function patchToRow(skillId: string, patch: SkillConfigPatch, updatedByProfileId
   if ("icon" in patch) row.icon = patch.icon;
   if ("hidden" in patch) row.hidden = patch.hidden;
   if ("modelId" in patch) row.model_id = patch.modelId;
+  if (skillSelectCols === SELECT_COLS) {
+    if ("duration" in patch) row.duration_sec = patch.duration;
+    if ("resolution" in patch) row.resolution = patch.resolution;
+    if ("aspectRatio" in patch) row.aspect_ratio = patch.aspectRatio;
+  }
   if (updatedByProfileId !== undefined) row.updated_by_profile_id = updatedByProfileId;
   return row;
 }
@@ -547,9 +698,6 @@ export async function upsertSkillConfig(
 
   if (patch.revert) {
     const existing = await getGlobalSkillOverrideFresh(skillId);
-    if (existing?.hidden) {
-      throw new Error("Deleted skills cannot be restored.");
-    }
     const { error } = await supabaseServer.from(TABLE).delete().eq("skill_id", skillId);
     if (error) throw new Error(error.message);
     bustSkillConfigCache();
@@ -558,11 +706,9 @@ export async function upsertSkillConfig(
   }
 
   const row = patchToRow(skillId, patch, updatedByProfileId);
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .upsert(row, { onConflict: "skill_id" })
-    .select(SELECT_COLS)
-    .maybeSingle();
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer.from(TABLE).upsert(row, { onConflict: "skill_id" }).select(cols).maybeSingle()
+  );
 
   if (error) throw new Error(error.message);
   bustSkillConfigCache();
@@ -760,16 +906,25 @@ export async function createCustomSkill(
     icon: input.icon ?? (input.mediaType === "video" ? "video" : "spark"),
     owner_profile_id: ownerProfileId,
     model_id: ownerProfileId ? null : (input.modelId ?? null),
+    // User-owned skills are already account-private; only master creates may hide.
+    hidden: ownerProfileId ? false : input.hidden === true,
   };
+  if (!ownerProfileId && skillSelectCols === SELECT_COLS) {
+    row.duration_sec = input.duration ?? null;
+    row.resolution = input.resolution ?? null;
+    row.aspect_ratio = input.aspectRatio ?? null;
+  }
   if (updatedByProfileId !== undefined) row.updated_by_profile_id = updatedByProfileId;
 
-  const { data, error } = await supabaseServer.from(TABLE).insert(row).select(SELECT_COLS).maybeSingle();
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer.from(TABLE).insert(row).select(cols).maybeSingle()
+  );
   if (error) throw new Error(error.message);
   if (!ownerProfileId) bustSkillConfigCache();
   const mapped = data ? mapRow(data as SkillConfigRow) : null;
   const skill = mapped ? customSkillFromOverride(mapped) : null;
   if (!skill) throw new Error("Failed to create skill.");
-  return { ...skill, owned: Boolean(ownerProfileId) };
+  return withCodeVideoDefaults({ ...skill, owned: Boolean(ownerProfileId) });
 }
 
 export async function updateOwnedSkill(
@@ -781,13 +936,15 @@ export async function updateOwnedSkill(
   if (!existing) throw new Error("Unknown skill.");
   const row = patchToRow(skillId, patch, ownerProfileId);
   delete row.skill_id;
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .update(row)
-    .eq("skill_id", skillId)
-    .eq("owner_profile_id", ownerProfileId)
-    .select(SELECT_COLS)
-    .maybeSingle();
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer
+      .from(TABLE)
+      .update(row)
+      .eq("skill_id", skillId)
+      .eq("owner_profile_id", ownerProfileId)
+      .select(cols)
+      .maybeSingle()
+  );
   if (error) throw new Error(error.message);
   const mapped = data ? mapRow(data as SkillConfigRow) : existing;
   const thumbUrl = await signThumb(mapped?.thumbPath);

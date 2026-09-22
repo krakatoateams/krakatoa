@@ -1,4 +1,5 @@
 import { LANDING_VIDEO_BASE } from "@/lib/landing-media";
+import { skillHref } from "@/lib/skills";
 
 /**
  * Clips for the dashboard "Trending templates" carousel.
@@ -53,6 +54,11 @@ export type TrendingTemplate = {
   title?: string;
   /** Viral templates: number of sequential shots/beats in the clip. */
   shotCount?: number;
+  /**
+   * When set, Use Template opens this skill on the Agent form instead of the
+   * Viral Template composer.
+   */
+  skillId?: string;
 };
 
 /** Text-to-video handoff for dashboard template cards. */
@@ -70,8 +76,11 @@ export function tryOnTemplateHref(videoUrl: string): string {
 /**
  * Viral-template handoff: dedicated Viral Template composer with the showcase
  * clip locked and the generation prompt baked in — user only supplies a character.
+ * Skill-linked cards open the Agent form for that skill instead.
  */
 export function viralTemplateHref(templateId: string): string {
+  const template = getViralTemplate(templateId);
+  if (template?.skillId) return skillHref(template.skillId);
   return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(templateId)}`;
 }
 
@@ -83,7 +92,9 @@ export function getViralTemplate(templateId: string): TrendingTemplate | undefin
 }
 
 export function isViralTemplateId(templateId: string): boolean {
-  return getViralTemplate(templateId) !== undefined;
+  const template = getViralTemplate(templateId);
+  // Skill-linked showcase cards are carousel handoffs, not Viral Template composer rows.
+  return Boolean(template && !template.skillId);
 }
 
 /** Same composer as viral templates — separate dashboard carousel only. */
@@ -161,7 +172,7 @@ export function motionControlGenerationVideoUrl(previewUrl: string): string {
 }
 
 /**
- * Dashboard "Photo try-on" carousel (left column next to Video try-on).
+ * Dashboard "Photo try-on" carousel (right column next to Product review).
  * Add a folder under `public/viral-templates/` with product / character /
  * result stills, then append one object here.
  */
@@ -214,7 +225,7 @@ export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON
 );
 
 /**
- * Dashboard "Viral templates" carousel.
+ * Dashboard "Viral templates" carousel (left column next to Motion control).
  *
  * Add a new card here — one object per clip. Put the mp4 (and optional webm)
  * in `public/viral-templates/` and append one object to VIRAL_CATALOG. The
@@ -225,6 +236,15 @@ const VIRAL_DIR = "/viral-templates";
 const VIRAL_START_FRAME = `${VIRAL_DIR}/reference.png`;
 /** Carousel hint — user supplies their own character; not the locked i2v start frame. */
 const VIRAL_CHARACTER_THUMB = `${VIRAL_DIR}/character-thumb.webp`;
+/** CDN folder for viral showcase clips (same bucket pattern as product review). */
+const VIRAL_CDN_DIR = "Viral Template";
+
+function viralCdnUrl(file: string): string {
+  const dir = VIRAL_CDN_DIR.split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${LANDING_VIDEO_BASE}/${dir}/${encodeURIComponent(file)}`;
+}
 
 type ViralCatalogEntry = {
   file: string;
@@ -237,6 +257,12 @@ type ViralCatalogEntry = {
   startFrameImageUrl?: string;
   /** Product review carousel: product still beside the character thumb. */
   productThumb?: string;
+  /** Override the default character corner thumb on the carousel card. */
+  characterThumb?: string;
+  /** Absolute preview URL (CDN). Defaults to local `/viral-templates/{file}`. */
+  previewUrl?: string;
+  /** Opens this skill instead of the Viral Template composer. */
+  skillId?: string;
 };
 
 function characterIdentityBlock(): string {
@@ -310,6 +336,17 @@ function buildProductReviewTemplatePrompt(entry: ViralCatalogEntry): string {
 
 const VIRAL_CATALOG: ViralCatalogEntry[] = [
   {
+    file: "kelolako_viral_videos_00007.webm",
+    title: "Sailor Moon",
+    usesCharacter: true,
+    shots: [
+      "Vertical transformation shot of the person in [Image1] as Sailor Moon — iconic sailor-style costume, magical girl pose, sparkles and crescent-moon motif, cinematic anime-inspired lighting.",
+    ],
+    previewUrl: viralCdnUrl("kelolako_viral_videos_00007.webm"),
+    characterThumb: `${VIRAL_DIR}/sailor-moon-character.webp`,
+    skillId: "sailor-moon",
+  },
+  {
     file: "kelolako_viral_videos_00001.mp4",
     title: "Helicopter golden hour",
     usesCharacter: true,
@@ -367,14 +404,15 @@ export const VIRAL_TEMPLATES: TrendingTemplate[] = VIRAL_CATALOG.map((item) => (
   id: item.file,
   title: item.title,
   shotCount: item.shots.length,
-  videoUrl: `${VIRAL_DIR}/${item.file}`,
-  characterImageUrl: VIRAL_CHARACTER_THUMB,
+  videoUrl: item.previewUrl ?? `${VIRAL_DIR}/${item.file}`,
+  characterImageUrl: item.characterThumb ?? VIRAL_CHARACTER_THUMB,
   referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
-  prompt: buildViralTemplatePrompt(item),
+  prompt: item.skillId ? undefined : buildViralTemplatePrompt(item),
+  ...(item.skillId ? { skillId: item.skillId } : {}),
 }));
 
 /**
- * Dashboard "Product review templates" carousel (beside Viral templates).
+ * Dashboard "Product review templates" carousel (beside Photo try-on).
  *
  * Clips live in the `video-banner` R2 bucket under `Product review/` and are
  * served from cdn.kelolako.com (same pattern as landing hero clips). Append one

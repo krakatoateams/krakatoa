@@ -16,23 +16,17 @@ import {
 } from "@/lib/trending-templates";
 
 /**
- * Dashboard template carousels. Photo try-on → Product try-on. Motion control
- * clips → Motion control with the template video preloaded. Viral clips →
- * Viral Template composer (character upload only).
+ * Dashboard template carousels. Viral clips → Viral Template composer
+ * (character upload only). Motion control clips → Motion control with the
+ * template video preloaded. Photo try-on → Product try-on.
  */
 export default function TrendingTemplates() {
   return (
     <section className="mb-8 grid grid-cols-1 gap-6 md:mb-16 md:grid-cols-2">
       <TemplateCarousel
-        title="Photo try-on"
-        templates={VIRTUAL_PRODUCT_TRYON_TEMPLATES}
-        hrefFor={(t) =>
-          productTryOnHref({
-            productUrl: t.productImageUrl ?? "",
-            characterUrl: t.characterImageUrl,
-            prompt: t.prompt,
-          })
-        }
+        title="Viral templates"
+        templates={VIRAL_TEMPLATES}
+        hrefFor={(t) => viralTemplateHref(t.id)}
       />
       <TemplateCarousel
         title="Motion control"
@@ -56,9 +50,15 @@ export function VideoTemplateCarousels() {
       </div>
       <div className="min-w-0">
         <TemplateCarousel
-          title="Viral templates"
-          templates={VIRAL_TEMPLATES}
-          hrefFor={(t) => viralTemplateHref(t.id)}
+          title="Photo try-on"
+          templates={VIRTUAL_PRODUCT_TRYON_TEMPLATES}
+          hrefFor={(t) =>
+            productTryOnHref({
+              productUrl: t.productImageUrl ?? "",
+              characterUrl: t.characterImageUrl,
+              prompt: t.prompt,
+            })
+          }
         />
       </div>
     </section>

@@ -7,7 +7,7 @@
  * Animate hand-off stay valid.
  */
 
-import type { VideoResolution } from "@/lib/video-models";
+import type { VideoAspectRatio, VideoResolution } from "@/lib/video-models";
 
 export const SKILL_IDS = [
   "high-quality-film",
@@ -203,7 +203,7 @@ export type Skill = {
   badge?: "new";
   /** Admin-pinned Photo tier or Video model. Absent = catalog default. */
   modelId?: string;
-  /** Optional code-catalog video duration pin (seconds). */
+  /** Optional video duration pin (seconds). */
   duration?: number;
   /**
    * Pin the video resolution too (video skills only). Absent = the model's
@@ -213,6 +213,8 @@ export type Skill = {
    * alone isn't enough.
    */
   resolution?: VideoResolution;
+  /** Optional video aspect-ratio pin (video skills only). */
+  aspectRatio?: VideoAspectRatio;
 };
 
 export const SKILL_CATEGORIES: { id: SkillCategoryId; title: string }[] = [

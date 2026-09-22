@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentAdmin } from "@/lib/admin-auth";
 import { getCurrentProfile, requireCurrentProfile } from "@/lib/profiles-db";
 import {
   createCustomSkill,
@@ -9,11 +10,15 @@ import { errorLogSafe } from "@/lib/error-log-safe";
 
 export const dynamic = "force-dynamic";
 
-/** Merged catalog for this visitor: shared skills plus their own. */
+/** Merged catalog for this visitor: shared skills plus their own.
+ *  Admins also receive private (hidden) master skills so they can manage them. */
 export async function GET() {
   try {
-    const profile = await getCurrentProfile();
-    const skills = await listCatalogSkills({ viewerProfileId: profile?.id ?? null });
+    const [profile, admin] = await Promise.all([getCurrentProfile(), getCurrentAdmin()]);
+    const skills = await listCatalogSkills({
+      viewerProfileId: profile?.id ?? null,
+      includeHidden: Boolean(admin),
+    });
     return NextResponse.json({ skills });
   } catch (e) {
     console.error("[api/skills] failed:", errorLogSafe(e));

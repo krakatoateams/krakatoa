@@ -75,6 +75,7 @@ import {
   skillHref,
   skillPhotoAttemptSignature,
   skillPhotoMode,
+  WELCOME_VIDEO_SKILL_ID,
   type SkillId,
 } from "@/lib/skills";
 import FeaturedSkillsRow from "./FeaturedSkillsRow";
@@ -359,45 +360,75 @@ function SkillOmniInner({
   const [videoAspect, setVideoAspect] = useState<VideoAspectRatio>(videoModel.defaultAspectRatio);
 
   const allowedDurations = getAllowedDurations(videoModel, videoResolution);
-  const pinnedVideoDuration =
-    designatedVideoModel &&
-    skill?.duration &&
-    allowedDurations.includes(skill.duration)
+  // Welcome offer keeps a hard lock so the advertised credit cost stays true.
+  // Other skills (e.g. Sailor Moon) only seed defaults — users can still change them.
+  const lockVideoParams = skill?.id === WELCOME_VIDEO_SKILL_ID;
+  const lockedVideoDuration =
+    lockVideoParams && skill?.duration && allowedDurations.includes(skill.duration)
       ? skill.duration
       : undefined;
+  const lockedVideoResolution =
+    lockVideoParams && skill?.resolution && videoModel.resolutions.includes(skill.resolution)
+      ? skill.resolution
+      : undefined;
+  const lockedVideoAspect =
+    lockVideoParams && skill?.aspectRatio && videoModel.aspectRatios.includes(skill.aspectRatio)
+      ? skill.aspectRatio
+      : undefined;
+
+  // Soft defaults: apply when the selected skill changes (not continuously).
   useEffect(() => {
-    if (pinnedVideoDuration) {
-      if (duration !== pinnedVideoDuration) setDuration(pinnedVideoDuration);
+    if (!isVideo || !skill) return;
+    const nextResolution =
+      skill.resolution && videoModel.resolutions.includes(skill.resolution)
+        ? skill.resolution
+        : videoModel.defaultResolution;
+    const nextAspect =
+      skill.aspectRatio && videoModel.aspectRatios.includes(skill.aspectRatio)
+        ? skill.aspectRatio
+        : videoModel.defaultAspectRatio;
+    const nextAllowed = getAllowedDurations(videoModel, nextResolution);
+    const nextDuration =
+      skill.duration && nextAllowed.includes(skill.duration)
+        ? skill.duration
+        : nextAllowed.includes(videoModel.defaultDuration)
+          ? videoModel.defaultDuration
+          : nextAllowed[0];
+    setVideoResolution(nextResolution);
+    setVideoAspect(nextAspect);
+    if (nextDuration) setDuration(nextDuration);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skill?.id, isVideo, videoModel.id]);
+
+  useEffect(() => {
+    if (lockedVideoDuration) {
+      if (duration !== lockedVideoDuration) setDuration(lockedVideoDuration);
       return;
     }
     if (!allowedDurations.includes(duration) && allowedDurations[0]) {
       setDuration(allowedDurations[0]);
     }
-  }, [allowedDurations, duration, pinnedVideoDuration]);
+  }, [allowedDurations, duration, lockedVideoDuration]);
 
-  // A skill can pin a specific resolution (e.g. the welcome-offer skill needs
-  // 480p specifically to land on its advertised credit cost) — every catalog
-  // model's own defaultResolution is 720p/1080p, so pinning modelId alone
-  // isn't enough. Falls back to the existing default-snap when unpinned.
   useEffect(() => {
-    const pinned =
-      skill?.resolution && videoModel.resolutions.includes(skill.resolution)
-        ? skill.resolution
-        : undefined;
-    if (pinned) {
-      if (videoResolution !== pinned) setVideoResolution(pinned);
+    if (lockedVideoResolution) {
+      if (videoResolution !== lockedVideoResolution) setVideoResolution(lockedVideoResolution);
       return;
     }
     if (!videoModel.resolutions.includes(videoResolution) && videoModel.resolutions[0]) {
       setVideoResolution(videoModel.resolutions[0]);
     }
-  }, [videoModel, videoResolution, skill?.resolution]);
+  }, [videoModel, videoResolution, lockedVideoResolution]);
 
   useEffect(() => {
+    if (lockedVideoAspect) {
+      if (videoAspect !== lockedVideoAspect) setVideoAspect(lockedVideoAspect);
+      return;
+    }
     if (!videoModel.aspectRatios.includes(videoAspect) && videoModel.aspectRatios[0]) {
       setVideoAspect(videoModel.aspectRatios[0]);
     }
-  }, [videoModel, videoAspect]);
+  }, [videoModel, videoAspect, lockedVideoAspect]);
 
   const photoPricingKey = tier.hasResolution
     ? tier.resolutions.find((r) => r.id === resolution)?.pricingKey ??
@@ -736,7 +767,7 @@ function SkillOmniInner({
                       hint: `${videoCredits(videoPricingKey, d)}`,
                     }))}
                     onSelect={(id) => setDuration(Number(id))}
-                    disabled={loading || Boolean(pinnedVideoDuration)}
+                    disabled={loading || Boolean(lockedVideoDuration)}
                   />
                   <ChipDropdown
                     sheetTitle="Select resolution"
@@ -757,7 +788,7 @@ function SkillOmniInner({
                       )}`,
                     }))}
                     onSelect={(id) => setVideoResolution(id as VideoResolution)}
-                    disabled={loading}
+                    disabled={loading || Boolean(lockedVideoResolution)}
                   />
                   <ChipDropdown
                     sheetTitle="Select video ratio"
@@ -768,7 +799,7 @@ function SkillOmniInner({
                     activeId={videoAspect}
                     options={videoModel.aspectRatios.map((a) => ({ id: a, label: a }))}
                     onSelect={(id) => setVideoAspect(id as VideoAspectRatio)}
-                    disabled={loading}
+                    disabled={loading || Boolean(lockedVideoAspect)}
                   />
                 </>
               )}

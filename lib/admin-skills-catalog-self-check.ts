@@ -29,6 +29,9 @@ const emptyOverlay: SkillConfigOverride = {
   hidden: false,
   ownerProfileId: null,
   modelId: null,
+  duration: null,
+  resolution: null,
+  aspectRatio: null,
 };
 assert.equal(
   mergeSkill(welcome, emptyOverlay).modelId,
@@ -140,6 +143,36 @@ assert.match(
   configsSource,
   /if \(!builtin\)[\s\S]*?\.delete\(\)[\s\S]*?removeSkillThumb/,
   "custom delete must remove the row before best-effort old-thumb cleanup"
+);
+assert.match(
+  configsSource,
+  /includeHidden\?: boolean/,
+  "resolveLiveSkill must allow admins to run private master skills"
+);
+
+const modifyPanel = readFileSync(
+  new URL("../app/(app)/tools/skills/SkillModifyPanel.tsx", import.meta.url),
+  "utf8"
+);
+assert.match(
+  modifyPanel,
+  /Visibility/,
+  "master skill editor must expose public/private visibility"
+);
+assert.match(
+  modifyPanel,
+  /body\.hidden = visibility === "private"/,
+  "visibility must map to the skill_configs.hidden column"
+);
+
+const adminPatch = readFileSync(
+  new URL("../app/api/admin/skills/[skillId]/route.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  adminPatch,
+  /"hidden" in body/,
+  "admin skill PATCH must accept hidden for visibility"
 );
 
 for (const relativePath of [

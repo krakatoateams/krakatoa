@@ -3,8 +3,11 @@ import { withAdmin } from "@/lib/admin-api";
 import {
   createCustomSkill,
   listCatalogSkills,
+  parseSkillAspectRatio,
+  parseSkillDuration,
   parseSkillInputs,
   parseSkillModelId,
+  parseSkillResolution,
   type CreateCustomSkillInput,
 } from "@/lib/skill-configs-db";
 import {
@@ -23,7 +26,7 @@ function isCategoryId(value: string): value is SkillCategoryId {
 
 export async function GET() {
   return withAdmin(async () => {
-    const skills = await listCatalogSkills();
+    const skills = await listCatalogSkills({ includeHidden: true });
     return NextResponse.json({ skills });
   });
 }
@@ -88,6 +91,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsedModel.error }, { status: 400 });
     }
 
+    if ("hidden" in body && typeof body.hidden !== "boolean") {
+      return NextResponse.json({ error: "hidden must be a boolean." }, { status: 400 });
+    }
+
+    let duration: number | null = null;
+    let resolution: CreateCustomSkillInput["resolution"] = null;
+    let aspectRatio: CreateCustomSkillInput["aspectRatio"] = null;
+    if (mediaType === "video") {
+      const parsedDuration = parseSkillDuration(body.duration ?? null);
+      if ("error" in parsedDuration) {
+        return NextResponse.json({ error: parsedDuration.error }, { status: 400 });
+      }
+      duration = parsedDuration.duration;
+      const parsedResolution = parseSkillResolution(body.resolution ?? null);
+      if ("error" in parsedResolution) {
+        return NextResponse.json({ error: parsedResolution.error }, { status: 400 });
+      }
+      resolution = parsedResolution.resolution;
+      const parsedAspect = parseSkillAspectRatio(body.aspectRatio ?? null);
+      if ("error" in parsedAspect) {
+        return NextResponse.json({ error: parsedAspect.error }, { status: 400 });
+      }
+      aspectRatio = parsedAspect.aspectRatio;
+    }
+
     const input: CreateCustomSkillInput = {
       title,
       description,
@@ -99,6 +127,10 @@ export async function POST(req: Request) {
       mediaType,
       inputs: parsedInputs ?? defaultSkillInputs(mediaType),
       modelId: parsedModel.modelId,
+      hidden: body.hidden === true,
+      duration,
+      resolution,
+      aspectRatio,
     };
 
     try {
