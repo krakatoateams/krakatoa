@@ -29,7 +29,7 @@ export async function POST(req: Request, props: { params: Promise<{ skillId: str
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     }
-    const existing = (await listCatalogSkills()).find(
+    const existing = (await listCatalogSkills({ includeHidden: true })).find(
       (s) => s.id === params.skillId
     );
     if (!existing) {
@@ -70,7 +70,7 @@ export async function POST(req: Request, props: { params: Promise<{ skillId: str
       ctx.profile.id
     );
     const signed = await createSignedStorageUrl(storagePath, "ui");
-    const skills = await listCatalogSkills();
+    const skills = await listCatalogSkills({ includeHidden: true });
     const skill = skills.find((s) => s.id === params.skillId);
     return NextResponse.json({ skill, thumb: signed.url });
   });

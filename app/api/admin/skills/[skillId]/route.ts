@@ -4,9 +4,12 @@ import {
   deleteCatalogSkill,
   getSkillOverride,
   listCatalogSkills,
+  parseSkillAspectRatio,
+  parseSkillDuration,
   parseSkillInputs,
   upsertSkillConfig,
   parseSkillModelId,
+  parseSkillResolution,
   type SkillConfigPatch,
 } from "@/lib/skill-configs-db";
 import {
@@ -28,7 +31,7 @@ export async function GET(_req: Request, props: { params: Promise<{ skillId: str
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     }
-    const skills = await listCatalogSkills();
+    const skills = await listCatalogSkills({ includeHidden: true });
     const skill = skills.find((s) => s.id === params.skillId);
     if (!skill) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
@@ -45,7 +48,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ skillId: st
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     }
 
-    const skillsBefore = await listCatalogSkills();
+    const skillsBefore = await listCatalogSkills({ includeHidden: true });
     const existing = skillsBefore.find((s) => s.id === params.skillId);
     if (!existing) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
@@ -58,7 +61,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ skillId: st
 
     if (body.revert === true) {
       await upsertSkillConfig(params.skillId, { revert: true }, ctx.profile.id);
-      const skills = await listCatalogSkills();
+      const skills = await listCatalogSkills({ includeHidden: true });
       const skill = skills.find((s) => s.id === params.skillId) ?? null;
       return NextResponse.json({ skill, deleted: !skill });
     }
@@ -166,12 +169,47 @@ export async function PATCH(req: Request, props: { params: Promise<{ skillId: st
       if ("error" in parsed) patch.modelId = null;
     }
 
+    if ("hidden" in body) {
+      if (typeof body.hidden !== "boolean") {
+        return NextResponse.json({ error: "hidden must be a boolean." }, { status: 400 });
+      }
+      patch.hidden = body.hidden;
+    }
+
+    if (nextMediaType === "video") {
+      if ("duration" in body) {
+        const parsed = parseSkillDuration(body.duration);
+        if ("error" in parsed) {
+          return NextResponse.json({ error: parsed.error }, { status: 400 });
+        }
+        patch.duration = parsed.duration;
+      }
+      if ("resolution" in body) {
+        const parsed = parseSkillResolution(body.resolution);
+        if ("error" in parsed) {
+          return NextResponse.json({ error: parsed.error }, { status: 400 });
+        }
+        patch.resolution = parsed.resolution;
+      }
+      if ("aspectRatio" in body) {
+        const parsed = parseSkillAspectRatio(body.aspectRatio);
+        if ("error" in parsed) {
+          return NextResponse.json({ error: parsed.error }, { status: 400 });
+        }
+        patch.aspectRatio = parsed.aspectRatio;
+      }
+    } else if ("mediaType" in patch) {
+      patch.duration = null;
+      patch.resolution = null;
+      patch.aspectRatio = null;
+    }
+
     if (Object.keys(patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
     }
 
     await upsertSkillConfig(params.skillId, patch, ctx.profile.id);
-    const skills = await listCatalogSkills();
+    const skills = await listCatalogSkills({ includeHidden: true });
     const skill = skills.find((s) => s.id === params.skillId);
     return NextResponse.json({ skill });
   });
@@ -183,7 +221,7 @@ export async function DELETE(_req: Request, props: { params: Promise<{ skillId: 
     if (!isSkillSlug(params.skillId)) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });
     }
-    const skills = await listCatalogSkills();
+    const skills = await listCatalogSkills({ includeHidden: true });
     const existing = skills.find((s) => s.id === params.skillId);
     if (!existing) {
       return NextResponse.json({ error: "Unknown skill." }, { status: 404 });

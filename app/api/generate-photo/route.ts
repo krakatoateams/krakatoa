@@ -74,6 +74,7 @@ import {
 } from "@/lib/dev-blank-generation";
 import { handlePhotoStoryboardGeneration } from "@/lib/photo-storyboard-generation";
 import { resolveLiveSkill } from "@/lib/skill-configs-db";
+import { getCurrentAdmin } from "@/lib/admin-auth";
 import {
   assembleSkillPrompt,
   skillDefaultTitle,
@@ -214,7 +215,10 @@ export async function POST(req: Request) {
 
     const formData = await req.formData();
     const skillIdRaw = String(formData.get("skillId") || "").trim();
-    const liveSkill = skillIdRaw ? await resolveLiveSkill(skillIdRaw, profileId) : null;
+    const admin = await getCurrentAdmin();
+    const liveSkill = skillIdRaw
+      ? await resolveLiveSkill(skillIdRaw, profileId, { includeHidden: Boolean(admin) })
+      : null;
     if (skillIdRaw) {
       if (!liveSkill || liveSkill.mediaType !== "image" || liveSkill.openHref) {
         return NextResponse.json({ error: "Unknown photo skill." }, { status: 400 });

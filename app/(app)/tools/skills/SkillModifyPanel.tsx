@@ -21,6 +21,8 @@ import {
   VIDEO_MODELS,
   isImageToVideoModel,
   isTextToVideoModel,
+  type VideoAspectRatio,
+  type VideoResolution,
 } from "@/lib/video-models";
 import type { CatalogSkill } from "./SkillsCatalogProvider";
 
@@ -100,9 +102,17 @@ export function SkillModifyPanel({
   );
   const [category, setCategory] = useState<SkillCategoryId>(skill?.category ?? "storytelling");
   const [badgeNew, setBadgeNew] = useState(skill?.badge === "new");
+  const [visibility, setVisibility] = useState<"public" | "private">(
+    skill?.hidden ? "private" : "public"
+  );
   const [promptRequired, setPromptRequired] = useState(skill?.promptRequired ?? true);
   const [mediaType, setMediaType] = useState<SkillMediaType>(skill?.mediaType ?? "image");
   const [modelId, setModelId] = useState(skill?.modelId ?? "");
+  const [duration, setDuration] = useState(
+    skill?.duration != null ? String(skill.duration) : ""
+  );
+  const [resolution, setResolution] = useState(skill?.resolution ?? "");
+  const [aspectRatio, setAspectRatio] = useState(skill?.aspectRatio ?? "");
   const [slots, setSlots] = useState<Record<SkillInputKey, SlotState>>(() =>
     emptyStates(skill?.mediaType ?? "image", skill?.inputs ?? defaultSkillInputs("image"))
   );
@@ -138,6 +148,9 @@ export function SkillModifyPanel({
     setMediaType(next);
     setSlots(emptyStates(next, defaultSkillInputs(next)));
     setModelId("");
+    setDuration("");
+    setResolution("");
+    setAspectRatio("");
   };
 
   const payload = () => {
@@ -154,6 +167,12 @@ export function SkillModifyPanel({
       body.category = category;
       body.badge = badgeNew ? "new" : null;
       body.modelId = modelId.trim() || null;
+      body.hidden = visibility === "private";
+      if (mediaType === "video") {
+        body.duration = duration ? Number(duration) : null;
+        body.resolution = resolution || null;
+        body.aspectRatio = aspectRatio || null;
+      }
     }
     return body;
   };
@@ -293,7 +312,9 @@ export function SkillModifyPanel({
               </p>
             ) : (
               <p className="mt-1 text-sm text-text-secondary">
-                Stays in the shared catalog for everyone.
+                {visibility === "private"
+                  ? "Private — only admins can see and use this skill."
+                  : "Public — stays in the shared catalog for everyone."}
               </p>
             )}
           </div>
@@ -386,6 +407,34 @@ export function SkillModifyPanel({
           </div>
 
           {isUser ? null : (
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled">
+              Visibility
+            </p>
+            <p className="mb-2 text-xs text-text-secondary">
+              Public skills appear in the shared catalog. Private skills stay admin-only until you
+              publish them.
+            </p>
+            <div className="flex gap-2">
+              {(["public", "private"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setVisibility(value)}
+                  className={`rounded-xl px-3 py-1.5 text-sm capitalize ${
+                    visibility === value
+                      ? "bg-white text-N0"
+                      : "bg-white/5 text-text-secondary hover:bg-white/10"
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+          )}
+
+          {isUser ? null : (
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-text-disabled">
               Designated model
@@ -408,6 +457,67 @@ export function SkillModifyPanel({
               ))}
             </select>
           </label>
+          )}
+
+          {isUser || mediaType !== "video" ? null : (
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled">
+              Default video settings
+            </p>
+            <p className="mb-2 text-xs text-text-secondary">
+              Starting defaults for everyone who uses this skill. Users can still change them before
+              generating. Leave blank to follow the model defaults.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-text-disabled">Duration</span>
+                <select
+                  value={duration}
+                  onChange={(e) => setDuration(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-N900 outline-none focus:border-white/25"
+                >
+                  <option value="">Model default</option>
+                  {[5, 8, 10, 15].map((d) => (
+                    <option key={d} value={String(d)}>
+                      {d}s
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-text-disabled">Resolution</span>
+                <select
+                  value={resolution}
+                  onChange={(e) => setResolution(e.target.value as VideoResolution | "")}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-N900 outline-none focus:border-white/25"
+                >
+                  <option value="">Model default</option>
+                  {(["480p", "720p", "1080p", "4k"] as VideoResolution[]).map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-text-disabled">Aspect ratio</span>
+                <select
+                  value={aspectRatio}
+                  onChange={(e) => setAspectRatio(e.target.value as VideoAspectRatio | "")}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-N900 outline-none focus:border-white/25"
+                >
+                  <option value="">Model default</option>
+                  {(
+                    ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9", "9:21", "adaptive"] as VideoAspectRatio[]
+                  ).map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
           )}
 
           <div>

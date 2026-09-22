@@ -73,10 +73,12 @@ import {
   viralTemplateAssetUrlForProvider,
 } from "@/lib/viral-template-pipeline";
 import { resolveLiveSkill } from "@/lib/skill-configs-db";
+import { getCurrentAdmin } from "@/lib/admin-auth";
 import {
   assembleSkillPrompt,
   skillDefaultTitle,
   skillPinMismatch,
+  WELCOME_VIDEO_SKILL_ID,
 } from "@/lib/skills";
 import {
   DevBlankForbiddenError,
@@ -280,7 +282,10 @@ export async function POST(req: Request) {
     }
     const b = body as Record<string, unknown>;
     const skillIdRaw = typeof b.skillId === "string" ? b.skillId.trim() : "";
-    const liveSkill = skillIdRaw ? await resolveLiveSkill(skillIdRaw, profileId) : null;
+    const admin = await getCurrentAdmin();
+    const liveSkill = skillIdRaw
+      ? await resolveLiveSkill(skillIdRaw, profileId, { includeHidden: Boolean(admin) })
+      : null;
     if (skillIdRaw) {
       if (!liveSkill || liveSkill.mediaType !== "video" || liveSkill.openHref) {
         return NextResponse.json({ error: "Unknown video skill." }, { status: 400 });
@@ -399,8 +404,7 @@ export async function POST(req: Request) {
       );
     }
     if (
-      designatedModelAvailable &&
-      liveSkill?.modelId === modelId &&
+      liveSkill?.id === WELCOME_VIDEO_SKILL_ID &&
       liveSkill.resolution &&
       liveSkill.resolution !== resolution
     ) {
@@ -411,6 +415,16 @@ export async function POST(req: Request) {
     }
     if (!isValidVideoAspectRatio(model, aspectRatio)) {
       return NextResponse.json({ error: "Unsupported aspect ratio." }, { status: 400 });
+    }
+    if (
+      liveSkill?.id === WELCOME_VIDEO_SKILL_ID &&
+      liveSkill.aspectRatio &&
+      liveSkill.aspectRatio !== aspectRatio
+    ) {
+      return NextResponse.json(
+        { error: "This skill is configured to use a different aspect ratio." },
+        { status: 400 }
+      );
     }
     // Duration is validated against the resolution (some models restrict durations
     // at certain resolutions — e.g. Veo 3.1 Lite only allows 8s at 1080p).
@@ -424,8 +438,7 @@ export async function POST(req: Request) {
       );
     }
     if (
-      designatedModelAvailable &&
-      liveSkill?.modelId === modelId &&
+      liveSkill?.id === WELCOME_VIDEO_SKILL_ID &&
       liveSkill.duration &&
       allowedDurations.includes(liveSkill.duration) &&
       liveSkill.duration !== duration

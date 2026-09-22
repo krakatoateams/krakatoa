@@ -26,6 +26,12 @@ export function skillsCatalogDisplaySelfCheck(): void {
     "after settle, hidden rows must stay off the grid"
   );
   assert(
+    catalogSkillsForDisplay(afterFetch, true, { includeHidden: true })
+      .map((s) => s.id)
+      .join(",") === "high-quality-film,change-background",
+    "admins may keep private (hidden) rows on the manage grid"
+  );
+  assert(
     catalogSkillsForDisplay(fallback, true).length === 2,
     "a failed fetch that keeps the fallback must still show it once ready"
   );

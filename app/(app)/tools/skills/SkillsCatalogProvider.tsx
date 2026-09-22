@@ -73,6 +73,8 @@ function SkillsCatalogProviderInner({ children }: { children: ReactNode }) {
 
   const value = useMemo<SkillsCatalogValue>(() => {
     const byId = new Map(skills.map((s) => [s.id, s]));
+    // Public surfaces (featured, pickers) never show private master skills.
+    // Admins still get them in `skills` / grid via includeHidden from the API.
     const visible = skills.filter((skill) => !skill.hidden);
     return {
       skills,
@@ -82,7 +84,8 @@ function SkillsCatalogProviderInner({ children }: { children: ReactNode }) {
       refresh,
       skillById: (id: string) => {
         const found = byId.get(id as SkillId);
-        if (!found || found.hidden) return undefined;
+        if (!found) return undefined;
+        if (found.hidden && !isAdmin) return undefined;
         return found;
       },
       featured: FEATURED_SKILL_IDS.map((id) => byId.get(id)).filter(

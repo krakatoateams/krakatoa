@@ -66,6 +66,7 @@ export function SkillTile({
   active,
   favorite,
   dimmed,
+  privateSkill,
   onSelect,
   onToggleFavorite,
   onModify,
@@ -74,6 +75,8 @@ export function SkillTile({
   active?: boolean;
   favorite: boolean;
   dimmed?: boolean;
+  /** Admin-only mark for master skills off the shared catalog. */
+  privateSkill?: boolean;
   onSelect: () => void;
   onToggleFavorite: () => void;
   onModify?: () => void;
@@ -101,7 +104,14 @@ export function SkillTile({
             />
           ) : null}
         </span>
-        <RunningTitle text={skill.title} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <RunningTitle text={skill.title} />
+          {privateSkill ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
+              Private
+            </span>
+          ) : null}
+        </span>
       </button>
       <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center">
         {onModify ? (

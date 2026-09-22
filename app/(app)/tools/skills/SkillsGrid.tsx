@@ -52,6 +52,7 @@ function SkillSection({
               skill={skill}
               active={skill.id === activeId}
               favorite={isFavorite(skill.id)}
+              privateSkill={Boolean(skill.hidden) && isAdmin && !skill.owned}
               onSelect={() => onSelect(skill)}
               onToggleFavorite={() => onToggleFavorite(skill.id)}
               onModify={manage ? () => onModify(skill) : undefined}
@@ -72,10 +73,12 @@ export function SkillsGrid({
   onSelect: (skill: Skill) => void;
   onModify?: (skill: CatalogSkill) => void;
 }) {
-  const { visible, ready, isAdmin, refresh } = useSkillsCatalog();
+  const { visible, skills, ready, isAdmin, refresh } = useSkillsCatalog();
   const { ids: favoriteIds, isFavorite, toggle } = useSkillFavorites();
   const [editing, setEditing] = useState<CatalogSkill | null>(null);
-  const shown = catalogSkillsForDisplay(visible, ready);
+  const shown = catalogSkillsForDisplay(isAdmin ? skills : visible, ready, {
+    includeHidden: isAdmin,
+  });
 
   const byId = useMemo(() => new Map(shown.map((skill) => [skill.id, skill])), [shown]);
 

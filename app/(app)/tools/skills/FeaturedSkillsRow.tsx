@@ -26,27 +26,44 @@ export default function FeaturedSkillsRow({
   onSelectSkill: (id: SkillId) => void;
   className?: string;
 }) {
-  const { featured, skillById, ready } = useSkillsCatalog();
+  const { featured, visible, skillById, ready } = useSkillsCatalog();
   const { ids: favoriteIds } = useSkillFavorites();
 
   const chips = useMemo(() => {
-    const settled = catalogSkillsForDisplay(featured, ready);
+    const settledFeatured = catalogSkillsForDisplay(featured, ready);
+    const settledVisible = catalogSkillsForDisplay(visible, ready);
     const seen = new Set<string>();
     const out: CatalogSkill[] = [];
     if (!ready) return out;
-    for (const id of favoriteIds) {
-      const skill = skillById(id);
-      if (!skill || seen.has(skill.id)) continue;
+
+    const push = (skill: CatalogSkill | undefined) => {
+      if (!skill || seen.has(skill.id) || !isAgentSkill(skill)) return;
       seen.add(skill.id);
       out.push(skill);
+    };
+
+    const curatedIds = new Set(settledFeatured.map((skill) => skill.id));
+    // Admin-created master skills with a New badge lead on the left — not
+    // builtin catalog rows that happen to carry the same badge.
+    for (const skill of settledVisible) {
+      if (
+        skill.badge !== "new" ||
+        skill.owned ||
+        skill.origin !== "custom" ||
+        curatedIds.has(skill.id)
+      ) {
+        continue;
+      }
+      push(skill);
     }
-    for (const skill of settled) {
-      if (seen.has(skill.id)) continue;
-      seen.add(skill.id);
-      out.push(skill);
+    for (const id of favoriteIds) {
+      push(skillById(id));
+    }
+    for (const skill of settledFeatured) {
+      push(skill);
     }
     return out;
-  }, [favoriteIds, featured, ready, skillById]);
+  }, [favoriteIds, featured, ready, skillById, visible]);
 
   return (
     <div className={`flex flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}>
