@@ -1225,9 +1225,7 @@ export default function EditorWorkspace() {
                   </div>
                   <div className="mb-2 space-y-1">
                     {overlays.length === 0 ? (
-                      <p className="flex h-8 items-center text-[11px] text-text-secondary">
-                        Overlay layers — drag the edges to trim
-                      </p>
+                      <div className="h-8" />
                     ) : (
                       overlayRows.map(({ overlay }) => (
                         <TimelineLayerRow
@@ -1258,9 +1256,7 @@ export default function EditorWorkspace() {
                   </div>
                   <div className="space-y-1">
                     {sequence.length === 0 ? (
-                      <p className="flex h-8 items-center text-xs text-text-secondary">
-                        Clip layers — drag to move, edges to trim
-                      </p>
+                      <div className="h-8" />
                     ) : (
                       clipRows.map(({ clip }) => {
                         const clipDur = clipLayerDurationSec(clip);
