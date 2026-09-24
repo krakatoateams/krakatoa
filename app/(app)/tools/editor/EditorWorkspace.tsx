@@ -1121,7 +1121,7 @@ export default function EditorWorkspace() {
             </div>
 
             <div className="flex">
-              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 py-3 pl-3 md:flex">
+              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-3 pb-11 pl-3 md:flex">
                 <div className="mb-2 h-5" />
                 <div className="mb-2 space-y-1">
                   {overlayRows.length === 0 ? (
@@ -1179,7 +1179,7 @@ export default function EditorWorkspace() {
                 </div>
               </div>
 
-              <div className="min-w-0 flex-1 overflow-x-auto px-3 py-3">
+              <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-3 pb-11">
                 <div
                   className="relative"
                   style={{ width: timelineWidth }}
