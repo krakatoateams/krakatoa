@@ -1200,7 +1200,7 @@ export default function EditorWorkspace() {
 
             <div className="flex">
               <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex">
-                <div className="mb-1 h-5" />
+                <div className="mb-2.5 h-5" />
                 {overlayRows.length > 0 ? (
                   <div className="mb-2 space-y-1">
                     {overlayRows.map(({ overlay, label }) => (
@@ -1287,7 +1287,7 @@ export default function EditorWorkspace() {
                   >
                     {formatTimecode(playhead)}
                   </div>
-                  <div className="relative mb-1 h-5">
+                  <div className="relative mb-2.5 h-5">
                     {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
                       <div
                         key={i}
