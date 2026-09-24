@@ -36,6 +36,8 @@ export type EditorClip = {
   /** Known source length; layer span cannot exceed sourceDuration - inSec. */
   sourceDurationSec: number | null;
   order: number;
+  locked: boolean;
+  hidden: boolean;
 };
 
 export type EditorOverlayKind = "text" | "image" | "video";
@@ -55,6 +57,8 @@ export type EditorOverlay = {
   color: string | null;
   creationId: string | null;
   storagePath: string | null;
+  locked: boolean;
+  hidden: boolean;
 };
 
 export type EditorDocument = {
@@ -258,6 +262,8 @@ function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolea
     inSec,
     sourceDurationSec,
     order: Number.isFinite(asFiniteNumber(o.order, index)) ? asFiniteNumber(o.order, index) : index,
+    locked: Boolean(o.locked),
+    hidden: Boolean(o.hidden),
     packed,
   };
 }
@@ -290,6 +296,8 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
     color: kind === "text" && COLOR_RE.test(colorRaw) ? colorRaw : kind === "text" ? "#FFFFFF" : null,
     creationId: kind === "text" ? null : asId(o.creationId),
     storagePath: kind === "text" ? null : asPath(o.storagePath),
+    locked: Boolean(o.locked),
+    hidden: Boolean(o.hidden),
   };
 }
 
@@ -350,6 +358,8 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
         inSec: clip.inSec,
         sourceDurationSec: clip.sourceDurationSec,
         order: clip.order,
+        locked: clip.locked,
+        hidden: clip.hidden,
       },
       durationSec
     )
@@ -441,6 +451,22 @@ function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-document self-check: ${msg}`);
 }
 
+/** Reorders `list` by moving `sourceId` next to `targetId`; null when nothing moves. */
+export function reorderById<T extends { id: string }>(
+  list: T[],
+  sourceId: string,
+  targetId: string
+): T[] | null {
+  if (sourceId === targetId) return null;
+  const items = [...list];
+  const from = items.findIndex((item) => item.id === sourceId);
+  const to = items.findIndex((item) => item.id === targetId);
+  if (from === -1 || to === -1) return null;
+  const [moved] = items.splice(from, 1);
+  items.splice(to, 0, moved);
+  return items;
+}
+
 export function editorDocumentSelfCheck(): void {
   const empty = emptyEditorDocument();
   assert(empty.sequence.length === 0 && empty.aspect === "9:16", "empty document defaults");
@@ -520,6 +546,21 @@ export function editorDocumentSelfCheck(): void {
 
   assert(normalizeEditorTitle("   ") === DEFAULT_EDITOR_TITLE, "blank title falls back");
   assert(normalizeEditorTitle("x".repeat(200)).length === EDITOR_TITLE_MAX, "title cap");
+
+  assert(parsed!.sequence.every((c) => c.locked === false && c.hidden === false), "clips default unlocked and visible");
+  const withFlags = parseEditorDocument({
+    durationSec: 5,
+    sequence: [
+      { id: "f1", creationId: "x", startSec: 0, endSec: 2, inSec: 0, order: 0, locked: true, hidden: true },
+    ],
+    overlays: [{ id: "fo1", kind: "text", startSec: 0, endSec: 2, text: "hi", locked: true, hidden: true }],
+  });
+  assert(withFlags?.sequence[0]?.locked === true && withFlags?.sequence[0]?.hidden === true, "clip locked/hidden parsed");
+  assert(withFlags?.overlays[0]?.locked === true && withFlags?.overlays[0]?.hidden === true, "overlay locked/hidden parsed");
+
+  const reordered = reorderById([{ id: "a" }, { id: "b" }, { id: "c" }], "a", "c");
+  assert(reordered?.map((x) => x.id).join(",") === "b,c,a", "reorderById moves source next to target");
+  assert(reorderById([{ id: "a" }], "a", "a") === null, "reorderById no-ops when source equals target");
 }
 
 if (require.main === module) {

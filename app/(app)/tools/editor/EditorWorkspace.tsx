@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
+  Eye,
+  EyeOff,
   ImagePlus,
+  Lock,
   Pause,
   Play,
   Plus,
@@ -14,6 +17,7 @@ import {
   StepForward,
   Trash2,
   Type,
+  Unlock,
   Upload,
   Video,
 } from "lucide-react";
@@ -42,6 +46,7 @@ import {
   normalizeEditorTitle,
   parseEditorDocument,
   projectDurationSec,
+  reorderById,
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
@@ -73,6 +78,10 @@ function snapTenth(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+const LAYER_PANEL_MIN_WIDTH = 128;
+const LAYER_PANEL_MAX_WIDTH = 320;
+const LAYER_PANEL_DEFAULT_WIDTH = 176;
+
 function startTimelineDrag(
   event: ReactPointerEvent,
   pxPerSec: number,
@@ -90,17 +99,6 @@ function startTimelineDrag(
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
-}
-
-function reorderById<T extends { id: string }>(list: T[], sourceId: string, targetId: string): T[] | null {
-  if (sourceId === targetId) return null;
-  const items = [...list];
-  const from = items.findIndex((item) => item.id === sourceId);
-  const to = items.findIndex((item) => item.id === targetId);
-  if (from === -1 || to === -1) return null;
-  const [moved] = items.splice(from, 1);
-  items.splice(to, 0, moved);
-  return items;
 }
 
 function fingerprintOf(title: string, doc: EditorDocument): string {
@@ -133,6 +131,8 @@ function newClipLayer(
     inSec: 0,
     sourceDurationSec: null,
     order,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -151,6 +151,8 @@ function clipFromUpload(storagePath: string, order: number, startSec: number, du
 
 function TimelineLayerRow({
   selected,
+  locked,
+  hidden,
   startSec,
   endSec,
   pxPerSec,
@@ -165,6 +167,8 @@ function TimelineLayerRow({
   onTrimEnd,
 }: {
   selected: boolean;
+  locked: boolean;
+  hidden: boolean;
   startSec: number;
   endSec: number;
   pxPerSec: number;
@@ -190,6 +194,7 @@ function TimelineLayerRow({
           onSelect();
         }}
         onPointerDown={(event) => {
+          if (locked) return;
           if ((event.target as HTMLElement).dataset.trim) return;
           const origStart = startSec;
           const origEnd = endSec;
@@ -199,38 +204,42 @@ function TimelineLayerRow({
             onMove(nextStart, nextStart + origSpan);
           });
         }}
-        className={`absolute inset-y-0 flex cursor-grab items-center rounded-md active:cursor-grabbing ${
-          selected ? selectedClassName : "bg-white/10"
-        }`}
+        className={`absolute inset-y-0 flex items-center rounded-md ${
+          locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        } ${hidden ? "opacity-40" : ""} ${selected ? selectedClassName : "bg-white/10"}`}
         style={{ left: startSec * pxPerSec, width }}
       >
-        <span
-          data-trim="start"
-          className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
-          onPointerDown={(event) => {
-            const origStart = startSec;
-            const origEnd = endSec;
-            const minStart = Math.max(0, origEnd - maxSpan);
-            startTimelineDrag(event, pxPerSec, (delta) => {
-              onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
-            });
-          }}
-        />
+        {!locked ? (
+          <span
+            data-trim="start"
+            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
+            onPointerDown={(event) => {
+              const origStart = startSec;
+              const origEnd = endSec;
+              const minStart = Math.max(0, origEnd - maxSpan);
+              startTimelineDrag(event, pxPerSec, (delta) => {
+                onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
+              });
+            }}
+          />
+        ) : null}
         <span className="min-w-0 flex-1 truncate px-2 text-left text-[10px] leading-8">
           {label}
         </span>
-        <span
-          data-trim="end"
-          className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
-          onPointerDown={(event) => {
-            const origStart = startSec;
-            const origEnd = endSec;
-            const cap = Math.min(maxEnd, origStart + maxSpan);
-            startTimelineDrag(event, pxPerSec, (delta) => {
-              onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
-            });
-          }}
-        />
+        {!locked ? (
+          <span
+            data-trim="end"
+            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
+            onPointerDown={(event) => {
+              const origStart = startSec;
+              const origEnd = endSec;
+              const cap = Math.min(maxEnd, origStart + maxSpan);
+              startTimelineDrag(event, pxPerSec, (delta) => {
+                onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
+              });
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -238,35 +247,107 @@ function TimelineLayerRow({
 
 function LayerPanelRow({
   selected,
+  locked,
+  hidden,
   icon,
   label,
+  dragOver,
   onSelect,
   onDragStart,
+  onDragOver,
+  onDragLeave,
   onDrop,
+  onDragEnd,
+  onToggleLock,
+  onToggleHidden,
+  onDelete,
 }: {
   selected: boolean;
+  locked: boolean;
+  hidden: boolean;
   icon: ReactNode;
   label: string;
+  dragOver: boolean;
   onSelect: () => void;
-  onDragStart: () => void;
+  onDragStart: (event: import("react").DragEvent) => void;
+  onDragOver: () => void;
+  onDragLeave: () => void;
   onDrop: () => void;
+  onDragEnd: () => void;
+  onToggleLock: () => void;
+  onToggleHidden: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div
       draggable
-      onDragStart={onDragStart}
-      onDragOver={(event) => event.preventDefault()}
+      onDragStart={(event) => {
+        if (locked || (event.target as HTMLElement).closest("[data-nodrag]")) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", label);
+        onDragStart(event);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        onDragOver();
+      }}
+      onDragLeave={onDragLeave}
       onDrop={(event) => {
         event.preventDefault();
         onDrop();
       }}
+      onDragEnd={onDragEnd}
       onClick={onSelect}
-      className={`flex h-8 cursor-grab items-center gap-1.5 rounded-sm px-2 text-[11px] active:cursor-grabbing ${
+      className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] ${
+        locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+      } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
       }`}
     >
-      <span className="shrink-0 opacity-70">{icon}</span>
-      <span className="truncate">{label}</span>
+      <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
+      <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
+      <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleHidden();
+          }}
+          className="rounded p-0.5 hover:bg-white/10"
+          aria-label={hidden ? "Show layer" : "Hide layer"}
+          title={hidden ? "Show layer" : "Hide layer"}
+        >
+          {hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleLock();
+          }}
+          className="rounded p-0.5 hover:bg-white/10"
+          aria-label={locked ? "Unlock layer" : "Lock layer"}
+          title={locked ? "Unlock layer" : "Lock layer"}
+        >
+          {locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          className="rounded p-0.5 text-error hover:bg-error/10"
+          aria-label="Delete layer"
+          title="Delete layer"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </span>
     </div>
   );
 }
@@ -287,6 +368,8 @@ function textOverlay(startSec: number, endSec: number, z: number): EditorOverlay
     color: "#FFFFFF",
     creationId: null,
     storagePath: null,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -312,6 +395,8 @@ function mediaOverlay(
     color: null,
     creationId: item.id ?? null,
     storagePath: item.storagePath?.trim() || null,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -376,6 +461,8 @@ export default function EditorWorkspace() {
   const [openList, setOpenList] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
+  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
 
   const titleRef = useRef(title);
   const docRef = useRef(doc);
@@ -398,7 +485,10 @@ export default function EditorWorkspace() {
   const dirty = fingerprint !== lastSavedRef.current;
   const sequence = sortedSequence(doc);
   const overlays = sortedOverlays(doc);
-  const active = clipAtPlayhead(doc, playhead);
+  const active = clipAtPlayhead(
+    { ...doc, sequence: doc.sequence.filter((c) => !c.hidden) },
+    playhead
+  );
   const canvas = EDITOR_CANVAS[doc.aspect];
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
@@ -439,10 +529,22 @@ export default function EditorWorkspace() {
     })
     .reverse();
 
+  // Panel/lane rows display frontmost-on-top, i.e. the reverse of ascending order/z.
+  // Reorder against that same displayed order so a drop lands where it visually looks like it did.
+  function displayIndexById<T extends { id: string }>(
+    list: T[],
+    sourceId: string,
+    targetId: string
+  ): Map<string, number> | null {
+    const reordered = reorderById([...list].reverse(), sourceId, targetId);
+    if (!reordered) return null;
+    const n = reordered.length;
+    return new Map(reordered.map((item, i) => [item.id, n - 1 - i]));
+  }
+
   const reorderClips = (sourceId: string, targetId: string) => {
-    const reordered = reorderById(sequence, sourceId, targetId);
-    if (!reordered) return;
-    const orderById = new Map(reordered.map((c, i) => [c.id, i]));
+    const orderById = displayIndexById(sequence, sourceId, targetId);
+    if (!orderById) return;
     patchDoc((current) => ({
       ...current,
       sequence: current.sequence.map((c) => ({ ...c, order: orderById.get(c.id) ?? c.order })),
@@ -450,9 +552,8 @@ export default function EditorWorkspace() {
   };
 
   const reorderOverlays = (sourceId: string, targetId: string) => {
-    const reordered = reorderById(overlays, sourceId, targetId);
-    if (!reordered) return;
-    const zById = new Map(reordered.map((o, i) => [o.id, i]));
+    const zById = displayIndexById(overlays, sourceId, targetId);
+    if (!zById) return;
     patchDoc((current) => ({
       ...current,
       overlays: current.overlays.map((o) => ({ ...o, z: zById.get(o.id) ?? o.z })),
@@ -821,14 +922,16 @@ export default function EditorWorkspace() {
     }));
   };
 
-  const removeSelected = () => {
-    if (!selectedId) return;
+  const removeLayer = (kind: "clip" | "overlay", id: string) => {
     patchDoc((current) => ({
       ...current,
-      sequence: current.sequence.filter((c) => c.id !== selectedId).map((c, order) => ({ ...c, order })),
-      overlays: current.overlays.filter((o) => o.id !== selectedId),
+      sequence:
+        kind === "clip"
+          ? current.sequence.filter((c) => c.id !== id).map((c, order) => ({ ...c, order }))
+          : current.sequence,
+      overlays: kind === "overlay" ? current.overlays.filter((o) => o.id !== id) : current.overlays,
     }));
-    setSelectedId(null);
+    setSelectedId((current) => (current === id ? null : current));
   };
 
   const handleExport = async () => {
@@ -919,6 +1022,7 @@ export default function EditorWorkspace() {
                 </div>
               )}
               {overlays.map((overlay) => {
+                if (overlay.hidden) return null;
                 if (playhead < overlay.startSec || playhead >= overlay.endSec) return null;
                 const selected = overlay.id === selectedId;
                 return (
@@ -931,7 +1035,7 @@ export default function EditorWorkspace() {
                       setSelectedId(overlay.id);
                     }}
                     onPointerDown={(event) => {
-                      if (!selected) return;
+                      if (!selected || overlay.locked) return;
                       event.stopPropagation();
                       const stage = event.currentTarget.parentElement;
                       if (!stage) return;
@@ -975,7 +1079,7 @@ export default function EditorWorkspace() {
                     ) : (
                       <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing} />
                     )}
-                    {selected ? (
+                    {selected && !overlay.locked ? (
                       <div
                         className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize rounded-sm bg-brand-primary"
                         onPointerDown={(event) => {
@@ -1082,16 +1186,6 @@ export default function EditorWorkspace() {
                   <Video className="h-3.5 w-3.5" />
                   PiP
                 </button>
-                {selectedId ? (
-                  <button
-                    type="button"
-                    onClick={removeSelected}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-error hover:bg-error/10"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Remove
-                  </button>
-                ) : null}
                 <input
                   ref={uploadRef}
                   type="file"
@@ -1199,7 +1293,10 @@ export default function EditorWorkspace() {
             </div>
 
             <div className="flex">
-              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex">
+              <div
+                className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex"
+                style={{ width: panelWidth }}
+              >
                 <div className="mb-3 h-5" />
                 {overlayRows.length > 0 ? (
                   <div className="mb-2 space-y-1">
@@ -1207,6 +1304,9 @@ export default function EditorWorkspace() {
                       <LayerPanelRow
                         key={overlay.id}
                         selected={overlay.id === selectedId}
+                        locked={overlay.locked}
+                        hidden={overlay.hidden}
+                        dragOver={dragOverLayerId === overlay.id}
                         icon={
                           overlay.kind === "text" ? (
                             <Type className="h-3 w-3" />
@@ -1221,11 +1321,23 @@ export default function EditorWorkspace() {
                         onDragStart={() => {
                           dragLayerIdRef.current = overlay.id;
                         }}
+                        onDragOver={() => setDragOverLayerId(overlay.id)}
+                        onDragLeave={() =>
+                          setDragOverLayerId((current) => (current === overlay.id ? null : current))
+                        }
                         onDrop={() => {
                           const sourceId = dragLayerIdRef.current;
                           dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
                           if (sourceId) reorderOverlays(sourceId, overlay.id);
                         }}
+                        onDragEnd={() => {
+                          dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
+                        }}
+                        onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
+                        onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
+                        onDelete={() => removeLayer("overlay", overlay.id)}
                       />
                     ))}
                   </div>
@@ -1238,22 +1350,51 @@ export default function EditorWorkspace() {
                       <LayerPanelRow
                         key={clip.id}
                         selected={clip.id === selectedId}
+                        locked={clip.locked}
+                        hidden={clip.hidden}
+                        dragOver={dragOverLayerId === clip.id}
                         icon={<Video className="h-3 w-3" />}
                         label={label}
                         onSelect={() => setSelectedId(clip.id)}
                         onDragStart={() => {
                           dragLayerIdRef.current = clip.id;
                         }}
+                        onDragOver={() => setDragOverLayerId(clip.id)}
+                        onDragLeave={() =>
+                          setDragOverLayerId((current) => (current === clip.id ? null : current))
+                        }
                         onDrop={() => {
                           const sourceId = dragLayerIdRef.current;
                           dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
                           if (sourceId) reorderClips(sourceId, clip.id);
                         }}
+                        onDragEnd={() => {
+                          dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
+                        }}
+                        onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
+                        onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
+                        onDelete={() => removeLayer("clip", clip.id)}
                       />
                     ))
                   )}
                 </div>
               </div>
+
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                onPointerDown={(event) => {
+                  const startWidth = panelWidth;
+                  startTimelineDrag(event, 1, (deltaPx) => {
+                    setPanelWidth(
+                      Math.max(LAYER_PANEL_MIN_WIDTH, Math.min(LAYER_PANEL_MAX_WIDTH, startWidth + deltaPx))
+                    );
+                  });
+                }}
+                className="hidden w-1.5 shrink-0 cursor-col-resize bg-white/5 hover:bg-brand-primary/50 active:bg-brand-primary md:block"
+              />
 
               <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11">
                 <div
@@ -1305,6 +1446,8 @@ export default function EditorWorkspace() {
                         <TimelineLayerRow
                           key={overlay.id}
                           selected={overlay.id === selectedId}
+                          locked={overlay.locked}
+                          hidden={overlay.hidden}
                           startSec={overlay.startSec}
                           endSec={overlay.endSec}
                           pxPerSec={pxPerSec}
@@ -1338,6 +1481,8 @@ export default function EditorWorkspace() {
                           <TimelineLayerRow
                             key={clip.id}
                             selected={clip.id === selectedId}
+                            locked={clip.locked}
+                            hidden={clip.hidden}
                             startSec={clip.startSec}
                             endSec={clip.endSec}
                             pxPerSec={pxPerSec}
