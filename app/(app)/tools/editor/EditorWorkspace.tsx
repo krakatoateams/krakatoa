@@ -1433,7 +1433,7 @@ export default function EditorWorkspace() {
 
               <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11">
                 <div
-                  className="relative"
+                  className="relative min-h-full"
                   style={{ width: timelineWidth }}
                   onPointerDown={(event) => {
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -1449,11 +1449,11 @@ export default function EditorWorkspace() {
                   }}
                 >
                   <div
-                    className="pointer-events-none absolute top-4 z-20 h-[calc(100%-1rem)] w-px bg-brand-primary"
+                    className="pointer-events-none absolute top-4 bottom-0 z-20 w-px bg-info"
                     style={{ left: playhead * pxPerSec }}
                   />
                   <div
-                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-brand-primary px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-brand-primary after:content-['']"
+                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
                     style={{ left: playhead * pxPerSec }}
                     aria-hidden
                   >
