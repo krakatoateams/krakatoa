@@ -1119,8 +1119,8 @@ export default function EditorWorkspace() {
                   type="button"
                   onClick={() => stepPlayhead(-0.1)}
                   className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
-                  aria-label="Previous frame"
-                  title="Previous frame"
+                  aria-label="Step back"
+                  title="Step back"
                 >
                   <StepBack className="h-3.5 w-3.5" />
                 </button>
@@ -1139,8 +1139,8 @@ export default function EditorWorkspace() {
                   type="button"
                   onClick={() => stepPlayhead(0.1)}
                   className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
-                  aria-label="Next frame"
-                  title="Next frame"
+                  aria-label="Step forward"
+                  title="Step forward"
                 >
                   <StepForward className="h-3.5 w-3.5" />
                 </button>
@@ -1160,7 +1160,7 @@ export default function EditorWorkspace() {
                 </span>
               </div>
 
-              <div className="flex items-center justify-end gap-1.5">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <label className="flex items-center gap-1">
                   <span className="hidden text-[11px] text-text-secondary sm:inline">Duration</span>
                   <input
