@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
+  ChevronDown,
   Eye,
   EyeOff,
   ImagePlus,
@@ -486,6 +487,8 @@ export default function EditorWorkspace() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
@@ -573,6 +576,21 @@ export default function EditorWorkspace() {
     setPlaying(false);
     setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.endSec : duration))));
   };
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [addMenuOpen]);
   const commitTimeInput = (raw: string) => {
     const parsed = Number(raw);
     if (Number.isFinite(parsed)) {
@@ -1331,78 +1349,105 @@ export default function EditorWorkspace() {
             />
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() =>
-                    openLibrary({
-                      mediaType: "video",
-                      title: "Add a clip",
-                      onPick: addClip,
-                    })
-                  }
-                  disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Clip
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    uploadKindRef.current = "sequence";
-                    uploadRef.current?.click();
-                  }}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  Upload
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
-                    const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-                    const end = snapTenth(Math.min(duration, start + 3));
-                    const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
-                    patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
-                    setSelectedId(overlay.id);
-                  }}
-                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-                >
-                  <Type className="h-3.5 w-3.5" />
-                  Text
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openLibrary({
-                      mediaType: "image",
-                      title: "Add an image overlay",
-                      onPick: (item) => addOverlayFromItem("image", item),
-                    })
-                  }
-                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-                >
-                  <ImagePlus className="h-3.5 w-3.5" />
-                  Image
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openLibrary({
-                      mediaType: "video",
-                      title: "Add a video overlay",
-                      onPick: (item) => addOverlayFromItem("video", item),
-                    })
-                  }
-                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-                >
-                  <Video className="h-3.5 w-3.5" />
-                  PiP
-                </button>
+                <div ref={addMenuRef} className="relative">
+                  <button
+                    type="button"
+                    aria-haspopup="true"
+                    aria-expanded={addMenuOpen}
+                    onClick={() => setAddMenuOpen((current) => !current)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </button>
+                  {addMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label="Add to timeline"
+                      className="absolute left-0 top-full z-30 mt-1 w-44 rounded-lg border border-white/10 bg-N50 p-1 text-text-primary shadow-xl"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({ mediaType: "video", title: "Add a clip", onPick: addClip });
+                        }}
+                        disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Clip
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          uploadKindRef.current = "sequence";
+                          uploadRef.current?.click();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Upload
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
+                          const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
+                          const end = snapTenth(Math.min(duration, start + 3));
+                          const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
+                          patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+                          setSelectedId(overlay.id);
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Type className="h-3.5 w-3.5" />
+                        Text
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({
+                            mediaType: "image",
+                            title: "Add an image overlay",
+                            onPick: (item) => addOverlayFromItem("image", item),
+                          });
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        Image
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({
+                            mediaType: "video",
+                            title: "Add a video overlay",
+                            onPick: (item) => addOverlayFromItem("video", item),
+                          });
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Video className="h-3.5 w-3.5" />
+                        PiP
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <input
                   ref={uploadRef}
                   type="file"
