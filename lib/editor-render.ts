@@ -93,8 +93,8 @@ export function buildEditorFfmpegGraph(
 
   const { w: width, h: height } = EDITOR_CANVAS[doc.aspect];
   const durationSec = round2(sequenceDurationSec(doc));
-  const sequence = sortedSequence(doc);
-  const overlays = sortedOverlays(doc);
+  const sequence = sortedSequence(doc).filter((clip) => !clip.hidden);
+  const overlays = sortedOverlays(doc).filter((overlay) => !overlay.hidden);
 
   const inputFiles: Record<string, string> = {};
   const inputArgs: string[] = [];
@@ -244,6 +244,8 @@ export function editorRenderSelfCheck(): void {
         inSec: 0,
         sourceDurationSec: 4,
         order: 0,
+        locked: false,
+        hidden: false,
       },
       {
         id: "c2",
@@ -254,6 +256,8 @@ export function editorRenderSelfCheck(): void {
         inSec: 1,
         sourceDurationSec: 6,
         order: 1,
+        locked: false,
+        hidden: false,
       },
     ],
     overlays: [
@@ -272,6 +276,8 @@ export function editorRenderSelfCheck(): void {
         color: "#FFAA00",
         creationId: null,
         storagePath: null,
+        locked: false,
+        hidden: false,
       },
       {
         id: "i1",
@@ -288,6 +294,8 @@ export function editorRenderSelfCheck(): void {
         color: null,
         creationId: "img1",
         storagePath: null,
+        locked: false,
+        hidden: false,
       },
     ],
   };

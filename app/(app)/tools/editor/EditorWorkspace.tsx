@@ -4,12 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
+  ChevronDown,
+  Eye,
+  EyeOff,
   ImagePlus,
+  Lock,
   Pause,
   Play,
   Plus,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
   Trash2,
   Type,
+  Unlock,
   Upload,
   Video,
 } from "lucide-react";
@@ -19,6 +28,7 @@ import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { canDropOnEditor } from "@/lib/editor-handoff";
 import { uploadRefFile } from "@/components/studio/RefGroup";
+import { useStudioGenerationPreview } from "@/components/studio";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { probeVideoDurationSec } from "@/lib/use-video-duration";
 import type { CreationHistoryItem } from "@/lib/creations";
@@ -38,16 +48,20 @@ import {
   normalizeEditorTitle,
   parseEditorDocument,
   projectDurationSec,
+  reorderById,
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
   validateEditorExport,
+  withProjectAspect,
   withProjectDuration,
-  type EditorAspect,
   type EditorClip,
   type EditorDocument,
   type EditorOverlay,
 } from "@/lib/editor-document";
+import { containSize } from "@/lib/editor-preview-size";
+import { useEditorViewport } from "./useEditorViewport";
+import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
 import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
@@ -70,6 +84,22 @@ function snapTenth(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+const LAYER_PANEL_MIN_WIDTH = 128;
+const LAYER_PANEL_MAX_WIDTH = 320;
+const LAYER_PANEL_DEFAULT_WIDTH = 176;
+/** Smallest usable preview canvas edge, e.g. below the stage size on a very narrow viewport. */
+const EDITOR_PREVIEW_MIN_PX = 160;
+
+const TIMELINE_TRACKS_MIN_HEIGHT = 140;
+const TIMELINE_TRACKS_MAX_HEIGHT = 420;
+const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
+// Ruler lives outside the vertically-scrolling rows so it stays pinned in view;
+// its own height is carved out of tracksHeight to keep the resizable split intact.
+const TIMELINE_RULER_HEIGHT = 36;
+
+const HISTORY_LIMIT = 50;
+const HISTORY_COALESCE_MS = 650;
+
 function startTimelineDrag(
   event: ReactPointerEvent,
   pxPerSec: number,
@@ -84,6 +114,37 @@ function startTimelineDrag(
   const up = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+const LAYER_ROW_ATTR = "data-layer-row";
+
+function layerRowIdAt(clientX: number, clientY: number): string | null {
+  const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+  const row = el?.closest(`[${LAYER_ROW_ATTR}]`) as HTMLElement | null;
+  return row?.dataset.layerId ?? null;
+}
+
+/**
+ * Reorders layer rows by tracking the pointer directly instead of native HTML5
+ * drag-and-drop: native DnD only reliably completes a small fraction of real
+ * drags in this app (Chromium silently drops the session after one dragover,
+ * worse in Safari), while plain pointermove/pointerup — already used for
+ * timeline trim/move — never misses a drop.
+ */
+function startLayerReorderDrag(
+  event: ReactPointerEvent,
+  onHover: (targetId: string | null) => void,
+  onCommit: (targetId: string | null) => void
+): void {
+  event.preventDefault();
+  const move = (ev: PointerEvent) => onHover(layerRowIdAt(ev.clientX, ev.clientY));
+  const up = (ev: PointerEvent) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    onCommit(layerRowIdAt(ev.clientX, ev.clientY));
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -119,6 +180,8 @@ function newClipLayer(
     inSec: 0,
     sourceDurationSec: null,
     order,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -137,6 +200,8 @@ function clipFromUpload(storagePath: string, order: number, startSec: number, du
 
 function TimelineLayerRow({
   selected,
+  locked,
+  hidden,
   startSec,
   endSec,
   pxPerSec,
@@ -151,6 +216,8 @@ function TimelineLayerRow({
   onTrimEnd,
 }: {
   selected: boolean;
+  locked: boolean;
+  hidden: boolean;
   startSec: number;
   endSec: number;
   pxPerSec: number;
@@ -176,6 +243,7 @@ function TimelineLayerRow({
           onSelect();
         }}
         onPointerDown={(event) => {
+          if (locked) return;
           if ((event.target as HTMLElement).dataset.trim) return;
           const origStart = startSec;
           const origEnd = endSec;
@@ -185,39 +253,136 @@ function TimelineLayerRow({
             onMove(nextStart, nextStart + origSpan);
           });
         }}
-        className={`absolute inset-y-0 flex cursor-grab items-center rounded-md active:cursor-grabbing ${
-          selected ? selectedClassName : "bg-white/10"
-        }`}
+        className={`absolute inset-y-0 flex items-center rounded-md ${
+          locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        } ${hidden ? "opacity-40" : ""} ${selected ? selectedClassName : "bg-white/10"}`}
         style={{ left: startSec * pxPerSec, width }}
       >
-        <span
-          data-trim="start"
-          className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
-          onPointerDown={(event) => {
-            const origStart = startSec;
-            const origEnd = endSec;
-            const minStart = Math.max(0, origEnd - maxSpan);
-            startTimelineDrag(event, pxPerSec, (delta) => {
-              onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
-            });
-          }}
-        />
+        {!locked ? (
+          <span
+            data-trim="start"
+            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
+            onPointerDown={(event) => {
+              const origStart = startSec;
+              const origEnd = endSec;
+              const minStart = Math.max(0, origEnd - maxSpan);
+              startTimelineDrag(event, pxPerSec, (delta) => {
+                onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
+              });
+            }}
+          />
+        ) : null}
         <span className="min-w-0 flex-1 truncate px-2 text-left text-[10px] leading-8">
           {label}
         </span>
-        <span
-          data-trim="end"
-          className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
-          onPointerDown={(event) => {
-            const origStart = startSec;
-            const origEnd = endSec;
-            const cap = Math.min(maxEnd, origStart + maxSpan);
-            startTimelineDrag(event, pxPerSec, (delta) => {
-              onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
-            });
-          }}
-        />
+        {!locked ? (
+          <span
+            data-trim="end"
+            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
+            onPointerDown={(event) => {
+              const origStart = startSec;
+              const origEnd = endSec;
+              const cap = Math.min(maxEnd, origStart + maxSpan);
+              startTimelineDrag(event, pxPerSec, (delta) => {
+                onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
+              });
+            }}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function LayerPanelRow({
+  id,
+  selected,
+  locked,
+  hidden,
+  icon,
+  label,
+  dragOver,
+  onSelect,
+  onReorderStart,
+  onReorderHover,
+  onReorderCommit,
+  onToggleLock,
+  onToggleHidden,
+  onDelete,
+}: {
+  id: string;
+  selected: boolean;
+  locked: boolean;
+  hidden: boolean;
+  icon: ReactNode;
+  label: string;
+  dragOver: boolean;
+  onSelect: () => void;
+  onReorderStart: () => void;
+  onReorderHover: (targetId: string | null) => void;
+  onReorderCommit: (targetId: string | null) => void;
+  onToggleLock: () => void;
+  onToggleHidden: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      data-layer-row
+      data-layer-id={id}
+      onPointerDown={(event) => {
+        if (locked || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
+          return;
+        }
+        onReorderStart();
+        startLayerReorderDrag(event, onReorderHover, onReorderCommit);
+      }}
+      onClick={onSelect}
+      className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
+        locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+      } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
+        selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
+      }`}
+    >
+      <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
+      <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
+      <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleHidden();
+          }}
+          className="rounded p-0.5 hover:bg-white/10"
+          aria-label={hidden ? "Show layer" : "Hide layer"}
+          title={hidden ? "Show layer" : "Hide layer"}
+        >
+          {hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleLock();
+          }}
+          className="rounded p-0.5 hover:bg-white/10"
+          aria-label={locked ? "Unlock layer" : "Lock layer"}
+          title={locked ? "Unlock layer" : "Lock layer"}
+        >
+          {locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          className="rounded p-0.5 text-error hover:bg-error/10"
+          aria-label="Delete layer"
+          title="Delete layer"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </span>
     </div>
   );
 }
@@ -238,6 +403,8 @@ function textOverlay(startSec: number, endSec: number, z: number): EditorOverlay
     color: "#FFFFFF",
     creationId: null,
     storagePath: null,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -246,23 +413,32 @@ function mediaOverlay(
   item: { id?: string; storagePath?: string | null },
   startSec: number,
   endSec: number,
-  z: number
+  z: number,
+  canvas: { w: number; h: number }
 ): EditorOverlay {
+  // Square default sized off the shorter canvas edge so a fresh overlay looks
+  // the same regardless of which aspect ratio was active when it was added,
+  // instead of the old w/h fractions whose on-screen shape depended on it.
+  const side = 0.3 * Math.min(canvas.w, canvas.h);
+  const w = side / canvas.w;
+  const h = side / canvas.h;
   return {
     id: newId("ov"),
     kind,
     startSec: snapTenth(startSec),
     endSec: snapTenth(endSec),
-    x: 0.62,
+    x: 1 - w - 0.06,
     y: 0.06,
-    w: 0.32,
-    h: 0.24,
+    w,
+    h,
     z,
     text: null,
     fontSize: null,
     color: null,
     creationId: item.id ?? null,
     storagePath: item.storagePath?.trim() || null,
+    locked: false,
+    hidden: false,
   };
 }
 
@@ -270,10 +446,12 @@ function SignedVideo({
   storagePath,
   currentTime,
   playing,
+  onNaturalSize,
 }: {
   storagePath: string | null;
   currentTime: number;
   playing: boolean;
+  onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
 }) {
   const url = useSignedMediaUrl(storagePath);
   const ref = useRef<HTMLVideoElement>(null);
@@ -297,15 +475,37 @@ function SignedVideo({
       muted
       playsInline
       className="h-full w-full object-contain"
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget;
+        onNaturalSize?.(video.videoWidth, video.videoHeight);
+      }}
     />
   );
 }
 
-function SignedImage({ storagePath }: { storagePath: string | null }) {
+function SignedImage({
+  storagePath,
+  onNaturalSize,
+}: {
+  storagePath: string | null;
+  onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
+}) {
   const url = useSignedMediaUrl(storagePath);
   if (!url) return <div className="h-full w-full animate-pulse bg-white/10" />;
   return (
-    <Image src={url} alt="" fill sizes="240px" className="object-contain" />
+    <Image
+      src={url}
+      alt=""
+      fill
+      sizes="240px"
+      className="object-contain"
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
+      onLoad={(event) => {
+        const img = event.currentTarget;
+        onNaturalSize?.(img.naturalWidth, img.naturalHeight);
+      }}
+    />
   );
 }
 
@@ -315,6 +515,7 @@ export default function EditorWorkspace() {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
+  const { openPreview } = useStudioGenerationPreview();
   const { begin, cancel, cancelling } = useIdempotentSubmit("editor:export");
 
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
@@ -322,14 +523,30 @@ export default function EditorWorkspace() {
   const [doc, setDoc] = useState<EditorDocument>(emptyEditorDocument);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
+  const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const rulerScrollRef = useRef<HTMLDivElement>(null);
+  const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
+  const [tracksHeight, setTracksHeight] = useState(TIMELINE_TRACKS_DEFAULT_HEIGHT);
+  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+  const [tool, setTool] = useState<EditorTool>("select");
+  const [past, setPast] = useState<EditorDocument[]>([]);
+  const [future, setFuture] = useState<EditorDocument[]>([]);
 
   const titleRef = useRef(title);
   const docRef = useRef(doc);
+  const pastRef = useRef(past);
+  const futureRef = useRef(future);
+  const selectedIdRef = useRef(selectedId);
+  const lastPatchRef = useRef<{ key: string; at: number } | null>(null);
   const projectIdRef = useRef(projectId);
   const lastSavedRef = useRef(fingerprintOf(DEFAULT_EDITOR_TITLE, emptyEditorDocument()));
   const persistedTitleRef = useRef(DEFAULT_EDITOR_TITLE);
@@ -338,9 +555,15 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const dragLayerIdRef = useRef<string | null>(null);
+  const lastActiveStoragePathRef = useRef<string | null>(null);
+  const lastActiveLocalSecRef = useRef(0);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
+  pastRef.current = past;
+  futureRef.current = future;
+  selectedIdRef.current = selectedId;
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -348,10 +571,127 @@ export default function EditorWorkspace() {
   const dirty = fingerprint !== lastSavedRef.current;
   const sequence = sortedSequence(doc);
   const overlays = sortedOverlays(doc);
-  const active = clipAtPlayhead(doc, playhead);
+  const active = clipAtPlayhead(
+    { ...doc, sequence: doc.sequence.filter((c) => !c.hidden) },
+    playhead
+  );
+  if (active) {
+    lastActiveStoragePathRef.current = active.clip.storagePath;
+    lastActiveLocalSecRef.current = active.localSec;
+  }
   const canvas = EDITOR_CANVAS[doc.aspect];
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setStageSize({ w: rect.width, h: rect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const previewSize = containSize(stageSize, canvas, EDITOR_PREVIEW_MIN_PX);
+  const viewport = useEditorViewport(
+    stageRef,
+    { width: previewSize.width, height: previewSize.height },
+    stageSize,
+    tool === "hand"
+  );
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
+  const navClip = selectedClip ?? active?.clip ?? null;
+
+  const stepPlayhead = (deltaSec: number) => {
+    setPlaying(false);
+    setPlayhead((head) => snapTenth(Math.max(0, Math.min(duration, head + deltaSec))));
+  };
+  const jumpToClipStart = () => {
+    setPlaying(false);
+    setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.startSec : 0))));
+  };
+  const jumpToClipEnd = () => {
+    setPlaying(false);
+    setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.endSec : duration))));
+  };
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [addMenuOpen]);
+  const commitTimeInput = (raw: string) => {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      setPlaying(false);
+      setPlayhead(snapTenth(Math.max(0, Math.min(duration, parsed))));
+    }
+    setTimeInputDraft(null);
+  };
+
+  // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
+  const clipRows = sequence
+    .map((clip, i) => ({ clip, label: `Clip ${i + 1}` }))
+    .reverse();
+  let imageOverlayCount = 0;
+  let videoOverlayCount = 0;
+  const overlayRows = overlays
+    .map((overlay) => {
+      let label: string;
+      if (overlay.kind === "text") {
+        label = overlay.text?.trim().slice(0, 18) || "Text";
+      } else if (overlay.kind === "image") {
+        imageOverlayCount += 1;
+        label = `Image overlay ${imageOverlayCount}`;
+      } else {
+        videoOverlayCount += 1;
+        label = `Video overlay ${videoOverlayCount}`;
+      }
+      return { overlay, label };
+    })
+    .reverse();
+
+  // Panel/lane rows display frontmost-on-top, i.e. the reverse of ascending order/z.
+  // Reorder against that same displayed order so a drop lands where it visually looks like it did.
+  function displayIndexById<T extends { id: string }>(
+    list: T[],
+    sourceId: string,
+    targetId: string
+  ): Map<string, number> | null {
+    const reordered = reorderById([...list].reverse(), sourceId, targetId);
+    if (!reordered) return null;
+    const n = reordered.length;
+    return new Map(reordered.map((item, i) => [item.id, n - 1 - i]));
+  }
+
+  const reorderClips = (sourceId: string, targetId: string) => {
+    const orderById = displayIndexById(sequence, sourceId, targetId);
+    if (!orderById) return;
+    patchDoc((current) => ({
+      ...current,
+      sequence: current.sequence.map((c) => ({ ...c, order: orderById.get(c.id) ?? c.order })),
+    }));
+  };
+
+  const reorderOverlays = (sourceId: string, targetId: string) => {
+    const zById = displayIndexById(overlays, sourceId, targetId);
+    if (!zById) return;
+    patchDoc((current) => ({
+      ...current,
+      overlays: current.overlays.map((o) => ({ ...o, z: zById.get(o.id) ?? o.z })),
+    }));
+  };
 
   const applyUrl = useCallback(
     (id: string | null) => {
@@ -361,10 +701,77 @@ export default function EditorWorkspace() {
     [router]
   );
 
-  const patchDoc = useCallback((updater: (current: EditorDocument) => EditorDocument) => {
-    setDoc((current) => updater(current));
-    setPlaying(false);
+  // Continuous drags (overlay move/resize, timeline trim) call patchDoc on every
+  // pointermove; coalesceKey collapses same-key patches within this window into
+  // one undo step instead of one per pixel.
+  // ponytail: time-window coalescing, not true gesture-scoped (pointerdown/up) —
+  // a >650ms pause mid-drag splits into two undo steps. Upgrade to explicit
+  // begin/end-gesture calls if that granularity ever bothers users.
+  const patchDoc = useCallback(
+    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string }) => {
+      const current = docRef.current;
+      const next = updater(current);
+      const key = opts?.coalesceKey ?? null;
+      const now = performance.now();
+      const last = lastPatchRef.current;
+      const coalesced = key != null && last?.key === key && now - last.at < HISTORY_COALESCE_MS;
+      if (!coalesced) {
+        setPast((p) => [...p.slice(-HISTORY_LIMIT + 1), current]);
+        setFuture([]);
+      }
+      lastPatchRef.current = key != null ? { key, at: now } : null;
+      docRef.current = next;
+      setDoc(next);
+      setPlaying(false);
+    },
+    []
+  );
+
+  const undo = useCallback(() => {
+    const p = pastRef.current;
+    if (p.length === 0) return;
+    const prev = p[p.length - 1];
+    setFuture((f) => [docRef.current, ...f].slice(0, HISTORY_LIMIT));
+    setPast(p.slice(0, -1));
+    docRef.current = prev;
+    setDoc(prev);
+    setSelectedId(null);
+    lastPatchRef.current = null;
   }, []);
+
+  const redo = useCallback(() => {
+    const f = futureRef.current;
+    if (f.length === 0) return;
+    const next = f[0];
+    setPast((p) => [...p, docRef.current].slice(-HISTORY_LIMIT));
+    setFuture(f.slice(1));
+    docRef.current = next;
+    setDoc(next);
+    setSelectedId(null);
+    lastPatchRef.current = null;
+  }, []);
+
+  const removeLayer = useCallback(
+    (kind: "clip" | "overlay", id: string) => {
+      patchDoc((current) => ({
+        ...current,
+        sequence:
+          kind === "clip"
+            ? current.sequence.filter((c) => c.id !== id).map((c, order) => ({ ...c, order }))
+            : current.sequence,
+        overlays: kind === "overlay" ? current.overlays.filter((o) => o.id !== id) : current.overlays,
+      }));
+      setSelectedId((current) => (current === id ? null : current));
+    },
+    [patchDoc]
+  );
+
+  const deleteSelected = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const isClip = docRef.current.sequence.some((c) => c.id === id);
+    removeLayer(isClip ? "clip" : "overlay", id);
+  }, [removeLayer]);
 
   const loadProject = useCallback(
     async (id: string) => {
@@ -388,6 +795,8 @@ export default function EditorWorkspace() {
       setSelectedId(null);
       setPlayhead(0);
       setPlaying(false);
+      setPast([]);
+      setFuture([]);
       lastSavedRef.current = fingerprintOf(data.project.title, parsed);
       applyUrl(data.project.id);
     },
@@ -403,6 +812,8 @@ export default function EditorWorkspace() {
     setSelectedId(null);
     setPlayhead(0);
     setPlaying(false);
+    setPast([]);
+    setFuture([]);
     lastSavedRef.current = fingerprintOf(DEFAULT_EDITOR_TITLE, empty);
     applyUrl(null);
   }, [applyUrl]);
@@ -580,10 +991,30 @@ export default function EditorWorkspace() {
       e.returnValue = "";
     };
     const onKey = (event: KeyboardEvent) => {
-      const save = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s" && !event.shiftKey;
+      const target = event.target as HTMLElement | null;
+      const editable = target?.closest("input, textarea, select, [contenteditable='true']");
+      const meta = event.metaKey || event.ctrlKey;
+      const save = meta && event.key.toLowerCase() === "s" && !event.shiftKey;
       if (save) {
         event.preventDefault();
         void handleSave();
+        return;
+      }
+      if (meta && !editable && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === "y" || event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (!editable && (event.key === "Delete" || event.key === "Backspace")) {
+        event.preventDefault();
+        deleteSelected();
+        return;
+      }
+      if (event.code === "Space" && !event.repeat) {
+        if (editable) return;
+        event.preventDefault();
+        setPlaying((current) => (current ? false : sequenceDurationSec(docRef.current) > 0));
       }
     };
     window.addEventListener("beforeunload", warn);
@@ -592,7 +1023,7 @@ export default function EditorWorkspace() {
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener("keydown", onKey);
     };
-  }, [handleSave]);
+  }, [handleSave, undo, redo, deleteSelected]);
 
   const attachSourceDuration = useCallback(async (clipId: string, storagePath: string | null) => {
     if (!storagePath) return;
@@ -640,7 +1071,10 @@ export default function EditorWorkspace() {
       const end = snapTenth(Math.min(duration, start + 2));
       return {
         ...current,
-        overlays: [...current.overlays, mediaOverlay(kind, item, start, end, current.overlays.length)],
+        overlays: [
+          ...current.overlays,
+          mediaOverlay(kind, item, start, end, current.overlays.length, EDITOR_CANVAS[current.aspect]),
+        ],
       };
     });
   };
@@ -669,7 +1103,14 @@ export default function EditorWorkspace() {
           ...current,
           overlays: [
             ...current.overlays,
-            mediaOverlay(kind, { storagePath: uploaded.path }, start, end, current.overlays.length),
+            mediaOverlay(
+              kind,
+              { storagePath: uploaded.path },
+              start,
+              end,
+              current.overlays.length,
+              EDITOR_CANVAS[current.aspect]
+            ),
           ],
         };
       });
@@ -678,7 +1119,7 @@ export default function EditorWorkspace() {
     }
   };
 
-  const updateClip = (id: string, patch: Partial<EditorClip>) => {
+  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string }) => {
     const next: Partial<EditorClip> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -690,10 +1131,10 @@ export default function EditorWorkspace() {
           ? clampClipToComposition({ ...clip, ...next }, projectDurationSec(current))
           : clip
       ),
-    }));
+    }), opts);
   };
 
-  const updateOverlay = (id: string, patch: Partial<EditorOverlay>) => {
+  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string }) => {
     const next: Partial<EditorOverlay> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -704,17 +1145,44 @@ export default function EditorWorkspace() {
           ? clampOverlayToComposition({ ...overlay, ...next }, projectDurationSec(current))
           : overlay
       ),
-    }));
+    }), opts);
   };
 
-  const removeSelected = () => {
-    if (!selectedId) return;
-    patchDoc((current) => ({
-      ...current,
-      sequence: current.sequence.filter((c) => c.id !== selectedId).map((c, order) => ({ ...c, order })),
-      overlays: current.overlays.filter((o) => o.id !== selectedId),
-    }));
-    setSelectedId(null);
+  // Image and PiP overlays can carry stale w/h from before the box tracked the
+  // media's real shape (or from manual resizes against a since-changed aspect
+  // ratio), producing a box that letterboxes the media inside it. Once the
+  // browser reports the media's actual pixel size, snap the box to match — same
+  // center, clamped to the canvas — so the outline hugs the visible image.
+  const fitOverlayToNaturalSize = (id: string, naturalWidth: number, naturalHeight: number) => {
+    if (naturalWidth <= 0 || naturalHeight <= 0) return;
+    if (fittedOverlaysRef.current.has(id)) return;
+    fittedOverlaysRef.current.add(id);
+    const overlay = docRef.current.overlays.find((o) => o.id === id);
+    if (!overlay) return;
+    const naturalRatio = naturalWidth / naturalHeight;
+    const pixelW = overlay.w * canvas.w;
+    const pixelH = overlay.h * canvas.h;
+    if (Math.abs(pixelW / pixelH - naturalRatio) < 0.02) return;
+    let newPixelH = pixelH;
+    let newPixelW = newPixelH * naturalRatio;
+    if (newPixelW > canvas.w) {
+      newPixelW = canvas.w;
+      newPixelH = newPixelW / naturalRatio;
+    }
+    if (newPixelH > canvas.h) {
+      newPixelH = canvas.h;
+      newPixelW = newPixelH * naturalRatio;
+    }
+    const centerX = overlay.x * canvas.w + pixelW / 2;
+    const centerY = overlay.y * canvas.h + pixelH / 2;
+    const newW = newPixelW / canvas.w;
+    const newH = newPixelH / canvas.h;
+    updateOverlay(id, {
+      w: newW,
+      h: newH,
+      x: Math.min(Math.max((centerX - newPixelW / 2) / canvas.w, 0), 1 - newW),
+      y: Math.min(Math.max((centerY - newPixelH / 2) / canvas.h, 0), 1 - newH),
+    });
   };
 
   const handleExport = async () => {
@@ -739,7 +1207,11 @@ export default function EditorWorkspace() {
         },
         body: JSON.stringify({ title, document: doc }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+        creation?: { id?: string };
+      };
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
@@ -749,6 +1221,7 @@ export default function EditorWorkspace() {
         throw new Error(data.error || "Export failed.");
       }
       attempt.settle(true);
+      if (data.creation?.id) void openPreview(data.creation.id);
     } catch (err) {
       attempt.settle(false);
       setExportError(err instanceof Error ? err.message : "Export failed.");
@@ -766,8 +1239,6 @@ export default function EditorWorkspace() {
         title={title}
         dirty={dirty}
         saving={saving}
-        aspect={doc.aspect}
-        durationSec={duration}
         exportReady={!exportCheck && duration > 0}
         exporting={exporting}
         cancelling={cancelling}
@@ -781,50 +1252,66 @@ export default function EditorWorkspace() {
           }
           setOpenList(true);
         }}
-        onAspectChange={(aspect: EditorAspect) => patchDoc((current) => ({ ...current, aspect }))}
-        onDurationChange={(next) => {
-          patchDoc((current) => withProjectDuration(current, next));
-          setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
-        }}
         onExport={() => void handleExport()}
         onCancel={() => void cancel()}
       />
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black/40 p-4">
+          <div
+            ref={stageRef}
+            className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-surface p-4 touch-none ${
+              viewport.panning
+                ? "cursor-grabbing"
+                : viewport.spacePanning || tool === "hand"
+                  ? "cursor-grab"
+                  : ""
+            }`}
+            {...viewport.stageHandlers}
+            onClick={() => setSelectedId(null)}
+          >
             <div
-              className="relative max-h-full max-w-full overflow-hidden rounded-lg bg-black shadow-2xl"
-              style={{ aspectRatio: `${canvas.w} / ${canvas.h}`, width: "min(100%, 420px)" }}
-              onClick={() => setSelectedId(null)}
+              className="relative max-h-full max-w-full"
+              style={{
+                width: previewSize.width || undefined,
+                height: previewSize.height || undefined,
+                transform: viewport.transform,
+                transformOrigin: "center",
+              }}
             >
-              {active ? (
+            <div
+              className="relative h-full w-full overflow-hidden rounded-lg bg-black shadow-2xl ring-1 ring-white/10"
+              style={{
+                aspectRatio: `${canvas.w} / ${canvas.h}`,
+              }}
+            >
+              <div className={`h-full w-full ${active ? "" : "invisible"}`}>
                 <SignedVideo
-                  storagePath={active.clip.storagePath}
-                  currentTime={active.localSec}
-                  playing={playing}
+                  storagePath={active ? active.clip.storagePath : lastActiveStoragePathRef.current}
+                  currentTime={active ? active.localSec : lastActiveLocalSecRef.current}
+                  playing={playing && !!active}
                 />
-              ) : (
-                <div className="flex h-full min-h-[240px] items-center justify-center px-6 text-center text-sm text-text-secondary">
-                  {doc.sequence.length === 0
-                    ? "Add a clip from My Library or upload a video to start editing."
-                    : null}
+              </div>
+              {!active && doc.sequence.length === 0 ? (
+                <div className="pointer-events-none absolute inset-0 flex h-full min-h-[240px] items-center justify-center px-6 text-center text-sm text-text-secondary">
+                  Add a clip from My Library or upload a video to start editing.
                 </div>
-              )}
+              ) : null}
               {overlays.map((overlay) => {
-                if (playhead < overlay.startSec || playhead >= overlay.endSec) return null;
+                const visible =
+                  !overlay.hidden && playhead >= overlay.startSec && playhead < overlay.endSec;
                 const selected = overlay.id === selectedId;
                 return (
                   <div
                     key={overlay.id}
                     role="button"
-                    tabIndex={0}
+                    tabIndex={visible ? 0 : -1}
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedId(overlay.id);
                     }}
                     onPointerDown={(event) => {
-                      if (!selected) return;
+                      if (!visible || !selected || overlay.locked) return;
                       event.stopPropagation();
                       const stage = event.currentTarget.parentElement;
                       if (!stage) return;
@@ -835,10 +1322,14 @@ export default function EditorWorkspace() {
                       const move = (ev: PointerEvent) => {
                         const dx = (ev.clientX - startX) / rect.width;
                         const dy = (ev.clientY - startY) / rect.height;
-                        updateOverlay(overlay.id, {
-                          x: Math.min(1 - overlay.w, Math.max(0, orig.x + dx)),
-                          y: Math.min(1 - overlay.h, Math.max(0, orig.y + dy)),
-                        });
+                        updateOverlay(
+                          overlay.id,
+                          {
+                            x: Math.min(1 - overlay.w, Math.max(0, orig.x + dx)),
+                            y: Math.min(1 - overlay.h, Math.max(0, orig.y + dy)),
+                          },
+                          { coalesceKey: `move:${overlay.id}` }
+                        );
                       };
                       const up = () => {
                         window.removeEventListener("pointermove", move);
@@ -847,7 +1338,7 @@ export default function EditorWorkspace() {
                       window.addEventListener("pointermove", move);
                       window.addEventListener("pointerup", up);
                     }}
-                    className={`absolute overflow-hidden ${selected ? "ring-2 ring-brand-primary" : ""}`}
+                    className={`absolute select-none overflow-hidden ${visible ? "" : "invisible"} ${selected ? "ring-2 ring-brand-primary" : ""}`}
                     style={{
                       left: `${overlay.x * 100}%`,
                       top: `${overlay.y * 100}%`,
@@ -864,11 +1355,19 @@ export default function EditorWorkspace() {
                         {overlay.text}
                       </div>
                     ) : overlay.kind === "image" ? (
-                      <SignedImage storagePath={overlay.storagePath} />
+                      <SignedImage
+                        storagePath={overlay.storagePath}
+                        onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
+                      />
                     ) : (
-                      <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing} />
+                      <SignedVideo
+                        storagePath={overlay.storagePath}
+                        currentTime={0}
+                        playing={playing && visible}
+                        onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
+                      />
                     )}
-                    {selected ? (
+                    {visible && selected && !overlay.locked ? (
                       <div
                         className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize rounded-sm bg-brand-primary"
                         onPointerDown={(event) => {
@@ -880,10 +1379,14 @@ export default function EditorWorkspace() {
                           const startY = event.clientY;
                           const orig = { w: overlay.w, h: overlay.h };
                           const move = (ev: PointerEvent) => {
-                            updateOverlay(overlay.id, {
-                              w: Math.min(1 - overlay.x, Math.max(0.05, orig.w + (ev.clientX - startX) / rect.width)),
-                              h: Math.min(1 - overlay.y, Math.max(0.05, orig.h + (ev.clientY - startY) / rect.height)),
-                            });
+                            updateOverlay(
+                              overlay.id,
+                              {
+                                w: Math.min(1 - overlay.x, Math.max(0.05, orig.w + (ev.clientX - startX) / rect.width)),
+                                h: Math.min(1 - overlay.y, Math.max(0.05, orig.h + (ev.clientY - startY) / rect.height)),
+                              },
+                              { coalesceKey: `resize:${overlay.id}` }
+                            );
                           };
                           const up = () => {
                             window.removeEventListener("pointermove", move);
@@ -898,161 +1401,306 @@ export default function EditorWorkspace() {
                 );
               })}
             </div>
-          </div>
-
-          <div className="shrink-0 border-t border-white/10 bg-N50">
-            <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (playing) setPlaying(false);
-                  else if (duration > 0) setPlaying(true);
-                }}
-                className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
-                aria-label={playing ? "Pause" : "Play"}
-              >
-                {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              </button>
-              <span className="min-w-[5.5rem] text-xs tabular-nums text-text-secondary">
-                {formatTimecode(playhead)}
-                <span className="text-white/30"> / </span>
-                {formatTimecode(duration)}
-              </span>
-              <label className="flex items-center gap-1 sm:hidden">
-                <span className="text-[11px] text-text-secondary">Duration</span>
-                <input
-                  type="number"
-                  min={0.1}
-                  max={EDITOR_MAX_DURATION_SEC}
-                  step={0.1}
-                  value={duration}
-                  onChange={(event) => {
-                    const next = Number(event.target.value) || 0.1;
-                    patchDoc((current) => withProjectDuration(current, next));
-                    setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
-                  }}
-                  aria-label="Video duration in seconds"
-                  className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none"
-                />
-                <span className="text-[11px] text-text-secondary">s</span>
-              </label>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "video",
-                    title: "Add a clip",
-                    onPick: addClip,
-                  })
-                }
-                disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Clip
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  uploadKindRef.current = "sequence";
-                  uploadRef.current?.click();
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                Upload
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
-                  const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-                  const end = snapTenth(Math.min(duration, start + 3));
-                  const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
-                  patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
-                  setSelectedId(overlay.id);
-                }}
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <Type className="h-3.5 w-3.5" />
-                Text
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "image",
-                    title: "Add an image overlay",
-                    onPick: (item) => addOverlayFromItem("image", item),
-                  })
-                }
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <ImagePlus className="h-3.5 w-3.5" />
-                Image
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "video",
-                    title: "Add a video overlay",
-                    onPick: (item) => addOverlayFromItem("video", item),
-                  })
-                }
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <Video className="h-3.5 w-3.5" />
-                PiP
-              </button>
-              {selectedId ? (
-                <button
-                  type="button"
-                  onClick={removeSelected}
-                  className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-error hover:bg-error/10"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Remove
-                </button>
-              ) : null}
-              <input
-                ref={uploadRef}
-                type="file"
-                accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) void onUpload(file);
-                }}
-              />
             </div>
 
-            <div className="overflow-x-auto px-3 py-3">
-              <div
-                className="relative"
-                style={{ width: timelineWidth }}
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const x = event.clientX - rect.left;
-                  setPlayhead(snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec))));
-                  setPlaying(false);
-                }}
-              >
-                <div
-                  className="pointer-events-none absolute top-0 z-20 h-full w-px bg-brand-primary"
-                  style={{ left: playhead * pxPerSec }}
-                />
-                <div
-                  className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded bg-brand-primary px-1 py-0.5 text-[9px] font-semibold tabular-nums text-white"
-                  style={{ left: playhead * pxPerSec }}
-                >
-                  {formatTimecode(playhead)}
+            <EditorPreviewToolbar
+              tool={tool}
+              onToolChange={setTool}
+              zoomPercent={viewport.zoomPercent}
+              canZoomIn={viewport.canZoomIn}
+              canZoomOut={viewport.canZoomOut}
+              onZoomIn={viewport.zoomIn}
+              onZoomOut={viewport.zoomOut}
+              onSetZoom={viewport.setZoom}
+              onFit={viewport.fit}
+              canUndo={past.length > 0}
+              canRedo={future.length > 0}
+              onUndo={undo}
+              onRedo={redo}
+            />
+          </div>
+
+          <div className="flex shrink-0 flex-col bg-N50">
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const startY = event.clientY;
+                const startHeight = tracksHeight;
+                const move = (ev: PointerEvent) => {
+                  setTracksHeight(
+                    Math.max(
+                      TIMELINE_TRACKS_MIN_HEIGHT,
+                      Math.min(TIMELINE_TRACKS_MAX_HEIGHT, startHeight - (ev.clientY - startY))
+                    )
+                  );
+                };
+                const up = () => {
+                  window.removeEventListener("pointermove", move);
+                  window.removeEventListener("pointerup", up);
+                };
+                window.addEventListener("pointermove", move);
+                window.addEventListener("pointerup", up);
+              }}
+              className="h-1.5 shrink-0 cursor-row-resize bg-white/10 hover:bg-brand-primary/50 active:bg-brand-primary"
+            />
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <div ref={addMenuRef} className="relative">
+                  <button
+                    type="button"
+                    aria-haspopup="true"
+                    aria-expanded={addMenuOpen}
+                    onClick={() => setAddMenuOpen((current) => !current)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </button>
+                  {addMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label="Add to timeline"
+                      className="absolute left-0 top-full z-30 mt-1 w-44 rounded-lg border border-white/10 bg-N50 p-1 text-text-primary shadow-xl"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({ mediaType: "video", title: "Add a clip", onPick: addClip });
+                        }}
+                        disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Clip
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          uploadKindRef.current = "sequence";
+                          uploadRef.current?.click();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        Upload
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
+                          const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
+                          const end = snapTenth(Math.min(duration, start + 3));
+                          const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
+                          patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+                          setSelectedId(overlay.id);
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Type className="h-3.5 w-3.5" />
+                        Text
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({
+                            mediaType: "image",
+                            title: "Add an image overlay",
+                            onPick: (item) => addOverlayFromItem("image", item),
+                          });
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        Image
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openLibrary({
+                            mediaType: "video",
+                            title: "Add a video overlay",
+                            onPick: (item) => addOverlayFromItem("video", item),
+                          });
+                        }}
+                        disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                      >
+                        <Video className="h-3.5 w-3.5" />
+                        PiP
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="relative mb-2 h-5">
+                <input
+                  ref={uploadRef}
+                  type="file"
+                  accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void onUpload(file);
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-center gap-1">
+                <button
+                  type="button"
+                  onClick={jumpToClipStart}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Jump to clip start"
+                  title="Jump to clip start"
+                >
+                  <SkipBack className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepPlayhead(-0.1)}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Step back"
+                  title="Step back"
+                >
+                  <StepBack className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (playing) setPlaying(false);
+                    else if (duration > 0) setPlaying(true);
+                  }}
+                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
+                  aria-label={playing ? "Pause" : "Play"}
+                >
+                  {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepPlayhead(0.1)}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Step forward"
+                  title="Step forward"
+                >
+                  <StepForward className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={jumpToClipEnd}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Jump to clip end"
+                  title="Jump to clip end"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                </button>
+                <span className="ml-1 flex items-center text-xs tabular-nums text-text-secondary">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={timeInputDraft ?? playhead.toFixed(1)}
+                    onFocus={(event) => {
+                      setTimeInputDraft(playhead.toFixed(1));
+                      event.currentTarget.select();
+                    }}
+                    onChange={(event) => setTimeInputDraft(event.target.value)}
+                    onBlur={(event) => commitTimeInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Escape") {
+                        setTimeInputDraft(null);
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    aria-label="Jump to time in seconds"
+                    title="Type a time in seconds and press Enter to jump"
+                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15"
+                  />
+                  <span>s</span>
+                  <span className="text-white/30"> / </span>
+                  {formatTimecode(duration)}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <label className="flex items-center gap-1">
+                  <span className="hidden text-[11px] text-text-secondary sm:inline">Duration</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={EDITOR_MAX_DURATION_SEC}
+                    step={0.1}
+                    value={duration}
+                    onChange={(event) => {
+                      const next = Number(event.target.value) || 0.1;
+                      patchDoc((current) => withProjectDuration(current, next));
+                      setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
+                    }}
+                    aria-label="Video duration in seconds"
+                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
+                  />
+                  <span className="text-[11px] text-text-secondary">s</span>
+                </label>
+                <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
+                  {EDITOR_ASPECTS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => patchDoc((current) => withProjectAspect(current, value))}
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
+                        doc.aspect === value
+                          ? "bg-white/15 text-text-primary"
+                          : "text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex shrink-0">
+              <div className="hidden shrink-0 md:block" style={{ width: panelWidth }} />
+              <div className="hidden w-1.5 shrink-0 md:block" />
+              <div ref={rulerScrollRef} className="min-w-0 flex-1 overflow-hidden px-3 pt-2 pb-2">
+                <div
+                  className="relative h-5"
+                  style={{ width: timelineWidth }}
+                  onPointerDown={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
+                    setPlayhead(startPlayhead);
+                    setPlaying(false);
+                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
+                      setPlayhead(
+                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
+                      );
+                    });
+                  }}
+                >
+                  <div
+                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
+                    style={{ left: playhead * pxPerSec }}
+                    aria-hidden
+                  >
+                    {formatTimecode(playhead)}
+                  </div>
                   {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
                     <div
                       key={i}
@@ -1064,71 +1712,212 @@ export default function EditorWorkspace() {
                     </div>
                   ))}
                 </div>
-                <div className="mb-2 space-y-1">
-                  {sequence.length === 0 ? (
-                    <p className="text-xs text-text-secondary">Clip layers — drag to move, edges to trim</p>
-                  ) : (
-                    sequence.map((clip) => {
-                      const clipDur = clipLayerDurationSec(clip);
-                      return (
-                        <TimelineLayerRow
-                          key={clip.id}
-                          selected={clip.id === selectedId}
-                          startSec={clip.startSec}
-                          endSec={clip.endSec}
-                          pxPerSec={pxPerSec}
-                          trackWidth={timelineWidth}
-                          maxEnd={duration}
-                          maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
-                          selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
-                          onSelect={() => setSelectedId(clip.id)}
-                          onMove={(startSec, endSec) => updateClip(clip.id, { startSec, endSec })}
-                          onTrimStart={(startSec) => updateClip(clip.id, { startSec })}
-                          onTrimEnd={(endSec) => updateClip(clip.id, { endSec })}
-                          label={
-                            <>
-                              Clip
-                              <span className="ml-1 tabular-nums opacity-80">
-                                {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
-                              </span>
-                              <span className="ml-1 tabular-nums opacity-60">{formatTimecode(clipDur)}</span>
-                            </>
-                          }
-                        />
-                      );
-                    })
-                  )}
-                </div>
-                <div className="space-y-1">
-                  {overlays.length === 0 ? (
-                    <p className="text-[11px] text-text-secondary">Overlay layers — drag the edges to trim</p>
-                  ) : (
-                    overlays.map((overlay) => (
-                      <TimelineLayerRow
+              </div>
+            </div>
+
+            <div
+              className="flex min-h-0 items-start overflow-y-auto"
+              style={{ height: Math.max(0, tracksHeight - TIMELINE_RULER_HEIGHT) }}
+            >
+              <div
+                className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex"
+                style={{ width: panelWidth }}
+              >
+                {overlayRows.length > 0 ? (
+                  <div className="mb-2 space-y-1">
+                    {overlayRows.map(({ overlay, label }) => (
+                      <LayerPanelRow
                         key={overlay.id}
+                        id={overlay.id}
                         selected={overlay.id === selectedId}
-                        startSec={overlay.startSec}
-                        endSec={overlay.endSec}
-                        pxPerSec={pxPerSec}
-                        trackWidth={timelineWidth}
-                        maxEnd={duration}
-                        maxSpan={duration}
-                        selectedClassName="bg-white/25 ring-1 ring-white/40"
-                        onSelect={() => setSelectedId(overlay.id)}
-                        onMove={(startSec, endSec) => updateOverlay(overlay.id, { startSec, endSec })}
-                        onTrimStart={(startSec) => updateOverlay(overlay.id, { startSec })}
-                        onTrimEnd={(endSec) => updateOverlay(overlay.id, { endSec })}
-                        label={
-                          <>
-                            <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
-                            <span className="ml-1 tabular-nums text-text-secondary">
-                              {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
-                            </span>
-                          </>
+                        locked={overlay.locked}
+                        hidden={overlay.hidden}
+                        dragOver={dragOverLayerId === overlay.id}
+                        icon={
+                          overlay.kind === "text" ? (
+                            <Type className="h-3 w-3" />
+                          ) : overlay.kind === "image" ? (
+                            <ImagePlus className="h-3 w-3" />
+                          ) : (
+                            <Video className="h-3 w-3" />
+                          )
                         }
+                        label={label}
+                        onSelect={() => setSelectedId(overlay.id)}
+                        onReorderStart={() => {
+                          dragLayerIdRef.current = overlay.id;
+                        }}
+                        onReorderHover={setDragOverLayerId}
+                        onReorderCommit={(targetId) => {
+                          const sourceId = dragLayerIdRef.current;
+                          dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
+                          if (sourceId && targetId) reorderOverlays(sourceId, targetId);
+                        }}
+                        onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
+                        onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
+                        onDelete={() => removeLayer("overlay", overlay.id)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <div className="space-y-1">
+                  {clipRows.length === 0 ? (
+                    <div className="h-8" />
+                  ) : (
+                    clipRows.map(({ clip, label }) => (
+                      <LayerPanelRow
+                        key={clip.id}
+                        id={clip.id}
+                        selected={clip.id === selectedId}
+                        locked={clip.locked}
+                        hidden={clip.hidden}
+                        dragOver={dragOverLayerId === clip.id}
+                        icon={<Video className="h-3 w-3" />}
+                        label={label}
+                        onSelect={() => setSelectedId(clip.id)}
+                        onReorderStart={() => {
+                          dragLayerIdRef.current = clip.id;
+                        }}
+                        onReorderHover={setDragOverLayerId}
+                        onReorderCommit={(targetId) => {
+                          const sourceId = dragLayerIdRef.current;
+                          dragLayerIdRef.current = null;
+                          setDragOverLayerId(null);
+                          if (sourceId && targetId) reorderClips(sourceId, targetId);
+                        }}
+                        onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
+                        onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
+                        onDelete={() => removeLayer("clip", clip.id)}
                       />
                     ))
                   )}
+                </div>
+              </div>
+
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                onPointerDown={(event) => {
+                  const startWidth = panelWidth;
+                  startTimelineDrag(event, 1, (deltaPx) => {
+                    setPanelWidth(
+                      Math.max(LAYER_PANEL_MIN_WIDTH, Math.min(LAYER_PANEL_MAX_WIDTH, startWidth + deltaPx))
+                    );
+                  });
+                }}
+                className="hidden w-1.5 shrink-0 cursor-col-resize bg-white/5 hover:bg-brand-primary/50 active:bg-brand-primary md:block"
+              />
+
+              <div
+                ref={tracksScrollRef}
+                className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11"
+                onScroll={(event) => {
+                  if (rulerScrollRef.current) {
+                    rulerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                  }
+                }}
+              >
+                <div
+                  className="relative min-h-full"
+                  style={{ width: timelineWidth }}
+                  onPointerDown={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
+                    setPlayhead(startPlayhead);
+                    setPlaying(false);
+                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
+                      setPlayhead(
+                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
+                      );
+                    });
+                  }}
+                >
+                  <div
+                    className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info"
+                    style={{ left: playhead * pxPerSec }}
+                  />
+                  {overlayRows.length > 0 ? (
+                    <div className="mb-2 space-y-1">
+                      {overlayRows.map(({ overlay }) => (
+                        <TimelineLayerRow
+                          key={overlay.id}
+                          selected={overlay.id === selectedId}
+                          locked={overlay.locked}
+                          hidden={overlay.hidden}
+                          startSec={overlay.startSec}
+                          endSec={overlay.endSec}
+                          pxPerSec={pxPerSec}
+                          trackWidth={timelineWidth}
+                          maxEnd={duration}
+                          maxSpan={duration}
+                          selectedClassName="bg-white/25 ring-1 ring-white/40"
+                          onSelect={() => setSelectedId(overlay.id)}
+                          onMove={(startSec, endSec) =>
+                            updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
+                          }
+                          onTrimStart={(startSec) =>
+                            updateOverlay(overlay.id, { startSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
+                          }
+                          onTrimEnd={(endSec) =>
+                            updateOverlay(overlay.id, { endSec }, { coalesceKey: `tl-trim-e:${overlay.id}` })
+                          }
+                          label={
+                            <>
+                              <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
+                              <span className="ml-1 tabular-nums text-text-secondary">
+                                {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
+                              </span>
+                            </>
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="space-y-1">
+                    {sequence.length === 0 ? (
+                      <div className="h-8" />
+                    ) : (
+                      clipRows.map(({ clip }) => {
+                        const clipDur = clipLayerDurationSec(clip);
+                        return (
+                          <TimelineLayerRow
+                            key={clip.id}
+                            selected={clip.id === selectedId}
+                            locked={clip.locked}
+                            hidden={clip.hidden}
+                            startSec={clip.startSec}
+                            endSec={clip.endSec}
+                            pxPerSec={pxPerSec}
+                            trackWidth={timelineWidth}
+                            maxEnd={duration}
+                            maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
+                            selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
+                            onSelect={() => setSelectedId(clip.id)}
+                            onMove={(startSec, endSec) =>
+                              updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
+                            }
+                            onTrimStart={(startSec) =>
+                              updateClip(clip.id, { startSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
+                            }
+                            onTrimEnd={(endSec) =>
+                              updateClip(clip.id, { endSec }, { coalesceKey: `tl-trim-e:${clip.id}` })
+                            }
+                            label={
+                              <>
+                                Clip
+                                <span className="ml-1 tabular-nums opacity-80">
+                                  {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
+                                </span>
+                                <span className="ml-1 tabular-nums opacity-60">{formatTimecode(clipDur)}</span>
+                              </>
+                            }
+                          />
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1138,18 +1927,6 @@ export default function EditorWorkspace() {
 
         <aside className="hidden w-64 shrink-0 border-l border-white/10 p-3 lg:block">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">Inspector</p>
-          <div className="mb-3 flex gap-1 sm:hidden">
-            {EDITOR_ASPECTS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => patchDoc((current) => ({ ...current, aspect: value }))}
-                className={`rounded-md px-2 py-1 text-[11px] ${doc.aspect === value ? "bg-white/15" : "bg-white/5"}`}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
           {selectedClip ? (
             <div className="space-y-2 text-xs">
               <p className="font-medium">Clip layer</p>
@@ -1286,7 +2063,7 @@ export default function EditorWorkspace() {
             </div>
           ) : (
             <p className="text-xs text-text-secondary">
-              Set Duration in the top bar. Select a clip or overlay to place it on the timeline.
+              Set Duration in the timeline header. Select a clip or overlay to place it on the timeline.
             </p>
           )}
         </aside>

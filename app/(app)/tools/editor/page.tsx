@@ -1,15 +1,18 @@
 "use client";
 
 import { Suspense } from "react";
+import { StudioGenerationPreviewProvider } from "@/components/studio";
 import EditorWorkspace from "./EditorWorkspace";
 import { EditorLibraryProvider } from "./EditorLibraryPicker";
 
 export default function EditorPage() {
   return (
-    <EditorLibraryProvider>
-      <Suspense fallback={<div className="h-full bg-N50" />}>
-        <EditorWorkspace />
-      </Suspense>
-    </EditorLibraryProvider>
+    <StudioGenerationPreviewProvider>
+      <EditorLibraryProvider>
+        <Suspense fallback={<div className="h-full bg-N50" />}>
+          <EditorWorkspace />
+        </Suspense>
+      </EditorLibraryProvider>
+    </StudioGenerationPreviewProvider>
   );
 }
