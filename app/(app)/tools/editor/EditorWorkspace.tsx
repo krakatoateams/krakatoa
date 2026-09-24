@@ -1049,20 +1049,20 @@ export default function EditorWorkspace() {
                 </div>
               ) : null}
               {overlays.map((overlay) => {
-                if (overlay.hidden) return null;
-                if (playhead < overlay.startSec || playhead >= overlay.endSec) return null;
+                const visible =
+                  !overlay.hidden && playhead >= overlay.startSec && playhead < overlay.endSec;
                 const selected = overlay.id === selectedId;
                 return (
                   <div
                     key={overlay.id}
                     role="button"
-                    tabIndex={0}
+                    tabIndex={visible ? 0 : -1}
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedId(overlay.id);
                     }}
                     onPointerDown={(event) => {
-                      if (!selected || overlay.locked) return;
+                      if (!visible || !selected || overlay.locked) return;
                       event.stopPropagation();
                       const stage = event.currentTarget.parentElement;
                       if (!stage) return;
@@ -1085,7 +1085,7 @@ export default function EditorWorkspace() {
                       window.addEventListener("pointermove", move);
                       window.addEventListener("pointerup", up);
                     }}
-                    className={`absolute overflow-hidden ${selected ? "ring-2 ring-brand-primary" : ""}`}
+                    className={`absolute overflow-hidden ${visible ? "" : "invisible"} ${selected ? "ring-2 ring-brand-primary" : ""}`}
                     style={{
                       left: `${overlay.x * 100}%`,
                       top: `${overlay.y * 100}%`,
@@ -1104,9 +1104,9 @@ export default function EditorWorkspace() {
                     ) : overlay.kind === "image" ? (
                       <SignedImage storagePath={overlay.storagePath} />
                     ) : (
-                      <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing} />
+                      <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing && visible} />
                     )}
-                    {selected && !overlay.locked ? (
+                    {visible && selected && !overlay.locked ? (
                       <div
                         className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize rounded-sm bg-brand-primary"
                         onPointerDown={(event) => {
