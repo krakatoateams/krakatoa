@@ -492,6 +492,8 @@ function SignedImage({
       fill
       sizes="240px"
       className="object-contain"
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
       onLoad={(event) => {
         const img = event.currentTarget;
         onNaturalSize?.(img.naturalWidth, img.naturalHeight);
@@ -1323,7 +1325,7 @@ export default function EditorWorkspace() {
                       window.addEventListener("pointermove", move);
                       window.addEventListener("pointerup", up);
                     }}
-                    className={`absolute overflow-hidden ${visible ? "" : "invisible"} ${selected ? "ring-2 ring-brand-primary" : ""}`}
+                    className={`absolute select-none overflow-hidden ${visible ? "" : "invisible"} ${selected ? "ring-2 ring-brand-primary" : ""}`}
                     style={{
                       left: `${overlay.x * 100}%`,
                       top: `${overlay.y * 100}%`,
