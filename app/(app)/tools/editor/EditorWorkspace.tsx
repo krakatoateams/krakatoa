@@ -497,6 +497,8 @@ export default function EditorWorkspace() {
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
   const dragLayerIdRef = useRef<string | null>(null);
+  const lastActiveStoragePathRef = useRef<string | null>(null);
+  const lastActiveLocalSecRef = useRef(0);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
@@ -511,6 +513,10 @@ export default function EditorWorkspace() {
     { ...doc, sequence: doc.sequence.filter((c) => !c.hidden) },
     playhead
   );
+  if (active) {
+    lastActiveStoragePathRef.current = active.clip.storagePath;
+    lastActiveLocalSecRef.current = active.localSec;
+  }
   const canvas = EDITOR_CANVAS[doc.aspect];
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
@@ -1030,19 +1036,18 @@ export default function EditorWorkspace() {
               style={{ aspectRatio: `${canvas.w} / ${canvas.h}`, width: "min(100%, 420px)" }}
               onClick={() => setSelectedId(null)}
             >
-              {active ? (
+              <div className={`h-full w-full ${active ? "" : "invisible"}`}>
                 <SignedVideo
-                  storagePath={active.clip.storagePath}
-                  currentTime={active.localSec}
-                  playing={playing}
+                  storagePath={active ? active.clip.storagePath : lastActiveStoragePathRef.current}
+                  currentTime={active ? active.localSec : lastActiveLocalSecRef.current}
+                  playing={playing && !!active}
                 />
-              ) : (
-                <div className="flex h-full min-h-[240px] items-center justify-center px-6 text-center text-sm text-text-secondary">
-                  {doc.sequence.length === 0
-                    ? "Add a clip from My Library or upload a video to start editing."
-                    : null}
+              </div>
+              {!active && doc.sequence.length === 0 ? (
+                <div className="pointer-events-none absolute inset-0 flex h-full min-h-[240px] items-center justify-center px-6 text-center text-sm text-text-secondary">
+                  Add a clip from My Library or upload a video to start editing.
                 </div>
-              )}
+              ) : null}
               {overlays.map((overlay) => {
                 if (overlay.hidden) return null;
                 if (playhead < overlay.startSec || playhead >= overlay.endSec) return null;
