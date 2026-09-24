@@ -8,6 +8,10 @@ import {
   Pause,
   Play,
   Plus,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
   Trash2,
   Type,
   Upload,
@@ -43,7 +47,6 @@ import {
   sortedSequence,
   validateEditorExport,
   withProjectDuration,
-  type EditorAspect,
   type EditorClip,
   type EditorDocument,
   type EditorOverlay,
@@ -399,6 +402,20 @@ export default function EditorWorkspace() {
   const canvas = EDITOR_CANVAS[doc.aspect];
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
+  const navClip = selectedClip ?? active?.clip ?? null;
+
+  const stepPlayhead = (deltaSec: number) => {
+    setPlaying(false);
+    setPlayhead((head) => snapTenth(Math.max(0, Math.min(duration, head + deltaSec))));
+  };
+  const jumpToClipStart = () => {
+    setPlaying(false);
+    setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.startSec : 0))));
+  };
+  const jumpToClipEnd = () => {
+    setPlaying(false);
+    setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.endSec : duration))));
+  };
 
   // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
   const clipRows = sequence
@@ -863,8 +880,6 @@ export default function EditorWorkspace() {
         title={title}
         dirty={dirty}
         saving={saving}
-        aspect={doc.aspect}
-        durationSec={duration}
         exportReady={!exportCheck && duration > 0}
         exporting={exporting}
         cancelling={cancelling}
@@ -877,11 +892,6 @@ export default function EditorWorkspace() {
             return;
           }
           setOpenList(true);
-        }}
-        onAspectChange={(aspect: EditorAspect) => patchDoc((current) => ({ ...current, aspect }))}
-        onDurationChange={(next) => {
-          patchDoc((current) => withProjectDuration(current, next));
-          setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
         }}
         onExport={() => void handleExport()}
         onCancel={() => void cancel()}
@@ -998,134 +1008,194 @@ export default function EditorWorkspace() {
           </div>
 
           <div className="shrink-0 border-t border-white/10 bg-N50">
-            <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (playing) setPlaying(false);
-                  else if (duration > 0) setPlaying(true);
-                }}
-                className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
-                aria-label={playing ? "Pause" : "Play"}
-              >
-                {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              </button>
-              <span className="min-w-[5.5rem] text-xs tabular-nums text-text-secondary">
-                {formatTimecode(playhead)}
-                <span className="text-white/30"> / </span>
-                {formatTimecode(duration)}
-              </span>
-              <label className="flex items-center gap-1 sm:hidden">
-                <span className="text-[11px] text-text-secondary">Duration</span>
-                <input
-                  type="number"
-                  min={0.1}
-                  max={EDITOR_MAX_DURATION_SEC}
-                  step={0.1}
-                  value={duration}
-                  onChange={(event) => {
-                    const next = Number(event.target.value) || 0.1;
-                    patchDoc((current) => withProjectDuration(current, next));
-                    setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
-                  }}
-                  aria-label="Video duration in seconds"
-                  className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none"
-                />
-                <span className="text-[11px] text-text-secondary">s</span>
-              </label>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "video",
-                    title: "Add a clip",
-                    onPick: addClip,
-                  })
-                }
-                disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Clip
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  uploadKindRef.current = "sequence";
-                  uploadRef.current?.click();
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                Upload
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
-                  const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-                  const end = snapTenth(Math.min(duration, start + 3));
-                  const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
-                  patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
-                  setSelectedId(overlay.id);
-                }}
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <Type className="h-3.5 w-3.5" />
-                Text
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "image",
-                    title: "Add an image overlay",
-                    onPick: (item) => addOverlayFromItem("image", item),
-                  })
-                }
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <ImagePlus className="h-3.5 w-3.5" />
-                Image
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  openLibrary({
-                    mediaType: "video",
-                    title: "Add a video overlay",
-                    onPick: (item) => addOverlayFromItem("video", item),
-                  })
-                }
-                disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
-              >
-                <Video className="h-3.5 w-3.5" />
-                PiP
-              </button>
-              {selectedId ? (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={removeSelected}
-                  className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-error hover:bg-error/10"
+                  onClick={() =>
+                    openLibrary({
+                      mediaType: "video",
+                      title: "Add a clip",
+                      onPick: addClip,
+                    })
+                  }
+                  disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Remove
+                  <Plus className="h-3.5 w-3.5" />
+                  Clip
                 </button>
-              ) : null}
-              <input
-                ref={uploadRef}
-                type="file"
-                accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) void onUpload(file);
-                }}
-              />
+                <button
+                  type="button"
+                  onClick={() => {
+                    uploadKindRef.current = "sequence";
+                    uploadRef.current?.click();
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
+                    const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
+                    const end = snapTenth(Math.min(duration, start + 3));
+                    const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
+                    patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+                    setSelectedId(overlay.id);
+                  }}
+                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
+                >
+                  <Type className="h-3.5 w-3.5" />
+                  Text
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openLibrary({
+                      mediaType: "image",
+                      title: "Add an image overlay",
+                      onPick: (item) => addOverlayFromItem("image", item),
+                    })
+                  }
+                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
+                >
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  Image
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openLibrary({
+                      mediaType: "video",
+                      title: "Add a video overlay",
+                      onPick: (item) => addOverlayFromItem("video", item),
+                    })
+                  }
+                  disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary hover:bg-white/10 disabled:opacity-40"
+                >
+                  <Video className="h-3.5 w-3.5" />
+                  PiP
+                </button>
+                {selectedId ? (
+                  <button
+                    type="button"
+                    onClick={removeSelected}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-error hover:bg-error/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </button>
+                ) : null}
+                <input
+                  ref={uploadRef}
+                  type="file"
+                  accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void onUpload(file);
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-center gap-1">
+                <button
+                  type="button"
+                  onClick={jumpToClipStart}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Jump to clip start"
+                  title="Jump to clip start"
+                >
+                  <SkipBack className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepPlayhead(-0.1)}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Previous frame"
+                  title="Previous frame"
+                >
+                  <StepBack className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (playing) setPlaying(false);
+                    else if (duration > 0) setPlaying(true);
+                  }}
+                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
+                  aria-label={playing ? "Pause" : "Play"}
+                >
+                  {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepPlayhead(0.1)}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Next frame"
+                  title="Next frame"
+                >
+                  <StepForward className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={jumpToClipEnd}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  aria-label="Jump to clip end"
+                  title="Jump to clip end"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                </button>
+                <span className="ml-1 min-w-[5.5rem] text-xs tabular-nums text-text-secondary">
+                  {formatTimecode(playhead)}
+                  <span className="text-white/30"> / </span>
+                  {formatTimecode(duration)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-1.5">
+                <label className="flex items-center gap-1">
+                  <span className="hidden text-[11px] text-text-secondary sm:inline">Duration</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={EDITOR_MAX_DURATION_SEC}
+                    step={0.1}
+                    value={duration}
+                    onChange={(event) => {
+                      const next = Number(event.target.value) || 0.1;
+                      patchDoc((current) => withProjectDuration(current, next));
+                      setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
+                    }}
+                    aria-label="Video duration in seconds"
+                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
+                  />
+                  <span className="text-[11px] text-text-secondary">s</span>
+                </label>
+                <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
+                  {EDITOR_ASPECTS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => patchDoc((current) => ({ ...current, aspect: value }))}
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
+                        doc.aspect === value
+                          ? "bg-white/15 text-text-primary"
+                          : "text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="flex">
@@ -1306,18 +1376,6 @@ export default function EditorWorkspace() {
 
         <aside className="hidden w-64 shrink-0 border-l border-white/10 p-3 lg:block">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">Inspector</p>
-          <div className="mb-3 flex gap-1 sm:hidden">
-            {EDITOR_ASPECTS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => patchDoc((current) => ({ ...current, aspect: value }))}
-                className={`rounded-md px-2 py-1 text-[11px] ${doc.aspect === value ? "bg-white/15" : "bg-white/5"}`}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
           {selectedClip ? (
             <div className="space-y-2 text-xs">
               <p className="font-medium">Clip layer</p>
@@ -1454,7 +1512,7 @@ export default function EditorWorkspace() {
             </div>
           ) : (
             <p className="text-xs text-text-secondary">
-              Set Duration in the top bar. Select a clip or overlay to place it on the timeline.
+              Set Duration in the timeline header. Select a clip or overlay to place it on the timeline.
             </p>
           )}
         </aside>

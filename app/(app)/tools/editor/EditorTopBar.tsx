@@ -7,14 +7,11 @@ import { FolderKanban, Loader2, Pencil, Save } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
 import { GenerationCancelButton } from "@/components/studio/GenerationCancelButton";
-import { EDITOR_ASPECTS, EDITOR_MAX_DURATION_SEC, type EditorAspect } from "@/lib/editor-document";
 
 export default function EditorTopBar({
   title,
   dirty,
   saving,
-  aspect,
-  durationSec,
   exportReady,
   exporting,
   cancelling,
@@ -22,16 +19,12 @@ export default function EditorTopBar({
   onTitleCommit,
   onSave,
   onOpen,
-  onAspectChange,
-  onDurationChange,
   onExport,
   onCancel,
 }: {
   title: string;
   dirty: boolean;
   saving: boolean;
-  aspect: EditorAspect;
-  durationSec: number;
   exportReady: boolean;
   exporting: boolean;
   cancelling: boolean;
@@ -39,8 +32,6 @@ export default function EditorTopBar({
   onTitleCommit: (title: string) => void;
   onSave: () => void;
   onOpen: () => void;
-  onAspectChange: (aspect: EditorAspect) => void;
-  onDurationChange: (durationSec: number) => void;
   onExport: () => void;
   onCancel: () => void;
 }) {
@@ -116,36 +107,6 @@ export default function EditorTopBar({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <label className="hidden items-center gap-1 sm:flex">
-          <span className="text-[11px] font-medium text-text-secondary">Duration</span>
-          <input
-            type="number"
-            min={0.1}
-            max={EDITOR_MAX_DURATION_SEC}
-            step={0.1}
-            value={durationSec}
-            onChange={(event) => onDurationChange(Number(event.target.value) || 0.1)}
-            aria-label="Video duration in seconds"
-            className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
-          />
-          <span className="text-[11px] text-text-secondary">s</span>
-        </label>
-        <div className="hidden items-center gap-0.5 rounded-lg bg-white/5 p-0.5 sm:flex">
-          {EDITOR_ASPECTS.map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onAspectChange(value)}
-              className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
-                aspect === value
-                  ? "bg-white/15 text-text-primary"
-                  : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
         <CreditBadge
           className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
           iconClassName="h-4 w-4"
