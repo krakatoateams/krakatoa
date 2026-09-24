@@ -230,6 +230,35 @@ export function withProjectDuration(doc: EditorDocument, durationSec: number): E
   };
 }
 
+function reprojectOverlayToAspect(
+  overlay: EditorOverlay,
+  oldCanvas: { w: number; h: number },
+  newCanvas: { w: number; h: number }
+): EditorOverlay {
+  const pixelX = overlay.x * oldCanvas.w;
+  const pixelY = overlay.y * oldCanvas.h;
+  const pixelW = overlay.w * oldCanvas.w;
+  const pixelH = overlay.h * oldCanvas.h;
+
+  const w = clamp(pixelW / newCanvas.w, 0, 1);
+  const h = clamp(pixelH / newCanvas.h, 0, 1);
+  const x = clamp(pixelX / newCanvas.w, 0, 1 - w);
+  const y = clamp(pixelY / newCanvas.h, 0, 1 - h);
+
+  return { ...overlay, x, y, w, h };
+}
+
+export function withProjectAspect(doc: EditorDocument, aspect: EditorAspect): EditorDocument {
+  if (aspect === doc.aspect) return doc;
+  const oldCanvas = EDITOR_CANVAS[doc.aspect];
+  const newCanvas = EDITOR_CANVAS[aspect];
+  return {
+    ...doc,
+    aspect,
+    overlays: doc.overlays.map((overlay) => reprojectOverlayToAspect(overlay, oldCanvas, newCanvas)),
+  };
+}
+
 function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolean }) | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;

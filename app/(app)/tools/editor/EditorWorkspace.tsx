@@ -52,6 +52,7 @@ import {
   sortedOverlays,
   sortedSequence,
   validateEditorExport,
+  withProjectAspect,
   withProjectDuration,
   type EditorClip,
   type EditorDocument,
@@ -91,6 +92,9 @@ const EDITOR_PREVIEW_MIN_PX = 160;
 const TIMELINE_TRACKS_MIN_HEIGHT = 140;
 const TIMELINE_TRACKS_MAX_HEIGHT = 420;
 const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
+// Ruler lives outside the vertically-scrolling rows so it stays pinned in view;
+// its own height is carved out of tracksHeight to keep the resizable split intact.
+const TIMELINE_RULER_HEIGHT = 36;
 
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 650;
@@ -408,17 +412,24 @@ function mediaOverlay(
   item: { id?: string; storagePath?: string | null },
   startSec: number,
   endSec: number,
-  z: number
+  z: number,
+  canvas: { w: number; h: number }
 ): EditorOverlay {
+  // Square default sized off the shorter canvas edge so a fresh overlay looks
+  // the same regardless of which aspect ratio was active when it was added,
+  // instead of the old w/h fractions whose on-screen shape depended on it.
+  const side = 0.3 * Math.min(canvas.w, canvas.h);
+  const w = side / canvas.w;
+  const h = side / canvas.h;
   return {
     id: newId("ov"),
     kind,
     startSec: snapTenth(startSec),
     endSec: snapTenth(endSec),
-    x: 0.62,
+    x: 1 - w - 0.06,
     y: 0.06,
-    w: 0.32,
-    h: 0.24,
+    w,
+    h,
     z,
     text: null,
     fontSize: null,
@@ -465,11 +476,27 @@ function SignedVideo({
   );
 }
 
-function SignedImage({ storagePath }: { storagePath: string | null }) {
+function SignedImage({
+  storagePath,
+  onNaturalSize,
+}: {
+  storagePath: string | null;
+  onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
+}) {
   const url = useSignedMediaUrl(storagePath);
   if (!url) return <div className="h-full w-full animate-pulse bg-white/10" />;
   return (
-    <Image src={url} alt="" fill sizes="240px" className="object-contain" />
+    <Image
+      src={url}
+      alt=""
+      fill
+      sizes="240px"
+      className="object-contain"
+      onLoad={(event) => {
+        const img = event.currentTarget;
+        onNaturalSize?.(img.naturalWidth, img.naturalHeight);
+      }}
+    />
   );
 }
 
@@ -489,6 +516,9 @@ export default function EditorWorkspace() {
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const rulerScrollRef = useRef<HTMLDivElement>(null);
+  const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
@@ -1031,7 +1061,10 @@ export default function EditorWorkspace() {
       const end = snapTenth(Math.min(duration, start + 2));
       return {
         ...current,
-        overlays: [...current.overlays, mediaOverlay(kind, item, start, end, current.overlays.length)],
+        overlays: [
+          ...current.overlays,
+          mediaOverlay(kind, item, start, end, current.overlays.length, EDITOR_CANVAS[current.aspect]),
+        ],
       };
     });
   };
@@ -1060,7 +1093,14 @@ export default function EditorWorkspace() {
           ...current,
           overlays: [
             ...current.overlays,
-            mediaOverlay(kind, { storagePath: uploaded.path }, start, end, current.overlays.length),
+            mediaOverlay(
+              kind,
+              { storagePath: uploaded.path },
+              start,
+              end,
+              current.overlays.length,
+              EDITOR_CANVAS[current.aspect]
+            ),
           ],
         };
       });
@@ -1098,6 +1138,42 @@ export default function EditorWorkspace() {
     }), opts);
   };
 
+  // Image overlays can carry stale w/h from before the box tracked the media's
+  // real shape (or from manual resizes against a since-changed aspect ratio),
+  // producing a box that letterboxes the image inside it. Once the browser
+  // reports the image's actual pixel size, snap the box to match — same
+  // center, clamped to the canvas — so the outline hugs the visible image.
+  const fitOverlayToNaturalSize = (id: string, naturalWidth: number, naturalHeight: number) => {
+    if (naturalWidth <= 0 || naturalHeight <= 0) return;
+    if (fittedOverlaysRef.current.has(id)) return;
+    fittedOverlaysRef.current.add(id);
+    const overlay = docRef.current.overlays.find((o) => o.id === id);
+    if (!overlay) return;
+    const naturalRatio = naturalWidth / naturalHeight;
+    const pixelW = overlay.w * canvas.w;
+    const pixelH = overlay.h * canvas.h;
+    if (Math.abs(pixelW / pixelH - naturalRatio) < 0.02) return;
+    let newPixelH = pixelH;
+    let newPixelW = newPixelH * naturalRatio;
+    if (newPixelW > canvas.w) {
+      newPixelW = canvas.w;
+      newPixelH = newPixelW / naturalRatio;
+    }
+    if (newPixelH > canvas.h) {
+      newPixelH = canvas.h;
+      newPixelW = newPixelH * naturalRatio;
+    }
+    const centerX = overlay.x * canvas.w + pixelW / 2;
+    const centerY = overlay.y * canvas.h + pixelH / 2;
+    const newW = newPixelW / canvas.w;
+    const newH = newPixelH / canvas.h;
+    updateOverlay(id, {
+      w: newW,
+      h: newH,
+      x: Math.min(Math.max((centerX - newPixelW / 2) / canvas.w, 0), 1 - newW),
+      y: Math.min(Math.max((centerY - newPixelH / 2) / canvas.h, 0), 1 - newH),
+    });
+  };
 
   const handleExport = async () => {
     if (status !== "authenticated") {
@@ -1177,6 +1253,7 @@ export default function EditorWorkspace() {
                   : ""
             }`}
             {...viewport.stageHandlers}
+            onClick={() => setSelectedId(null)}
           >
             <div
               className="relative max-h-full max-w-full"
@@ -1192,7 +1269,6 @@ export default function EditorWorkspace() {
               style={{
                 aspectRatio: `${canvas.w} / ${canvas.h}`,
               }}
-              onClick={() => setSelectedId(null)}
             >
               <div className={`h-full w-full ${active ? "" : "invisible"}`}>
                 <SignedVideo
@@ -1264,7 +1340,10 @@ export default function EditorWorkspace() {
                         {overlay.text}
                       </div>
                     ) : overlay.kind === "image" ? (
-                      <SignedImage storagePath={overlay.storagePath} />
+                      <SignedImage
+                        storagePath={overlay.storagePath}
+                        onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
+                      />
                     ) : (
                       <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing && visible} />
                     )}
@@ -1561,7 +1640,7 @@ export default function EditorWorkspace() {
                     <button
                       key={value}
                       type="button"
-                      onClick={() => patchDoc((current) => ({ ...current, aspect: value }))}
+                      onClick={() => patchDoc((current) => withProjectAspect(current, value))}
                       className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
                         doc.aspect === value
                           ? "bg-white/15 text-text-primary"
@@ -1575,12 +1654,55 @@ export default function EditorWorkspace() {
               </div>
             </div>
 
-            <div className="flex min-h-0 overflow-y-auto" style={{ height: tracksHeight }}>
+            <div className="flex shrink-0">
+              <div className="hidden shrink-0 md:block" style={{ width: panelWidth }} />
+              <div className="hidden w-1.5 shrink-0 md:block" />
+              <div ref={rulerScrollRef} className="min-w-0 flex-1 overflow-hidden px-3 pt-2 pb-2">
+                <div
+                  className="relative h-5"
+                  style={{ width: timelineWidth }}
+                  onPointerDown={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
+                    setPlayhead(startPlayhead);
+                    setPlaying(false);
+                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
+                      setPlayhead(
+                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
+                      );
+                    });
+                  }}
+                >
+                  <div
+                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
+                    style={{ left: playhead * pxPerSec }}
+                    aria-hidden
+                  >
+                    {formatTimecode(playhead)}
+                  </div>
+                  {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
+                    <div
+                      key={i}
+                      className="absolute top-0 flex flex-col items-start"
+                      style={{ left: i * pxPerSec }}
+                    >
+                      <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
+                      <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="flex min-h-0 items-start overflow-y-auto"
+              style={{ height: Math.max(0, tracksHeight - TIMELINE_RULER_HEIGHT) }}
+            >
               <div
                 className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex"
                 style={{ width: panelWidth }}
               >
-                <div className="mb-3 h-5" />
                 {overlayRows.length > 0 ? (
                   <div className="mb-2 space-y-1">
                     {overlayRows.map(({ overlay, label }) => (
@@ -1667,7 +1789,15 @@ export default function EditorWorkspace() {
                 className="hidden w-1.5 shrink-0 cursor-col-resize bg-white/5 hover:bg-brand-primary/50 active:bg-brand-primary md:block"
               />
 
-              <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11">
+              <div
+                ref={tracksScrollRef}
+                className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11"
+                onScroll={(event) => {
+                  if (rulerScrollRef.current) {
+                    rulerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                  }
+                }}
+              >
                 <div
                   className="relative min-h-full"
                   style={{ width: timelineWidth }}
@@ -1685,28 +1815,9 @@ export default function EditorWorkspace() {
                   }}
                 >
                   <div
-                    className="pointer-events-none absolute top-4 bottom-0 z-20 w-px bg-info"
+                    className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info"
                     style={{ left: playhead * pxPerSec }}
                   />
-                  <div
-                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
-                    style={{ left: playhead * pxPerSec }}
-                    aria-hidden
-                  >
-                    {formatTimecode(playhead)}
-                  </div>
-                  <div className="relative mb-3 h-5">
-                    {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
-                      <div
-                        key={i}
-                        className="absolute top-0 flex flex-col items-start"
-                        style={{ left: i * pxPerSec }}
-                      >
-                        <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
-                        <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
-                      </div>
-                    ))}
-                  </div>
                   {overlayRows.length > 0 ? (
                     <div className="mb-2 space-y-1">
                       {overlayRows.map(({ overlay }) => (
