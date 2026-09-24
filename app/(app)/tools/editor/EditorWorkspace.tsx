@@ -1201,11 +1201,9 @@ export default function EditorWorkspace() {
             <div className="flex">
               <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex">
                 <div className="mb-1 h-5" />
-                <div className="mb-2 space-y-1">
-                  {overlayRows.length === 0 ? (
-                    <div className="h-8" />
-                  ) : (
-                    overlayRows.map(({ overlay, label }) => (
+                {overlayRows.length > 0 ? (
+                  <div className="mb-2 space-y-1">
+                    {overlayRows.map(({ overlay, label }) => (
                       <LayerPanelRow
                         key={overlay.id}
                         selected={overlay.id === selectedId}
@@ -1229,9 +1227,9 @@ export default function EditorWorkspace() {
                           if (sourceId) reorderOverlays(sourceId, overlay.id);
                         }}
                       />
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="space-y-1">
                   {clipRows.length === 0 ? (
                     <div className="h-8" />
@@ -1301,11 +1299,9 @@ export default function EditorWorkspace() {
                       </div>
                     ))}
                   </div>
-                  <div className="mb-2 space-y-1">
-                    {overlays.length === 0 ? (
-                      <div className="h-8" />
-                    ) : (
-                      overlayRows.map(({ overlay }) => (
+                  {overlayRows.length > 0 ? (
+                    <div className="mb-2 space-y-1">
+                      {overlayRows.map(({ overlay }) => (
                         <TimelineLayerRow
                           key={overlay.id}
                           selected={overlay.id === selectedId}
@@ -1329,9 +1325,9 @@ export default function EditorWorkspace() {
                             </>
                           }
                         />
-                      ))
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="space-y-1">
                     {sequence.length === 0 ? (
                       <div className="h-8" />
