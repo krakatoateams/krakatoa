@@ -8,6 +8,8 @@ import {
   EyeOff,
   ImagePlus,
   Lock,
+  Maximize2,
+  Minus,
   Pause,
   Play,
   Plus,
@@ -57,6 +59,7 @@ import {
   type EditorOverlay,
 } from "@/lib/editor-document";
 import { containSize } from "@/lib/editor-preview-size";
+import { useEditorViewport } from "./useEditorViewport";
 import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
@@ -535,6 +538,11 @@ export default function EditorWorkspace() {
     return () => observer.disconnect();
   }, []);
   const previewSize = containSize(stageSize, canvas, EDITOR_PREVIEW_MIN_PX);
+  const viewport = useEditorViewport(
+    stageRef,
+    { width: previewSize.width, height: previewSize.height },
+    stageSize
+  );
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
   const navClip = selectedClip ?? active?.clip ?? null;
@@ -1049,14 +1057,24 @@ export default function EditorWorkspace() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div
             ref={stageRef}
-            className="relative flex min-h-0 flex-1 items-center justify-center bg-surface p-4"
+            className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-surface p-4 touch-none ${
+              viewport.panning ? "cursor-grabbing" : viewport.spacePanning ? "cursor-grab" : ""
+            }`}
+            {...viewport.stageHandlers}
           >
             <div
-              className="relative max-h-full max-w-full overflow-hidden rounded-lg bg-black shadow-2xl ring-1 ring-white/10"
+              className="relative max-h-full max-w-full"
               style={{
-                aspectRatio: `${canvas.w} / ${canvas.h}`,
                 width: previewSize.width || undefined,
                 height: previewSize.height || undefined,
+                transform: viewport.transform,
+                transformOrigin: "center",
+              }}
+            >
+            <div
+              className="relative h-full w-full overflow-hidden rounded-lg bg-black shadow-2xl ring-1 ring-white/10"
+              style={{
+                aspectRatio: `${canvas.w} / ${canvas.h}`,
               }}
               onClick={() => setSelectedId(null)}
             >
@@ -1159,6 +1177,47 @@ export default function EditorWorkspace() {
                   </div>
                 );
               })}
+            </div>
+            </div>
+
+            <div className="pointer-events-auto absolute bottom-3 right-3 flex items-center gap-0.5 rounded-lg bg-black/50 p-1 text-white backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={viewport.zoomOut}
+                disabled={!viewport.canZoomOut}
+                aria-label="Zoom out"
+                title="Zoom out (Cmd/Ctrl -)"
+                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <span
+                className="min-w-[3rem] select-none text-center text-[11px] tabular-nums text-white/80"
+                aria-label="Current zoom"
+              >
+                {Math.round(viewport.zoomPercent)}%
+              </span>
+              <button
+                type="button"
+                onClick={viewport.zoomIn}
+                disabled={!viewport.canZoomIn}
+                aria-label="Zoom in"
+                title="Zoom in (Cmd/Ctrl +)"
+                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <span className="mx-0.5 h-4 w-px bg-white/20" aria-hidden />
+              <button
+                type="button"
+                onClick={viewport.fit}
+                disabled={viewport.isFit}
+                aria-label="Fit and reset view"
+                title="Fit / Reset view (Cmd/Ctrl 0)"
+                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
 

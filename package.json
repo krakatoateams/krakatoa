@@ -25,7 +25,7 @@
     "test:skills": "tsx lib/skills.ts && tsx lib/skills-catalog-display-self-check.ts",
     "test:admin-skills-catalog": "tsx lib/admin-skills-catalog-self-check.ts",
     "test:canvas": "tsx lib/canvas-graph.ts && tsx lib/canvas-handoff.ts && tsx lib/canvas-document.ts && tsx lib/canvas-text-models.ts",
-    "test:editor": "tsx lib/editor-document.ts && tsx lib/editor-handoff.ts && tsx lib/editor-render.ts && tsx lib/editor-preview-size.ts",
+    "test:editor": "tsx lib/editor-document.ts && tsx lib/editor-handoff.ts && tsx lib/editor-render.ts && tsx lib/editor-preview-size.ts && tsx lib/editor-viewport.ts",
     "test:aspect-ratio": "tsx lib/aspect-ratio-match.ts",
     "test:active-generations": "tsx lib/active-generations-pure.ts",
     "test:metered-generation": "tsx lib/metered-generation/settlement-self-check.ts && tsx lib/metered-generation/lifecycle-self-check.ts",
