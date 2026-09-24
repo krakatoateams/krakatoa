@@ -56,6 +56,7 @@ import {
   type EditorDocument,
   type EditorOverlay,
 } from "@/lib/editor-document";
+import { containSize } from "@/lib/editor-preview-size";
 import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
@@ -81,6 +82,8 @@ function snapTenth(n: number): number {
 const LAYER_PANEL_MIN_WIDTH = 128;
 const LAYER_PANEL_MAX_WIDTH = 320;
 const LAYER_PANEL_DEFAULT_WIDTH = 176;
+/** Smallest usable preview canvas edge, e.g. below the stage size on a very narrow viewport. */
+const EDITOR_PREVIEW_MIN_PX = 160;
 
 const TIMELINE_TRACKS_MIN_HEIGHT = 140;
 const TIMELINE_TRACKS_MAX_HEIGHT = 420;
@@ -518,6 +521,20 @@ export default function EditorWorkspace() {
     lastActiveLocalSecRef.current = active.localSec;
   }
   const canvas = EDITOR_CANVAS[doc.aspect];
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setStageSize({ w: rect.width, h: rect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const previewSize = containSize(stageSize, canvas, EDITOR_PREVIEW_MIN_PX);
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
   const navClip = selectedClip ?? active?.clip ?? null;
@@ -1030,10 +1047,17 @@ export default function EditorWorkspace() {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-surface p-4">
+          <div
+            ref={stageRef}
+            className="relative flex min-h-0 flex-1 items-center justify-center bg-surface p-4"
+          >
             <div
               className="relative max-h-full max-w-full overflow-hidden rounded-lg bg-black shadow-2xl ring-1 ring-white/10"
-              style={{ aspectRatio: `${canvas.w} / ${canvas.h}`, width: "min(100%, 420px)" }}
+              style={{
+                aspectRatio: `${canvas.w} / ${canvas.h}`,
+                width: previewSize.width || undefined,
+                height: previewSize.height || undefined,
+              }}
               onClick={() => setSelectedId(null)}
             >
               <div className={`h-full w-full ${active ? "" : "invisible"}`}>
