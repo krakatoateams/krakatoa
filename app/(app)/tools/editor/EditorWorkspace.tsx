@@ -446,10 +446,12 @@ function SignedVideo({
   storagePath,
   currentTime,
   playing,
+  onNaturalSize,
 }: {
   storagePath: string | null;
   currentTime: number;
   playing: boolean;
+  onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
 }) {
   const url = useSignedMediaUrl(storagePath);
   const ref = useRef<HTMLVideoElement>(null);
@@ -473,6 +475,10 @@ function SignedVideo({
       muted
       playsInline
       className="h-full w-full object-contain"
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget;
+        onNaturalSize?.(video.videoWidth, video.videoHeight);
+      }}
     />
   );
 }
@@ -1142,10 +1148,10 @@ export default function EditorWorkspace() {
     }), opts);
   };
 
-  // Image overlays can carry stale w/h from before the box tracked the media's
-  // real shape (or from manual resizes against a since-changed aspect ratio),
-  // producing a box that letterboxes the image inside it. Once the browser
-  // reports the image's actual pixel size, snap the box to match — same
+  // Image and PiP overlays can carry stale w/h from before the box tracked the
+  // media's real shape (or from manual resizes against a since-changed aspect
+  // ratio), producing a box that letterboxes the media inside it. Once the
+  // browser reports the media's actual pixel size, snap the box to match — same
   // center, clamped to the canvas — so the outline hugs the visible image.
   const fitOverlayToNaturalSize = (id: string, naturalWidth: number, naturalHeight: number) => {
     if (naturalWidth <= 0 || naturalHeight <= 0) return;
@@ -1354,7 +1360,12 @@ export default function EditorWorkspace() {
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
                       />
                     ) : (
-                      <SignedVideo storagePath={overlay.storagePath} currentTime={0} playing={playing && visible} />
+                      <SignedVideo
+                        storagePath={overlay.storagePath}
+                        currentTime={0}
+                        playing={playing && visible}
+                        onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
+                      />
                     )}
                     {visible && selected && !overlay.locked ? (
                       <div
