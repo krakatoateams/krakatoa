@@ -1199,8 +1199,8 @@ export default function EditorWorkspace() {
             </div>
 
             <div className="flex">
-              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-3 pb-11 pl-3 md:flex">
-                <div className="mb-2 h-5" />
+              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex">
+                <div className="mb-1 h-5" />
                 <div className="mb-2 space-y-1">
                   {overlayRows.length === 0 ? (
                     <div className="h-8" />
@@ -1257,7 +1257,7 @@ export default function EditorWorkspace() {
                 </div>
               </div>
 
-              <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-3 pb-11">
+              <div className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11">
                 <div
                   className="relative"
                   style={{ width: timelineWidth }}
@@ -1289,7 +1289,7 @@ export default function EditorWorkspace() {
                   >
                     {formatTimecode(playhead)}
                   </div>
-                  <div className="relative mb-2 h-5">
+                  <div className="relative mb-1 h-5">
                     {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
                       <div
                         key={i}
