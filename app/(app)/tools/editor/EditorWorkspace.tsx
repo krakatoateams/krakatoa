@@ -485,6 +485,7 @@ export default function EditorWorkspace() {
   const [doc, setDoc] = useState<EditorDocument>(emptyEditorDocument);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
+  const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
@@ -571,6 +572,14 @@ export default function EditorWorkspace() {
   const jumpToClipEnd = () => {
     setPlaying(false);
     setPlayhead(snapTenth(Math.max(0, Math.min(duration, navClip ? navClip.endSec : duration))));
+  };
+  const commitTimeInput = (raw: string) => {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      setPlaying(false);
+      setPlayhead(snapTenth(Math.max(0, Math.min(duration, parsed))));
+    }
+    setTimeInputDraft(null);
   };
 
   // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
@@ -1455,8 +1464,29 @@ export default function EditorWorkspace() {
                 >
                   <SkipForward className="h-3.5 w-3.5" />
                 </button>
-                <span className="ml-1 min-w-[5.5rem] text-xs tabular-nums text-text-secondary">
-                  {formatTimecode(playhead)}
+                <span className="ml-1 flex items-center text-xs tabular-nums text-text-secondary">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={timeInputDraft ?? playhead.toFixed(1)}
+                    onFocus={(event) => {
+                      setTimeInputDraft(playhead.toFixed(1));
+                      event.currentTarget.select();
+                    }}
+                    onChange={(event) => setTimeInputDraft(event.target.value)}
+                    onBlur={(event) => commitTimeInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Escape") {
+                        setTimeInputDraft(null);
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    aria-label="Jump to time in seconds"
+                    title="Type a time in seconds and press Enter to jump"
+                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15"
+                  />
+                  <span>s</span>
                   <span className="text-white/30"> / </span>
                   {formatTimecode(duration)}
                 </span>
