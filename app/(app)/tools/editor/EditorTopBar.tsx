@@ -136,16 +136,14 @@ export default function EditorTopBar({
           cancelAllowed
           onCancel={onCancel}
         />
-        {!exporting ? (
-          <button
-            type="button"
-            onClick={onExport}
-            disabled={!exportReady}
-            className={`${GENERATE_BTN_CLASS} h-8 px-4 text-xs`}
-          >
-            Export
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={!exportReady || exporting}
+          className={`${GENERATE_BTN_CLASS} h-8 px-4 text-xs`}
+        >
+          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Export"}
+        </button>
       </div>
     </header>
   );

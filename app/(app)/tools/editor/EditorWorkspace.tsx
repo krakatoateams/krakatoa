@@ -28,6 +28,7 @@ import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { canDropOnEditor } from "@/lib/editor-handoff";
 import { uploadRefFile } from "@/components/studio/RefGroup";
+import { useStudioGenerationPreview } from "@/components/studio";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { probeVideoDurationSec } from "@/lib/use-video-duration";
 import type { CreationHistoryItem } from "@/lib/creations";
@@ -508,6 +509,7 @@ export default function EditorWorkspace() {
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
+  const { openPreview } = useStudioGenerationPreview();
   const { begin, cancel, cancelling } = useIdempotentSubmit("editor:export");
 
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
@@ -1199,7 +1201,11 @@ export default function EditorWorkspace() {
         },
         body: JSON.stringify({ title, document: doc }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+        creation?: { id?: string };
+      };
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
@@ -1209,6 +1215,7 @@ export default function EditorWorkspace() {
         throw new Error(data.error || "Export failed.");
       }
       attempt.settle(true);
+      if (data.creation?.id) void openPreview(data.creation.id);
     } catch (err) {
       attempt.settle(false);
       setExportError(err instanceof Error ? err.message : "Export failed.");
