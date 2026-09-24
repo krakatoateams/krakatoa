@@ -89,6 +89,17 @@ function startTimelineDrag(
   window.addEventListener("pointerup", up);
 }
 
+function reorderById<T extends { id: string }>(list: T[], sourceId: string, targetId: string): T[] | null {
+  if (sourceId === targetId) return null;
+  const items = [...list];
+  const from = items.findIndex((item) => item.id === sourceId);
+  const to = items.findIndex((item) => item.id === targetId);
+  if (from === -1 || to === -1) return null;
+  const [moved] = items.splice(from, 1);
+  items.splice(to, 0, moved);
+  return items;
+}
+
 function fingerprintOf(title: string, doc: EditorDocument): string {
   return JSON.stringify({ title: normalizeEditorTitle(title), document: doc });
 }
@@ -222,6 +233,41 @@ function TimelineLayerRow({
   );
 }
 
+function LayerPanelRow({
+  selected,
+  icon,
+  label,
+  onSelect,
+  onDragStart,
+  onDrop,
+}: {
+  selected: boolean;
+  icon: ReactNode;
+  label: string;
+  onSelect: () => void;
+  onDragStart: () => void;
+  onDrop: () => void;
+}) {
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+      onClick={onSelect}
+      className={`flex h-8 cursor-grab items-center gap-1.5 rounded-sm px-2 text-[11px] active:cursor-grabbing ${
+        selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
+      }`}
+    >
+      <span className="shrink-0 opacity-70">{icon}</span>
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
+
 function textOverlay(startSec: number, endSec: number, z: number): EditorOverlay {
   return {
     id: newId("ov"),
@@ -338,6 +384,7 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const dragLayerIdRef = useRef<string | null>(null);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
@@ -352,6 +399,48 @@ export default function EditorWorkspace() {
   const canvas = EDITOR_CANVAS[doc.aspect];
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
+
+  // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
+  const clipRows = sequence
+    .map((clip, i) => ({ clip, label: `Clip ${i + 1}` }))
+    .reverse();
+  let imageOverlayCount = 0;
+  let videoOverlayCount = 0;
+  const overlayRows = overlays
+    .map((overlay) => {
+      let label: string;
+      if (overlay.kind === "text") {
+        label = overlay.text?.trim().slice(0, 18) || "Text";
+      } else if (overlay.kind === "image") {
+        imageOverlayCount += 1;
+        label = `Image overlay ${imageOverlayCount}`;
+      } else {
+        videoOverlayCount += 1;
+        label = `Video overlay ${videoOverlayCount}`;
+      }
+      return { overlay, label };
+    })
+    .reverse();
+
+  const reorderClips = (sourceId: string, targetId: string) => {
+    const reordered = reorderById(sequence, sourceId, targetId);
+    if (!reordered) return;
+    const orderById = new Map(reordered.map((c, i) => [c.id, i]));
+    patchDoc((current) => ({
+      ...current,
+      sequence: current.sequence.map((c) => ({ ...c, order: orderById.get(c.id) ?? c.order })),
+    }));
+  };
+
+  const reorderOverlays = (sourceId: string, targetId: string) => {
+    const reordered = reorderById(overlays, sourceId, targetId);
+    if (!reordered) return;
+    const zById = new Map(reordered.map((o, i) => [o.id, i]));
+    patchDoc((current) => ({
+      ...current,
+      overlays: current.overlays.map((o) => ({ ...o, z: zById.get(o.id) ?? o.z })),
+    }));
+  };
 
   const applyUrl = useCallback(
     (id: string | null) => {
@@ -1031,104 +1120,175 @@ export default function EditorWorkspace() {
               />
             </div>
 
-            <div className="overflow-x-auto px-3 py-3">
-              <div
-                className="relative"
-                style={{ width: timelineWidth }}
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const x = event.clientX - rect.left;
-                  setPlayhead(snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec))));
-                  setPlaying(false);
-                }}
-              >
-                <div
-                  className="pointer-events-none absolute top-0 z-20 h-full w-px bg-brand-primary"
-                  style={{ left: playhead * pxPerSec }}
-                />
-                <div
-                  className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded bg-brand-primary px-1 py-0.5 text-[9px] font-semibold tabular-nums text-white"
-                  style={{ left: playhead * pxPerSec }}
-                >
-                  {formatTimecode(playhead)}
-                </div>
-                <div className="relative mb-2 h-5">
-                  {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
-                    <div
-                      key={i}
-                      className="absolute top-0 flex flex-col items-start"
-                      style={{ left: i * pxPerSec }}
-                    >
-                      <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
-                      <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
-                    </div>
-                  ))}
-                </div>
+            <div className="flex">
+              <div className="hidden w-28 shrink-0 flex-col border-r border-white/10 py-3 pl-3 md:flex">
+                <div className="mb-2 h-5" />
                 <div className="mb-2 space-y-1">
-                  {sequence.length === 0 ? (
-                    <p className="text-xs text-text-secondary">Clip layers — drag to move, edges to trim</p>
+                  {overlayRows.length === 0 ? (
+                    <div className="h-8" />
                   ) : (
-                    sequence.map((clip) => {
-                      const clipDur = clipLayerDurationSec(clip);
-                      return (
-                        <TimelineLayerRow
-                          key={clip.id}
-                          selected={clip.id === selectedId}
-                          startSec={clip.startSec}
-                          endSec={clip.endSec}
-                          pxPerSec={pxPerSec}
-                          trackWidth={timelineWidth}
-                          maxEnd={duration}
-                          maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
-                          selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
-                          onSelect={() => setSelectedId(clip.id)}
-                          onMove={(startSec, endSec) => updateClip(clip.id, { startSec, endSec })}
-                          onTrimStart={(startSec) => updateClip(clip.id, { startSec })}
-                          onTrimEnd={(endSec) => updateClip(clip.id, { endSec })}
-                          label={
-                            <>
-                              Clip
-                              <span className="ml-1 tabular-nums opacity-80">
-                                {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
-                              </span>
-                              <span className="ml-1 tabular-nums opacity-60">{formatTimecode(clipDur)}</span>
-                            </>
-                          }
-                        />
-                      );
-                    })
-                  )}
-                </div>
-                <div className="space-y-1">
-                  {overlays.length === 0 ? (
-                    <p className="text-[11px] text-text-secondary">Overlay layers — drag the edges to trim</p>
-                  ) : (
-                    overlays.map((overlay) => (
-                      <TimelineLayerRow
+                    overlayRows.map(({ overlay, label }) => (
+                      <LayerPanelRow
                         key={overlay.id}
                         selected={overlay.id === selectedId}
-                        startSec={overlay.startSec}
-                        endSec={overlay.endSec}
-                        pxPerSec={pxPerSec}
-                        trackWidth={timelineWidth}
-                        maxEnd={duration}
-                        maxSpan={duration}
-                        selectedClassName="bg-white/25 ring-1 ring-white/40"
-                        onSelect={() => setSelectedId(overlay.id)}
-                        onMove={(startSec, endSec) => updateOverlay(overlay.id, { startSec, endSec })}
-                        onTrimStart={(startSec) => updateOverlay(overlay.id, { startSec })}
-                        onTrimEnd={(endSec) => updateOverlay(overlay.id, { endSec })}
-                        label={
-                          <>
-                            <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
-                            <span className="ml-1 tabular-nums text-text-secondary">
-                              {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
-                            </span>
-                          </>
+                        icon={
+                          overlay.kind === "text" ? (
+                            <Type className="h-3 w-3" />
+                          ) : overlay.kind === "image" ? (
+                            <ImagePlus className="h-3 w-3" />
+                          ) : (
+                            <Video className="h-3 w-3" />
+                          )
                         }
+                        label={label}
+                        onSelect={() => setSelectedId(overlay.id)}
+                        onDragStart={() => {
+                          dragLayerIdRef.current = overlay.id;
+                        }}
+                        onDrop={() => {
+                          const sourceId = dragLayerIdRef.current;
+                          dragLayerIdRef.current = null;
+                          if (sourceId) reorderOverlays(sourceId, overlay.id);
+                        }}
                       />
                     ))
                   )}
+                </div>
+                <div className="space-y-1">
+                  {clipRows.length === 0 ? (
+                    <div className="h-8" />
+                  ) : (
+                    clipRows.map(({ clip, label }) => (
+                      <LayerPanelRow
+                        key={clip.id}
+                        selected={clip.id === selectedId}
+                        icon={<Video className="h-3 w-3" />}
+                        label={label}
+                        onSelect={() => setSelectedId(clip.id)}
+                        onDragStart={() => {
+                          dragLayerIdRef.current = clip.id;
+                        }}
+                        onDrop={() => {
+                          const sourceId = dragLayerIdRef.current;
+                          dragLayerIdRef.current = null;
+                          if (sourceId) reorderClips(sourceId, clip.id);
+                        }}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="min-w-0 flex-1 overflow-x-auto px-3 py-3">
+                <div
+                  className="relative"
+                  style={{ width: timelineWidth }}
+                  onPointerDown={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
+                    setPlayhead(startPlayhead);
+                    setPlaying(false);
+                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
+                      setPlayhead(
+                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
+                      );
+                    });
+                  }}
+                >
+                  <div
+                    className="pointer-events-none absolute top-0 z-20 h-full w-px bg-brand-primary"
+                    style={{ left: playhead * pxPerSec }}
+                  />
+                  <div
+                    className="absolute -top-1.5 z-20 h-3 w-5 -translate-x-1/2 cursor-ew-resize rounded-full bg-brand-primary shadow ring-2 ring-white/40"
+                    style={{ left: playhead * pxPerSec }}
+                    aria-hidden
+                  />
+                  <div
+                    className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded bg-brand-primary px-1 py-0.5 text-[9px] font-semibold tabular-nums text-white"
+                    style={{ left: playhead * pxPerSec }}
+                  >
+                    {formatTimecode(playhead)}
+                  </div>
+                  <div className="relative mb-2 h-5">
+                    {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
+                      <div
+                        key={i}
+                        className="absolute top-0 flex flex-col items-start"
+                        style={{ left: i * pxPerSec }}
+                      >
+                        <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
+                        <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mb-2 space-y-1">
+                    {overlays.length === 0 ? (
+                      <p className="text-[11px] text-text-secondary">Overlay layers — drag the edges to trim</p>
+                    ) : (
+                      overlayRows.map(({ overlay }) => (
+                        <TimelineLayerRow
+                          key={overlay.id}
+                          selected={overlay.id === selectedId}
+                          startSec={overlay.startSec}
+                          endSec={overlay.endSec}
+                          pxPerSec={pxPerSec}
+                          trackWidth={timelineWidth}
+                          maxEnd={duration}
+                          maxSpan={duration}
+                          selectedClassName="bg-white/25 ring-1 ring-white/40"
+                          onSelect={() => setSelectedId(overlay.id)}
+                          onMove={(startSec, endSec) => updateOverlay(overlay.id, { startSec, endSec })}
+                          onTrimStart={(startSec) => updateOverlay(overlay.id, { startSec })}
+                          onTrimEnd={(endSec) => updateOverlay(overlay.id, { endSec })}
+                          label={
+                            <>
+                              <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
+                              <span className="ml-1 tabular-nums text-text-secondary">
+                                {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
+                              </span>
+                            </>
+                          }
+                        />
+                      ))
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    {sequence.length === 0 ? (
+                      <p className="text-xs text-text-secondary">Clip layers — drag to move, edges to trim</p>
+                    ) : (
+                      clipRows.map(({ clip }) => {
+                        const clipDur = clipLayerDurationSec(clip);
+                        return (
+                          <TimelineLayerRow
+                            key={clip.id}
+                            selected={clip.id === selectedId}
+                            startSec={clip.startSec}
+                            endSec={clip.endSec}
+                            pxPerSec={pxPerSec}
+                            trackWidth={timelineWidth}
+                            maxEnd={duration}
+                            maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
+                            selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
+                            onSelect={() => setSelectedId(clip.id)}
+                            onMove={(startSec, endSec) => updateClip(clip.id, { startSec, endSec })}
+                            onTrimStart={(startSec) => updateClip(clip.id, { startSec })}
+                            onTrimEnd={(endSec) => updateClip(clip.id, { endSec })}
+                            label={
+                              <>
+                                Clip
+                                <span className="ml-1 tabular-nums opacity-80">
+                                  {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
+                                </span>
+                                <span className="ml-1 tabular-nums opacity-60">{formatTimecode(clipDur)}</span>
+                              </>
+                            }
+                          />
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
