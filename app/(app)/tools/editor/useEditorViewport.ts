@@ -127,14 +127,22 @@ export function useEditorViewport(
     const el = stageRef.current;
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const point = {
+          x: event.clientX - rect.left - rect.width / 2,
+          y: event.clientY - rect.top - rect.height / 2,
+        };
+        zoomAtStagePoint(point, event.deltaY);
+        return;
+      }
+      // Plain two-finger trackpad scroll (no modifier) pans instead.
       event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const point = {
-        x: event.clientX - rect.left - rect.width / 2,
-        y: event.clientY - rect.top - rect.height / 2,
-      };
-      zoomAtStagePoint(point, event.deltaY);
+      applyZoomAndPan(zoomRef.current, {
+        x: panRef.current.x - event.deltaX,
+        y: panRef.current.y - event.deltaY,
+      });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
