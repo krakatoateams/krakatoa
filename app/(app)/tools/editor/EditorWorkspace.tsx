@@ -1030,9 +1030,9 @@ export default function EditorWorkspace() {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black/40 p-4">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center bg-surface p-4">
             <div
-              className="relative max-h-full max-w-full overflow-hidden rounded-lg bg-black shadow-2xl"
+              className="relative max-h-full max-w-full overflow-hidden rounded-lg bg-black shadow-2xl ring-1 ring-white/10"
               style={{ aspectRatio: `${canvas.w} / ${canvas.h}`, width: "min(100%, 420px)" }}
               onClick={() => setSelectedId(null)}
             >
