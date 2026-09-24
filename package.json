@@ -59,6 +59,7 @@
     "test:creation-ownership": "tsx lib/creation-ownership-self-check.ts",
     "test:doku-fulfillment": "tsx lib/doku-fulfillment-self-check.ts",
     "test:storage-sign-ownership": "tsx lib/storage-sign-ownership-self-check.ts",
+    "test:storage-sign-client": "tsx lib/storage-sign-client-self-check.ts",
     "test:storage-sweep": "tsx lib/storage-sweep-self-check.ts",
     "test:creation-expiry": "tsx lib/creation-expiry-self-check.ts",
     "test:tiktok-photo-proxy": "tsx lib/tiktok-photo-proxy-self-check.ts",
