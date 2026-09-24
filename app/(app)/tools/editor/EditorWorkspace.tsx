@@ -82,6 +82,10 @@ const LAYER_PANEL_MIN_WIDTH = 128;
 const LAYER_PANEL_MAX_WIDTH = 320;
 const LAYER_PANEL_DEFAULT_WIDTH = 176;
 
+const TIMELINE_TRACKS_MIN_HEIGHT = 140;
+const TIMELINE_TRACKS_MAX_HEIGHT = 420;
+const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
+
 function startTimelineDrag(
   event: ReactPointerEvent,
   pxPerSec: number,
@@ -96,6 +100,37 @@ function startTimelineDrag(
   const up = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+const LAYER_ROW_ATTR = "data-layer-row";
+
+function layerRowIdAt(clientX: number, clientY: number): string | null {
+  const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+  const row = el?.closest(`[${LAYER_ROW_ATTR}]`) as HTMLElement | null;
+  return row?.dataset.layerId ?? null;
+}
+
+/**
+ * Reorders layer rows by tracking the pointer directly instead of native HTML5
+ * drag-and-drop: native DnD only reliably completes a small fraction of real
+ * drags in this app (Chromium silently drops the session after one dragover,
+ * worse in Safari), while plain pointermove/pointerup — already used for
+ * timeline trim/move — never misses a drop.
+ */
+function startLayerReorderDrag(
+  event: ReactPointerEvent,
+  onHover: (targetId: string | null) => void,
+  onCommit: (targetId: string | null) => void
+): void {
+  event.preventDefault();
+  const move = (ev: PointerEvent) => onHover(layerRowIdAt(ev.clientX, ev.clientY));
+  const up = (ev: PointerEvent) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    onCommit(layerRowIdAt(ev.clientX, ev.clientY));
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -246,6 +281,7 @@ function TimelineLayerRow({
 }
 
 function LayerPanelRow({
+  id,
   selected,
   locked,
   hidden,
@@ -253,15 +289,14 @@ function LayerPanelRow({
   label,
   dragOver,
   onSelect,
-  onDragStart,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-  onDragEnd,
+  onReorderStart,
+  onReorderHover,
+  onReorderCommit,
   onToggleLock,
   onToggleHidden,
   onDelete,
 }: {
+  id: string;
   selected: boolean;
   locked: boolean;
   hidden: boolean;
@@ -269,40 +304,26 @@ function LayerPanelRow({
   label: string;
   dragOver: boolean;
   onSelect: () => void;
-  onDragStart: (event: import("react").DragEvent) => void;
-  onDragOver: () => void;
-  onDragLeave: () => void;
-  onDrop: () => void;
-  onDragEnd: () => void;
+  onReorderStart: () => void;
+  onReorderHover: (targetId: string | null) => void;
+  onReorderCommit: (targetId: string | null) => void;
   onToggleLock: () => void;
   onToggleHidden: () => void;
   onDelete: () => void;
 }) {
   return (
     <div
-      draggable
-      onDragStart={(event) => {
-        if (locked || (event.target as HTMLElement).closest("[data-nodrag]")) {
-          event.preventDefault();
+      data-layer-row
+      data-layer-id={id}
+      onPointerDown={(event) => {
+        if (locked || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
           return;
         }
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", label);
-        onDragStart(event);
+        onReorderStart();
+        startLayerReorderDrag(event, onReorderHover, onReorderCommit);
       }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        onDragOver();
-      }}
-      onDragLeave={onDragLeave}
-      onDrop={(event) => {
-        event.preventDefault();
-        onDrop();
-      }}
-      onDragEnd={onDragEnd}
       onClick={onSelect}
-      className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] ${
+      className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
         locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
       } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
@@ -462,6 +483,7 @@ export default function EditorWorkspace() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
+  const [tracksHeight, setTracksHeight] = useState(TIMELINE_TRACKS_DEFAULT_HEIGHT);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
 
   const titleRef = useRef(title);
@@ -1111,7 +1133,32 @@ export default function EditorWorkspace() {
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-white/10 bg-N50">
+          <div className="flex shrink-0 flex-col bg-N50">
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const startY = event.clientY;
+                const startHeight = tracksHeight;
+                const move = (ev: PointerEvent) => {
+                  setTracksHeight(
+                    Math.max(
+                      TIMELINE_TRACKS_MIN_HEIGHT,
+                      Math.min(TIMELINE_TRACKS_MAX_HEIGHT, startHeight - (ev.clientY - startY))
+                    )
+                  );
+                };
+                const up = () => {
+                  window.removeEventListener("pointermove", move);
+                  window.removeEventListener("pointerup", up);
+                };
+                window.addEventListener("pointermove", move);
+                window.addEventListener("pointerup", up);
+              }}
+              className="h-1.5 shrink-0 cursor-row-resize bg-white/10 hover:bg-brand-primary/50 active:bg-brand-primary"
+            />
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <button
@@ -1292,7 +1339,7 @@ export default function EditorWorkspace() {
               </div>
             </div>
 
-            <div className="flex">
+            <div className="flex min-h-0 overflow-y-auto" style={{ height: tracksHeight }}>
               <div
                 className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex"
                 style={{ width: panelWidth }}
@@ -1303,6 +1350,7 @@ export default function EditorWorkspace() {
                     {overlayRows.map(({ overlay, label }) => (
                       <LayerPanelRow
                         key={overlay.id}
+                        id={overlay.id}
                         selected={overlay.id === selectedId}
                         locked={overlay.locked}
                         hidden={overlay.hidden}
@@ -1318,22 +1366,15 @@ export default function EditorWorkspace() {
                         }
                         label={label}
                         onSelect={() => setSelectedId(overlay.id)}
-                        onDragStart={() => {
+                        onReorderStart={() => {
                           dragLayerIdRef.current = overlay.id;
                         }}
-                        onDragOver={() => setDragOverLayerId(overlay.id)}
-                        onDragLeave={() =>
-                          setDragOverLayerId((current) => (current === overlay.id ? null : current))
-                        }
-                        onDrop={() => {
+                        onReorderHover={setDragOverLayerId}
+                        onReorderCommit={(targetId) => {
                           const sourceId = dragLayerIdRef.current;
                           dragLayerIdRef.current = null;
                           setDragOverLayerId(null);
-                          if (sourceId) reorderOverlays(sourceId, overlay.id);
-                        }}
-                        onDragEnd={() => {
-                          dragLayerIdRef.current = null;
-                          setDragOverLayerId(null);
+                          if (sourceId && targetId) reorderOverlays(sourceId, targetId);
                         }}
                         onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
@@ -1349,6 +1390,7 @@ export default function EditorWorkspace() {
                     clipRows.map(({ clip, label }) => (
                       <LayerPanelRow
                         key={clip.id}
+                        id={clip.id}
                         selected={clip.id === selectedId}
                         locked={clip.locked}
                         hidden={clip.hidden}
@@ -1356,22 +1398,15 @@ export default function EditorWorkspace() {
                         icon={<Video className="h-3 w-3" />}
                         label={label}
                         onSelect={() => setSelectedId(clip.id)}
-                        onDragStart={() => {
+                        onReorderStart={() => {
                           dragLayerIdRef.current = clip.id;
                         }}
-                        onDragOver={() => setDragOverLayerId(clip.id)}
-                        onDragLeave={() =>
-                          setDragOverLayerId((current) => (current === clip.id ? null : current))
-                        }
-                        onDrop={() => {
+                        onReorderHover={setDragOverLayerId}
+                        onReorderCommit={(targetId) => {
                           const sourceId = dragLayerIdRef.current;
                           dragLayerIdRef.current = null;
                           setDragOverLayerId(null);
-                          if (sourceId) reorderClips(sourceId, clip.id);
-                        }}
-                        onDragEnd={() => {
-                          dragLayerIdRef.current = null;
-                          setDragOverLayerId(null);
+                          if (sourceId && targetId) reorderClips(sourceId, targetId);
                         }}
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
