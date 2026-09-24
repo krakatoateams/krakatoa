@@ -673,6 +673,14 @@ export default function EditorWorkspace() {
       if (save) {
         event.preventDefault();
         void handleSave();
+        return;
+      }
+      if (event.code === "Space" && !event.repeat) {
+        const target = event.target as HTMLElement | null;
+        const editable = target?.closest("input, textarea, select, [contenteditable='true']");
+        if (editable) return;
+        event.preventDefault();
+        setPlaying((current) => (current ? false : sequenceDurationSec(docRef.current) > 0));
       }
     };
     window.addEventListener("beforeunload", warn);
