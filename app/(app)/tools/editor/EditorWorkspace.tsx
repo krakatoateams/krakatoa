@@ -8,8 +8,6 @@ import {
   EyeOff,
   ImagePlus,
   Lock,
-  Maximize2,
-  Minus,
   Pause,
   Play,
   Plus,
@@ -60,6 +58,7 @@ import {
 } from "@/lib/editor-document";
 import { containSize } from "@/lib/editor-preview-size";
 import { useEditorViewport } from "./useEditorViewport";
+import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
 import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
@@ -91,6 +90,9 @@ const EDITOR_PREVIEW_MIN_PX = 160;
 const TIMELINE_TRACKS_MIN_HEIGHT = 140;
 const TIMELINE_TRACKS_MAX_HEIGHT = 420;
 const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
+
+const HISTORY_LIMIT = 50;
+const HISTORY_COALESCE_MS = 650;
 
 function startTimelineDrag(
   event: ReactPointerEvent,
@@ -491,9 +493,16 @@ export default function EditorWorkspace() {
   const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
   const [tracksHeight, setTracksHeight] = useState(TIMELINE_TRACKS_DEFAULT_HEIGHT);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
+  const [tool, setTool] = useState<EditorTool>("select");
+  const [past, setPast] = useState<EditorDocument[]>([]);
+  const [future, setFuture] = useState<EditorDocument[]>([]);
 
   const titleRef = useRef(title);
   const docRef = useRef(doc);
+  const pastRef = useRef(past);
+  const futureRef = useRef(future);
+  const selectedIdRef = useRef(selectedId);
+  const lastPatchRef = useRef<{ key: string; at: number } | null>(null);
   const projectIdRef = useRef(projectId);
   const lastSavedRef = useRef(fingerprintOf(DEFAULT_EDITOR_TITLE, emptyEditorDocument()));
   const persistedTitleRef = useRef(DEFAULT_EDITOR_TITLE);
@@ -508,6 +517,9 @@ export default function EditorWorkspace() {
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
+  pastRef.current = past;
+  futureRef.current = future;
+  selectedIdRef.current = selectedId;
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -541,7 +553,8 @@ export default function EditorWorkspace() {
   const viewport = useEditorViewport(
     stageRef,
     { width: previewSize.width, height: previewSize.height },
-    stageSize
+    stageSize,
+    tool === "hand"
   );
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
@@ -621,10 +634,77 @@ export default function EditorWorkspace() {
     [router]
   );
 
-  const patchDoc = useCallback((updater: (current: EditorDocument) => EditorDocument) => {
-    setDoc((current) => updater(current));
-    setPlaying(false);
+  // Continuous drags (overlay move/resize, timeline trim) call patchDoc on every
+  // pointermove; coalesceKey collapses same-key patches within this window into
+  // one undo step instead of one per pixel.
+  // ponytail: time-window coalescing, not true gesture-scoped (pointerdown/up) —
+  // a >650ms pause mid-drag splits into two undo steps. Upgrade to explicit
+  // begin/end-gesture calls if that granularity ever bothers users.
+  const patchDoc = useCallback(
+    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string }) => {
+      const current = docRef.current;
+      const next = updater(current);
+      const key = opts?.coalesceKey ?? null;
+      const now = performance.now();
+      const last = lastPatchRef.current;
+      const coalesced = key != null && last?.key === key && now - last.at < HISTORY_COALESCE_MS;
+      if (!coalesced) {
+        setPast((p) => [...p.slice(-HISTORY_LIMIT + 1), current]);
+        setFuture([]);
+      }
+      lastPatchRef.current = key != null ? { key, at: now } : null;
+      docRef.current = next;
+      setDoc(next);
+      setPlaying(false);
+    },
+    []
+  );
+
+  const undo = useCallback(() => {
+    const p = pastRef.current;
+    if (p.length === 0) return;
+    const prev = p[p.length - 1];
+    setFuture((f) => [docRef.current, ...f].slice(0, HISTORY_LIMIT));
+    setPast(p.slice(0, -1));
+    docRef.current = prev;
+    setDoc(prev);
+    setSelectedId(null);
+    lastPatchRef.current = null;
   }, []);
+
+  const redo = useCallback(() => {
+    const f = futureRef.current;
+    if (f.length === 0) return;
+    const next = f[0];
+    setPast((p) => [...p, docRef.current].slice(-HISTORY_LIMIT));
+    setFuture(f.slice(1));
+    docRef.current = next;
+    setDoc(next);
+    setSelectedId(null);
+    lastPatchRef.current = null;
+  }, []);
+
+  const removeLayer = useCallback(
+    (kind: "clip" | "overlay", id: string) => {
+      patchDoc((current) => ({
+        ...current,
+        sequence:
+          kind === "clip"
+            ? current.sequence.filter((c) => c.id !== id).map((c, order) => ({ ...c, order }))
+            : current.sequence,
+        overlays: kind === "overlay" ? current.overlays.filter((o) => o.id !== id) : current.overlays,
+      }));
+      setSelectedId((current) => (current === id ? null : current));
+    },
+    [patchDoc]
+  );
+
+  const deleteSelected = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const isClip = docRef.current.sequence.some((c) => c.id === id);
+    removeLayer(isClip ? "clip" : "overlay", id);
+  }, [removeLayer]);
 
   const loadProject = useCallback(
     async (id: string) => {
@@ -648,6 +728,8 @@ export default function EditorWorkspace() {
       setSelectedId(null);
       setPlayhead(0);
       setPlaying(false);
+      setPast([]);
+      setFuture([]);
       lastSavedRef.current = fingerprintOf(data.project.title, parsed);
       applyUrl(data.project.id);
     },
@@ -663,6 +745,8 @@ export default function EditorWorkspace() {
     setSelectedId(null);
     setPlayhead(0);
     setPlaying(false);
+    setPast([]);
+    setFuture([]);
     lastSavedRef.current = fingerprintOf(DEFAULT_EDITOR_TITLE, empty);
     applyUrl(null);
   }, [applyUrl]);
@@ -840,15 +924,27 @@ export default function EditorWorkspace() {
       e.returnValue = "";
     };
     const onKey = (event: KeyboardEvent) => {
-      const save = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s" && !event.shiftKey;
+      const target = event.target as HTMLElement | null;
+      const editable = target?.closest("input, textarea, select, [contenteditable='true']");
+      const meta = event.metaKey || event.ctrlKey;
+      const save = meta && event.key.toLowerCase() === "s" && !event.shiftKey;
       if (save) {
         event.preventDefault();
         void handleSave();
         return;
       }
+      if (meta && !editable && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === "y" || event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (!editable && (event.key === "Delete" || event.key === "Backspace")) {
+        event.preventDefault();
+        deleteSelected();
+        return;
+      }
       if (event.code === "Space" && !event.repeat) {
-        const target = event.target as HTMLElement | null;
-        const editable = target?.closest("input, textarea, select, [contenteditable='true']");
         if (editable) return;
         event.preventDefault();
         setPlaying((current) => (current ? false : sequenceDurationSec(docRef.current) > 0));
@@ -860,7 +956,7 @@ export default function EditorWorkspace() {
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener("keydown", onKey);
     };
-  }, [handleSave]);
+  }, [handleSave, undo, redo, deleteSelected]);
 
   const attachSourceDuration = useCallback(async (clipId: string, storagePath: string | null) => {
     if (!storagePath) return;
@@ -946,7 +1042,7 @@ export default function EditorWorkspace() {
     }
   };
 
-  const updateClip = (id: string, patch: Partial<EditorClip>) => {
+  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string }) => {
     const next: Partial<EditorClip> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -958,10 +1054,10 @@ export default function EditorWorkspace() {
           ? clampClipToComposition({ ...clip, ...next }, projectDurationSec(current))
           : clip
       ),
-    }));
+    }), opts);
   };
 
-  const updateOverlay = (id: string, patch: Partial<EditorOverlay>) => {
+  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string }) => {
     const next: Partial<EditorOverlay> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -972,20 +1068,9 @@ export default function EditorWorkspace() {
           ? clampOverlayToComposition({ ...overlay, ...next }, projectDurationSec(current))
           : overlay
       ),
-    }));
+    }), opts);
   };
 
-  const removeLayer = (kind: "clip" | "overlay", id: string) => {
-    patchDoc((current) => ({
-      ...current,
-      sequence:
-        kind === "clip"
-          ? current.sequence.filter((c) => c.id !== id).map((c, order) => ({ ...c, order }))
-          : current.sequence,
-      overlays: kind === "overlay" ? current.overlays.filter((o) => o.id !== id) : current.overlays,
-    }));
-    setSelectedId((current) => (current === id ? null : current));
-  };
 
   const handleExport = async () => {
     if (status !== "authenticated") {
@@ -1058,7 +1143,11 @@ export default function EditorWorkspace() {
           <div
             ref={stageRef}
             className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-surface p-4 touch-none ${
-              viewport.panning ? "cursor-grabbing" : viewport.spacePanning ? "cursor-grab" : ""
+              viewport.panning
+                ? "cursor-grabbing"
+                : viewport.spacePanning || tool === "hand"
+                  ? "cursor-grab"
+                  : ""
             }`}
             {...viewport.stageHandlers}
           >
@@ -1115,10 +1204,14 @@ export default function EditorWorkspace() {
                       const move = (ev: PointerEvent) => {
                         const dx = (ev.clientX - startX) / rect.width;
                         const dy = (ev.clientY - startY) / rect.height;
-                        updateOverlay(overlay.id, {
-                          x: Math.min(1 - overlay.w, Math.max(0, orig.x + dx)),
-                          y: Math.min(1 - overlay.h, Math.max(0, orig.y + dy)),
-                        });
+                        updateOverlay(
+                          overlay.id,
+                          {
+                            x: Math.min(1 - overlay.w, Math.max(0, orig.x + dx)),
+                            y: Math.min(1 - overlay.h, Math.max(0, orig.y + dy)),
+                          },
+                          { coalesceKey: `move:${overlay.id}` }
+                        );
                       };
                       const up = () => {
                         window.removeEventListener("pointermove", move);
@@ -1160,10 +1253,14 @@ export default function EditorWorkspace() {
                           const startY = event.clientY;
                           const orig = { w: overlay.w, h: overlay.h };
                           const move = (ev: PointerEvent) => {
-                            updateOverlay(overlay.id, {
-                              w: Math.min(1 - overlay.x, Math.max(0.05, orig.w + (ev.clientX - startX) / rect.width)),
-                              h: Math.min(1 - overlay.y, Math.max(0.05, orig.h + (ev.clientY - startY) / rect.height)),
-                            });
+                            updateOverlay(
+                              overlay.id,
+                              {
+                                w: Math.min(1 - overlay.x, Math.max(0.05, orig.w + (ev.clientX - startX) / rect.width)),
+                                h: Math.min(1 - overlay.y, Math.max(0.05, orig.h + (ev.clientY - startY) / rect.height)),
+                              },
+                              { coalesceKey: `resize:${overlay.id}` }
+                            );
                           };
                           const up = () => {
                             window.removeEventListener("pointermove", move);
@@ -1180,45 +1277,21 @@ export default function EditorWorkspace() {
             </div>
             </div>
 
-            <div className="pointer-events-auto absolute bottom-3 right-3 flex items-center gap-0.5 rounded-lg bg-black/50 p-1 text-white backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={viewport.zoomOut}
-                disabled={!viewport.canZoomOut}
-                aria-label="Zoom out"
-                title="Zoom out (Cmd/Ctrl -)"
-                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <span
-                className="min-w-[3rem] select-none text-center text-[11px] tabular-nums text-white/80"
-                aria-label="Current zoom"
-              >
-                {Math.round(viewport.zoomPercent)}%
-              </span>
-              <button
-                type="button"
-                onClick={viewport.zoomIn}
-                disabled={!viewport.canZoomIn}
-                aria-label="Zoom in"
-                title="Zoom in (Cmd/Ctrl +)"
-                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-              <span className="mx-0.5 h-4 w-px bg-white/20" aria-hidden />
-              <button
-                type="button"
-                onClick={viewport.fit}
-                disabled={viewport.isFit}
-                aria-label="Fit and reset view"
-                title="Fit / Reset view (Cmd/Ctrl 0)"
-                className="rounded-md p-1.5 hover:bg-white/15 disabled:opacity-30"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            <EditorPreviewToolbar
+              tool={tool}
+              onToolChange={setTool}
+              zoomPercent={viewport.zoomPercent}
+              canZoomIn={viewport.canZoomIn}
+              canZoomOut={viewport.canZoomOut}
+              onZoomIn={viewport.zoomIn}
+              onZoomOut={viewport.zoomOut}
+              onSetZoom={viewport.setZoom}
+              onFit={viewport.fit}
+              canUndo={past.length > 0}
+              canRedo={future.length > 0}
+              onUndo={undo}
+              onRedo={redo}
+            />
           </div>
 
           <div className="flex shrink-0 flex-col bg-N50">
@@ -1575,9 +1648,15 @@ export default function EditorWorkspace() {
                           maxSpan={duration}
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
                           onSelect={() => setSelectedId(overlay.id)}
-                          onMove={(startSec, endSec) => updateOverlay(overlay.id, { startSec, endSec })}
-                          onTrimStart={(startSec) => updateOverlay(overlay.id, { startSec })}
-                          onTrimEnd={(endSec) => updateOverlay(overlay.id, { endSec })}
+                          onMove={(startSec, endSec) =>
+                            updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
+                          }
+                          onTrimStart={(startSec) =>
+                            updateOverlay(overlay.id, { startSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
+                          }
+                          onTrimEnd={(endSec) =>
+                            updateOverlay(overlay.id, { endSec }, { coalesceKey: `tl-trim-e:${overlay.id}` })
+                          }
                           label={
                             <>
                               <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
@@ -1610,9 +1689,15 @@ export default function EditorWorkspace() {
                             maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
                             onSelect={() => setSelectedId(clip.id)}
-                            onMove={(startSec, endSec) => updateClip(clip.id, { startSec, endSec })}
-                            onTrimStart={(startSec) => updateClip(clip.id, { startSec })}
-                            onTrimEnd={(endSec) => updateClip(clip.id, { endSec })}
+                            onMove={(startSec, endSec) =>
+                              updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
+                            }
+                            onTrimStart={(startSec) =>
+                              updateClip(clip.id, { startSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
+                            }
+                            onTrimEnd={(endSec) =>
+                              updateClip(clip.id, { endSec }, { coalesceKey: `tl-trim-e:${clip.id}` })
+                            }
                             label={
                               <>
                                 Clip

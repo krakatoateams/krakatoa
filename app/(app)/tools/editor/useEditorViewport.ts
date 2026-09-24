@@ -25,7 +25,8 @@ import {
 export function useEditorViewport(
   stageRef: RefObject<HTMLDivElement | null>,
   fitSize: ViewportSize,
-  stageSize: { w: number; h: number }
+  stageSize: { w: number; h: number },
+  handMode = false
 ) {
   const [zoomPercent, setZoomPercentState] = useState(EDITOR_VIEWPORT_ZOOM_FIT);
   const [pan, setPanState] = useState<ViewportPan>({ x: 0, y: 0 });
@@ -66,6 +67,7 @@ export function useEditorViewport(
   const zoomIn = () => applyZoomAndPan(stepZoomPercent(zoomRef.current, 1), panRef.current);
   const zoomOut = () => applyZoomAndPan(stepZoomPercent(zoomRef.current, -1), panRef.current);
   const fit = () => applyZoomAndPan(EDITOR_VIEWPORT_ZOOM_FIT, { x: 0, y: 0 });
+  const setZoom = (percent: number) => applyZoomAndPan(clampZoomPercent(percent), panRef.current);
 
   const zoomAtStagePoint = (point: ViewportPan, deltaY: number) => {
     const nextPercent = zoomPercentFromWheel(zoomRef.current, deltaY);
@@ -168,8 +170,10 @@ export function useEditorViewport(
       return;
     }
     const isMiddleClick = event.button === 1;
-    const isSpaceDrag = event.button === 0 && spacePanning;
-    if (!isMiddleClick && !isSpaceDrag) return;
+    // Space+drag or the Hand tool both pan a plain left-drag; overlay drags call
+    // stopPropagation on their own pointerdown so they never reach here.
+    const isPanDrag = event.button === 0 && (spacePanning || handMode);
+    if (!isMiddleClick && !isPanDrag) return;
     event.preventDefault();
     event.stopPropagation();
     const startClient = { x: event.clientX, y: event.clientY };
@@ -227,6 +231,7 @@ export function useEditorViewport(
     zoomIn,
     zoomOut,
     fit,
+    setZoom,
     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomPercent / 100})`,
     displaySize,
     pointerOverStageRef,
