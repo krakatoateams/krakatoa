@@ -59,12 +59,14 @@ export function panForZoomAtPoint(
 }
 
 /**
- * Clamps pan so the zoomed canvas can never fully leave the stage: each axis
- * can pan only until that edge of the canvas reaches the matching stage edge.
+ * Clamps pan so the zoomed canvas can never fully leave the stage. Each axis
+ * can pan until that edge of the canvas reaches the matching stage edge, with
+ * a floor of half the stage size — so panning stays available even when the
+ * canvas is smaller than (or equal to) the stage, e.g. at Fit zoom.
  */
 export function clampPan(pan: ViewportPan, displaySize: ViewportSize, stage: StageSize): ViewportPan {
-  const maxX = Math.max(0, (displaySize.width - stage.w) / 2);
-  const maxY = Math.max(0, (displaySize.height - stage.h) / 2);
+  const maxX = Math.max(stage.w / 2, (displaySize.width - stage.w) / 2);
+  const maxY = Math.max(stage.h / 2, (displaySize.height - stage.h) / 2);
   return {
     x: Math.min(maxX, Math.max(-maxX, pan.x)),
     y: Math.min(maxY, Math.max(-maxY, pan.y)),
@@ -117,10 +119,10 @@ export function editorViewportSelfCheck(): void {
     assert(Math.abs(pan2.x - pan0.x) < 1e-9 && Math.abs(pan2.y - pan0.y) < 1e-9, "zoom is reversible at the same point");
   }
 
-  // Pan clamp: canvas smaller than or equal to the stage can't pan at all.
+  // Pan clamp: a fit-or-smaller canvas can still pan, up to half the stage size.
   {
     const clamped = clampPan({ x: 999, y: -999 }, { width: 400, height: 300 }, { w: 800, h: 600 });
-    assert(clamped.x === 0 && clamped.y === 0, "a fit-or-smaller canvas is pinned to center");
+    assert(clamped.x === 400 && clamped.y === -300, "a fit-or-smaller canvas can pan up to half the stage size");
   }
 
   // Pan clamp: an oversized canvas can pan until its edge reaches the stage edge, no further.
