@@ -162,18 +162,16 @@ export function ChipDropdown({
           big ? "px-4 py-3" : "px-3 py-2"
         } ${active ? "bg-white/15 text-text-primary" : "text-text-secondary hover:bg-white/5"}`}
       >
-        <span className="flex items-center gap-2">
-          {withMinorWordCase(opt.label)}
-          {opt.hint && (
-            <span
-              className={`text-xs font-medium sm:text-sm ${
-                opt.hint === "Soon" ? "text-warning" : "text-text-secondary"
-              }`}
-            >
-              {opt.hint}
-            </span>
-          )}
-        </span>
+        <span className="min-w-0 flex-1 truncate">{withMinorWordCase(opt.label)}</span>
+        {opt.hint && (
+          <span
+            className={`shrink-0 tabular-nums text-xs font-medium sm:text-sm ${
+              opt.hint === "Soon" ? "text-warning" : "text-text-secondary"
+            }`}
+          >
+            {opt.hint}
+          </span>
+        )}
         {active && <Check className="h-4 w-4 shrink-0 text-text-secondary" />}
       </button>
     );

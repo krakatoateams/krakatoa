@@ -51,18 +51,20 @@ export async function fulfillPaidOrder(
   paymentMethod: string | null
 ): Promise<void> {
   const { base, bonus } = splitOrderCredits(order);
+  const provider = order.metadata?.source === "polar" ? "polar" : "doku";
   const baseMeta = {
-    source: "doku",
+    source: provider,
     invoiceNumber: order.invoice_number,
     packId: order.pack_id,
     amountIdr: order.amount_idr,
+    amountUsdCents: order.metadata?.amountUsdCents ?? null,
     paymentMethod,
   };
 
   const baseResult = await addPurchaseCredits({
     profileId: order.profile_id,
     amount: base,
-    idempotencyKey: `purchase:doku:${order.invoice_number}:base`,
+    idempotencyKey: `purchase:${provider}:${order.invoice_number}:base`,
     description: `Credit pack ${order.pack_id} — base (${base} credits)`,
     source: "regular",
     metadata: { ...baseMeta, portion: "base" },
@@ -72,7 +74,7 @@ export async function fulfillPaidOrder(
     await addPurchaseCredits({
       profileId: order.profile_id,
       amount: bonus,
-      idempotencyKey: `purchase:doku:${order.invoice_number}:bonus`,
+      idempotencyKey: `purchase:${provider}:${order.invoice_number}:bonus`,
       description: `Credit pack ${order.pack_id} — bonus (${bonus} credits)`,
       source: "purchase_bonus",
       metadata: { ...baseMeta, portion: "bonus" },

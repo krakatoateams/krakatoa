@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const profile = await requireCurrentProfile();
-    const canvases = await listCanvases(profile.id);
+    const canvases = await listCanvases(profile);
     return NextResponse.json({ canvases });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

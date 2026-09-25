@@ -4,7 +4,12 @@ import {
   canvasGraphJsonTooLarge,
   parseCanvasGraph,
 } from "@/lib/canvas-document";
-import { deleteCanvas, getCanvas, updateCanvas, updateCanvasTitle } from "@/lib/canvases-db";
+import {
+  deleteCanvas,
+  getCanvasForProfile,
+  updateCanvasForProfile,
+  updateCanvasTitleForProfile,
+} from "@/lib/canvases-db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +27,12 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
     const profile = await requireCurrentProfile();
     const id = canvasIdOf(params);
     if (!id) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
-    const canvas = await getCanvas(profile.id, id);
-    if (!canvas) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
-    return NextResponse.json({ canvas });
+    const loaded = await getCanvasForProfile(profile, id);
+    if (!loaded) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
+    return NextResponse.json({
+      canvas: loaded.record,
+      access: loaded.access,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "Not authenticated.") {
@@ -52,13 +60,15 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
     if (canvasGraphJsonTooLarge(graph)) {
       return NextResponse.json({ error: "This canvas is too large to save." }, { status: 400 });
     }
-    const canvas = await updateCanvas({
-      profileId: profile.id,
+    const canvas = await updateCanvasForProfile({
+      profile,
       canvasId: id,
       title: typeof body.title === "string" ? body.title : "",
       graph,
     });
-    if (!canvas) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
+    if (!canvas) {
+      return NextResponse.json({ error: "You don't have permission to edit this canvas." }, { status: 403 });
+    }
     return NextResponse.json({ canvas });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -80,12 +90,14 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (!body || typeof body.title !== "string") {
       return NextResponse.json({ error: "A title is required." }, { status: 400 });
     }
-    const canvas = await updateCanvasTitle({
-      profileId: profile.id,
+    const canvas = await updateCanvasTitleForProfile({
+      profile,
       canvasId: id,
       title: body.title,
     });
-    if (!canvas) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
+    if (!canvas) {
+      return NextResponse.json({ error: "You don't have permission to edit this canvas." }, { status: 403 });
+    }
     return NextResponse.json({ canvas });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

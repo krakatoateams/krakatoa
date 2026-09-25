@@ -86,12 +86,31 @@ export type SavedCanvasGraph = {
   viewport: SavedCanvasViewport;
 };
 
+export type CanvasAccessRole = "owner" | "viewer" | "editor";
+export type CanvasCollaboratorRole = "viewer" | "editor";
+export type CanvasCollaboratorStatus = "pending" | "accepted";
+
+export type CanvasCollaborator = {
+  id: string;
+  canvasId: string;
+  invitedEmail: string;
+  inviteeProfileId: string | null;
+  role: CanvasCollaboratorRole;
+  invitedByProfileId: string;
+  status: CanvasCollaboratorStatus;
+  createdAt: string;
+  acceptedAt: string | null;
+};
+
 export type CanvasSummary = {
   id: string;
   title: string;
   updatedAt: string;
   createdAt: string;
   nodeCount: number;
+  /** Present when the canvas is shared with the current user (not owned). */
+  shared?: boolean;
+  role?: CanvasAccessRole;
 };
 
 export type CanvasFlowSnapshotNode = {

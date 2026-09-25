@@ -21,6 +21,7 @@ import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-med
 import {
   TEXT_TO_VIDEO_MODELS,
   getAllowedDurations,
+  formatVideoModelCreditHint,
   getVideoModel,
   type VideoAspectRatio,
   type VideoModelId,
@@ -133,8 +134,13 @@ export default function VideoNode({
   };
 
   const modelOptions = useMemo(
-    () => TEXT_TO_VIDEO_MODELS.map((m) => ({ id: m.id, label: m.modelLabel })),
-    []
+    () =>
+      TEXT_TO_VIDEO_MODELS.map((m) => ({
+        id: m.id,
+        label: m.modelLabel,
+        hint: formatVideoModelCreditHint(m, videoCredits, data.duration),
+      })),
+    [videoCredits, data.duration]
   );
 
   const handleGenerate = async () => {
@@ -263,6 +269,7 @@ export default function VideoNode({
       kind="video"
       title={data.label.trim() || CANVAS_KIND_LABELS.video}
       selected={selected}
+      sourceId={previewUrl ? id : undefined}
       onRemove={() => void deleteElements({ nodes: [{ id }] })}
       asset={
         <CanvasMediaBox

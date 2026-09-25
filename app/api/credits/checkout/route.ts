@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { packTotalCredits } from "@/lib/credit-packs";
 import { getActiveCreditPack } from "@/lib/credit-packs-db";
+import { getUsdCheckoutSettings } from "@/lib/usd-checkout-settings-db";
 import { createOrder, setOrderToken } from "@/lib/credit-orders-db";
 import { createCheckoutPayment, DokuConfigError, DokuApiError } from "@/lib/doku";
+import { createPolarCheckout, polarProductIdForPack, PolarApiError, PolarConfigError } from "@/lib/polar";
 import { resolveSiteOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -36,8 +38,15 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = (await req.json().catch(() => null)) as { packId?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as {
+    packId?: unknown;
+    currency?: unknown;
+  } | null;
   const packId = typeof body?.packId === "string" ? body.packId.trim() : "";
+  const currency = body?.currency === "USD" ? "USD" : "IDR";
+  if (currency === "USD" && !(await getUsdCheckoutSettings()).enabled) {
+    return NextResponse.json({ error: "USD checkout is not available." }, { status: 403 });
+  }
   let pack;
   try {
     pack = await getActiveCreditPack(packId);
@@ -62,6 +71,51 @@ export async function POST(req: Request) {
   const grantedCredits = packTotalCredits(pack);
 
   try {
+    const origin = resolveSiteOrigin();
+    const successUrl = `${origin}/dashboard/settings?tab=credits&status=success&order=${encodeURIComponent(invoiceNumber)}`;
+    const customerEmail = email && email.includes("@") ? email : null;
+    const customerName = displayName || email || "Kelolako Customer";
+
+    if (currency === "USD") {
+      const productId = polarProductIdForPack(pack.id);
+      if (!productId || pack.priceUsdCents <= 0) {
+        return NextResponse.json(
+          { error: "USD checkout is not configured for this pack." },
+          { status: 503 }
+        );
+      }
+      const order = await createOrder({
+        profileId,
+        packId: pack.id,
+        credits: grantedCredits,
+        amountIdr: pack.priceIdr,
+        currency: "USD",
+        invoiceNumber,
+        metadata: {
+          source: "polar",
+          packLabel: pack.label,
+          baseCredits: pack.credits,
+          bonusCredits: pack.bonusCredits ?? 0,
+          amountUsdCents: pack.priceUsdCents,
+          polarProductId: productId,
+        },
+      });
+      const { url, checkoutId } = await createPolarCheckout({
+        productId,
+        successUrl,
+        returnUrl: `${origin}/dashboard/settings?tab=credits`,
+        customerEmail,
+        customerName,
+        externalCustomerId: profileId,
+        invoiceNumber,
+        packId: pack.id,
+      });
+      await setOrderToken(invoiceNumber, checkoutId).catch((e) =>
+        console.warn("[credits/checkout] setOrderToken failed:", e)
+      );
+      return NextResponse.json({ paymentUrl: url, orderId: order.id, invoiceNumber });
+    }
+
     const order = await createOrder({
       profileId,
       packId: pack.id,
@@ -76,20 +130,12 @@ export async function POST(req: Request) {
       },
     });
 
-    const origin = resolveSiteOrigin();
-    const successUrl = `${origin}/dashboard/settings?tab=credits&status=success&order=${encodeURIComponent(invoiceNumber)}`;
-
-    const customerEmail = email || `user-${profileId}@kelolako.com`;
-    const customerName = displayName || email || "Kelolako Customer";
-
-    // Optional: override the Back Office notification URL per request (handy when
-    // a dev tunnel domain changes). Must share the same PATH as the configured URL.
     const notificationUrl = process.env.DOKU_NOTIFICATION_URL?.trim() || undefined;
 
     const { paymentUrl, tokenId } = await createCheckoutPayment({
       invoiceNumber,
       amountIdr: pack.priceIdr,
-      customer: { id: profileId, name: customerName, email: customerEmail },
+      customer: { id: profileId, name: customerName, email: customerEmail || `user-${profileId}@kelolako.com` },
       successUrl,
       notificationUrl,
       lineItem: {
@@ -111,15 +157,15 @@ export async function POST(req: Request) {
       invoiceNumber,
     });
   } catch (e) {
-    if (e instanceof DokuConfigError) {
-      console.error("[credits/checkout] DOKU not configured:", e.message);
+    if (e instanceof DokuConfigError || e instanceof PolarConfigError) {
+      console.error("[credits/checkout] payments not configured:", e.message);
       return NextResponse.json(
         { error: "Payments are not configured yet. Please try again later." },
         { status: 503 }
       );
     }
-    if (e instanceof DokuApiError) {
-      console.error("[credits/checkout] DOKU API error:", e.status, e.body);
+    if (e instanceof DokuApiError || e instanceof PolarApiError) {
+      console.error("[credits/checkout] payment API error:", e.status, e.body);
       return NextResponse.json(
         { error: "Could not start the payment. Please try again." },
         { status: 502 }

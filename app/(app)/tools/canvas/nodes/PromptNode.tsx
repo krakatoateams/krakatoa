@@ -216,7 +216,11 @@ export default function PromptNode({
               value={textModel.label}
               options={CANVAS_TEXT_MODELS.filter(
                 (model) => imageStoragePaths.length === 0 || model.vision
-              ).map((model) => ({ id: model.id, label: model.label }))}
+              ).map((model) => ({
+                id: model.id,
+                label: model.label,
+                hint: `${canvasTextCredits()}`,
+              }))}
               activeId={textModel.id}
               square
               onSelect={(next) => patch({ modelId: next as CanvasTextModelId })}

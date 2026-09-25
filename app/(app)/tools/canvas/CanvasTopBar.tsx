@@ -3,25 +3,34 @@
 import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { FolderKanban, Loader2, Pencil, Save, X } from "lucide-react";
+import { FolderKanban, Loader2, Pencil, Save, Share2, X } from "lucide-react";
+import type { CanvasAccessRole } from "@/lib/canvas-document";
 import CreditBadge from "@/components/CreditBadge";
 
 export default function CanvasTopBar({
   title,
   dirty,
   saving,
+  readOnly,
+  accessRole,
+  canShare,
   onTitleChange,
   onTitleCommit,
   onSave,
   onOpen,
+  onShare,
 }: {
   title: string;
   dirty: boolean;
   saving: boolean;
+  readOnly?: boolean;
+  accessRole?: CanvasAccessRole;
+  canShare?: boolean;
   onTitleChange: (title: string) => void;
   onTitleCommit: (title: string) => void;
   onSave: () => void;
   onOpen: () => void;
+  onShare?: () => void;
 }) {
   const titleRef = useRef<HTMLInputElement>(null);
   const titleAtFocus = useRef(title);
@@ -44,23 +53,26 @@ export default function CanvasTopBar({
         </Link>
         <span className="h-4 w-px shrink-0 bg-white/10" aria-hidden />
         <div className="flex min-w-0 items-center gap-1">
-          <button
-            type="button"
-            title="Rename canvas"
-            aria-label="Rename canvas"
-            onClick={() => {
-              const input = titleRef.current;
-              if (!input) return;
-              input.focus();
-              input.select();
-            }}
-            className="rounded-md p-1 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
+          {!readOnly ? (
+            <button
+              type="button"
+              title="Rename canvas"
+              aria-label="Rename canvas"
+              onClick={() => {
+                const input = titleRef.current;
+                if (!input) return;
+                input.focus();
+                input.select();
+              }}
+              className="rounded-md p-1 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           <input
             ref={titleRef}
             value={title}
+            readOnly={readOnly}
             onChange={(event) => onTitleChange(event.target.value)}
             onFocus={() => {
               titleAtFocus.current = title;
@@ -89,8 +101,13 @@ export default function CanvasTopBar({
             className="min-w-0 max-w-[42vw] truncate rounded-lg bg-transparent px-1.5 py-1 text-sm font-semibold text-text-primary outline-none placeholder:text-text-secondary hover:bg-white/10 focus:bg-white/10 sm:max-w-xs"
             placeholder="Untitled canvas"
           />
-          {dirty ? (
+          {dirty && !readOnly ? (
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" title="Unsaved changes" />
+          ) : null}
+          {accessRole && accessRole !== "owner" ? (
+            <span className="shrink-0 rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+              {accessRole === "viewer" ? "View only" : "Shared"}
+            </span>
           ) : null}
         </div>
       </div>
@@ -108,16 +125,29 @@ export default function CanvasTopBar({
           <FolderKanban className="h-4 w-4" />
           <span className="hidden sm:inline">Open</span>
         </button>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving || !dirty}
-          title="Save canvas (⌘S)"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-semibold text-text-primary transition-colors hover:bg-white/15 disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          {saving ? "Saving" : dirty ? "Save" : "Saved"}
-        </button>
+        {canShare && onShare ? (
+          <button
+            type="button"
+            onClick={onShare}
+            title="Invite someone by email"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
+          >
+            <Share2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+        ) : null}
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || !dirty}
+            title="Save now (⌘S). Changes also autosave after you stop editing."
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-semibold text-text-primary transition-colors hover:bg-white/15 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            {saving ? "Saving" : dirty ? "Save" : "Saved"}
+          </button>
+        ) : null}
         <Link
           href="/dashboard"
           aria-label="Close canvas"

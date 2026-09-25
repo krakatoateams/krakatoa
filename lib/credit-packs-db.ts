@@ -27,6 +27,7 @@ type CreditPackRow = {
   credits: number;
   bonus_credits: number;
   price_idr: number;
+  price_usd_cents: number;
   label: string;
   popular: boolean;
   is_active: boolean;
@@ -39,6 +40,7 @@ function toPublic(row: CreditPackRow): CreditPack {
     credits: row.credits,
     bonusCredits: row.bonus_credits || undefined,
     priceIdr: row.price_idr,
+    priceUsdCents: row.price_usd_cents ?? 0,
     label: row.label,
     popular: row.popular || undefined,
   };
@@ -50,6 +52,7 @@ function toAdmin(row: CreditPackRow): AdminCreditPack {
     credits: row.credits,
     bonusCredits: row.bonus_credits || undefined,
     priceIdr: row.price_idr,
+    priceUsdCents: row.price_usd_cents ?? 0,
     label: row.label,
     popular: row.popular || undefined,
     isActive: row.is_active,
@@ -58,7 +61,7 @@ function toAdmin(row: CreditPackRow): AdminCreditPack {
 }
 
 const SELECT =
-  "id, credits, bonus_credits, price_idr, label, popular, is_active, sort_order";
+  "id, credits, bonus_credits, price_idr, price_usd_cents, label, popular, is_active, sort_order";
 
 /**
  * Active purchasable tiers, sorted. Reads fresh from the DB every call and
@@ -123,6 +126,7 @@ export async function saveAllCreditPacks(
     credits: p.credits,
     bonus_credits: p.bonusCredits ?? 0,
     price_idr: p.priceIdr,
+    price_usd_cents: p.priceUsdCents,
     label: p.label,
     popular: p.popular ?? false,
     is_active: p.isActive,
