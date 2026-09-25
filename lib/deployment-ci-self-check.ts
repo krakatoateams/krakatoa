@@ -40,7 +40,7 @@ export function deploymentCiSelfCheck(): void {
   );
   assert(
     rootPackage.scripts?.["ci:checks"] ===
-      "npm run test:deployment-ci && npm run test:dependency-security && npm run test:client-secret-boundary && npm run test:internal-routes && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run build",
+      "npm run test:deployment-ci && npm run test:dependency-security && npm run test:client-secret-boundary && npm run test:internal-routes && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --audit-level=high && npm run lint && npm run typecheck && npm run build",
     "ci:checks must preserve the secretless deployment quality gates",
   );
   assert(
