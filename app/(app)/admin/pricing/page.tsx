@@ -11,6 +11,7 @@ type AdminCreditPack = {
   credits: number;
   bonusCredits?: number;
   priceIdr: number;
+  priceUsdCents: number;
   label: string;
   popular?: boolean;
   isActive: boolean;
@@ -23,6 +24,7 @@ type Row = {
   credits: string;
   bonusCredits: string;
   priceIdr: string;
+  priceUsd: string;
   label: string;
   popular: boolean;
   isActive: boolean;
@@ -35,6 +37,7 @@ function toRow(p: AdminCreditPack): Row {
     credits: String(p.credits),
     bonusCredits: p.bonusCredits ? String(p.bonusCredits) : "",
     priceIdr: String(p.priceIdr),
+    priceUsd: (p.priceUsdCents / 100).toFixed(2),
     label: p.label,
     popular: !!p.popular,
     isActive: p.isActive,
@@ -53,31 +56,48 @@ function costUsdLabel(credits: string, bonusCredits: string): string {
 }
 
 /**
- * Informational economics derived from the tier's tokens, its IDR price, and the
- * admin-supplied kurs (IDR per US$1). Cost basis is 100 tokens = US$1.
+ * Informational economics. Cost basis is 100 tokens = US$1.
+ * Sell USD / Margin USD use the USD price. Sell IDR / Margin IDR use the IDR
+ * price, with cost converted at the admin kurs (IDR per US$1).
  */
 function economicsFor(
   credits: string,
   bonusCredits: string,
   priceIdr: string,
+  priceUsd: string,
   kurs: string
-): { sellUsd: string; margin: string; profitIdr: string; negative: boolean } {
+): {
+  sellUsd: string;
+  sellIdr: string;
+  marginUsd: string;
+  marginIdr: string;
+  usdNegative: boolean;
+  idrNegative: boolean;
+} {
+  const empty = {
+    sellUsd: "—",
+    sellIdr: "—",
+    marginUsd: "—",
+    marginIdr: "—",
+    usdNegative: false,
+    idrNegative: false,
+  };
   const total = (Number(credits) || 0) + (Number(bonusCredits) || 0);
-  const price = Number(priceIdr) || 0;
+  const idr = Number(priceIdr) || 0;
+  const usd = Number(priceUsd) || 0;
   const rate = Number(kurs) || 0;
-  if (total <= 0 || price <= 0 || rate <= 0) {
-    return { sellUsd: "—", margin: "—", profitIdr: "—", negative: false };
-  }
+  if (total <= 0) return empty;
   const costUsd = total / TOKENS_PER_USD;
-  const sellUsd = price / rate;
-  // Markup on cost: profit as a percentage of the base cost (0% = sold at cost).
-  const marginPct = ((sellUsd - costUsd) / costUsd) * 100;
-  const profitIdr = price - costUsd * rate;
+  const marginPct = (sell: number, cost: number) => ((sell - cost) / cost) * 100;
+  const usdMargin = usd > 0 ? marginPct(usd, costUsd) : null;
+  const idrMargin = idr > 0 && rate > 0 ? marginPct(idr, costUsd * rate) : null;
   return {
-    sellUsd: `$${sellUsd.toFixed(2)}`,
-    margin: `${marginPct.toFixed(0)}%`,
-    profitIdr: formatIdr(Math.round(profitIdr)),
-    negative: marginPct < 0,
+    sellUsd: usd > 0 ? `$${usd.toFixed(2)}` : "—",
+    sellIdr: idr > 0 ? formatIdr(idr) : "—",
+    marginUsd: usdMargin === null ? "—" : `${usdMargin.toFixed(0)}%`,
+    marginIdr: idrMargin === null ? "—" : `${idrMargin.toFixed(0)}%`,
+    usdNegative: usdMargin !== null && usdMargin < 0,
+    idrNegative: idrMargin !== null && idrMargin < 0,
   };
 }
 
@@ -98,6 +118,9 @@ export default function AdminPricingPage() {
   const [offerEnabled, setOfferEnabled] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [offerMsg, setOfferMsg] = useState<string | null>(null);
+  const [usdCheckoutEnabled, setUsdCheckoutEnabled] = useState(false);
+  const [usdCheckoutBusy, setUsdCheckoutBusy] = useState(false);
+  const [usdCheckoutMsg, setUsdCheckoutMsg] = useState<string | null>(null);
   const [offerPreview, setOfferPreview] = useState(false);
 
   useEffect(() => {
@@ -128,6 +151,41 @@ export default function AdminPricingPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/usd-checkout", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { settings?: { enabled: boolean } } | null) => {
+        if (cancelled || !d?.settings) return;
+        setUsdCheckoutEnabled(d.settings.enabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveUsdCheckout = async (enabled: boolean) => {
+    setUsdCheckoutBusy(true);
+    setUsdCheckoutMsg(null);
+    setUsdCheckoutEnabled(enabled);
+    try {
+      const res = await fetch("/api/admin/usd-checkout", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Could not save.");
+      setUsdCheckoutMsg(enabled ? "USD checkout is visible." : "USD checkout is hidden.");
+    } catch (e) {
+      setUsdCheckoutEnabled(!enabled);
+      setUsdCheckoutMsg(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setUsdCheckoutBusy(false);
+    }
+  };
 
   const saveOffer = async () => {
     setOfferBusy(true);
@@ -225,6 +283,7 @@ export default function AdminPricingPage() {
         credits: "",
         bonusCredits: "",
         priceIdr: "",
+        priceUsd: "",
         label: "",
         popular: false,
         isActive: true,
@@ -244,6 +303,7 @@ export default function AdminPricingPage() {
         credits: Number(r.credits),
         bonusCredits: r.bonusCredits === "" ? 0 : Number(r.bonusCredits),
         priceIdr: Number(r.priceIdr),
+        priceUsdCents: Math.round(Number(r.priceUsd || 0) * 100),
         label: r.label.trim(),
         popular: r.popular,
         isActive: r.isActive,
@@ -271,11 +331,37 @@ export default function AdminPricingPage() {
     <div className="space-y-6">
       <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
         Manage the credit purchase tiers shown on the Buy credits panel and the
-        landing page. Price is in whole IDR and is charged via DOKU. The tier{" "}
-        <span className="text-gray-200">id</span> is referenced by past orders, so
+        landing page. Price (IDR) is charged via DOKU. Price (USD) is the dummy
+        amount customers see when they pick USD; Polar does not charge it yet.
+        The tier <span className="text-gray-200">id</span> is referenced by past orders, so
         it can&apos;t be changed once a tier exists — add a new tier instead.
         Inactive tiers are hidden from customers but kept for history.
       </div>
+
+      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white">USD checkout</h3>
+            <p className="mt-1 max-w-xl text-xs text-gray-500">
+              Hides the USD price toggle and blocks USD purchases. IDR checkout
+              through DOKU stays available. Turn this on when a USD processor is ready.
+            </p>
+            {usdCheckoutMsg ? (
+              <p className="mt-2 text-xs text-gray-300">{usdCheckoutMsg}</p>
+            ) : null}
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              checked={usdCheckoutEnabled}
+              disabled={usdCheckoutBusy}
+              onChange={(e) => void saveUsdCheckout(e.target.checked)}
+              className="h-4 w-4 accent-emerald-500"
+            />
+            Show USD
+          </label>
+        </div>
+      </section>
 
       {/* Welcome offer — the promo popup shown once per session on the dashboard. */}
       <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
@@ -426,14 +512,14 @@ export default function AdminPricingPage() {
           className="w-32 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
         />
         <span className="text-xs text-gray-600">
-          Used only to compute the informational USD / margin columns.
+          Converts the token cost into IDR for Sell (IDR) and Margin (IDR).
         </span>
       </div>
 
       <div className="overflow-x-auto">
-        <div className="min-w-[1240px] space-y-1.5">
+        <div className="min-w-[1480px] space-y-1.5">
           {/* Column headers (shown once). */}
-          <div className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_72px_120px_64px_64px_32px] items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+          <div className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_112px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
             <span>Order</span>
             <span>Id</span>
             <span>Label</span>
@@ -443,14 +529,18 @@ export default function AdminPricingPage() {
               Cost (USD)
             </span>
             <span className="text-right">Price (IDR)</span>
-            <span className="text-right" title="Price (IDR) ÷ kurs">
+            <span className="text-right">Price (USD)</span>
+            <span className="text-right" title="The USD price charged for this pack">
               Sell (USD)
             </span>
-            <span className="text-right" title="(Sell − Cost) ÷ Cost (markup)">
-              Margin
+            <span className="text-right" title="The IDR price charged for this pack">
+              Sell (IDR)
             </span>
-            <span className="text-right" title="Price (IDR) − Cost (IDR)">
-              Profit (IDR)
+            <span className="text-right" title="(Sell USD − Cost USD) ÷ Cost USD">
+              Margin (USD)
+            </span>
+            <span className="text-right" title="(Sell IDR − Cost USD × kurs) ÷ (Cost USD × kurs)">
+              Margin (IDR)
             </span>
             <span className="text-center">Popular</span>
             <span className="text-center">Active</span>
@@ -460,7 +550,7 @@ export default function AdminPricingPage() {
           {rows.map((row, i) => (
             <div
               key={`${row.id}-${i}`}
-              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_72px_120px_64px_64px_32px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5"
+              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_112px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5"
             >
               <div className="flex items-center gap-0.5">
                 <button
@@ -531,25 +621,30 @@ export default function AdminPricingPage() {
                 onChange={(e) => patch(i, { priceIdr: e.target.value.replace(/[^\d]/g, "") })}
                 className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
               />
+              <input
+                inputMode="decimal"
+                value={row.priceUsd}
+                placeholder="0.00"
+                title="Customer-facing USD price"
+                onChange={(e) => patch(i, { priceUsd: e.target.value.replace(/[^\d.]/g, "") })}
+                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
+              />
               {(() => {
                 const eco = economicsFor(
                   row.credits,
                   row.bonusCredits,
                   row.priceIdr,
+                  row.priceUsd,
                   kurs
                 );
-                const tone = eco.negative ? "text-red-400" : "text-gray-400";
+                const usdTone = eco.usdNegative ? "text-red-400" : "text-gray-400";
+                const idrTone = eco.idrNegative ? "text-red-400" : "text-gray-400";
                 return (
                   <>
-                    <span className={`px-2 text-right text-sm ${tone}`}>
-                      {eco.sellUsd}
-                    </span>
-                    <span className={`px-2 text-right text-sm ${tone}`}>
-                      {eco.margin}
-                    </span>
-                    <span className={`px-2 text-right text-sm ${tone}`}>
-                      {eco.profitIdr}
-                    </span>
+                    <span className={`px-2 text-right text-sm ${usdTone}`}>{eco.sellUsd}</span>
+                    <span className={`px-2 text-right text-sm ${idrTone}`}>{eco.sellIdr}</span>
+                    <span className={`px-2 text-right text-sm ${usdTone}`}>{eco.marginUsd}</span>
+                    <span className={`px-2 text-right text-sm ${idrTone}`}>{eco.marginIdr}</span>
                   </>
                 );
               })()}

@@ -36,7 +36,8 @@ function parsePack(raw: unknown, index: number): AdminCreditPack {
 
   const credits = intField(r.credits, "credits", 1);
   const bonusCredits = intField(r.bonusCredits ?? 0, "bonus credits", 0);
-  const priceIdr = intField(r.priceIdr, "price", 0);
+  const priceIdr = intField(r.priceIdr, "IDR price", 0);
+  const priceUsdCents = intField(r.priceUsdCents, "USD price (cents)", 0);
 
   const label = typeof r.label === "string" ? r.label.trim() : "";
   if (!label) throw new ValidationError(`Tier "${id}": label is required.`);
@@ -47,6 +48,7 @@ function parsePack(raw: unknown, index: number): AdminCreditPack {
     credits,
     bonusCredits: bonusCredits || undefined,
     priceIdr,
+    priceUsdCents,
     label,
     popular: r.popular === true || undefined,
     isActive: r.isActive !== false,

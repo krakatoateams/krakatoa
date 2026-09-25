@@ -13,9 +13,11 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import {
   DEFAULT_CREDIT_PACKS,
   creditPacksFromApiPayload,
-  formatIdr,
+  formatPackPrice,
   type CreditPack,
 } from "@/lib/credit-packs";
+import { PackCurrencyToggle } from "@/components/PackCurrencyToggle";
+import { usePackCurrency } from "@/lib/use-pack-currency";
 
 type BalanceResponse = {
   balance: number;
@@ -114,6 +116,7 @@ export default function CreditsTab() {
   // Admin-managed tiers; seeded with the static defaults so the panel renders
   // instantly, then refreshed from the DB-backed API.
   const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_CREDIT_PACKS);
+  const { currency, setCurrency } = usePackCurrency();
 
   useEffect(() => {
     let cancelled = false;
@@ -249,13 +252,14 @@ export default function CreditsTab() {
   }, [loadCredits, refetchBalance]);
 
   const handleBuy = useCallback(async (packId: string) => {
+    if (currency !== "IDR" && currency !== "USD") return;
     setPurchasingId(packId);
     setBuyError(null);
     try {
       const res = await fetch("/api/credits/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId }),
+        body: JSON.stringify({ packId, currency }),
       });
       const data = (await res.json().catch(() => null)) as
         | { paymentUrl?: string; error?: string }
@@ -268,7 +272,7 @@ export default function CreditsTab() {
       setBuyError(e instanceof Error ? e.message : "Could not start checkout.");
       setPurchasingId(null);
     }
-  }, []);
+  }, [currency]);
 
   const currentBalance = stats?.balance ?? balance;
 
@@ -358,16 +362,21 @@ export default function CreditsTab() {
 
       {/* Buy credits */}
       <div className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
             <Sparkles className="h-5 w-5 text-N700" />
           </div>
           <div>
             <p className="text-sm font-medium text-N900">Buy credits</p>
             <p className="text-xs text-text-disabled">
-              Top up your balance to keep generating. Pay securely with DOKU.
+              {currency === "IDR"
+                ? "Top up your balance to keep generating. Pay securely with DOKU."
+                : "Pay in US dollars with Polar."}
             </p>
           </div>
+          </div>
+          <PackCurrencyToggle currency={currency} onChange={setCurrency} />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -401,7 +410,7 @@ export default function CreditsTab() {
                 </p>
                 <div className="mt-auto pt-3">
                   <p className="text-sm font-semibold text-N700">
-                    {formatIdr(pack.priceIdr)}
+                    {formatPackPrice(pack, currency)}
                   </p>
                   <button
                     type="button"

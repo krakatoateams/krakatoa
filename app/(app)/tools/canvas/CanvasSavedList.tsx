@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderKanban, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { FolderKanban, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import type { CanvasSummary } from "@/lib/canvas-document";
 
 function formatUpdated(iso: string): string {
@@ -41,16 +41,40 @@ export default function CanvasSavedList({
   const [renameValue, setRenameValue] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const skipRenameBlur = useRef(false);
+  const loadGeneration = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const generation = ++loadGeneration.current;
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/canvas");
-      const data = (await res.json().catch(() => ({}))) as {
+      const fetchList = () =>
+        fetch("/api/canvas", { cache: "no-store", signal: controller.signal });
+
+      let res = await fetchList();
+      let data = (await res.json().catch(() => ({}))) as {
         canvases?: CanvasSummary[];
         error?: string;
       };
+
+      // Session cookies can lag right after sign-in; one short retry avoids a false empty list.
+      if (res.status === 401) {
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+        if (controller.signal.aborted || generation !== loadGeneration.current) return;
+        res = await fetchList();
+        data = (await res.json().catch(() => ({}))) as {
+          canvases?: CanvasSummary[];
+          error?: string;
+        };
+      }
+
+      if (generation !== loadGeneration.current) return;
+
       if (res.status === 401) {
         setError("Sign in to see saved canvases.");
         setItems([]);
@@ -59,15 +83,22 @@ export default function CanvasSavedList({
       if (!res.ok) throw new Error(data.error || "Failed to load canvases.");
       setItems(data.canvases ?? []);
     } catch (err) {
+      if (controller.signal.aborted || generation !== loadGeneration.current) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load canvases.");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      return;
+    }
     void load();
+    return () => abortRef.current?.abort();
   }, [load, open]);
 
   useEffect(() => {
@@ -185,6 +216,15 @@ export default function CanvasSavedList({
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
+              aria-label="Refresh saved canvases"
+              disabled={loading}
+              onClick={() => void load()}
+              className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary disabled:opacity-40"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              type="button"
               onClick={onNew}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
             >
@@ -202,18 +242,41 @@ export default function CanvasSavedList({
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {loading ? (
+          {loading && items.length === 0 ? (
             <div className="flex items-center gap-2 text-sm text-text-secondary">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading canvases…
             </div>
           ) : items.length === 0 ? (
-            <p className="text-sm text-text-secondary">
-              {error ?? "No saved canvases yet. Add nodes, then Save."}
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">
+                {error ?? "No saved canvases yet. Add nodes, then Save."}
+              </p>
+              {error ? (
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-xs font-medium text-text-primary hover:bg-white/15"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Try again
+                </button>
+              ) : null}
+            </div>
           ) : (
             <>
-              {error ? <p className="mb-3 text-sm text-error">{error}</p> : null}
+              {error ? (
+                <div className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-error/30 bg-error/10 px-3 py-2">
+                  <p className="text-sm text-error">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => void load()}
+                    className="shrink-0 text-xs font-medium text-error hover:underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : null}
               <ul className="space-y-2">
               {items.map((item) => {
                 const active = item.id === activeId;
@@ -266,42 +329,53 @@ export default function CanvasSavedList({
                           onClick={() => onSelect(item.id)}
                           className="min-w-0 flex-1 text-left"
                         >
-                          <p className="truncate text-sm font-medium text-text-primary">{item.title}</p>
+                          <p className="flex items-center gap-2 truncate text-sm font-medium text-text-primary">
+                            <span className="truncate">{item.title}</span>
+                            {item.shared ? (
+                              <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                                Shared
+                              </span>
+                            ) : null}
+                          </p>
                           <p className="mt-0.5 text-xs text-text-secondary">
                             {item.nodeCount} {item.nodeCount === 1 ? "node" : "nodes"}
                             {item.updatedAt ? ` · ${formatUpdated(item.updatedAt)}` : ""}
                           </p>
                         </button>
                       )}
-                      <button
-                        type="button"
-                        aria-label={`Rename ${item.title}`}
-                        disabled={Boolean(deletingId) || renameSaving}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (renamingId === item.id) {
-                            void commitRename();
-                            return;
-                          }
-                          beginRename(item);
-                        }}
-                        className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary disabled:opacity-50"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete ${item.title}`}
-                        disabled={deletingId === item.id}
-                        onClick={() => void handleDelete(item.id)}
-                        className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-error disabled:opacity-50"
-                      >
-                        {deletingId === item.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
+                      {!item.shared ? (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Rename ${item.title}`}
+                            disabled={Boolean(deletingId) || renameSaving}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (renamingId === item.id) {
+                                void commitRename();
+                                return;
+                              }
+                              beginRename(item);
+                            }}
+                            className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary disabled:opacity-50"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete ${item.title}`}
+                            disabled={deletingId === item.id}
+                            onClick={() => void handleDelete(item.id)}
+                            className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-error disabled:opacity-50"
+                          >
+                            {deletingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   </li>
                 );

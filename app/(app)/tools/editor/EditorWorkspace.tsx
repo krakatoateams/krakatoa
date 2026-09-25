@@ -446,15 +446,21 @@ function SignedVideo({
   storagePath,
   currentTime,
   playing,
+  muted = false,
   onNaturalSize,
+  videoRef,
 }: {
   storagePath: string | null;
   currentTime: number;
   playing: boolean;
+  muted?: boolean;
   onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
+  videoRef?: (node: HTMLVideoElement | null) => void;
 }) {
   const url = useSignedMediaUrl(storagePath);
-  const ref = useRef<HTMLVideoElement>(null);
+  const ref = useRef<HTMLVideoElement | null>(null) as React.MutableRefObject<
+    HTMLVideoElement | null
+  >;
 
   useEffect(() => {
     const el = ref.current;
@@ -470,9 +476,12 @@ function SignedVideo({
   }
   return (
     <video
-      ref={ref}
+      ref={(node) => {
+        ref.current = node;
+        videoRef?.(node);
+      }}
       src={url}
-      muted
+      muted={muted}
       playsInline
       className="h-full w-full object-contain"
       onLoadedMetadata={(event) => {
@@ -528,6 +537,7 @@ export default function EditorWorkspace() {
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1014,7 +1024,16 @@ export default function EditorWorkspace() {
       if (event.code === "Space" && !event.repeat) {
         if (editable) return;
         event.preventDefault();
-        setPlaying((current) => (current ? false : sequenceDurationSec(docRef.current) > 0));
+        setPlaying((current) => {
+          const next = current ? false : sequenceDurationSec(docRef.current) > 0;
+          const el = previewVideoRef.current;
+          if (!next) el?.pause();
+          else if (el) {
+            el.muted = false;
+            void el.play().catch(() => undefined);
+          }
+          return next;
+        });
       }
     };
     window.addEventListener("beforeunload", warn);
@@ -1290,6 +1309,9 @@ export default function EditorWorkspace() {
                   storagePath={active ? active.clip.storagePath : lastActiveStoragePathRef.current}
                   currentTime={active ? active.localSec : lastActiveLocalSecRef.current}
                   playing={playing && !!active}
+                  videoRef={(node) => {
+                    previewVideoRef.current = node;
+                  }}
                 />
               </div>
               {!active && doc.sequence.length === 0 ? (
@@ -1364,6 +1386,7 @@ export default function EditorWorkspace() {
                         storagePath={overlay.storagePath}
                         currentTime={0}
                         playing={playing && visible}
+                        muted
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
                       />
                     )}
@@ -1582,8 +1605,18 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (playing) setPlaying(false);
-                    else if (duration > 0) setPlaying(true);
+                    const el = previewVideoRef.current;
+                    if (playing) {
+                      el?.pause();
+                      setPlaying(false);
+                      return;
+                    }
+                    if (duration <= 0) return;
+                    if (el) {
+                      el.muted = false;
+                      void el.play().catch(() => undefined);
+                    }
+                    setPlaying(true);
                   }}
                   className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
                   aria-label={playing ? "Pause" : "Play"}

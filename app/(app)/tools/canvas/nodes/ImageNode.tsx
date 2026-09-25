@@ -320,7 +320,13 @@ export default function ImageNode({
             <ChipDropdown
               icon={<Cpu className="h-3.5 w-3.5" />}
               value={tier.modelLabel}
-              options={photoTiers.map((t) => ({ id: t.id, label: t.modelLabel }))}
+              options={photoTiers.map((t) => ({
+                id: t.id,
+                label: t.modelLabel,
+                hint: t.hasResolution
+                  ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
+                  : `${imageCredits(t.basicPricingKey!, 1)}`,
+              }))}
               activeId={data.modelTier}
               square
               onSelect={(next) => patch({ modelTier: next as ProductPhotoModelTier })}
@@ -337,7 +343,11 @@ export default function ImageNode({
               <ChipDropdown
                 icon={<Clock className="h-3.5 w-3.5" />}
                 value={data.resolution.toUpperCase()}
-                options={tier.resolutions.map((r) => ({ id: r.id, label: r.label }))}
+                options={tier.resolutions.map((r) => ({
+                  id: r.id,
+                  label: r.label,
+                  hint: `${imageCredits(r.pricingKey, 1)}`,
+                }))}
                 activeId={data.resolution}
                 square
                 onSelect={(next) => patch({ resolution: next as ProductPhotoResolution })}

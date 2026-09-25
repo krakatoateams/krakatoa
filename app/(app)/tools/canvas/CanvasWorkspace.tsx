@@ -32,7 +32,9 @@ import { canDropOnCanvas } from "@/lib/canvas-handoff";
 import {
   DEFAULT_CANVAS_TITLE,
   normalizeCanvasTitle,
+  type CanvasAccessRole,
 } from "@/lib/canvas-document";
+import CanvasShareModal from "./CanvasShareModal";
 import type { CreationHistoryItem } from "@/lib/creations";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
@@ -59,6 +61,9 @@ const nodeTypes = {
 const edgeTypes = {
   canvas: CanvasEdge,
 };
+
+/** Debounce window before persisting graph edits. */
+const CANVAS_AUTOSAVE_MS = 2000;
 
 type CanvasNode = Node<CanvasNodeData, CanvasNodeKind>;
 
@@ -123,6 +128,8 @@ export default function CanvasWorkspace() {
   const [canvasId, setCanvasId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
+  const [openShare, setOpenShare] = useState(false);
+  const [accessRole, setAccessRole] = useState<CanvasAccessRole>("owner");
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const titleRef = useRef(title);
@@ -136,6 +143,8 @@ export default function CanvasWorkspace() {
   const creationLinkRef = useRef(false);
   const lastSavedRef = useRef(emptyFingerprint());
   const persistedTitleRef = useRef(DEFAULT_CANVAS_TITLE);
+  const savingRef = useRef(false);
+  const skipAutosaveRef = useRef(false);
   const { openLibrary, pickerOpen } = useCanvasLibrary();
 
   const fingerprint = useMemo(
@@ -143,6 +152,8 @@ export default function CanvasWorkspace() {
     [edges, nodes, title]
   );
   const dirty = fingerprint !== lastSavedRef.current;
+  const readOnly = accessRole === "viewer";
+  const canEdit = accessRole !== "viewer";
 
   const pushHistory = useCallback(() => {
     historyRef.current.push({
@@ -166,6 +177,8 @@ export default function CanvasWorkspace() {
   );
 
   const resetCanvas = useCallback(() => {
+    skipAutosaveRef.current = true;
+    setAccessRole("owner");
     setCanvasId(null);
     setTitle(DEFAULT_CANVAS_TITLE);
     persistedTitleRef.current = DEFAULT_CANVAS_TITLE;
@@ -175,36 +188,44 @@ export default function CanvasWorkspace() {
     lastSavedRef.current = emptyFingerprint();
     setViewport({ x: 0, y: 0, zoom: 1 });
     applyCanvasUrl(null);
+    skipAutosaveRef.current = false;
   }, [applyCanvasUrl, setEdges, setNodes, setViewport]);
 
   const loadCanvas = useCallback(
     async (id: string) => {
-      const res = await fetch(`/api/canvas/${id}`);
-      const data = (await res.json().catch(() => ({}))) as {
-        canvas?: {
-          id: string;
-          title: string;
-          graph: Parameters<typeof flowFromGraph>[0];
+      skipAutosaveRef.current = true;
+      try {
+        const res = await fetch(`/api/canvas/${id}`);
+        const data = (await res.json().catch(() => ({}))) as {
+          canvas?: {
+            id: string;
+            title: string;
+            graph: Parameters<typeof flowFromGraph>[0];
+          };
+          access?: { role: CanvasAccessRole };
+          error?: string;
         };
-        error?: string;
-      };
-      if (res.status === 401) {
-        openSignInModal();
-        return;
+        if (res.status === 401) {
+          openSignInModal();
+          return;
+        }
+        if (!res.ok || !data.canvas) {
+          throw new Error(data.error || "Couldn't open that canvas.");
+        }
+        const flow = flowFromGraph(data.canvas.graph);
+        setAccessRole(data.access?.role ?? "owner");
+        setCanvasId(data.canvas.id);
+        setTitle(data.canvas.title);
+        persistedTitleRef.current = data.canvas.title;
+        setNodes(flow.nodes);
+        setEdges(flow.edges);
+        historyRef.current = [];
+        lastSavedRef.current = fingerprintOf(data.canvas.title, flow.nodes, flow.edges);
+        requestAnimationFrame(() => setViewport(flow.viewport));
+        applyCanvasUrl(data.canvas.id);
+      } finally {
+        skipAutosaveRef.current = false;
       }
-      if (!res.ok || !data.canvas) {
-        throw new Error(data.error || "Couldn't open that canvas.");
-      }
-      const flow = flowFromGraph(data.canvas.graph);
-      setCanvasId(data.canvas.id);
-      setTitle(data.canvas.title);
-      persistedTitleRef.current = data.canvas.title;
-      setNodes(flow.nodes);
-      setEdges(flow.edges);
-      historyRef.current = [];
-      lastSavedRef.current = fingerprintOf(data.canvas.title, flow.nodes, flow.edges);
-      requestAnimationFrame(() => setViewport(flow.viewport));
-      applyCanvasUrl(data.canvas.id);
     },
     [applyCanvasUrl, openSignInModal, setEdges, setNodes, setViewport]
   );
@@ -288,49 +309,72 @@ export default function CanvasWorkspace() {
     })();
   }, [addFromLibrary, searchParams]);
 
-  const handleSave = useCallback(async () => {
-    if (status !== "authenticated") {
-      openSignInModal();
-      return;
-    }
-    const graph = graphFromFlow(nodesRef.current, edgesRef.current, getViewport());
-    const nextTitle = titleRef.current;
-    const nextFingerprint = fingerprintOf(nextTitle, nodesRef.current, edgesRef.current);
-    if (nextFingerprint === lastSavedRef.current) return;
-
-    setSaving(true);
-    try {
-      const id = canvasIdRef.current;
-      const res = await fetch(id ? `/api/canvas/${id}` : "/api/canvas", {
-        method: id ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: nextTitle, graph }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        canvas?: { id: string; title: string };
-        error?: string;
-      };
-      if (res.status === 401) {
-        openSignInModal();
+  const handleSave = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (savingRef.current) return;
+      if (!canEdit) return;
+      if (status !== "authenticated") {
+        if (!options?.silent) openSignInModal();
         return;
       }
-      if (!res.ok || !data.canvas) {
-        throw new Error(data.error || "Couldn't save this canvas.");
+      const graph = graphFromFlow(nodesRef.current, edgesRef.current, getViewport());
+      const nextTitle = titleRef.current;
+      const nextFingerprint = fingerprintOf(nextTitle, nodesRef.current, edgesRef.current);
+      if (nextFingerprint === lastSavedRef.current) return;
+
+      savingRef.current = true;
+      setSaving(true);
+      try {
+        const id = canvasIdRef.current;
+        const res = await fetch(id ? `/api/canvas/${id}` : "/api/canvas", {
+          method: id ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: nextTitle, graph }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          canvas?: { id: string; title: string };
+          error?: string;
+        };
+        if (res.status === 401) {
+          if (!options?.silent) openSignInModal();
+          return;
+        }
+        if (!res.ok || !data.canvas) {
+          throw new Error(data.error || "Couldn't save this canvas.");
+        }
+        setCanvasId(data.canvas.id);
+        setTitle(data.canvas.title);
+        persistedTitleRef.current = data.canvas.title;
+        lastSavedRef.current = fingerprintOf(data.canvas.title, nodesRef.current, edgesRef.current);
+        applyCanvasUrl(data.canvas.id);
+      } catch (err) {
+        if (options?.silent) {
+          console.error("[canvas] autosave failed:", err);
+        } else {
+          window.alert(err instanceof Error ? err.message : "Couldn't save this canvas.");
+        }
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
       }
-      setCanvasId(data.canvas.id);
-      setTitle(data.canvas.title);
-      persistedTitleRef.current = data.canvas.title;
-      lastSavedRef.current = fingerprintOf(data.canvas.title, nodesRef.current, edgesRef.current);
-      applyCanvasUrl(data.canvas.id);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Couldn't save this canvas.");
-    } finally {
-      setSaving(false);
-    }
-  }, [applyCanvasUrl, getViewport, openSignInModal, status]);
+    },
+    [applyCanvasUrl, canEdit, getViewport, openSignInModal, status]
+  );
+
+  useEffect(() => {
+    if (!dirty || !canEdit || status !== "authenticated" || skipAutosaveRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      if (skipAutosaveRef.current) return;
+      void handleSave({ silent: true });
+    }, CANVAS_AUTOSAVE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [canEdit, dirty, fingerprint, handleSave, status]);
 
   const commitTitle = useCallback(
     async (raw: string) => {
+      if (!canEdit) return;
       const nextTitle = normalizeCanvasTitle(raw);
       setTitle(nextTitle);
       if (nextTitle === persistedTitleRef.current) return;
@@ -377,7 +421,7 @@ export default function CanvasWorkspace() {
         window.alert(err instanceof Error ? err.message : "Couldn't rename this canvas.");
       }
     },
-    [openSignInModal, status]
+    [canEdit, openSignInModal, status]
   );
 
   useEffect(() => {
@@ -415,6 +459,7 @@ export default function CanvasWorkspace() {
 
   const addNode = useCallback(
     (kind: CanvasNodeKind) => {
+      if (!canEdit) return;
       pushHistory();
       setNodes((current) => {
         const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
@@ -433,11 +478,12 @@ export default function CanvasWorkspace() {
         return withExclusiveSelection([...current, next], id);
       });
     },
-    [pushHistory, setNodes]
+    [canEdit, pushHistory, setNodes]
   );
 
   const spawnFrom = useCallback(
     (sourceId: string, kind: CanvasNodeKind) => {
+      if (!canEdit) return;
       const source = nodesRef.current.find((node) => node.id === sourceId);
       const sourceKind = kindOf(source);
       if (!source || !sourceKind) return;
@@ -490,7 +536,7 @@ export default function CanvasWorkspace() {
         } as Edge,
       ]);
     },
-    [pushHistory, setEdges, setNodes]
+    [canEdit, pushHistory, setEdges, setNodes]
   );
 
   const openLibraryPicker = useCallback(() => {
@@ -523,6 +569,7 @@ export default function CanvasWorkspace() {
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (!canEdit) return;
       if (!isValidConnection(connection)) return;
       const source = nodesRef.current.find((n) => n.id === connection.source);
       const sourceKind = kindOf(source);
@@ -553,15 +600,17 @@ export default function CanvasWorkspace() {
         ];
       });
     },
-    [isValidConnection, pushHistory, setEdges]
+    [canEdit, isValidConnection, pushHistory, setEdges]
   );
 
   const onReconnectStart = useCallback(() => {
+    if (!canEdit) return;
     reconnectOk.current = false;
-  }, []);
+  }, [canEdit]);
 
   const onReconnect = useCallback(
     (oldEdge: Edge, newConnection: Connection) => {
+      if (!canEdit) return;
       if (!isValidConnection(newConnection)) return;
       reconnectOk.current = true;
       const source = nodesRef.current.find((n) => n.id === newConnection.source);
@@ -582,7 +631,7 @@ export default function CanvasWorkspace() {
         );
       });
     },
-    [isValidConnection, pushHistory, setEdges]
+    [canEdit, isValidConnection, pushHistory, setEdges]
   );
 
   const onReconnectEnd = useCallback(
@@ -598,27 +647,29 @@ export default function CanvasWorkspace() {
 
   const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
+      if (readOnly) return;
       if (changes.some((change) => change.type === "remove")) pushHistory();
       onNodesChange(changes);
     },
-    [onNodesChange, pushHistory]
+    [onNodesChange, pushHistory, readOnly]
   );
 
   const handleEdgesChange: typeof onEdgesChange = useCallback(
     (changes) => {
+      if (readOnly) return;
       if (changes.some((change) => change.type === "remove")) pushHistory();
       onEdgesChange(changes);
     },
-    [onEdgesChange, pushHistory]
+    [onEdgesChange, pushHistory, readOnly]
   );
 
   const selectedNodes = useMemo(() => nodes.filter((node) => node.selected), [nodes]);
 
   const deleteSelected = useCallback(() => {
-    if (selectedNodes.length === 0) return;
+    if (!canEdit || selectedNodes.length === 0) return;
     pushHistory();
     void deleteElements({ nodes: selectedNodes.map((node) => ({ id: node.id })) });
-  }, [deleteElements, pushHistory, selectedNodes]);
+  }, [canEdit, deleteElements, pushHistory, selectedNodes]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-N50">
@@ -626,9 +677,13 @@ export default function CanvasWorkspace() {
         title={title}
         dirty={dirty}
         saving={saving}
+        readOnly={readOnly}
+        accessRole={accessRole}
+        canShare={accessRole === "owner" && Boolean(canvasId)}
         onTitleChange={setTitle}
         onTitleCommit={(next) => void commitTitle(next)}
         onSave={() => void handleSave()}
+        onShare={() => setOpenShare(true)}
         onOpen={() => {
           if (status !== "authenticated") {
             openSignInModal();
@@ -650,9 +705,13 @@ export default function CanvasWorkspace() {
           onReconnectStart={onReconnectStart}
           onReconnectEnd={onReconnectEnd}
           onEdgeDoubleClick={(_event, edge) => {
+            if (!canEdit) return;
             pushHistory();
             setEdges((current) => current.filter((item) => item.id !== edge.id));
           }}
+          nodesDraggable={canEdit}
+          nodesConnectable={canEdit}
+          elementsSelectable
           isValidConnection={isValidConnection}
           connectOnClick={false}
           panOnScroll
@@ -664,19 +723,19 @@ export default function CanvasWorkspace() {
           multiSelectionKeyCode={["Shift", "Meta"]}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          edgesReconnectable
+          edgesReconnectable={canEdit}
           elevateEdgesOnSelect
           connectionRadius={36}
-          reconnectRadius={20}
+          reconnectRadius={10}
           colorMode="dark"
           fitView={false}
           minZoom={0.25}
           maxZoom={2}
           elevateNodesOnSelect
-          deleteKeyCode={pickerOpen || openList ? null : ["Backspace", "Delete"]}
+          deleteKeyCode={!canEdit || pickerOpen || openList ? null : ["Backspace", "Delete"]}
           defaultEdgeOptions={{
             type: "canvas",
-            reconnectable: true,
+            reconnectable: canEdit,
             interactionWidth: 28,
             markerEnd: {
               type: MarkerType.ArrowClosed,
@@ -700,10 +759,21 @@ export default function CanvasWorkspace() {
             nodeColor="rgba(255,255,255,0.18)"
           />
         </ReactFlow>
-        {nodes.length === 0 && (
-          <CanvasEmptyState onAdd={addNode} onOpenLibrary={openLibraryPicker} />
+        {nodes.length === 0 && canEdit && (
+          <CanvasEmptyState
+            onAdd={addNode}
+            onOpenLibrary={openLibraryPicker}
+            onOpenSaved={() => setOpenList(true)}
+            onSelectSaved={(id) => {
+              if (id === canvasId) return;
+              if (!confirmDiscard()) return;
+              void loadCanvas(id).catch((err) => {
+                window.alert(err instanceof Error ? err.message : "Couldn't open that canvas.");
+              });
+            }}
+          />
         )}
-        {selectedNodes.length > 0 && (
+        {canEdit && selectedNodes.length > 0 && (
           <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
             <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-N50/90 px-3 py-1.5 shadow-lg shadow-black/40 backdrop-blur-md">
               <span className="text-xs text-text-secondary">
@@ -720,9 +790,17 @@ export default function CanvasWorkspace() {
             </div>
           </div>
         )}
-        <CanvasToolbar onAdd={addNode} onOpenLibrary={openLibraryPicker} />
+        {canEdit ? <CanvasToolbar onAdd={addNode} onOpenLibrary={openLibraryPicker} /> : null}
         </CanvasActionsProvider>
       </div>
+      {canvasId ? (
+        <CanvasShareModal
+          open={openShare}
+          canvasId={canvasId}
+          canvasTitle={title}
+          onClose={() => setOpenShare(false)}
+        />
+      ) : null}
       <CanvasSavedList
         open={openList}
         activeId={canvasId}

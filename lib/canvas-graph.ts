@@ -53,7 +53,8 @@ export type CanvasGraphEdge = {
  * Allowed wiring (one input port per node):
  *   prompt.out → image | video | prompt
  *   image.out  → image | video | prompt
- * Video and sound cannot feed anything. Sound cannot be a target.
+ *   video.out  → image | video | prompt
+ * Sound cannot feed anything or be a target.
  */
 export function canConnectCanvas(params: {
   sourceKind: CanvasNodeKind;
@@ -65,14 +66,14 @@ export function canConnectCanvas(params: {
   const { sourceKind, targetKind, targetHandle, sourceId, targetId } = params;
   if (sourceId && targetId && sourceId === targetId) return false;
   if (targetHandle && !LEGACY_TARGET_HANDLES.has(targetHandle)) return false;
-  if (targetKind === "sound" || sourceKind === "sound" || sourceKind === "video") return false;
-  if (sourceKind !== "prompt" && sourceKind !== "image") return false;
+  if (targetKind === "sound" || sourceKind === "sound") return false;
+  if (sourceKind !== "prompt" && sourceKind !== "image" && sourceKind !== "video") return false;
   return targetKind === "image" || targetKind === "video" || targetKind === "prompt";
 }
 
 /** Kinds the output-handle spawn menu may offer for this source. */
 export function nextCanvasKinds(sourceKind: CanvasNodeKind): CanvasNodeKind[] {
-  if (sourceKind === "prompt" || sourceKind === "image") {
+  if (sourceKind === "prompt" || sourceKind === "image" || sourceKind === "video") {
     return ["prompt", "image", "video"];
   }
   return [];
@@ -196,7 +197,9 @@ export function canvasRefStoragePaths(
 }
 
 export function inferCanvasTargetHandle(sourceKind: CanvasNodeKind): "in" | null {
-  if (sourceKind === "prompt" || sourceKind === "image") return CANVAS_HANDLES.in;
+  if (sourceKind === "prompt" || sourceKind === "image" || sourceKind === "video") {
+    return CANVAS_HANDLES.in;
+  }
   return null;
 }
 
@@ -304,12 +307,16 @@ export function canvasGraphSelfCheck(): void {
     "image can feed another image as reference"
   );
   assert(
-    !canConnectCanvas({ sourceKind: "video", targetKind: "image", targetHandle: "in" }),
-    "video cannot feed an image"
+    canConnectCanvas({ sourceKind: "video", targetKind: "image", targetHandle: "in" }),
+    "video can feed an image node"
   );
   assert(
-    !canConnectCanvas({ sourceKind: "video", targetKind: "video" }),
-    "video cannot feed video"
+    canConnectCanvas({ sourceKind: "video", targetKind: "video", targetHandle: "in" }),
+    "video can feed another video node"
+  );
+  assert(
+    canConnectCanvas({ sourceKind: "video", targetKind: "prompt", targetHandle: "in" }),
+    "video can feed a text node"
   );
   assert(
     !canConnectCanvas({
@@ -340,7 +347,7 @@ export function canvasGraphSelfCheck(): void {
 
   assert(inferCanvasTargetHandle("prompt") === "in", "prompt lands on the single input");
   assert(inferCanvasTargetHandle("image") === "in", "image lands on the single input");
-  assert(inferCanvasTargetHandle("video") === null, "video cannot start a wire");
+  assert(inferCanvasTargetHandle("video") === "in", "video can start a wire");
   assert(
     !isDuplicateCanvasConnection(edges, { source: "p1", target: "v1" }),
     "a new source-target pair is not a duplicate"
@@ -395,7 +402,6 @@ export function canvasGraphSelfCheck(): void {
       );
     }
   }
-  assert(nextCanvasKinds("video").length === 0, "video has no spawn menu");
   assert(nextCanvasKinds("sound").length === 0, "sound has no spawn menu");
   assert(
     !canConnectCanvas({ sourceKind: "prompt", targetKind: "sound" }),
