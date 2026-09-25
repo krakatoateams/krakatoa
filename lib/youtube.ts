@@ -56,8 +56,20 @@ export async function uploadToYouTube(params: YouTubeUploadParams): Promise<stri
     expiry_date: 1, // epoch past → library always refreshes
   });
 
-  // Explicitly refresh so we catch auth errors before streaming the video
-  const { token: freshToken } = await auth.getAccessToken();
+  // Explicitly refresh so we catch auth errors before streaming the video.
+  // A 401 here means the stored refresh_token itself is dead (revoked,
+  // expired) — distinct from a 401 on the upload call below, which (per a
+  // real production incident) means the token is fine but the account has
+  // no YouTube channel to upload to.
+  let freshToken: string | null | undefined;
+  try {
+    ({ token: freshToken } = await auth.getAccessToken());
+  } catch (err) {
+    if (googleApiStatus(err) === 401) {
+      throw youtubeAuthError("YouTube access has expired or was revoked. Please reconnect YouTube in Settings.");
+    }
+    throw err;
+  }
   if (!freshToken) {
     throw new Error("Failed to obtain a fresh access token from Google. The user may need to re-authorise.");
   }
@@ -77,30 +89,66 @@ export async function uploadToYouTube(params: YouTubeUploadParams): Promise<stri
   // ── Upload to YouTube ────────────────────────────────────────────────────
   const youtube = google.youtube({ version: "v3", auth });
 
-  const { data } = await youtube.videos.insert({
-    part: ["snippet", "status"],
-    requestBody: {
-      snippet: {
-        title,
-        description,
-        tags,
-        categoryId: "22", // People & Blogs — safe default
+  let data;
+  try {
+    ({ data } = await youtube.videos.insert({
+      part: ["snippet", "status"],
+      requestBody: {
+        snippet: {
+          title,
+          description,
+          tags,
+          categoryId: "22", // People & Blogs — safe default
+        },
+        status: {
+          // Scheduler publishes for real. The API honors requested visibility for
+          // this project (verified: test uploads land as requested, not force-private).
+          privacyStatus,
+        },
       },
-      status: {
-        // Scheduler publishes for real. The API honors requested visibility for
-        // this project (verified: test uploads land as requested, not force-private).
-        privacyStatus,
+      media: {
+        mimeType: mimeFromUrl(videoUrl),
+        body: videoStream,
       },
-    },
-    media: {
-      mimeType: mimeFromUrl(videoUrl),
-      body: videoStream,
-    },
-  });
+    }));
+  } catch (err) {
+    // A real production incident confirmed this: the refresh above already
+    // succeeded (a valid, freshly-reissued token), yet the upload itself
+    // still 401s. YouTube's API returns a bare, bodyless 401 — not a 403
+    // with a "no channel" reason — for a Google account that has never
+    // created a YouTube channel, so there's no structured field to key off.
+    // Re-checking channel existence via channels.list first isn't an option
+    // here: that read requires youtube.readonly/youtube scope, which this
+    // app deliberately doesn't request (see the comment above channels.list
+    // was never added — broadening scope means every user re-consenting).
+    if (googleApiStatus(err) === 401) {
+      throw youtubeAuthError(
+        "YouTube rejected this upload (401 Unauthorized). This almost always means the connected " +
+          "Google account has no YouTube channel yet — create one at youtube.com, then retry this post. " +
+          "If that doesn't fix it, reconnect YouTube in Settings.",
+      );
+    }
+    throw err;
+  }
 
   if (!data.id) {
     throw new Error("YouTube API returned a successful response but no video ID");
   }
 
   return data.id;
+}
+
+/** Gaxios attaches the HTTP status of a failed Google API call here. */
+function googleApiStatus(err: unknown): number | undefined {
+  return (err as { response?: { status?: number } })?.response?.status;
+}
+
+/**
+ * Builds a friendlier replacement for a raw Gaxios 401 while keeping
+ * `response.status` set — cron's isPermanentFailure (lib/cron-publish-pure.ts)
+ * keys off that field to skip retrying a condition that won't self-heal
+ * (dead token or missing channel), same as it did for the original error.
+ */
+function youtubeAuthError(message: string): Error {
+  return Object.assign(new Error(message), { response: { status: 401 } });
 }
