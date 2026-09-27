@@ -78,9 +78,18 @@ export function tryOnTemplateHref(videoUrl: string): string {
  * clip locked and the generation prompt baked in — user only supplies a character.
  * Skill-linked cards open the Agent form for that skill instead.
  */
+export function viralTemplateCardHref(
+  template: Pick<TrendingTemplate, "id" | "skillId">
+): string {
+  const skillId = template.skillId?.trim();
+  if (skillId) return skillHref(skillId);
+  return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(template.id)}`;
+}
+
+/** Resolve by id against the code catalog only — prefer `viralTemplateCardHref(template)`. */
 export function viralTemplateHref(templateId: string): string {
   const template = getViralTemplate(templateId);
-  if (template?.skillId) return skillHref(template.skillId);
+  if (template) return viralTemplateCardHref(template);
   return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(templateId)}`;
 }
 
@@ -145,8 +154,8 @@ export function productTryOnHref(opts: {
   return `/tools/photo-v2?${q.toString()}`;
 }
 
-export const TRENDING_TEMPLATES: TrendingTemplate[] = MOTION_CLIP_CATALOG.map(
-  ({ preview, generation }) => {
+function buildMotionControlTemplates(): TrendingTemplate[] {
+  return MOTION_CLIP_CATALOG.map(({ preview, generation }) => {
     const videoUrl = `${BASE}/${preview}`;
     const generationVideoUrl = `${BASE}/${generation ?? preview}`;
     return {
@@ -154,16 +163,26 @@ export const TRENDING_TEMPLATES: TrendingTemplate[] = MOTION_CLIP_CATALOG.map(
       videoUrl,
       ...(generationVideoUrl !== videoUrl ? { generationVideoUrl } : {}),
     };
-  }
-);
+  });
+}
+
+export const TRENDING_TEMPLATES: TrendingTemplate[] = buildMotionControlTemplates();
+
+/** Code defaults used to seed the admin-managed motion-control carousel. */
+export function defaultMotionControlTemplates(): TrendingTemplate[] {
+  return buildMotionControlTemplates();
+}
 
 /**
  * Resolve the provider/Supabase-safe motion reference URL from a preview URL
  * (deep-link query param or catalog `videoUrl`). Preview webm stays UI-only.
  */
-export function motionControlGenerationVideoUrl(previewUrl: string): string {
+export function motionControlGenerationVideoUrl(
+  previewUrl: string,
+  motionTemplates: TrendingTemplate[] = TRENDING_TEMPLATES
+): string {
   const normalized = previewUrl.trim();
-  const match = TRENDING_TEMPLATES.find((t) => t.videoUrl === normalized);
+  const match = motionTemplates.find((t) => t.videoUrl === normalized);
   if (match?.generationVideoUrl) return match.generationVideoUrl;
   if (/\.webm$/i.test(normalized)) {
     return normalized.replace(/\.webm$/i, "_compressed.mp4");
@@ -233,7 +252,8 @@ export const VIRTUAL_PRODUCT_TRYON_TEMPLATES: TrendingTemplate[] = PRODUCT_TRYON
  */
 const VIRAL_DIR = "/viral-templates";
 /** Default locked start frame for viral-template i2v (scene composition). */
-const VIRAL_START_FRAME = `${VIRAL_DIR}/reference.png`;
+export const DEFAULT_VIRAL_TEMPLATE_REFERENCE_FRAME = `${VIRAL_DIR}/reference.png`;
+const VIRAL_START_FRAME = DEFAULT_VIRAL_TEMPLATE_REFERENCE_FRAME;
 /** Carousel hint — user supplies their own character; not the locked i2v start frame. */
 const VIRAL_CHARACTER_THUMB = `${VIRAL_DIR}/character-thumb.webp`;
 /** CDN folder for viral showcase clips (same bucket pattern as product review). */
@@ -400,16 +420,25 @@ const VIRAL_CATALOG: ViralCatalogEntry[] = [
   },
 ];
 
-export const VIRAL_TEMPLATES: TrendingTemplate[] = VIRAL_CATALOG.map((item) => ({
-  id: item.file,
-  title: item.title,
-  shotCount: item.shots.length,
-  videoUrl: item.previewUrl ?? `${VIRAL_DIR}/${item.file}`,
-  characterImageUrl: item.characterThumb ?? VIRAL_CHARACTER_THUMB,
-  referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
-  prompt: item.skillId ? undefined : buildViralTemplatePrompt(item),
-  ...(item.skillId ? { skillId: item.skillId } : {}),
-}));
+function buildViralTemplates(): TrendingTemplate[] {
+  return VIRAL_CATALOG.map((item) => ({
+    id: item.file,
+    title: item.title,
+    shotCount: item.shots.length,
+    videoUrl: item.previewUrl ?? `${VIRAL_DIR}/${item.file}`,
+    characterImageUrl: item.characterThumb ?? VIRAL_CHARACTER_THUMB,
+    referenceImageUrl: item.startFrameImageUrl ?? VIRAL_START_FRAME,
+    prompt: item.skillId ? undefined : buildViralTemplatePrompt(item),
+    ...(item.skillId ? { skillId: item.skillId } : {}),
+  }));
+}
+
+export const VIRAL_TEMPLATES: TrendingTemplate[] = buildViralTemplates();
+
+/** Code defaults used to seed the admin-managed viral carousel. */
+export function defaultViralTemplates(): TrendingTemplate[] {
+  return buildViralTemplates();
+}
 
 /**
  * Dashboard "Product review templates" carousel (beside Photo try-on).

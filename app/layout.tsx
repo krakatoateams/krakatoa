@@ -37,6 +37,7 @@ export const metadata: Metadata = {
   description:
     "Generate faceless reels, product photos, and automate your social media — all in one place.",
   applicationName: "Kelolako",
+  manifest: "/site.webmanifest",
   appleWebApp: {
     capable: true,
     title: "Kelolako",

@@ -12,7 +12,11 @@ import {
   type VideoComposerKey,
   type VideoComposerEnablement,
 } from "@/lib/video-composer-features";
-import { parseVideoStudioDeepLink, type VideoCreationType } from "@/lib/video-studio-deep-link";
+import {
+  parseVideoStudioDeepLink,
+  type DashboardTemplateCatalog,
+  type VideoCreationType,
+} from "@/lib/video-studio-deep-link";
 import TextToVideoComposer from "./composers/TextToVideoComposer";
 import ViralTemplateComposer from "./composers/ViralTemplateComposer";
 import ImageToVideoComposer from "./composers/ImageToVideoComposer";
@@ -41,7 +45,8 @@ export default function VideoStudioShell({
   const [adminResolved, setAdminResolved] = useState(false);
   const [devBlank, setDevBlank] = useState(false);
 
-  const [deepLink] = useState(() => parseVideoStudioDeepLink(searchParams));
+  const [templateCatalog, setTemplateCatalog] = useState<DashboardTemplateCatalog | null>(null);
+  const [deepLink, setDeepLink] = useState(() => parseVideoStudioDeepLink(searchParams));
   const {
     initialType,
     initialStoryboardId,
@@ -50,6 +55,21 @@ export default function VideoStudioShell({
     initialViralTemplate,
     initialPrompt,
   } = deepLink;
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/dashboard/templates", { cache: "no-store" })
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((catalog: DashboardTemplateCatalog | null) => {
+        if (!active || !catalog) return;
+        setTemplateCatalog(catalog);
+        setDeepLink(parseVideoStudioDeepLink(searchParams, catalog));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     if (status !== "authenticated") {
@@ -217,6 +237,7 @@ export default function VideoStudioShell({
     motion_control: () => (
       <MotionControlComposer
         initialTemplateVideo={initialTemplateVideo}
+        motionTemplates={templateCatalog?.motionControl}
         creationTypes={availableCreationTypes}
         isAdmin={isAdmin}
         devBlank={devBlank}
