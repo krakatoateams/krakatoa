@@ -67,7 +67,11 @@ import {
   type MentionRef,
 } from "@/lib/mention-assets";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
-import { getViralTemplate, isViralTemplateAssetPath, isViralTemplateId, viralTemplateLabel } from "@/lib/trending-templates";
+import { isViralTemplateAssetPath, viralTemplateLabel } from "@/lib/trending-templates";
+import {
+  findViralTemplateBySlug,
+  isComposerViralTemplateSlug,
+} from "@/lib/dashboard-templates-db";
 import {
   rewriteViralTemplateFirstFrameUrl,
   viralTemplateAssetUrlForProvider,
@@ -349,8 +353,12 @@ export async function POST(req: Request) {
     }
     const composerKey = composerKeyRaw;
     const model = getVideoModel(modelId);
+    const viralTemplateKnown =
+      viralTemplateId.length > 0
+        ? await isComposerViralTemplateSlug(viralTemplateId)
+        : false;
     const isViralTemplateRun =
-      (viralTemplateId.length > 0 && isViralTemplateId(viralTemplateId)) ||
+      viralTemplateKnown ||
       (viralTemplateStartFramePath.length > 0 &&
         isViralTemplateAssetPath(viralTemplateStartFramePath));
     if ((composerKey === "viral_template") !== isViralTemplateRun) {
@@ -856,7 +864,7 @@ export async function POST(req: Request) {
 
     const viralTemplateMeta =
       isViralTemplateRun && viralTemplateId
-        ? getViralTemplate(viralTemplateId)
+        ? await findViralTemplateBySlug(viralTemplateId)
         : undefined;
     const title =
       isViralTemplateRun && viralTemplateMeta

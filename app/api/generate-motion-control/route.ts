@@ -55,7 +55,7 @@ import {
   attachGenerationRequestJob,
 } from "@/lib/generation-idempotency";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
-import { motionControlGenerationVideoUrl } from "@/lib/trending-templates";
+import { findMotionControlGenerationUrl } from "@/lib/dashboard-templates-db";
 import { start } from "workflow/api";
 import { resolveExecutionBackendForJobType } from "@/lib/generation-workflows/feature-flags";
 import { attachWorkflowRun } from "@/lib/generation-workflows/workflow-db";
@@ -236,7 +236,10 @@ export async function POST(req: Request) {
     }
     // Dashboard templates may preview webm; pipeline always needs the MP4 twin on CDN.
     if (videoRef.url && !videoRef.path?.trim()) {
-      videoRef = { ...videoRef, url: motionControlGenerationVideoUrl(videoRef.url) };
+      videoRef = {
+        ...videoRef,
+        url: await findMotionControlGenerationUrl(videoRef.url),
+      };
     }
     for (const ref of [imageRef, videoRef]) {
       if (ref.path && isVideosTempRefPath(ref.path)) tempRefPaths.push(ref.path);

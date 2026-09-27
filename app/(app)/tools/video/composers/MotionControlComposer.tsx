@@ -55,7 +55,7 @@ import {
   type VideoComposerKey,
   type VideoComposerEnablement,
 } from "@/lib/video-composer-features";
-import { motionControlGenerationVideoUrl } from "@/lib/trending-templates";
+import { motionControlGenerationVideoUrl, type TrendingTemplate } from "@/lib/trending-templates";
 import {
   CharacterPicker,
   creationTypeChipOptions,
@@ -91,6 +91,7 @@ async function pollMotionControlResult(
 
 export default function MotionControlComposer({
   initialTemplateVideo,
+  motionTemplates,
   creationTypes,
   isAdmin,
   devBlank,
@@ -100,6 +101,7 @@ export default function MotionControlComposer({
   onGenerated,
 }: {
   initialTemplateVideo?: string | null;
+  motionTemplates?: TrendingTemplate[];
   creationTypes: VideoCreationTypeOption[];
   isAdmin: boolean;
   devBlank: boolean;
@@ -245,7 +247,10 @@ export default function MotionControlComposer({
   // The driving video comes from a preloaded template (hosted URL) or an upload.
   // Template preview may be webm; generation always uses the catalog MP4 mapping.
   const resolvedVideo: { url: string; path: string } | null = templateUrl
-    ? { url: motionControlGenerationVideoUrl(templateUrl), path: "" }
+    ? {
+        url: motionControlGenerationVideoUrl(templateUrl, motionTemplates),
+        path: "",
+      }
     : motionVideo.done[0]
       ? { url: motionVideo.done[0].url, path: motionVideo.done[0].path }
       : null;

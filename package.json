@@ -44,6 +44,7 @@
     "test:deployment-ci": "tsx lib/deployment-ci-self-check.ts",
     "test:security-headers": "tsx lib/security-headers-self-check.ts",
     "test:public-marketing": "tsx lib/public-marketing-self-check.ts",
+    "test:dashboard-templates": "tsx lib/dashboard-templates-pure.ts",
     "test:auth-users-fk": "tsx lib/auth-users-fk-cutover-self-check.ts",
     "test:rpc-grants": "tsx lib/rpc-grant-lockdown-self-check.ts",
     "test:deny-by-default-rls": "tsx lib/deny-by-default-rls-self-check.ts",

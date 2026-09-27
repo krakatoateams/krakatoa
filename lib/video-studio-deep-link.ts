@@ -5,6 +5,11 @@ import {
   type TrendingTemplate,
 } from "./trending-templates";
 
+export type DashboardTemplateCatalog = {
+  viral: TrendingTemplate[];
+  motionControl: TrendingTemplate[];
+};
+
 export type VideoCreationType =
   | "text2video"
   | "image2video"
@@ -50,9 +55,31 @@ function videoCreationTypeParam(value: string | null): VideoCreationType | null 
   }
 }
 
+function resolveViralTemplateFromCatalog(
+  templateId: string,
+  catalog?: DashboardTemplateCatalog | null
+): TrendingTemplate | null {
+  const fromCatalog = catalog?.viral.find((template) => template.id === templateId);
+  if (fromCatalog) return fromCatalog;
+  const fallback = getViralTemplate(templateId);
+  return fallback && isViralTemplateId(templateId) ? fallback : null;
+}
+
+function isKnownMotionTemplateVideo(
+  templateVideoParam: string,
+  catalog?: DashboardTemplateCatalog | null
+): boolean {
+  if (!templateVideoParam) return false;
+  if (catalog?.motionControl.some((template) => template.videoUrl === templateVideoParam)) {
+    return true;
+  }
+  return TRENDING_TEMPLATES.some((template) => template.videoUrl === templateVideoParam);
+}
+
 /** Read search params once on mount — switching modes in the UI must not rewrite the URL. */
 export function parseVideoStudioDeepLink(
-  searchParams: Pick<URLSearchParams, "get">
+  searchParams: Pick<URLSearchParams, "get">,
+  catalog?: DashboardTemplateCatalog | null
 ): VideoStudioDeepLink {
   const typeParam = searchParams.get("type");
   const parsedType = videoCreationTypeParam(typeParam);
@@ -68,16 +95,13 @@ export function parseVideoStudioDeepLink(
       : null;
   const templateVideoParam = searchParams.get("templateVideo")?.trim() ?? "";
   const initialTemplateVideo =
-    queryType === "motion_control" &&
-    TRENDING_TEMPLATES.some((template) => template.videoUrl === templateVideoParam)
+    queryType === "motion_control" && isKnownMotionTemplateVideo(templateVideoParam, catalog)
       ? templateVideoParam
       : null;
   const initialViralTemplateId = searchParams.get("viralTemplate");
   const initialViralTemplate =
-    queryType === "viral_template" &&
-    initialViralTemplateId &&
-    isViralTemplateId(initialViralTemplateId)
-      ? (getViralTemplate(initialViralTemplateId) ?? null)
+    queryType === "viral_template" && initialViralTemplateId
+      ? resolveViralTemplateFromCatalog(initialViralTemplateId, catalog)
       : null;
   const initialPrompt =
     queryType === "text2video" || queryType === "image2video"

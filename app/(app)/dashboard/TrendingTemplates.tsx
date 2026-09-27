@@ -4,16 +4,50 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
-  TRENDING_TEMPLATES,
-  VIRAL_TEMPLATES,
   PRODUCT_REVIEW_TEMPLATES,
   VIRTUAL_PRODUCT_TRYON_TEMPLATES,
   tryOnTemplateHref,
-  viralTemplateHref,
+  viralTemplateCardHref,
   productReviewTemplateHref,
   productTryOnHref,
   type TrendingTemplate,
 } from "@/lib/trending-templates";
+
+type DashboardTemplateCatalog = {
+  viral: TrendingTemplate[];
+  motionControl: TrendingTemplate[];
+};
+
+function useDashboardTemplateCatalog(): {
+  catalog: DashboardTemplateCatalog | null;
+  loading: boolean;
+} {
+  const [catalog, setCatalog] = useState<DashboardTemplateCatalog | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/dashboard/templates", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        return res.json() as Promise<DashboardTemplateCatalog>;
+      })
+      .then((data) => {
+        if (!cancelled) setCatalog(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog({ viral: [], motionControl: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { catalog, loading };
+}
 
 /**
  * Dashboard template carousels. Viral clips → Viral Template composer
@@ -21,16 +55,20 @@ import {
  * template video preloaded. Photo try-on → Product try-on.
  */
 export default function TrendingTemplates() {
+  const { catalog, loading } = useDashboardTemplateCatalog();
+
   return (
     <section className="mb-8 grid grid-cols-1 gap-6 md:mb-16 md:grid-cols-2">
       <TemplateCarousel
         title="Viral templates"
-        templates={VIRAL_TEMPLATES}
-        hrefFor={(t) => viralTemplateHref(t.id)}
+        templates={catalog?.viral ?? []}
+        loading={loading}
+        hrefFor={(t) => viralTemplateCardHref(t)}
       />
       <TemplateCarousel
         title="Motion control"
-        templates={TRENDING_TEMPLATES}
+        templates={catalog?.motionControl ?? []}
+        loading={loading}
         hrefFor={(t) => tryOnTemplateHref(t.videoUrl ?? "")}
       />
     </section>
@@ -103,10 +141,12 @@ function LazyWhenVisible({
 function TemplateCarousel({
   title,
   templates,
+  loading = false,
   hrefFor,
 }: {
   title: string;
   templates: TrendingTemplate[];
+  loading?: boolean;
   hrefFor: (template: TrendingTemplate) => string;
 }) {
   const router = useRouter();
@@ -146,7 +186,16 @@ function TemplateCarousel({
         )}
       </div>
 
-      {templates.length === 0 ? (
+      {loading ? (
+        <div className="flex min-h-[14.25rem] snap-x snap-mandatory gap-3 overflow-hidden sm:min-h-[17.75rem] sm:gap-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="aspect-[9/16] w-32 shrink-0 animate-pulse rounded-xl bg-white/[0.06] sm:w-40 md:w-44"
+            />
+          ))}
+        </div>
+      ) : templates.length === 0 ? (
         <p className="flex min-h-[14.25rem] items-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-sm text-text-disabled sm:min-h-[17.75rem]">
           Templates coming soon.
         </p>
@@ -238,27 +287,17 @@ function TemplateCard({
       onMouseLeave={template.videoUrl ? handlePreviewLeave : undefined}
     >
       {template.videoUrl ? (
-        inView ? (
-          <video
-            ref={videoRef}
-            src={template.videoUrl}
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="metadata"
-            poster={template.imageUrl}
-            aria-label="Trending template preview"
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        ) : template.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={template.imageUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        ) : null
+        <video
+          ref={videoRef}
+          src={template.videoUrl}
+          muted
+          loop
+          playsInline
+          preload={inView ? "metadata" : "none"}
+          poster={template.imageUrl}
+          aria-label="Trending template preview"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
       ) : template.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
