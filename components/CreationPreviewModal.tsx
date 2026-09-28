@@ -125,7 +125,6 @@ export function CreationPreviewModal({
     : [];
   const narration =
     typeof meta.narration === "string" ? meta.narration.trim() : "";
-  const hasDetails = !!prompt || scenePrompts.length > 0 || !!narration;
   const modelLabel = getCreationModelLabel(item);
   const trashed = isTrashedItem(item);
 
@@ -139,7 +138,7 @@ export function CreationPreviewModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-N0"
+        className="relative flex h-full max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-N0 lg:h-[90vh] lg:max-w-5xl lg:flex-row xl:max-w-6xl"
       >
         <button
           type="button"
@@ -150,164 +149,161 @@ export function CreationPreviewModal({
           <X className="h-5 w-5" />
         </button>
 
-        {onPrev && (
-          <button
-            type="button"
-            onClick={onPrev}
-            aria-label="Previous asset"
-            className="absolute left-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-        )}
-        {onNext && (
-          <button
-            type="button"
-            onClick={onNext}
-            aria-label="Next asset"
-            className="absolute right-3 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
-        )}
+        {/* Media stage */}
+        <div className="relative flex min-h-[45vh] min-w-0 flex-1 items-center justify-center overflow-hidden bg-black/40 p-4 lg:min-h-0 lg:p-6">
+          {onPrev && (
+            <button
+              type="button"
+              onClick={onPrev}
+              aria-label="Previous asset"
+              className="absolute left-4 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+          {onNext && (
+            <button
+              type="button"
+              onClick={onNext}
+              aria-label="Next asset"
+              className="absolute right-4 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-N0/50 text-N900/80 backdrop-blur-sm transition-colors hover:bg-N0/70 hover:text-N900"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
           {/* The frame is held open until the media paints, otherwise the preview
               opens as a bare description strip and the picture pops in later.
               onError clears it too, so a broken asset can't pulse forever. */}
-          <div
-            className={`relative flex items-center justify-center bg-N0 ${
-              mediaReady ? "" : "min-h-[45vh]"
-            }`}
-          >
-            {!mediaReady && (
-              <div className="absolute inset-0 animate-pulse bg-white/[0.06]" aria-busy="true">
-                <span className="sr-only">Loading asset</span>
-              </div>
-            )}
-            {item.mediaType === "video" ? (
-              <video
-                src={item.mediaUrl}
-                className={`max-h-[70vh] w-full object-contain transition-opacity duration-200 ${
-                  mediaReady ? "opacity-100" : "opacity-0"
-                }`}
-                controls
-                autoPlay
-                playsInline
-                onLoadedData={() => setMediaReady(true)}
-                onError={() => setMediaReady(true)}
-              />
-            ) : (
+          {!mediaReady && (
+            <div className="absolute inset-0 animate-pulse bg-white/[0.06]" aria-busy="true">
+              <span className="sr-only">Loading asset</span>
+            </div>
+          )}
+          {item.mediaType === "video" ? (
+            <video
+              src={item.mediaUrl}
+              className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
+                mediaReady ? "opacity-100" : "opacity-0"
+              }`}
+              controls
+              autoPlay
+              playsInline
+              onLoadedData={() => setMediaReady(true)}
+              onError={() => setMediaReady(true)}
+            />
+          ) : (
+            <div className="relative h-full w-full self-stretch">
               <Image
                 src={item.mediaUrl}
                 alt={item.title || item.toolLabel}
-                width={1080}
-                height={1350}
-                sizes="(min-width: 768px) 720px, 100vw"
-                className={`max-h-[70vh] w-auto object-contain transition-opacity duration-200 ${
+                fill
+                sizes="(min-width: 1024px) 60vw, 100vw"
+                className={`object-contain transition-opacity duration-200 ${
                   mediaReady ? "opacity-100" : "opacity-0"
                 }`}
                 onLoad={() => setMediaReady(true)}
                 onError={() => setMediaReady(true)}
               />
-            )}
-          </div>
-
-          {richUI && isCharacterItem(item) && (
-            <div className="border-b border-white/10 px-4 py-4">
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                Character name
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  maxLength={80}
-                  placeholder="Name this character"
-                  className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus:border-purple-400/40 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={saveCharacterName}
-                  disabled={savingName}
-                  className="flex h-9 items-center gap-1.5 rounded-xl bg-purple-500/20 px-4 text-sm font-medium text-purple-200 transition-colors hover:bg-purple-500/30 disabled:opacity-50"
-                >
-                  {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-                </button>
-              </div>
-              {nameError && <p className="mt-1.5 text-xs text-error">{nameError}</p>}
-            </div>
-          )}
-
-          {hasDetails && (
-            <div className="space-y-4 px-4 py-4">
-              {prompt && (
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                    Prompt
-                  </p>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
-                    {prompt}
-                  </p>
-                </div>
-              )}
-
-              {scenePrompts.length > 0 && (
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                    Scene prompts
-                  </p>
-                  <ol className="space-y-1.5">
-                    {scenePrompts.map((scenePrompt, i) => (
-                      <li
-                        key={i}
-                        className="flex gap-2 text-sm leading-relaxed text-text-secondary"
-                      >
-                        <span className="shrink-0 text-text-disabled tabular-nums">
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <span className="whitespace-pre-wrap">{scenePrompt}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-
-              {narration && (
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                    Narration
-                  </p>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
-                    {narration}
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-white/10 bg-gradient-to-t from-white/[0.04] to-transparent px-4 py-3.5">
-          <div className="min-w-0 flex-1 leading-tight">
-            <time
-              className="block text-sm font-medium text-text-primary"
-              dateTime={item.createdAt}
-            >
-              {new Date(item.createdAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })}
-            </time>
-            {modelLabel ? (
-              <span className="mt-0.5 block truncate text-xs text-text-disabled">
-                {modelLabel}
-              </span>
-            ) : null}
+        {/* Sidebar: header, scrollable details, sticky actions */}
+        <div className="flex min-h-0 w-full shrink-0 flex-col border-t border-white/10 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px]">
+          <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-3 lg:px-5">
+            <div className="min-w-0 flex-1 leading-tight">
+              <time
+                className="block text-sm font-medium text-text-primary"
+                dateTime={item.createdAt}
+              >
+                {new Date(item.createdAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </time>
+              {modelLabel ? (
+                <span className="mt-0.5 block truncate text-xs text-text-disabled">
+                  {modelLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 lg:p-5">
+            {richUI && isCharacterItem(item) && (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
+                  Character name
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    maxLength={80}
+                    placeholder="Name this character"
+                    className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus:border-purple-400/40 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveCharacterName}
+                    disabled={savingName}
+                    className="flex h-9 items-center gap-1.5 rounded-xl bg-purple-500/20 px-4 text-sm font-medium text-purple-200 transition-colors hover:bg-purple-500/30 disabled:opacity-50"
+                  >
+                    {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                  </button>
+                </div>
+                {nameError && <p className="mt-1.5 text-xs text-error">{nameError}</p>}
+              </div>
+            )}
+
+            {prompt && (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
+                  Prompt
+                </p>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
+                  {prompt}
+                </p>
+              </div>
+            )}
+
+            {scenePrompts.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
+                  Scene prompts
+                </p>
+                <ol className="space-y-1.5">
+                  {scenePrompts.map((scenePrompt, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-2 text-sm leading-relaxed text-text-secondary"
+                    >
+                      <span className="shrink-0 text-text-disabled tabular-nums">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <span className="whitespace-pre-wrap">{scenePrompt}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {narration && (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
+                  Narration
+                </p>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
+                  {narration}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1 border-t border-white/10 bg-gradient-to-t from-white/[0.04] to-transparent px-4 py-3.5">
             {richUI && !trashed && (
               <Tooltip label={isFavorite ? "Remove favorite" : "Add to favorites"}>
                 <button
