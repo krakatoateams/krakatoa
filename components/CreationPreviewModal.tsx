@@ -54,7 +54,7 @@ type Props = {
 };
 
 /**
- * Full-bleed preview for one creation: the media, its prompt/narration details,
+ * Full-bleed preview for one creation: the media, its user-typed prompt,
  * and the per-asset actions.
  *
  * Mount this with `key={item.id}` — per-item state (which media has painted, the
@@ -116,15 +116,7 @@ export function CreationPreviewModal({
     }
   }, [item.id, nameDraft, onItemUpdated]);
 
-  const meta = item.metadata ?? {};
   const prompt = getCreationUserPrompt(item);
-  const scenePrompts = Array.isArray(meta.scenePrompts)
-    ? (meta.scenePrompts as unknown[]).filter(
-        (s): s is string => typeof s === "string" && s.trim().length > 0
-      )
-    : [];
-  const narration =
-    typeof meta.narration === "string" ? meta.narration.trim() : "";
   const modelLabel = getCreationModelLabel(item);
   const trashed = isTrashedItem(item);
 
@@ -266,38 +258,6 @@ export function CreationPreviewModal({
                 </p>
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
                   {prompt}
-                </p>
-              </div>
-            )}
-
-            {scenePrompts.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                  Scene prompts
-                </p>
-                <ol className="space-y-1.5">
-                  {scenePrompts.map((scenePrompt, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-2 text-sm leading-relaxed text-text-secondary"
-                    >
-                      <span className="shrink-0 text-text-disabled tabular-nums">
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span className="whitespace-pre-wrap">{scenePrompt}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
-
-            {narration && (
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-text-disabled sm:text-sm">
-                  Narration
-                </p>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
-                  {narration}
                 </p>
               </div>
             )}
