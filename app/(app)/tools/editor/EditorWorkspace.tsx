@@ -352,7 +352,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleHidden();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={hidden ? "Show layer" : "Hide layer"}
           title={hidden ? "Show layer" : "Hide layer"}
         >
@@ -364,7 +364,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleLock();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={locked ? "Unlock layer" : "Lock layer"}
           title={locked ? "Unlock layer" : "Lock layer"}
         >
@@ -376,7 +376,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onDelete();
           }}
-          className="rounded p-0.5 text-error hover:bg-error/10"
+          className="rounded p-0.5 text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error"
           aria-label="Delete layer"
           title="Delete layer"
         >
@@ -1477,7 +1477,7 @@ export default function EditorWorkspace() {
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
                     onClick={() => setAddMenuOpen((current) => !current)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Add
@@ -1497,7 +1497,7 @@ export default function EditorWorkspace() {
                           openLibrary({ mediaType: "video", title: "Add a clip", onPick: addClip });
                         }}
                         disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Clip
@@ -1510,7 +1510,7 @@ export default function EditorWorkspace() {
                           uploadKindRef.current = "sequence";
                           uploadRef.current?.click();
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                       >
                         <Upload className="h-3.5 w-3.5" />
                         Upload
@@ -1528,7 +1528,7 @@ export default function EditorWorkspace() {
                           setSelectedId(overlay.id);
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Type className="h-3.5 w-3.5" />
                         Text
@@ -1545,7 +1545,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <ImagePlus className="h-3.5 w-3.5" />
                         Image
@@ -1562,7 +1562,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Video className="h-3.5 w-3.5" />
                         PiP
@@ -1587,7 +1587,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipStart}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip start"
                   title="Jump to clip start"
                 >
@@ -1596,7 +1596,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={() => stepPlayhead(-0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step back"
                   title="Step back"
                 >
@@ -1618,15 +1618,16 @@ export default function EditorWorkspace() {
                     }
                     setPlaying(true);
                   }}
-                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
+                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
                 >
                   {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </button>
                 <button
                   type="button"
                   onClick={() => stepPlayhead(0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step forward"
                   title="Step forward"
                 >
@@ -1635,7 +1636,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipEnd}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip end"
                   title="Jump to clip end"
                 >
@@ -1661,7 +1662,7 @@ export default function EditorWorkspace() {
                     }}
                     aria-label="Jump to time in seconds"
                     title="Type a time in seconds and press Enter to jump"
-                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15"
+                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span>s</span>
                   <span className="text-white/30"> / </span>
@@ -1684,7 +1685,7 @@ export default function EditorWorkspace() {
                       setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
                     }}
                     aria-label="Video duration in seconds"
-                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
+                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span className="text-[11px] text-text-secondary">s</span>
                 </label>
@@ -1694,7 +1695,7 @@ export default function EditorWorkspace() {
                       key={value}
                       type="button"
                       onClick={() => patchDoc((current) => withProjectAspect(current, value))}
-                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary ${
                         doc.aspect === value
                           ? "bg-white/15 text-text-primary"
                           : "text-text-secondary hover:text-text-primary"
@@ -1976,7 +1977,7 @@ export default function EditorWorkspace() {
                       startSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -1992,7 +1993,7 @@ export default function EditorWorkspace() {
                       endSec: Number(event.target.value) || 0,
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2007,7 +2008,7 @@ export default function EditorWorkspace() {
                       inSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               {selectedClip.sourceDurationSec != null ? (
@@ -2027,7 +2028,7 @@ export default function EditorWorkspace() {
                     <input
                       value={selectedOverlay.text ?? ""}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { text: event.target.value.slice(0, 200) })}
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2036,7 +2037,7 @@ export default function EditorWorkspace() {
                       type="color"
                       value={selectedOverlay.color || "#ffffff"}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { color: event.target.value })}
-                      className="mt-1 h-8 w-full bg-transparent"
+                      className="mt-1 h-8 w-full cursor-pointer rounded-md border border-white/10 bg-white/5 px-1 py-0.5 outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2049,7 +2050,7 @@ export default function EditorWorkspace() {
                       onChange={(event) =>
                         updateOverlay(selectedOverlay.id, { fontSize: Number(event.target.value) || 48 })
                       }
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                 </>
@@ -2064,7 +2065,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { startSec: Math.max(0, Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2077,7 +2078,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { endSec: Number(event.target.value) || 0 })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2090,7 +2091,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { z: Math.round(Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
             </div>
