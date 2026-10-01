@@ -1054,7 +1054,17 @@ export default function EditorWorkspace() {
         void handleSave();
         return;
       }
-      if (meta && !editable && event.key.toLowerCase() === "b") {
+      if (
+        meta &&
+        !editable &&
+        !event.repeat &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "b"
+      ) {
+        if (typeof document !== "undefined" && document.querySelector("[role='dialog'], [aria-modal='true']")) {
+          return;
+        }
         event.preventDefault();
         handleSplitSelected();
         return;

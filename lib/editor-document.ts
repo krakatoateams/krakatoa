@@ -222,9 +222,10 @@ export function splitEditorClip(
   playheadSec: number,
   newClipId?: string
 ): { doc: EditorDocument; rightClipId: string } | null {
-  const index = doc.sequence.findIndex((c) => c.id === clipId);
-  if (index === -1) return null;
-  const target = doc.sequence[index];
+  const sorted = sortedSequence(doc);
+  const targetIndex = sorted.findIndex((c) => c.id === clipId);
+  if (targetIndex === -1) return null;
+  const target = sorted[targetIndex];
   if (!canSplitClip(target, playheadSec)) return null;
 
   const p = snapTenth(playheadSec);
@@ -250,11 +251,11 @@ export function splitEditorClip(
   );
 
   const newSequence: EditorClip[] = [];
-  for (let i = 0; i < doc.sequence.length; i++) {
-    if (i === index) {
+  for (let i = 0; i < sorted.length; i++) {
+    if (i === targetIndex) {
       newSequence.push(leftClip, rightClip);
     } else {
-      newSequence.push(doc.sequence[i]);
+      newSequence.push(sorted[i]);
     }
   }
 
@@ -775,6 +776,106 @@ export function editorDocumentSelfCheck(): void {
   assert(trimmedEnd !== null, "trim end succeeds");
   assert(trimmedEnd.sequence[0].endSec === 4.0, "trimmed end is 4.0");
   assert(trimmedEnd.sequence[0].inSec === 0.5, "trim end leaves inSec unchanged: 0.5");
+
+  // Multi-clip out-of-order split, locked->null, id tidak ada->null, right clip properties
+  const outOfOrderDoc: EditorDocument = {
+    ...emptyEditorDocument(),
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-third",
+        creationId: "c3",
+        storagePath: null,
+        startSec: 6.0,
+        endSec: 9.0,
+        inSec: 0,
+        sourceDurationSec: 15,
+        order: 2,
+        locked: false,
+        hidden: true,
+      },
+      {
+        id: "c-first",
+        creationId: "c1",
+        storagePath: null,
+        startSec: 0.0,
+        endSec: 3.0,
+        inSec: 0,
+        sourceDurationSec: 10,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+      {
+        id: "c-second",
+        creationId: "c2",
+        storagePath: null,
+        startSec: 3.0,
+        endSec: 6.0,
+        inSec: 0,
+        sourceDurationSec: null,
+        order: 1,
+        locked: false,
+        hidden: false,
+      },
+    ],
+  };
+
+  // locked -> null
+  const lockedDoc: EditorDocument = {
+    ...outOfOrderDoc,
+    sequence: outOfOrderDoc.sequence.map((c) => (c.id === "c-first" ? { ...c, locked: true } : c)),
+  };
+  assert(splitEditorClip(lockedDoc, "c-first", 1.5) === null, "locked clip split returns null");
+
+  // id tidak ada -> null
+  assert(splitEditorClip(outOfOrderDoc, "non-existent-id", 1.5) === null, "non-existent id split returns null");
+
+  // Multi-clip out-of-order split on c-third
+  const oooSplit = splitEditorClip(outOfOrderDoc, "c-third", 7.5, "c-third-r");
+  assert(oooSplit !== null, "out-of-order multi-clip split succeeds");
+  assert(oooSplit.doc.sequence.length === 4, "out-of-order split results in 4 clips");
+  const reindexedIds = oooSplit.doc.sequence.map((c) => c.id);
+  assert(
+    reindexedIds.join(",") === "c-first,c-second,c-third,c-third-r",
+    "reindexed in sorted order with right clip immediately after left"
+  );
+  assert(oooSplit.doc.sequence.every((c, i) => c.order === i), "all orders sequential 0..3");
+
+  // Right clip preserves non-default sourceDurationSec, locked, hidden
+  const rightOoo = oooSplit.doc.sequence.find((c) => c.id === "c-third-r")!;
+  assert(rightOoo.sourceDurationSec === 15, "right clip preserves non-default sourceDurationSec");
+  assert(rightOoo.hidden === true, "right clip preserves non-default hidden");
+  assert(rightOoo.locked === false, "right clip preserves locked state");
+
+  // Trim start near source boundary
+  const sourceCappedDoc: EditorDocument = {
+    ...emptyEditorDocument(),
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-bounded",
+        creationId: "b1",
+        storagePath: null,
+        startSec: 0.0,
+        endSec: 4.0,
+        inSec: 0.0,
+        sourceDurationSec: 5.0,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+    ],
+  };
+  const trimmedNearBound = trimClipStartToPlayhead(sourceCappedDoc, "c-bounded", 3.5);
+  assert(trimmedNearBound !== null, "trim start near source boundary succeeds");
+  assert(trimmedNearBound.sequence[0].startSec === 3.5, "trimmed startSec is 3.5");
+  assert(trimmedNearBound.sequence[0].inSec === 3.5, "trimmed inSec is 3.5 near source boundary");
+
+  const trimmedMinSpan = trimClipStartToPlayhead(sourceCappedDoc, "c-bounded", 3.8);
+  assert(trimmedMinSpan !== null, "trim start leaving min span succeeds");
+  assert(trimmedMinSpan.sequence[0].startSec === 3.8, "trimmed startSec is 3.8");
+  assert(trimmedMinSpan.sequence[0].inSec === 3.8, "trimmed inSec is 3.8");
 }
 
 if (require.main === module) {
