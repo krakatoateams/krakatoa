@@ -665,28 +665,28 @@ export function validateEditorUploadFile(
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
     return {
       ok: false,
-      error: `Ukuran file terlalu besar (${sizeMB} MB). Maksimal ukuran file adalah 100 MB.`,
+      error: `File is too large (${sizeMB} MB). The maximum size is 100 MB.`,
     };
   }
 
   if (!file.type || !EDITOR_ACCEPTED_UPLOAD_MIME_TYPES.has(file.type)) {
     return {
       ok: false,
-      error: `Format file "${file.type || file.name}" tidak didukung. Gunakan format MP4, MOV, WebM, JPEG, PNG, atau WebP.`,
+      error: `File type "${file.type || file.name}" isn't supported. Use MP4, MOV, WebM, JPEG, PNG, or WebP.`,
     };
   }
 
   if (expectedKind === "image" && !file.type.startsWith("image/")) {
     return {
       ok: false,
-      error: "Hanya file gambar (JPEG, PNG, WebP) yang diizinkan untuk overlay gambar.",
+      error: "Only image files (JPEG, PNG, WebP) can be used as image overlays.",
     };
   }
 
   if ((expectedKind === "sequence" || expectedKind === "video") && !file.type.startsWith("video/")) {
     return {
       ok: false,
-      error: "Hanya file video (MP4, MOV, WebM) yang diizinkan.",
+      error: "Only video files (MP4, MOV, WebM) are allowed.",
     };
   }
 
@@ -839,10 +839,10 @@ export function editorDocumentSelfCheck(): void {
 
   // Upload validation tests
   const oversized = validateEditorUploadFile({ size: EDITOR_MAX_UPLOAD_BYTES + 1, type: "video/mp4", name: "big.mp4" });
-  assert(!oversized.ok && oversized.error.includes("terlalu besar"), "oversized file rejected");
+  assert(!oversized.ok && oversized.error.includes("too large"), "oversized file rejected");
 
   const badType = validateEditorUploadFile({ size: 1024, type: "application/pdf", name: "doc.pdf" });
-  assert(!badType.ok && badType.error.includes("tidak didukung"), "unsupported mime type rejected");
+  assert(!badType.ok && badType.error.includes("isn't supported"), "unsupported mime type rejected");
 
   const validVideo = validateEditorUploadFile({ size: 1024 * 1024, type: "video/mp4", name: "v.mp4" }, "sequence");
   assert(validVideo.ok, "valid mp4 sequence upload accepted");
@@ -921,7 +921,7 @@ export function editorDocumentSelfCheck(): void {
   assert(trimmedEnd.sequence[0].endSec === 4.0, "trimmed end is 4.0");
   assert(trimmedEnd.sequence[0].inSec === 0.5, "trim end leaves inSec unchanged: 0.5");
 
-  // Multi-clip out-of-order split, locked->null, id tidak ada->null, right clip properties
+  // Multi-clip out-of-order split, locked->null, non-existent id->null, right clip properties
   const outOfOrderDoc: EditorDocument = {
     ...emptyEditorDocument(),
     durationSec: 10,
@@ -972,7 +972,7 @@ export function editorDocumentSelfCheck(): void {
   };
   assert(splitEditorClip(lockedDoc, "c-first", 1.5) === null, "locked clip split returns null");
 
-  // id tidak ada -> null
+  // non-existent id -> null
   assert(splitEditorClip(outOfOrderDoc, "non-existent-id", 1.5) === null, "non-existent id split returns null");
 
   // Multi-clip out-of-order split on c-third
