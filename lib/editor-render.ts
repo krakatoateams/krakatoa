@@ -3,12 +3,8 @@
  * `durationSec`, overlay each clip full-frame in its time window, then
  * overlay / drawtext with enable='between(t,…)'.
  *
- * Audio: each audible layer (see `isAudibleLayer`) whose source has an audio
- * stream is trimmed, delayed to its timeline window, and mixed; with no
- * audible source the export stays picture-only (`-an`).
- *
  * Pure graph builder — runnable as `npx tsx lib/editor-render.ts`.
- * The route calls `runEditorRender`, which probes source audio and talks to Rendi.
+ * The route calls `runEditorRender` which talks to Rendi.
  */
 
 import {
@@ -119,6 +115,11 @@ function placeClipFilter(
 }
 
 /**
+ * Audio: each audible layer (see `isAudibleLayer`) whose source has an audio
+ * stream is trimmed, delayed to its timeline window, and mixed; with no
+ * audible source the export stays picture-only (`-an`). `runEditorRender`
+ * probes which sources have audio.
+ *
  * @param audioUrls source URLs verified to carry an audio stream. A layer whose
  *   URL is absent is treated as silent, so FFmpeg never reads a missing `[n:a]`.
  */
