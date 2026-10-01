@@ -601,6 +601,12 @@ function SignedImage({
   );
 }
 
+type UploadState = {
+  isUploading: boolean;
+  fileName: string;
+  kind: "sequence" | "image" | "video";
+};
+
 type EditorToastState = {
   id: string;
   type: "success" | "error";
@@ -659,8 +665,8 @@ export default function EditorWorkspace() {
   const [playhead, setPlayhead] = useState(0);
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [toast, setToast] = useState<EditorToastState | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
 
   const showToast = useCallback((t: { type: "success" | "error"; message: string }) => {
     setToast({ id: crypto.randomUUID(), ...t });
@@ -700,6 +706,7 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const uploadingRef = useRef(false);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
@@ -1284,6 +1291,7 @@ export default function EditorWorkspace() {
   };
 
   const onUpload = async (file: File) => {
+    if (uploadingRef.current) return;
     const kind = uploadKindRef.current;
     const validation = validateEditorUploadFile(file, kind);
     if (!validation.ok) {
@@ -1291,7 +1299,8 @@ export default function EditorWorkspace() {
       return;
     }
 
-    setIsUploading(true);
+    uploadingRef.current = true;
+    setUploadState({ isUploading: true, fileName: file.name, kind });
     try {
       const uploaded = await uploadRefFile(file);
       if (kind === "sequence") {
@@ -1310,7 +1319,7 @@ export default function EditorWorkspace() {
         }));
         setSelectedId(clip.id);
         void attachSourceDuration(clip.id, clip.storagePath);
-        showToast({ type: "success", message: "Klip video berhasil diunggah." });
+        showToast({ type: "success", message: "Media berhasil ditambahkan" });
         return;
       }
       if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
@@ -1336,17 +1345,11 @@ export default function EditorWorkspace() {
         newOverlayId = overlay.id;
         return {
           ...current,
-          overlays: [
-            ...current.overlays,
-            overlay,
-          ],
+          overlays: [...current.overlays, overlay],
         };
       });
       if (newOverlayId) setSelectedId(newOverlayId);
-      showToast({
-        type: "success",
-        message: `Overlay ${kind === "image" ? "gambar" : "video"} berhasil diunggah.`,
-      });
+      showToast({ type: "success", message: "Media berhasil ditambahkan" });
     } catch (err) {
       let message = "Upload gagal.";
       if (err instanceof Error) {
@@ -1361,7 +1364,8 @@ export default function EditorWorkspace() {
       }
       showToast({ type: "error", message });
     } finally {
-      setIsUploading(false);
+      uploadingRef.current = false;
+      setUploadState(null);
     }
   };
 
@@ -1703,10 +1707,15 @@ export default function EditorWorkspace() {
                     type="button"
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
+                    disabled={uploadState?.isUploading}
                     onClick={() => setAddMenuOpen((current) => !current)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    {uploadState?.isUploading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
                     Add
                     <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
@@ -1732,17 +1741,17 @@ export default function EditorWorkspace() {
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={isUploading || doc.sequence.length >= EDITOR_MAX_SEQUENCE}
+                        disabled={uploadState?.isUploading || doc.sequence.length >= EDITOR_MAX_SEQUENCE}
                         onClick={() => {
                           setAddMenuOpen(false);
                           uploadKindRef.current = "sequence";
                           uploadRef.current?.click();
                         }}
-                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
                         title="Upload video dari perangkat (Maks. 100 MB)"
                       >
                         <span className="flex items-center gap-2">
-                          {isUploading ? (
+                          {uploadState?.isUploading ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
                           ) : (
                             <Upload className="h-3.5 w-3.5" />
@@ -1806,15 +1815,6 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                 </div>
-                {isUploading ? (
-                  <span
-                    role="status"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand-primary/30 bg-brand-primary/10 px-2.5 text-xs font-medium text-brand-primary"
-                  >
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Mengunggah...
-                  </span>
-                ) : null}
                 <button
                   type="button"
                   onClick={handleSplitSelected}
@@ -1835,7 +1835,7 @@ export default function EditorWorkspace() {
                       : "video/mp4,video/quicktime,video/webm"
                   }
                   className="hidden"
-                  disabled={isUploading}
+                  disabled={uploadState?.isUploading}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
@@ -2058,7 +2058,7 @@ export default function EditorWorkspace() {
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {clipRows.length === 0 ? (
+                  {clipRows.length === 0 && !uploadState ? (
                     <div className="h-8" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
@@ -2089,6 +2089,12 @@ export default function EditorWorkspace() {
                       />
                     ))
                   )}
+                  {uploadState?.kind === "sequence" ? (
+                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -2173,7 +2179,7 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {sequence.length === 0 ? (
+                    {sequence.length === 0 && !uploadState ? (
                       <div className="h-8" />
                     ) : (
                       clipRows.map(({ clip, label }) => {
@@ -2214,6 +2220,22 @@ export default function EditorWorkspace() {
                         );
                       })
                     )}
+                    {uploadState?.kind === "sequence" ? (
+                      <div
+                        role="status"
+                        aria-label={`Mengunggah ${uploadState.fileName}`}
+                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
+                        style={{
+                          left: Math.max(0, playhead * pxPerSec),
+                          width: Math.max(90, 3 * pxPerSec),
+                        }}
+                      >
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                        <span className="truncate text-[11px] font-medium text-text-primary">
+                          Mengunggah {uploadState.fileName}...
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2423,6 +2445,19 @@ export default function EditorWorkspace() {
           }
         }}
       />
+
+      {uploadState?.isUploading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-brand-primary/40 bg-N100/95 px-4 py-2.5 text-xs text-brand-primary shadow-2xl backdrop-blur-md transition-all duration-300"
+        >
+          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
+          <span className="font-medium text-text-primary">
+            Mengunggah <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
+          </span>
+        </div>
+      ) : null}
 
       {toast ? <EditorToast toast={toast} onDismiss={dismissToast} /> : null}
     </div>
