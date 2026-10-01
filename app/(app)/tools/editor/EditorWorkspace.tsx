@@ -21,6 +21,8 @@ import {
   Unlock,
   Upload,
   Video,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
@@ -182,6 +184,7 @@ function newClipLayer(
     order,
     locked: false,
     hidden: false,
+    muted: false,
   };
 }
 
@@ -299,6 +302,8 @@ function LayerPanelRow({
   selected,
   locked,
   hidden,
+  canMute = false,
+  muted = false,
   icon,
   label,
   dragOver,
@@ -308,12 +313,15 @@ function LayerPanelRow({
   onReorderCommit,
   onToggleLock,
   onToggleHidden,
+  onToggleMute,
   onDelete,
 }: {
   id: string;
   selected: boolean;
   locked: boolean;
   hidden: boolean;
+  canMute?: boolean;
+  muted?: boolean;
   icon: ReactNode;
   label: string;
   dragOver: boolean;
@@ -323,6 +331,7 @@ function LayerPanelRow({
   onReorderCommit: (targetId: string | null) => void;
   onToggleLock: () => void;
   onToggleHidden: () => void;
+  onToggleMute?: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -346,6 +355,20 @@ function LayerPanelRow({
       <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
       <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
       <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
+        {canMute && onToggleMute ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleMute();
+            }}
+            className={`rounded p-0.5 hover:bg-white/10 ${muted ? "text-warning opacity-90" : "text-text-secondary hover:text-text-primary"}`}
+            aria-label={muted ? "Unmute audio" : "Mute audio"}
+            title={muted ? "Unmute audio" : "Mute audio"}
+          >
+            {muted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={(event) => {
@@ -439,6 +462,7 @@ function mediaOverlay(
     storagePath: item.storagePath?.trim() || null,
     locked: false,
     hidden: false,
+    muted: kind === "video" ? false : undefined,
   };
 }
 
@@ -467,9 +491,10 @@ function SignedVideo({
     if (!el || !url) return;
     const gap = Math.abs(el.currentTime - currentTime);
     if (gap > 0.18) el.currentTime = Math.max(0, currentTime);
+    el.muted = muted;
     if (playing) void el.play().catch(() => undefined);
     else el.pause();
-  }, [currentTime, playing, url]);
+  }, [currentTime, playing, url, muted]);
 
   if (!url) {
     return <div className="h-full w-full animate-pulse bg-white/5" />;
@@ -568,12 +593,22 @@ export default function EditorWorkspace() {
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
+  const playheadRef = useRef(playhead);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
   pastRef.current = past;
   futureRef.current = future;
   selectedIdRef.current = selectedId;
+  playheadRef.current = playhead;
+
+  const isCurrentClipMuted = () => {
+    const cur = clipAtPlayhead(
+      { ...docRef.current, sequence: docRef.current.sequence.filter((c) => !c.hidden) },
+      playheadRef.current
+    );
+    return Boolean(cur?.clip.muted);
+  };
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -1029,7 +1064,7 @@ export default function EditorWorkspace() {
           const el = previewVideoRef.current;
           if (!next) el?.pause();
           else if (el) {
-            el.muted = false;
+            el.muted = isCurrentClipMuted();
             void el.play().catch(() => undefined);
           }
           return next;
@@ -1309,6 +1344,7 @@ export default function EditorWorkspace() {
                   storagePath={active ? active.clip.storagePath : lastActiveStoragePathRef.current}
                   currentTime={active ? active.localSec : lastActiveLocalSecRef.current}
                   playing={playing && !!active}
+                  muted={active?.clip.muted ?? false}
                   videoRef={(node) => {
                     previewVideoRef.current = node;
                   }}
@@ -1386,7 +1422,7 @@ export default function EditorWorkspace() {
                         storagePath={overlay.storagePath}
                         currentTime={0}
                         playing={playing && visible}
-                        muted
+                        muted={overlay.muted ?? false}
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
                       />
                     )}
@@ -1613,7 +1649,7 @@ export default function EditorWorkspace() {
                     }
                     if (duration <= 0) return;
                     if (el) {
-                      el.muted = false;
+                      el.muted = isCurrentClipMuted();
                       void el.play().catch(() => undefined);
                     }
                     setPlaying(true);
@@ -1765,6 +1801,8 @@ export default function EditorWorkspace() {
                         selected={overlay.id === selectedId}
                         locked={overlay.locked}
                         hidden={overlay.hidden}
+                        canMute={overlay.kind === "video"}
+                        muted={overlay.kind === "video" ? Boolean(overlay.muted) : undefined}
                         dragOver={dragOverLayerId === overlay.id}
                         icon={
                           overlay.kind === "text" ? (
@@ -1789,6 +1827,11 @@ export default function EditorWorkspace() {
                         }}
                         onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
+                        onToggleMute={
+                          overlay.kind === "video"
+                            ? () => updateOverlay(overlay.id, { muted: !overlay.muted })
+                            : undefined
+                        }
                         onDelete={() => removeLayer("overlay", overlay.id)}
                       />
                     ))}
@@ -1805,6 +1848,8 @@ export default function EditorWorkspace() {
                         selected={clip.id === selectedId}
                         locked={clip.locked}
                         hidden={clip.hidden}
+                        canMute={true}
+                        muted={Boolean(clip.muted)}
                         dragOver={dragOverLayerId === clip.id}
                         icon={<Video className="h-3 w-3" />}
                         label={label}
@@ -1821,6 +1866,7 @@ export default function EditorWorkspace() {
                         }}
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
+                        onToggleMute={() => updateClip(clip.id, { muted: !clip.muted })}
                         onDelete={() => removeLayer("clip", clip.id)}
                       />
                     ))
