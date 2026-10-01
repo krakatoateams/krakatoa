@@ -1340,7 +1340,7 @@ export default function EditorWorkspace() {
         if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
           showToast({
             type: "error",
-            message: `Batas maksimal urutan (${EDITOR_MAX_SEQUENCE} klip) telah tercapai.`,
+            message: `Sequence limit reached (${EDITOR_MAX_SEQUENCE} clips).`,
           });
           return;
         }
@@ -1352,13 +1352,13 @@ export default function EditorWorkspace() {
         }));
         setSelectedId(clip.id);
         void attachSourceDuration(clip.id, clip.storagePath);
-        showToast({ type: "success", message: "Media berhasil ditambahkan" });
+        showToast({ type: "success", message: "Media added" });
         return;
       }
       if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
         showToast({
           type: "error",
-          message: `Batas maksimal overlay (${EDITOR_MAX_OVERLAYS}) telah tercapai.`,
+          message: `Overlay limit reached (${EDITOR_MAX_OVERLAYS}).`,
         });
         return;
       }
@@ -1382,9 +1382,9 @@ export default function EditorWorkspace() {
         };
       });
       if (newOverlayId) setSelectedId(newOverlayId);
-      showToast({ type: "success", message: "Media berhasil ditambahkan" });
+      showToast({ type: "success", message: "Media added" });
     } catch (err) {
-      let message = "Upload gagal.";
+      let message = "Upload failed.";
       if (err instanceof Error) {
         message = err.message;
         if (
@@ -1392,7 +1392,7 @@ export default function EditorWorkspace() {
           message.toLowerCase().includes("payload too large") ||
           message.toLowerCase().includes("too large")
         ) {
-          message = "Ukuran file terlalu besar. Maksimal ukuran file adalah 100 MB.";
+          message = "File is too large. The maximum size is 100 MB.";
         }
       }
       showToast({ type: "error", message });
@@ -1782,7 +1782,7 @@ export default function EditorWorkspace() {
                           uploadRef.current?.click();
                         }}
                         className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="Upload video dari perangkat (Maks. 100 MB)"
+                        title="Upload video from device (max 100 MB)"
                       >
                         <span className="flex items-center gap-2">
                           {uploadState?.isUploading ? (
@@ -1792,7 +1792,7 @@ export default function EditorWorkspace() {
                           )}
                           Upload
                         </span>
-                        <span className="text-[10px] text-text-secondary">Maks. 100 MB</span>
+                        <span className="text-[10px] text-text-secondary">Max 100 MB</span>
                       </button>
                       <button
                         type="button"
@@ -2136,7 +2136,7 @@ export default function EditorWorkspace() {
                   {uploadState?.kind === "sequence" ? (
                     <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
                       <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
-                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
+                      <span className="truncate text-[11px] font-medium">Uploading...</span>
                     </div>
                   ) : null}
                 </div>
@@ -2267,7 +2267,7 @@ export default function EditorWorkspace() {
                     {uploadState?.kind === "sequence" ? (
                       <div
                         role="status"
-                        aria-label={`Mengunggah ${uploadState.fileName}`}
+                        aria-label={`Uploading ${uploadState.fileName}`}
                         className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
                         style={{
                           left: Math.max(0, playhead * pxPerSec),
@@ -2276,7 +2276,7 @@ export default function EditorWorkspace() {
                       >
                         <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
                         <span className="truncate text-[11px] font-medium text-text-primary">
-                          Mengunggah {uploadState.fileName}...
+                          Uploading {uploadState.fileName}...
                         </span>
                       </div>
                     ) : null}
@@ -2498,7 +2498,7 @@ export default function EditorWorkspace() {
         >
           <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
           <span className="font-medium text-text-primary">
-            Mengunggah <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
+            Uploading <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
           </span>
         </div>
       ) : null}
