@@ -2099,7 +2099,7 @@ export default function EditorWorkspace() {
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {clipRows.length === 0 && !uploadState ? (
+                  {clipRows.length === 0 && uploadState?.kind !== "sequence" ? (
                     <div className="h-8" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
@@ -2223,7 +2223,7 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {sequence.length === 0 && !uploadState ? (
+                    {sequence.length === 0 && uploadState?.kind !== "sequence" ? (
                       <div className="h-8" />
                     ) : (
                       clipRows.map(({ clip, label }) => {
