@@ -39,6 +39,7 @@ export type EditorClip = {
   order: number;
   locked: boolean;
   hidden: boolean;
+  muted?: boolean;
 };
 
 export type EditorOverlayKind = "text" | "image" | "video";
@@ -61,6 +62,7 @@ export type EditorOverlay = {
   storagePath: string | null;
   locked: boolean;
   hidden: boolean;
+  muted?: boolean;
 };
 
 export type EditorDocument = {
@@ -447,6 +449,7 @@ function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolea
     order: Number.isFinite(asFiniteNumber(o.order, index)) ? asFiniteNumber(o.order, index) : index,
     locked: Boolean(o.locked),
     hidden: Boolean(o.hidden),
+    muted: Boolean(o.muted),
     packed,
   };
 }
@@ -482,6 +485,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
     storagePath: kind === "text" ? null : asPath(o.storagePath),
     locked: Boolean(o.locked),
     hidden: Boolean(o.hidden),
+    muted: kind === "video" ? Boolean(o.muted) : undefined,
   };
 }
 
@@ -545,6 +549,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
         order: clip.order,
         locked: clip.locked,
         hidden: clip.hidden,
+        muted: clip.muted,
       },
       durationSec
     )
@@ -631,6 +636,7 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
   for (const overlay of doc.overlays) add(overlay.creationId, overlay.storagePath);
   return { creationIds, storagePaths };
 }
+
 
 export const EDITOR_MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -802,6 +808,34 @@ export function editorDocumentSelfCheck(): void {
   const reordered = reorderById([{ id: "a" }, { id: "b" }, { id: "c" }], "a", "c");
   assert(reordered?.map((x) => x.id).join(",") === "b,c,a", "reorderById moves source next to target");
   assert(reorderById([{ id: "a" }], "a", "a") === null, "reorderById no-ops when source equals target");
+
+  // Muted tests
+  assert(parsed!.sequence.every((c) => c.muted === false), "clips default unmuted (false)");
+  const withMute = parseEditorDocument({
+    durationSec: 5,
+    sequence: [
+      { id: "m1", creationId: "x", startSec: 0, endSec: 2, inSec: 0, order: 0, muted: true },
+      { id: "m2", creationId: "y", startSec: 2, endSec: 4, inSec: 0, order: 1, muted: false },
+    ],
+    overlays: [
+      { id: "vm1", kind: "video", startSec: 0, endSec: 2, muted: true },
+      { id: "vm2", kind: "video", startSec: 2, endSec: 4, muted: false },
+      { id: "tm1", kind: "text", startSec: 0, endSec: 2, text: "t", muted: true },
+    ],
+  });
+  assert(withMute?.sequence[0]?.muted === true, "clip muted=true parsed");
+  assert(withMute?.sequence[1]?.muted === false, "clip muted=false parsed");
+  assert(withMute?.overlays[0]?.muted === true, "video overlay muted=true parsed");
+  assert(withMute?.overlays[1]?.muted === false, "video overlay muted=false parsed");
+  assert(withMute?.overlays[2]?.muted === undefined, "text overlay muted omitted (undefined)");
+
+  // Backward compatibility: legacy document without muted field
+  const legacyDoc = parseEditorDocument({
+    v: 1,
+    durationSec: 5,
+    sequence: [{ id: "leg1", startSec: 0, endSec: 2 }],
+  });
+  assert(legacyDoc?.sequence[0]?.muted === false, "legacy clip without muted field defaults to false");
 
   // Upload validation tests
   const oversized = validateEditorUploadFile({ size: EDITOR_MAX_UPLOAD_BYTES + 1, type: "video/mp4", name: "big.mp4" });
