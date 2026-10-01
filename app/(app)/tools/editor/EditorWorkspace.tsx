@@ -4,14 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
+  AlertCircle,
+  CheckCircle2,
   ChevronDown,
   Eye,
   EyeOff,
   ImagePlus,
+  Loader2,
   Lock,
   Pause,
   Play,
   Plus,
+  Scissors,
   SkipBack,
   SkipForward,
   StepBack,
@@ -23,6 +27,7 @@ import {
   Video,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
@@ -41,6 +46,11 @@ import {
   EDITOR_MAX_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
+  validateEditorUploadFile,
+  canSplitClip,
+  canTrimClipEnd,
+  canTrimClipStart,
+  LAYER_NAME_MAX,
   clampClipToComposition,
   clampOverlayToComposition,
   clipAtPlayhead,
@@ -48,12 +58,17 @@ import {
   emptyEditorDocument,
   maxClipLayerDurationSec,
   normalizeEditorTitle,
+  normalizeLayerName,
   parseEditorDocument,
   projectDurationSec,
   reorderById,
+  resolveLayerLabel,
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
+  splitEditorClip,
+  trimClipEndToPlayhead,
+  trimClipStartToPlayhead,
   validateEditorExport,
   withProjectAspect,
   withProjectDuration,
@@ -315,6 +330,7 @@ function LayerPanelRow({
   onToggleHidden,
   onToggleMute,
   onDelete,
+  onRename,
 }: {
   id: string;
   selected: boolean;
@@ -333,13 +349,39 @@ function LayerPanelRow({
   onToggleHidden: () => void;
   onToggleMute?: () => void;
   onDelete: () => void;
+  onRename?: (nextName: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(label);
+  const committedRef = useRef(false);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setEditDraft(label);
+  }, [editing, label]);
+
+  const commitEdit = (raw: string) => {
+    if (committedRef.current || cancelledRef.current) return;
+    committedRef.current = true;
+    setEditing(false);
+    const trimmed = raw.trim();
+    if (trimmed !== label) {
+      onRename?.(trimmed);
+    }
+  };
+
+  const cancelEdit = () => {
+    cancelledRef.current = true;
+    setEditing(false);
+    setEditDraft(label);
+  };
+
   return (
     <div
       data-layer-row
       data-layer-id={id}
       onPointerDown={(event) => {
-        if (locked || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
+        if (locked || editing || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
           return;
         }
         onReorderStart();
@@ -347,13 +389,54 @@ function LayerPanelRow({
       }}
       onClick={onSelect}
       className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
-        locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        locked ? "cursor-default" : editing ? "cursor-text" : "cursor-grab active:cursor-grabbing"
       } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
       }`}
     >
       <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
-      <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={editDraft}
+          maxLength={LAYER_NAME_MAX}
+          data-nodrag
+          onChange={(event) => setEditDraft(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitEdit(editDraft);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEdit();
+            }
+          }}
+          onBlur={() => {
+            commitEdit(editDraft);
+          }}
+          className="min-w-0 flex-1 rounded bg-white/10 px-1 py-0.5 text-[11px] text-text-primary outline-none ring-1 ring-brand-primary"
+        />
+      ) : (
+        <span
+          onDoubleClick={(event) => {
+            if (locked || !onRename) return;
+            event.stopPropagation();
+            event.preventDefault();
+            committedRef.current = false;
+            cancelledRef.current = false;
+            setEditDraft(label);
+            setEditing(true);
+          }}
+          className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}
+          title="Double-click to rename"
+        >
+          {label}
+        </span>
+      )}
       <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
         {canMute && onToggleMute ? (
           <button
@@ -375,7 +458,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleHidden();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={hidden ? "Show layer" : "Hide layer"}
           title={hidden ? "Show layer" : "Hide layer"}
         >
@@ -387,7 +470,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleLock();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={locked ? "Unlock layer" : "Lock layer"}
           title={locked ? "Unlock layer" : "Lock layer"}
         >
@@ -399,7 +482,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onDelete();
           }}
-          className="rounded p-0.5 text-error hover:bg-error/10"
+          className="rounded p-0.5 text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error"
           aria-label="Delete layer"
           title="Delete layer"
         >
@@ -543,6 +626,54 @@ function SignedImage({
   );
 }
 
+type UploadState = {
+  isUploading: boolean;
+  fileName: string;
+  kind: "sequence" | "image" | "video";
+};
+
+type EditorToastState = {
+  id: string;
+  type: "success" | "error";
+  message: string;
+};
+
+function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(t);
+  }, [toast.id, onDismiss]);
+
+  const isSuccess = toast.type === "success";
+
+  return (
+    <div
+      role="alert"
+      aria-live="polite"
+      className={`fixed bottom-6 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ${
+        isSuccess
+          ? "border-success/30 bg-N100/95 text-text-primary"
+          : "border-error/30 bg-N100/95 text-text-primary"
+      }`}
+    >
+      {isSuccess ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+      ) : (
+        <AlertCircle className="h-4 w-4 shrink-0 text-error" />
+      )}
+      <span className="text-xs font-medium leading-relaxed">{toast.message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Tutup notifikasi"
+        className="ml-auto shrink-0 cursor-pointer p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -559,6 +690,16 @@ export default function EditorWorkspace() {
   const [playhead, setPlayhead] = useState(0);
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [toast, setToast] = useState<EditorToastState | null>(null);
+
+  const showToast = useCallback((t: { type: "success" | "error"; message: string }) => {
+    setToast({ id: crypto.randomUUID(), ...t });
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    setToast(null);
+  }, []);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
@@ -590,6 +731,7 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const uploadingRef = useRef(false);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
@@ -649,6 +791,10 @@ export default function EditorWorkspace() {
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
   const navClip = selectedClip ?? active?.clip ?? null;
 
+  const canSplitSelected = selectedClip ? canSplitClip(selectedClip, playhead) : false;
+  const canTrimStart = selectedClip ? canTrimClipStart(selectedClip, playhead) : false;
+  const canTrimEnd = selectedClip ? canTrimClipEnd(selectedClip, playhead) : false;
+
   const stepPlayhead = (deltaSec: number) => {
     setPlaying(false);
     setPlayhead((head) => snapTenth(Math.max(0, Math.min(duration, head + deltaSec))));
@@ -687,23 +833,21 @@ export default function EditorWorkspace() {
 
   // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
   const clipRows = sequence
-    .map((clip, i) => ({ clip, label: `Clip ${i + 1}` }))
+    .map((clip, i) => ({ clip, label: resolveLayerLabel(clip, i) }))
     .reverse();
   let imageOverlayCount = 0;
   let videoOverlayCount = 0;
   const overlayRows = overlays
     .map((overlay) => {
-      let label: string;
-      if (overlay.kind === "text") {
-        label = overlay.text?.trim().slice(0, 18) || "Text";
-      } else if (overlay.kind === "image") {
+      let typeIndex: number | undefined;
+      if (overlay.kind === "image") {
+        typeIndex = imageOverlayCount;
         imageOverlayCount += 1;
-        label = `Image overlay ${imageOverlayCount}`;
-      } else {
+      } else if (overlay.kind === "video") {
+        typeIndex = videoOverlayCount;
         videoOverlayCount += 1;
-        label = `Video overlay ${videoOverlayCount}`;
       }
-      return { overlay, label };
+      return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
 
@@ -771,6 +915,37 @@ export default function EditorWorkspace() {
     },
     []
   );
+
+  const handleSplitSelected = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canSplitClip(clip, playheadRef.current)) return;
+    const result = splitEditorClip(docRef.current, id, playheadRef.current);
+    if (!result) return;
+    patchDoc(() => result.doc);
+    setSelectedId(result.rightClipId);
+  }, [patchDoc]);
+
+  const handleTrimStartToPlayhead = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canTrimClipStart(clip, playheadRef.current)) return;
+    const updated = trimClipStartToPlayhead(docRef.current, id, playheadRef.current);
+    if (!updated) return;
+    patchDoc(() => updated);
+  }, [patchDoc]);
+
+  const handleTrimEndToPlayhead = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canTrimClipEnd(clip, playheadRef.current)) return;
+    const updated = trimClipEndToPlayhead(docRef.current, id, playheadRef.current);
+    if (!updated) return;
+    patchDoc(() => updated);
+  }, [patchDoc]);
 
   const undo = useCallback(() => {
     const p = pastRef.current;
@@ -1045,6 +1220,21 @@ export default function EditorWorkspace() {
         void handleSave();
         return;
       }
+      if (
+        meta &&
+        !editable &&
+        !event.repeat &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "b"
+      ) {
+        if (typeof document !== "undefined" && document.querySelector("[role='dialog'], [aria-modal='true']")) {
+          return;
+        }
+        event.preventDefault();
+        handleSplitSelected();
+        return;
+      }
       if (meta && !editable && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
         event.preventDefault();
         if (event.key.toLowerCase() === "y" || event.shiftKey) redo();
@@ -1077,7 +1267,7 @@ export default function EditorWorkspace() {
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener("keydown", onKey);
     };
-  }, [handleSave, undo, redo, deleteSelected]);
+  }, [handleSave, undo, redo, deleteSelected, handleSplitSelected]);
 
   const attachSourceDuration = useCallback(async (clipId: string, storagePath: string | null) => {
     if (!storagePath) return;
@@ -1134,42 +1324,81 @@ export default function EditorWorkspace() {
   };
 
   const onUpload = async (file: File) => {
+    if (uploadingRef.current) return;
+    const kind = uploadKindRef.current;
+    const validation = validateEditorUploadFile(file, kind);
+    if (!validation.ok) {
+      showToast({ type: "error", message: validation.error });
+      return;
+    }
+
+    uploadingRef.current = true;
+    setUploadState({ isUploading: true, fileName: file.name, kind });
     try {
       const uploaded = await uploadRefFile(file);
-      const kind = uploadKindRef.current;
       if (kind === "sequence") {
-        if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) return;
+        if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
+          showToast({
+            type: "error",
+            message: `Batas maksimal urutan (${EDITOR_MAX_SEQUENCE} klip) telah tercapai.`,
+          });
+          return;
+        }
         const duration = projectDurationSec(docRef.current);
         const clip = clipFromUpload(uploaded.path, docRef.current.sequence.length, playhead, duration);
         patchDoc((current) => ({
           ...current,
           sequence: [...current.sequence, clip],
         }));
+        setSelectedId(clip.id);
         void attachSourceDuration(clip.id, clip.storagePath);
+        showToast({ type: "success", message: "Media berhasil ditambahkan" });
         return;
       }
-      if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) return;
+      if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
+        showToast({
+          type: "error",
+          message: `Batas maksimal overlay (${EDITOR_MAX_OVERLAYS}) telah tercapai.`,
+        });
+        return;
+      }
+      let newOverlayId: string | null = null;
       patchDoc((current) => {
         const duration = projectDurationSec(current);
         const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
         const end = snapTenth(Math.min(duration, start + 2));
+        const overlay = mediaOverlay(
+          kind,
+          { storagePath: uploaded.path },
+          start,
+          end,
+          current.overlays.length,
+          EDITOR_CANVAS[current.aspect]
+        );
+        newOverlayId = overlay.id;
         return {
           ...current,
-          overlays: [
-            ...current.overlays,
-            mediaOverlay(
-              kind,
-              { storagePath: uploaded.path },
-              start,
-              end,
-              current.overlays.length,
-              EDITOR_CANVAS[current.aspect]
-            ),
-          ],
+          overlays: [...current.overlays, overlay],
         };
       });
+      if (newOverlayId) setSelectedId(newOverlayId);
+      showToast({ type: "success", message: "Media berhasil ditambahkan" });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Upload failed.");
+      let message = "Upload gagal.";
+      if (err instanceof Error) {
+        message = err.message;
+        if (
+          message.includes("413") ||
+          message.toLowerCase().includes("payload too large") ||
+          message.toLowerCase().includes("too large")
+        ) {
+          message = "Ukuran file terlalu besar. Maksimal ukuran file adalah 100 MB.";
+        }
+      }
+      showToast({ type: "error", message });
+    } finally {
+      uploadingRef.current = false;
+      setUploadState(null);
     }
   };
 
@@ -1512,10 +1741,15 @@ export default function EditorWorkspace() {
                     type="button"
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
+                    disabled={uploadState?.isUploading}
                     onClick={() => setAddMenuOpen((current) => !current)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    {uploadState?.isUploading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
                     Add
                     <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
@@ -1533,7 +1767,7 @@ export default function EditorWorkspace() {
                           openLibrary({ mediaType: "video", title: "Add a clip", onPick: addClip });
                         }}
                         disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Clip
@@ -1541,15 +1775,24 @@ export default function EditorWorkspace() {
                       <button
                         type="button"
                         role="menuitem"
+                        disabled={uploadState?.isUploading || doc.sequence.length >= EDITOR_MAX_SEQUENCE}
                         onClick={() => {
                           setAddMenuOpen(false);
                           uploadKindRef.current = "sequence";
                           uploadRef.current?.click();
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Upload video dari perangkat (Maks. 100 MB)"
                       >
-                        <Upload className="h-3.5 w-3.5" />
-                        Upload
+                        <span className="flex items-center gap-2">
+                          {uploadState?.isUploading ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
+                          ) : (
+                            <Upload className="h-3.5 w-3.5" />
+                          )}
+                          Upload
+                        </span>
+                        <span className="text-[10px] text-text-secondary">Maks. 100 MB</span>
                       </button>
                       <button
                         type="button"
@@ -1564,7 +1807,7 @@ export default function EditorWorkspace() {
                           setSelectedId(overlay.id);
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Type className="h-3.5 w-3.5" />
                         Text
@@ -1581,7 +1824,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <ImagePlus className="h-3.5 w-3.5" />
                         Image
@@ -1598,7 +1841,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Video className="h-3.5 w-3.5" />
                         PiP
@@ -1606,11 +1849,27 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={handleSplitSelected}
+                  disabled={!canSplitSelected}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10"
+                  title={canSplitSelected ? "Split clip at playhead (⌘B)" : "Select a clip intersecting playhead to split"}
+                  aria-label="Split clip at playhead"
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                  Split
+                </button>
                 <input
                   ref={uploadRef}
                   type="file"
-                  accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
+                  accept={
+                    uploadKindRef.current === "image"
+                      ? "image/jpeg,image/png,image/webp"
+                      : "video/mp4,video/quicktime,video/webm"
+                  }
                   className="hidden"
+                  disabled={uploadState?.isUploading}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
@@ -1623,7 +1882,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipStart}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip start"
                   title="Jump to clip start"
                 >
@@ -1632,7 +1891,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={() => stepPlayhead(-0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step back"
                   title="Step back"
                 >
@@ -1654,15 +1913,16 @@ export default function EditorWorkspace() {
                     }
                     setPlaying(true);
                   }}
-                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
+                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
                 >
                   {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </button>
                 <button
                   type="button"
                   onClick={() => stepPlayhead(0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step forward"
                   title="Step forward"
                 >
@@ -1671,7 +1931,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipEnd}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip end"
                   title="Jump to clip end"
                 >
@@ -1697,7 +1957,7 @@ export default function EditorWorkspace() {
                     }}
                     aria-label="Jump to time in seconds"
                     title="Type a time in seconds and press Enter to jump"
-                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15"
+                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span>s</span>
                   <span className="text-white/30"> / </span>
@@ -1720,7 +1980,7 @@ export default function EditorWorkspace() {
                       setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
                     }}
                     aria-label="Video duration in seconds"
-                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
+                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span className="text-[11px] text-text-secondary">s</span>
                 </label>
@@ -1730,7 +1990,7 @@ export default function EditorWorkspace() {
                       key={value}
                       type="button"
                       onClick={() => patchDoc((current) => withProjectAspect(current, value))}
-                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary ${
                         doc.aspect === value
                           ? "bg-white/15 text-text-primary"
                           : "text-text-secondary hover:text-text-primary"
@@ -1833,12 +2093,13 @@ export default function EditorWorkspace() {
                             : undefined
                         }
                         onDelete={() => removeLayer("overlay", overlay.id)}
+                        onRename={(nextName) => updateOverlay(overlay.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))}
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {clipRows.length === 0 ? (
+                  {clipRows.length === 0 && !uploadState ? (
                     <div className="h-8" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
@@ -1868,9 +2129,16 @@ export default function EditorWorkspace() {
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
                         onToggleMute={() => updateClip(clip.id, { muted: !clip.muted })}
                         onDelete={() => removeLayer("clip", clip.id)}
+                        onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))
                   )}
+                  {uploadState?.kind === "sequence" ? (
+                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1919,7 +2187,7 @@ export default function EditorWorkspace() {
                   />
                   {overlayRows.length > 0 ? (
                     <div className="mb-2 space-y-1">
-                      {overlayRows.map(({ overlay }) => (
+                      {overlayRows.map(({ overlay, label }) => (
                         <TimelineLayerRow
                           key={overlay.id}
                           selected={overlay.id === selectedId}
@@ -1944,7 +2212,7 @@ export default function EditorWorkspace() {
                           }
                           label={
                             <>
-                              <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
+                              <span className="truncate capitalize">{label}</span>
                               <span className="ml-1 tabular-nums text-text-secondary">
                                 {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
                               </span>
@@ -1955,10 +2223,10 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {sequence.length === 0 ? (
+                    {sequence.length === 0 && !uploadState ? (
                       <div className="h-8" />
                     ) : (
-                      clipRows.map(({ clip }) => {
+                      clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);
                         return (
                           <TimelineLayerRow
@@ -1985,7 +2253,7 @@ export default function EditorWorkspace() {
                             }
                             label={
                               <>
-                                Clip
+                                <span className="truncate">{label}</span>
                                 <span className="ml-1 tabular-nums opacity-80">
                                   {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
                                 </span>
@@ -1996,6 +2264,22 @@ export default function EditorWorkspace() {
                         );
                       })
                     )}
+                    {uploadState?.kind === "sequence" ? (
+                      <div
+                        role="status"
+                        aria-label={`Mengunggah ${uploadState.fileName}`}
+                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
+                        style={{
+                          left: Math.max(0, playhead * pxPerSec),
+                          width: Math.max(90, 3 * pxPerSec),
+                        }}
+                      >
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                        <span className="truncate text-[11px] font-medium text-text-primary">
+                          Mengunggah {uploadState.fileName}...
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2022,7 +2306,7 @@ export default function EditorWorkspace() {
                       startSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2038,7 +2322,7 @@ export default function EditorWorkspace() {
                       endSec: Number(event.target.value) || 0,
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2053,7 +2337,7 @@ export default function EditorWorkspace() {
                       inSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               {selectedClip.sourceDurationSec != null ? (
@@ -2062,6 +2346,41 @@ export default function EditorWorkspace() {
                   {formatTimecode(maxClipLayerDurationSec(selectedClip))}
                 </p>
               ) : null}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <p className="font-medium text-text-secondary">Trim & Split</p>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSplitSelected}
+                    disabled={!canSplitSelected}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10"
+                    title="Split selected clip at current playhead position"
+                  >
+                    <Scissors className="h-3.5 w-3.5" />
+                    Split at playhead (⌘B)
+                  </button>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleTrimStartToPlayhead}
+                      disabled={!canTrimStart}
+                      className="rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-center"
+                      title="Trim start of clip to playhead"
+                    >
+                      Trim Start
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTrimEndToPlayhead}
+                      disabled={!canTrimEnd}
+                      className="rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-center"
+                      title="Trim end of clip to playhead"
+                    >
+                      Trim End
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : selectedOverlay ? (
             <div className="space-y-2 text-xs">
@@ -2073,7 +2392,7 @@ export default function EditorWorkspace() {
                     <input
                       value={selectedOverlay.text ?? ""}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { text: event.target.value.slice(0, 200) })}
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2082,7 +2401,7 @@ export default function EditorWorkspace() {
                       type="color"
                       value={selectedOverlay.color || "#ffffff"}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { color: event.target.value })}
-                      className="mt-1 h-8 w-full bg-transparent"
+                      className="mt-1 h-8 w-full cursor-pointer rounded-md border border-white/10 bg-white/5 px-1 py-0.5 outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2095,7 +2414,7 @@ export default function EditorWorkspace() {
                       onChange={(event) =>
                         updateOverlay(selectedOverlay.id, { fontSize: Number(event.target.value) || 48 })
                       }
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                 </>
@@ -2110,7 +2429,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { startSec: Math.max(0, Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2123,7 +2442,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { endSec: Number(event.target.value) || 0 })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2136,7 +2455,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { z: Math.round(Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
             </div>
@@ -2170,6 +2489,21 @@ export default function EditorWorkspace() {
           }
         }}
       />
+
+      {uploadState?.isUploading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-brand-primary/40 bg-N100/95 px-4 py-2.5 text-xs text-brand-primary shadow-2xl backdrop-blur-md transition-all duration-300"
+        >
+          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
+          <span className="font-medium text-text-primary">
+            Mengunggah <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
+          </span>
+        </div>
+      ) : null}
+
+      {toast ? <EditorToast toast={toast} onDismiss={dismissToast} /> : null}
     </div>
   );
 }
