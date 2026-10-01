@@ -12,6 +12,7 @@ import {
   Pause,
   Play,
   Plus,
+  Scissors,
   SkipBack,
   SkipForward,
   StepBack,
@@ -39,6 +40,9 @@ import {
   EDITOR_MAX_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
+  canSplitClip,
+  canTrimClipEnd,
+  canTrimClipStart,
   clampClipToComposition,
   clampOverlayToComposition,
   clipAtPlayhead,
@@ -52,6 +56,9 @@ import {
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
+  splitEditorClip,
+  trimClipEndToPlayhead,
+  trimClipStartToPlayhead,
   validateEditorExport,
   withProjectAspect,
   withProjectDuration,
@@ -568,12 +575,14 @@ export default function EditorWorkspace() {
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
+  const playheadRef = useRef(playhead);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
   pastRef.current = past;
   futureRef.current = future;
   selectedIdRef.current = selectedId;
+  playheadRef.current = playhead;
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -613,6 +622,10 @@ export default function EditorWorkspace() {
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
   const navClip = selectedClip ?? active?.clip ?? null;
+
+  const canSplitSelected = selectedClip ? canSplitClip(selectedClip, playhead) : false;
+  const canTrimStart = selectedClip ? canTrimClipStart(selectedClip, playhead) : false;
+  const canTrimEnd = selectedClip ? canTrimClipEnd(selectedClip, playhead) : false;
 
   const stepPlayhead = (deltaSec: number) => {
     setPlaying(false);
@@ -736,6 +749,37 @@ export default function EditorWorkspace() {
     },
     []
   );
+
+  const handleSplitSelected = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canSplitClip(clip, playheadRef.current)) return;
+    const result = splitEditorClip(docRef.current, id, playheadRef.current);
+    if (!result) return;
+    patchDoc(() => result.doc);
+    setSelectedId(result.rightClipId);
+  }, [patchDoc]);
+
+  const handleTrimStartToPlayhead = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canTrimClipStart(clip, playheadRef.current)) return;
+    const updated = trimClipStartToPlayhead(docRef.current, id, playheadRef.current);
+    if (!updated) return;
+    patchDoc(() => updated);
+  }, [patchDoc]);
+
+  const handleTrimEndToPlayhead = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const clip = docRef.current.sequence.find((c) => c.id === id);
+    if (!clip || !canTrimClipEnd(clip, playheadRef.current)) return;
+    const updated = trimClipEndToPlayhead(docRef.current, id, playheadRef.current);
+    if (!updated) return;
+    patchDoc(() => updated);
+  }, [patchDoc]);
 
   const undo = useCallback(() => {
     const p = pastRef.current;
@@ -1010,6 +1054,11 @@ export default function EditorWorkspace() {
         void handleSave();
         return;
       }
+      if (meta && !editable && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        handleSplitSelected();
+        return;
+      }
       if (meta && !editable && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
         event.preventDefault();
         if (event.key.toLowerCase() === "y" || event.shiftKey) redo();
@@ -1042,7 +1091,7 @@ export default function EditorWorkspace() {
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener("keydown", onKey);
     };
-  }, [handleSave, undo, redo, deleteSelected]);
+  }, [handleSave, undo, redo, deleteSelected, handleSplitSelected]);
 
   const attachSourceDuration = useCallback(async (clipId: string, storagePath: string | null) => {
     if (!storagePath) return;
@@ -1570,6 +1619,17 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={handleSplitSelected}
+                  disabled={!canSplitSelected}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10"
+                  title={canSplitSelected ? "Split clip at playhead (⌘B)" : "Select a clip intersecting playhead to split"}
+                  aria-label="Split clip at playhead"
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                  Split
+                </button>
                 <input
                   ref={uploadRef}
                   type="file"
@@ -2016,6 +2076,41 @@ export default function EditorWorkspace() {
                   {formatTimecode(maxClipLayerDurationSec(selectedClip))}
                 </p>
               ) : null}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <p className="font-medium text-text-secondary">Trim & Split</p>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSplitSelected}
+                    disabled={!canSplitSelected}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10"
+                    title="Split selected clip at current playhead position"
+                  >
+                    <Scissors className="h-3.5 w-3.5" />
+                    Split at playhead (⌘B)
+                  </button>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleTrimStartToPlayhead}
+                      disabled={!canTrimStart}
+                      className="rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-center"
+                      title="Trim start of clip to playhead"
+                    >
+                      Trim Start
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTrimEndToPlayhead}
+                      disabled={!canTrimEnd}
+                      className="rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-center"
+                      title="Trim end of clip to playhead"
+                    >
+                      Trim End
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : selectedOverlay ? (
             <div className="space-y-2 text-xs">

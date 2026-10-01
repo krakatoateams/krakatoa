@@ -206,6 +206,129 @@ export function clampClipToComposition(clip: EditorClip, durationSec: number): E
   return { ...clip, startSec, endSec, inSec };
 }
 
+export const CLIP_MIN_SPAN_SEC = 0.2;
+
+export function canSplitClip(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  const leftSpan = snapTenth(p - clip.startSec);
+  const rightSpan = snapTenth(clip.endSec - p);
+  return leftSpan >= CLIP_MIN_SPAN_SEC && rightSpan >= CLIP_MIN_SPAN_SEC;
+}
+
+export function splitEditorClip(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number,
+  newClipId?: string
+): { doc: EditorDocument; rightClipId: string } | null {
+  const index = doc.sequence.findIndex((c) => c.id === clipId);
+  if (index === -1) return null;
+  const target = doc.sequence[index];
+  if (!canSplitClip(target, playheadSec)) return null;
+
+  const p = snapTenth(playheadSec);
+  const leftClip: EditorClip = clampClipToComposition(
+    {
+      ...target,
+      endSec: p,
+    },
+    doc.durationSec
+  );
+
+  const delta = snapTenth(p - target.startSec);
+  const rightId = newClipId ?? `clip-${crypto.randomUUID().slice(0, 8)}`;
+  const rightClip: EditorClip = clampClipToComposition(
+    {
+      ...target,
+      id: rightId,
+      startSec: p,
+      endSec: target.endSec,
+      inSec: snapTenth(target.inSec + delta),
+    },
+    doc.durationSec
+  );
+
+  const newSequence: EditorClip[] = [];
+  for (let i = 0; i < doc.sequence.length; i++) {
+    if (i === index) {
+      newSequence.push(leftClip, rightClip);
+    } else {
+      newSequence.push(doc.sequence[i]);
+    }
+  }
+
+  return {
+    doc: {
+      ...doc,
+      sequence: newSequence.map((c, i) => ({ ...c, order: i })),
+    },
+    rightClipId: rightId,
+  };
+}
+
+export function canTrimClipStart(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  return p > clip.startSec && snapTenth(clip.endSec - p) >= CLIP_MIN_SPAN_SEC;
+}
+
+export function trimClipStartToPlayhead(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number
+): EditorDocument | null {
+  const clip = doc.sequence.find((c) => c.id === clipId);
+  if (!clip || !canTrimClipStart(clip, playheadSec)) return null;
+  const p = snapTenth(playheadSec);
+  const delta = snapTenth(p - clip.startSec);
+  return {
+    ...doc,
+    sequence: doc.sequence.map((c) =>
+      c.id === clipId
+        ? clampClipToComposition(
+            {
+              ...c,
+              startSec: p,
+              inSec: snapTenth(c.inSec + delta),
+            },
+            doc.durationSec
+          )
+        : c
+    ),
+  };
+}
+
+export function canTrimClipEnd(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  return p < clip.endSec && snapTenth(p - clip.startSec) >= CLIP_MIN_SPAN_SEC;
+}
+
+export function trimClipEndToPlayhead(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number
+): EditorDocument | null {
+  const clip = doc.sequence.find((c) => c.id === clipId);
+  if (!clip || !canTrimClipEnd(clip, playheadSec)) return null;
+  const p = snapTenth(playheadSec);
+  return {
+    ...doc,
+    sequence: doc.sequence.map((c) =>
+      c.id === clipId
+        ? clampClipToComposition(
+            {
+              ...c,
+              endSec: p,
+            },
+            doc.durationSec
+          )
+        : c
+    ),
+  };
+}
+
 export function clampOverlayToComposition(
   overlay: EditorOverlay,
   durationSec: number
@@ -476,7 +599,7 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
   return { creationIds, storagePaths };
 }
 
-function assert(cond: boolean, msg: string): void {
+function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`editor-document self-check: ${msg}`);
 }
 
@@ -590,6 +713,68 @@ export function editorDocumentSelfCheck(): void {
   const reordered = reorderById([{ id: "a" }, { id: "b" }, { id: "c" }], "a", "c");
   assert(reordered?.map((x) => x.id).join(",") === "b,c,a", "reorderById moves source next to target");
   assert(reorderById([{ id: "a" }], "a", "a") === null, "reorderById no-ops when source equals target");
+
+  // Split & trim pure tests
+  const testDoc: EditorDocument = {
+    v: 1,
+    aspect: "9:16",
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-split",
+        creationId: "item-1",
+        storagePath: null,
+        startSec: 1.0,
+        endSec: 5.0,
+        inSec: 0.5,
+        sourceDurationSec: 10,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+    ],
+    overlays: [],
+  };
+
+  // Split rejects:
+  assert(!canSplitClip(testDoc.sequence[0], 1.0), "split at clip start rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 5.0), "split at clip end rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 1.1), "split below min span rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 4.9), "split near end below min span rejected");
+  assert(!canSplitClip({ ...testDoc.sequence[0], locked: true }, 3.0), "locked clip split rejected");
+
+  // Valid split at 3.0s:
+  const splitResult = splitEditorClip(testDoc, "c-split", 3.0, "c-split-r");
+  assert(splitResult !== null, "valid split succeeds");
+  assert(splitResult.doc.sequence.length === 2, "split produces 2 clips");
+  const left = splitResult.doc.sequence[0];
+  const right = splitResult.doc.sequence[1];
+  assert(left.id === "c-split", "left keeps original id");
+  assert(left.startSec === 1.0 && left.endSec === 3.0, "left bounds: 1.0 - 3.0");
+  assert(left.inSec === 0.5, "left inSec preserved: 0.5");
+  assert(left.order === 0, "left order is 0");
+  assert(right.id === "c-split-r", "right has specified new id");
+  assert(right.startSec === 3.0 && right.endSec === 5.0, "right bounds: 3.0 - 5.0");
+  assert(right.inSec === 2.5, "right inSec calculated correctly: 2.5");
+  assert(right.order === 1, "right order is reindexed to 1");
+
+  // Trim start tests
+  assert(!canTrimClipStart(testDoc.sequence[0], 1.0), "trim start at same position rejected");
+  assert(!canTrimClipStart(testDoc.sequence[0], 4.9), "trim start leaving < min span rejected");
+  assert(!canTrimClipStart({ ...testDoc.sequence[0], locked: true }, 2.0), "trim start on locked clip rejected");
+  const trimmedStart = trimClipStartToPlayhead(testDoc, "c-split", 2.0);
+  assert(trimmedStart !== null, "trim start succeeds");
+  assert(trimmedStart.sequence[0].startSec === 2.0, "trimmed start is 2.0");
+  assert(trimmedStart.sequence[0].inSec === 1.5, "trimmed inSec is 1.5 (0.5 + 1.0)");
+
+  // Trim end tests
+  assert(!canTrimClipEnd(testDoc.sequence[0], 5.0), "trim end at same position rejected");
+  assert(!canTrimClipEnd(testDoc.sequence[0], 1.1), "trim end leaving < min span rejected");
+  assert(!canTrimClipEnd({ ...testDoc.sequence[0], locked: true }, 4.0), "trim end on locked clip rejected");
+  const trimmedEnd = trimClipEndToPlayhead(testDoc, "c-split", 4.0);
+  assert(trimmedEnd !== null, "trim end succeeds");
+  assert(trimmedEnd.sequence[0].endSec === 4.0, "trimmed end is 4.0");
+  assert(trimmedEnd.sequence[0].inSec === 0.5, "trim end leaves inSec unchanged: 0.5");
 }
 
 if (require.main === module) {
