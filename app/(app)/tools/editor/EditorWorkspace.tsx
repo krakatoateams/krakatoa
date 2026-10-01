@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
+  AlertCircle,
+  CheckCircle2,
   ChevronDown,
   Eye,
   EyeOff,
   ImagePlus,
+  Loader2,
   Lock,
   Pause,
   Play,
@@ -21,6 +24,7 @@ import {
   Unlock,
   Upload,
   Video,
+  X,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
@@ -518,6 +522,54 @@ function SignedImage({
   );
 }
 
+type UploadState = {
+  isUploading: boolean;
+  fileName: string;
+  kind: "sequence" | "image" | "video";
+};
+
+type EditorToastState = {
+  id: string;
+  type: "success" | "error";
+  message: string;
+};
+
+function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [toast.id, onDismiss]);
+
+  const isSuccess = toast.type === "success";
+
+  return (
+    <div
+      role="alert"
+      aria-live="polite"
+      className={`fixed bottom-6 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ${
+        isSuccess
+          ? "border-success/30 bg-N100/95 text-text-primary"
+          : "border-error/30 bg-N100/95 text-text-primary"
+      }`}
+    >
+      {isSuccess ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+      ) : (
+        <AlertCircle className="h-4 w-4 shrink-0 text-error" />
+      )}
+      <span className="text-xs font-medium leading-relaxed">{toast.message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Tutup notifikasi"
+        className="ml-auto shrink-0 cursor-pointer p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -534,6 +586,16 @@ export default function EditorWorkspace() {
   const [playhead, setPlayhead] = useState(0);
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [toast, setToast] = useState<EditorToastState | null>(null);
+
+  const showToast = useCallback((t: { type: "success" | "error"; message: string }) => {
+    setToast({ id: crypto.randomUUID(), ...t });
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    setToast(null);
+  }, []);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
@@ -1099,42 +1161,64 @@ export default function EditorWorkspace() {
   };
 
   const onUpload = async (file: File) => {
+    const kind = uploadKindRef.current;
+    setUploadState({ isUploading: true, fileName: file.name, kind });
     try {
       const uploaded = await uploadRefFile(file);
-      const kind = uploadKindRef.current;
       if (kind === "sequence") {
-        if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) return;
+        if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
+          showToast({
+            type: "error",
+            message: `Batas maksimal urutan (${EDITOR_MAX_SEQUENCE} klip) telah tercapai.`,
+          });
+          return;
+        }
         const duration = projectDurationSec(docRef.current);
         const clip = clipFromUpload(uploaded.path, docRef.current.sequence.length, playhead, duration);
         patchDoc((current) => ({
           ...current,
           sequence: [...current.sequence, clip],
         }));
+        setSelectedId(clip.id);
         void attachSourceDuration(clip.id, clip.storagePath);
+        showToast({ type: "success", message: "Media berhasil ditambahkan" });
         return;
       }
-      if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) return;
+      if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
+        showToast({
+          type: "error",
+          message: `Batas maksimal overlay (${EDITOR_MAX_OVERLAYS}) telah tercapai.`,
+        });
+        return;
+      }
+      let newOverlayId: string | null = null;
       patchDoc((current) => {
         const duration = projectDurationSec(current);
         const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
         const end = snapTenth(Math.min(duration, start + 2));
+        const overlay = mediaOverlay(
+          kind,
+          { storagePath: uploaded.path },
+          start,
+          end,
+          current.overlays.length,
+          EDITOR_CANVAS[current.aspect]
+        );
+        newOverlayId = overlay.id;
         return {
           ...current,
-          overlays: [
-            ...current.overlays,
-            mediaOverlay(
-              kind,
-              { storagePath: uploaded.path },
-              start,
-              end,
-              current.overlays.length,
-              EDITOR_CANVAS[current.aspect]
-            ),
-          ],
+          overlays: [...current.overlays, overlay],
         };
       });
+      if (newOverlayId) setSelectedId(newOverlayId);
+      showToast({ type: "success", message: "Media berhasil ditambahkan" });
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Upload failed.");
+      showToast({
+        type: "error",
+        message: err instanceof Error ? err.message : "Upload gagal.",
+      });
+    } finally {
+      setUploadState(null);
     }
   };
 
@@ -1476,10 +1560,15 @@ export default function EditorWorkspace() {
                     type="button"
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
+                    disabled={uploadState?.isUploading}
                     onClick={() => setAddMenuOpen((current) => !current)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    {uploadState?.isUploading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
                     Add
                     <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
@@ -1505,14 +1594,19 @@ export default function EditorWorkspace() {
                       <button
                         type="button"
                         role="menuitem"
+                        disabled={uploadState?.isUploading || doc.sequence.length >= EDITOR_MAX_SEQUENCE}
                         onClick={() => {
                           setAddMenuOpen(false);
                           uploadKindRef.current = "sequence";
                           uploadRef.current?.click();
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <Upload className="h-3.5 w-3.5" />
+                        {uploadState?.isUploading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
+                        ) : (
+                          <Upload className="h-3.5 w-3.5" />
+                        )}
                         Upload
                       </button>
                       <button
@@ -1575,6 +1669,7 @@ export default function EditorWorkspace() {
                   type="file"
                   accept={uploadKindRef.current === "image" ? "image/*" : "video/*"}
                   className="hidden"
+                  disabled={uploadState?.isUploading}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
@@ -1795,7 +1890,13 @@ export default function EditorWorkspace() {
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {clipRows.length === 0 ? (
+                  {uploadState?.kind === "sequence" ? (
+                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
+                    </div>
+                  ) : null}
+                  {clipRows.length === 0 && !uploadState ? (
                     <div className="h-8" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
@@ -1909,7 +2010,23 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {sequence.length === 0 ? (
+                    {uploadState?.kind === "sequence" ? (
+                      <div
+                        role="status"
+                        aria-label={`Mengunggah ${uploadState.fileName}`}
+                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
+                        style={{
+                          left: Math.max(0, playhead * pxPerSec),
+                          width: Math.max(90, 3 * pxPerSec),
+                        }}
+                      >
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                        <span className="truncate text-[11px] font-medium text-text-primary">
+                          Mengunggah {uploadState.fileName}...
+                        </span>
+                      </div>
+                    ) : null}
+                    {sequence.length === 0 && !uploadState ? (
                       <div className="h-8" />
                     ) : (
                       clipRows.map(({ clip }) => {
@@ -2124,6 +2241,21 @@ export default function EditorWorkspace() {
           }
         }}
       />
+
+      {uploadState?.isUploading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-brand-primary/40 bg-N100/95 px-4 py-2.5 text-xs text-brand-primary shadow-2xl backdrop-blur-md transition-all duration-300"
+        >
+          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
+          <span className="font-medium text-text-primary">
+            Mengunggah <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
+          </span>
+        </div>
+      ) : null}
+
+      {toast ? <EditorToast toast={toast} onDismiss={dismissToast} /> : null}
     </div>
   );
 }
