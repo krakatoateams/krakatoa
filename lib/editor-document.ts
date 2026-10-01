@@ -632,6 +632,62 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
   return { creationIds, storagePaths };
 }
 
+export const EDITOR_MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+
+export const EDITOR_ACCEPTED_VIDEO_MIME_TYPES = [
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+] as const;
+
+export const EDITOR_ACCEPTED_IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+export const EDITOR_ACCEPTED_UPLOAD_MIME_TYPES = new Set<string>([
+  ...EDITOR_ACCEPTED_VIDEO_MIME_TYPES,
+  ...EDITOR_ACCEPTED_IMAGE_MIME_TYPES,
+]);
+
+export function validateEditorUploadFile(
+  file: { size: number; type: string; name: string },
+  expectedKind?: "sequence" | "image" | "video"
+): { ok: true } | { ok: false; error: string } {
+  if (file.size > EDITOR_MAX_UPLOAD_BYTES) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    return {
+      ok: false,
+      error: `Ukuran file terlalu besar (${sizeMB} MB). Maksimal ukuran file adalah 100 MB.`,
+    };
+  }
+
+  if (!file.type || !EDITOR_ACCEPTED_UPLOAD_MIME_TYPES.has(file.type)) {
+    return {
+      ok: false,
+      error: `Format file "${file.type || file.name}" tidak didukung. Gunakan format MP4, MOV, WebM, JPEG, PNG, atau WebP.`,
+    };
+  }
+
+  if (expectedKind === "image" && !file.type.startsWith("image/")) {
+    return {
+      ok: false,
+      error: "Hanya file gambar (JPEG, PNG, WebP) yang diizinkan untuk overlay gambar.",
+    };
+  }
+
+  if ((expectedKind === "sequence" || expectedKind === "video") && !file.type.startsWith("video/")) {
+    return {
+      ok: false,
+      error: "Hanya file video (MP4, MOV, WebM) yang diizinkan.",
+    };
+  }
+
+  return { ok: true };
+}
+
+
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`editor-document self-check: ${msg}`);
 }
@@ -746,6 +802,28 @@ export function editorDocumentSelfCheck(): void {
   const reordered = reorderById([{ id: "a" }, { id: "b" }, { id: "c" }], "a", "c");
   assert(reordered?.map((x) => x.id).join(",") === "b,c,a", "reorderById moves source next to target");
   assert(reorderById([{ id: "a" }], "a", "a") === null, "reorderById no-ops when source equals target");
+
+  // Upload validation tests
+  const oversized = validateEditorUploadFile({ size: EDITOR_MAX_UPLOAD_BYTES + 1, type: "video/mp4", name: "big.mp4" });
+  assert(!oversized.ok && oversized.error.includes("terlalu besar"), "oversized file rejected");
+
+  const badType = validateEditorUploadFile({ size: 1024, type: "application/pdf", name: "doc.pdf" });
+  assert(!badType.ok && badType.error.includes("tidak didukung"), "unsupported mime type rejected");
+
+  const validVideo = validateEditorUploadFile({ size: 1024 * 1024, type: "video/mp4", name: "v.mp4" }, "sequence");
+  assert(validVideo.ok, "valid mp4 sequence upload accepted");
+
+  const validMov = validateEditorUploadFile({ size: 1024 * 1024, type: "video/quicktime", name: "v.mov" }, "video");
+  assert(validMov.ok, "valid mov overlay upload accepted");
+
+  const validWebp = validateEditorUploadFile({ size: 500, type: "image/webp", name: "img.webp" }, "image");
+  assert(validWebp.ok, "valid webp image upload accepted");
+
+  const imageForSequence = validateEditorUploadFile({ size: 500, type: "image/png", name: "img.png" }, "sequence");
+  assert(!imageForSequence.ok, "image rejected for video sequence");
+
+  const videoForImage = validateEditorUploadFile({ size: 1024, type: "video/mp4", name: "v.mp4" }, "image");
+  assert(!videoForImage.ok, "video rejected for image overlay");
 
   // Split & trim pure tests
   const testDoc: EditorDocument = {
