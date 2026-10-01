@@ -3,7 +3,8 @@
  * `durationSec`, overlay each clip full-frame in its time window, then
  * overlay / drawtext with enable='between(t,…)'.
  *
- * Pure graph builder — runnable as `npx tsx lib/editor-render.ts`.
+ * Pure graph builder — runnable as `npx tsx --conditions=react-server lib/editor-render.ts`
+ * (the condition resolves `server-only` from `@/lib/rendi` to its empty export).
  * The route calls `runEditorRender` which talks to Rendi.
  */
 
