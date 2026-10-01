@@ -186,7 +186,7 @@ export default function EditorSavedList({
             <button
               type="button"
               onClick={onNew}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
             >
               <Plus className="h-3.5 w-3.5" />
               New
@@ -195,7 +195,7 @@ export default function EditorSavedList({
               type="button"
               aria-label="Close saved edits"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary"
+              className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
             >
               <X className="h-4 w-4" />
             </button>
@@ -253,7 +253,7 @@ export default function EditorSavedList({
                                 }
                                 void commitRename();
                               }}
-                              className="w-full rounded-md border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-sm font-medium text-text-primary outline-none focus:border-white/30"
+                              className="w-full rounded-md border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-sm font-medium text-text-primary outline-none focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                             />
                             <p className="mt-0.5 text-xs text-text-secondary">
                               {item.clipCount} {item.clipCount === 1 ? "clip" : "clips"}
@@ -264,7 +264,7 @@ export default function EditorSavedList({
                           <button
                             type="button"
                             onClick={() => onSelect(item.id)}
-                            className="min-w-0 flex-1 text-left"
+                            className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary rounded"
                           >
                             <p className="truncate text-sm font-medium text-text-primary">{item.title}</p>
                             <p className="mt-0.5 text-xs text-text-secondary">
@@ -276,6 +276,7 @@ export default function EditorSavedList({
                         <button
                           type="button"
                           aria-label={`Rename ${item.title}`}
+                          title={`Rename ${item.title}`}
                           disabled={Boolean(deletingId) || renameSaving}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -285,16 +286,17 @@ export default function EditorSavedList({
                             }
                             beginRename(item);
                           }}
-                          className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary disabled:opacity-50"
+                          className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           type="button"
                           aria-label={`Delete ${item.title}`}
+                          title={`Delete ${item.title}`}
                           disabled={deletingId === item.id}
                           onClick={() => void handleDelete(item.id)}
-                          className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-error disabled:opacity-50"
+                          className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-error focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {deletingId === item.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
