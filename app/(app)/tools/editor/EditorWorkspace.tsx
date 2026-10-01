@@ -39,6 +39,7 @@ import {
   EDITOR_MAX_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
+  LAYER_NAME_MAX,
   clampClipToComposition,
   clampOverlayToComposition,
   clipAtPlayhead,
@@ -46,9 +47,11 @@ import {
   emptyEditorDocument,
   maxClipLayerDurationSec,
   normalizeEditorTitle,
+  normalizeLayerName,
   parseEditorDocument,
   projectDurationSec,
   reorderById,
+  resolveLayerLabel,
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
@@ -309,6 +312,7 @@ function LayerPanelRow({
   onToggleLock,
   onToggleHidden,
   onDelete,
+  onRename,
 }: {
   id: string;
   selected: boolean;
@@ -324,13 +328,39 @@ function LayerPanelRow({
   onToggleLock: () => void;
   onToggleHidden: () => void;
   onDelete: () => void;
+  onRename?: (nextName: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(label);
+  const committedRef = useRef(false);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setEditDraft(label);
+  }, [editing, label]);
+
+  const commitEdit = (raw: string) => {
+    if (committedRef.current || cancelledRef.current) return;
+    committedRef.current = true;
+    setEditing(false);
+    const trimmed = raw.trim();
+    if (trimmed !== label) {
+      onRename?.(trimmed);
+    }
+  };
+
+  const cancelEdit = () => {
+    cancelledRef.current = true;
+    setEditing(false);
+    setEditDraft(label);
+  };
+
   return (
     <div
       data-layer-row
       data-layer-id={id}
       onPointerDown={(event) => {
-        if (locked || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
+        if (locked || editing || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
           return;
         }
         onReorderStart();
@@ -338,13 +368,54 @@ function LayerPanelRow({
       }}
       onClick={onSelect}
       className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
-        locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        locked ? "cursor-default" : editing ? "cursor-text" : "cursor-grab active:cursor-grabbing"
       } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
       }`}
     >
       <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
-      <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={editDraft}
+          maxLength={LAYER_NAME_MAX}
+          data-nodrag
+          onChange={(event) => setEditDraft(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitEdit(editDraft);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEdit();
+            }
+          }}
+          onBlur={() => {
+            commitEdit(editDraft);
+          }}
+          className="min-w-0 flex-1 rounded bg-white/10 px-1 py-0.5 text-[11px] text-text-primary outline-none ring-1 ring-brand-primary"
+        />
+      ) : (
+        <span
+          onDoubleClick={(event) => {
+            if (locked || !onRename) return;
+            event.stopPropagation();
+            event.preventDefault();
+            committedRef.current = false;
+            cancelledRef.current = false;
+            setEditDraft(label);
+            setEditing(true);
+          }}
+          className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}
+          title="Double-click to rename"
+        >
+          {label}
+        </span>
+      )}
       <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
         <button
           type="button"
@@ -652,23 +723,21 @@ export default function EditorWorkspace() {
 
   // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
   const clipRows = sequence
-    .map((clip, i) => ({ clip, label: `Clip ${i + 1}` }))
+    .map((clip, i) => ({ clip, label: resolveLayerLabel(clip, i) }))
     .reverse();
   let imageOverlayCount = 0;
   let videoOverlayCount = 0;
   const overlayRows = overlays
     .map((overlay) => {
-      let label: string;
-      if (overlay.kind === "text") {
-        label = overlay.text?.trim().slice(0, 18) || "Text";
-      } else if (overlay.kind === "image") {
+      let typeIndex: number | undefined;
+      if (overlay.kind === "image") {
+        typeIndex = imageOverlayCount;
         imageOverlayCount += 1;
-        label = `Image overlay ${imageOverlayCount}`;
-      } else {
+      } else if (overlay.kind === "video") {
+        typeIndex = videoOverlayCount;
         videoOverlayCount += 1;
-        label = `Video overlay ${videoOverlayCount}`;
       }
-      return { overlay, label };
+      return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
 
@@ -1791,6 +1860,7 @@ export default function EditorWorkspace() {
                         onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
                         onDelete={() => removeLayer("overlay", overlay.id)}
+                        onRename={(nextName) => updateOverlay(overlay.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))}
                   </div>
@@ -1823,6 +1893,7 @@ export default function EditorWorkspace() {
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
                         onDelete={() => removeLayer("clip", clip.id)}
+                        onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))
                   )}
@@ -1874,7 +1945,7 @@ export default function EditorWorkspace() {
                   />
                   {overlayRows.length > 0 ? (
                     <div className="mb-2 space-y-1">
-                      {overlayRows.map(({ overlay }) => (
+                      {overlayRows.map(({ overlay, label }) => (
                         <TimelineLayerRow
                           key={overlay.id}
                           selected={overlay.id === selectedId}
@@ -1899,7 +1970,7 @@ export default function EditorWorkspace() {
                           }
                           label={
                             <>
-                              <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
+                              <span className="truncate capitalize">{label}</span>
                               <span className="ml-1 tabular-nums text-text-secondary">
                                 {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
                               </span>
@@ -1913,7 +1984,7 @@ export default function EditorWorkspace() {
                     {sequence.length === 0 ? (
                       <div className="h-8" />
                     ) : (
-                      clipRows.map(({ clip }) => {
+                      clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);
                         return (
                           <TimelineLayerRow
@@ -1940,7 +2011,7 @@ export default function EditorWorkspace() {
                             }
                             label={
                               <>
-                                Clip
+                                <span className="truncate">{label}</span>
                                 <span className="ml-1 tabular-nums opacity-80">
                                   {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
                                 </span>
