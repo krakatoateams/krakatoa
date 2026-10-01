@@ -627,6 +627,7 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const uploadingRef = useRef(false);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
@@ -1161,6 +1162,8 @@ export default function EditorWorkspace() {
   };
 
   const onUpload = async (file: File) => {
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
     const kind = uploadKindRef.current;
     setUploadState({ isUploading: true, fileName: file.name, kind });
     try {
@@ -1218,6 +1221,7 @@ export default function EditorWorkspace() {
         message: err instanceof Error ? err.message : "Upload gagal.",
       });
     } finally {
+      uploadingRef.current = false;
       setUploadState(null);
     }
   };
@@ -1890,12 +1894,6 @@ export default function EditorWorkspace() {
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {uploadState?.kind === "sequence" ? (
-                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
-                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
-                    </div>
-                  ) : null}
                   {clipRows.length === 0 && !uploadState ? (
                     <div className="h-8" />
                   ) : (
@@ -1926,6 +1924,12 @@ export default function EditorWorkspace() {
                       />
                     ))
                   )}
+                  {uploadState?.kind === "sequence" ? (
+                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                      <span className="truncate text-[11px] font-medium">Mengunggah...</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -2010,22 +2014,6 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {uploadState?.kind === "sequence" ? (
-                      <div
-                        role="status"
-                        aria-label={`Mengunggah ${uploadState.fileName}`}
-                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
-                        style={{
-                          left: Math.max(0, playhead * pxPerSec),
-                          width: Math.max(90, 3 * pxPerSec),
-                        }}
-                      >
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
-                        <span className="truncate text-[11px] font-medium text-text-primary">
-                          Mengunggah {uploadState.fileName}...
-                        </span>
-                      </div>
-                    ) : null}
                     {sequence.length === 0 && !uploadState ? (
                       <div className="h-8" />
                     ) : (
@@ -2067,6 +2055,22 @@ export default function EditorWorkspace() {
                         );
                       })
                     )}
+                    {uploadState?.kind === "sequence" ? (
+                      <div
+                        role="status"
+                        aria-label={`Mengunggah ${uploadState.fileName}`}
+                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
+                        style={{
+                          left: Math.max(0, playhead * pxPerSec),
+                          width: Math.max(90, 3 * pxPerSec),
+                        }}
+                      >
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
+                        <span className="truncate text-[11px] font-medium text-text-primary">
+                          Mengunggah {uploadState.fileName}...
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
