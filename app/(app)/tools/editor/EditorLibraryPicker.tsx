@@ -109,7 +109,7 @@ export function EditorLibraryProvider({ children }: { children: React.ReactNode 
                       type="button"
                       aria-label="Refresh library"
                       onClick={() => setRefreshKey((k) => k + 1)}
-                      className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary"
+                      className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                     >
                       <RefreshCw className="h-4 w-4" />
                     </button>
@@ -117,7 +117,7 @@ export function EditorLibraryProvider({ children }: { children: React.ReactNode 
                       type="button"
                       aria-label="Close library"
                       onClick={close}
-                      className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary"
+                      className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                     >
                       <X className="h-4 w-4" />
                     </button>

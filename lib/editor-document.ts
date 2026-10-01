@@ -26,6 +26,7 @@ export const EDITOR_CANVAS: Record<EditorAspect, { w: number; h: number }> = {
 
 export type EditorClip = {
   id: string;
+  name?: string | null;
   creationId: string | null;
   storagePath: string | null;
   /** Timeline placement. */
@@ -44,6 +45,7 @@ export type EditorOverlayKind = "text" | "image" | "video";
 
 export type EditorOverlay = {
   id: string;
+  name?: string | null;
   kind: EditorOverlayKind;
   startSec: number;
   endSec: number;
@@ -81,6 +83,33 @@ const ID_MAX = 64;
 const PATH_MAX = 512;
 const TEXT_MAX = 200;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+export const LAYER_NAME_MAX = 60;
+
+export function normalizeLayerName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().slice(0, LAYER_NAME_MAX);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function resolveLayerLabel(
+  layer: EditorClip | EditorOverlay,
+  fallbackIndex?: number
+): string {
+  if (layer.name && layer.name.trim().length > 0) {
+    return layer.name.trim();
+  }
+  if ("kind" in layer) {
+    if (layer.kind === "text") {
+      return layer.text?.trim() || "Text";
+    }
+    if (layer.kind === "image") {
+      return typeof fallbackIndex === "number" ? `Image overlay ${fallbackIndex + 1}` : "Image overlay";
+    }
+    return typeof fallbackIndex === "number" ? `Video overlay ${fallbackIndex + 1}` : "Video overlay";
+  }
+  const index = typeof fallbackIndex === "number" ? fallbackIndex + 1 : layer.order + 1;
+  return `Clip ${index}`;
+}
 
 function asFiniteNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -206,6 +235,130 @@ export function clampClipToComposition(clip: EditorClip, durationSec: number): E
   return { ...clip, startSec, endSec, inSec };
 }
 
+export const CLIP_MIN_SPAN_SEC = 0.2;
+
+export function canSplitClip(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  const leftSpan = snapTenth(p - clip.startSec);
+  const rightSpan = snapTenth(clip.endSec - p);
+  return leftSpan >= CLIP_MIN_SPAN_SEC && rightSpan >= CLIP_MIN_SPAN_SEC;
+}
+
+export function splitEditorClip(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number,
+  newClipId?: string
+): { doc: EditorDocument; rightClipId: string } | null {
+  const sorted = sortedSequence(doc);
+  const targetIndex = sorted.findIndex((c) => c.id === clipId);
+  if (targetIndex === -1) return null;
+  const target = sorted[targetIndex];
+  if (!canSplitClip(target, playheadSec)) return null;
+
+  const p = snapTenth(playheadSec);
+  const leftClip: EditorClip = clampClipToComposition(
+    {
+      ...target,
+      endSec: p,
+    },
+    doc.durationSec
+  );
+
+  const delta = snapTenth(p - target.startSec);
+  const rightId = newClipId ?? `clip-${crypto.randomUUID().slice(0, 8)}`;
+  const rightClip: EditorClip = clampClipToComposition(
+    {
+      ...target,
+      id: rightId,
+      startSec: p,
+      endSec: target.endSec,
+      inSec: snapTenth(target.inSec + delta),
+    },
+    doc.durationSec
+  );
+
+  const newSequence: EditorClip[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i === targetIndex) {
+      newSequence.push(leftClip, rightClip);
+    } else {
+      newSequence.push(sorted[i]);
+    }
+  }
+
+  return {
+    doc: {
+      ...doc,
+      sequence: newSequence.map((c, i) => ({ ...c, order: i })),
+    },
+    rightClipId: rightId,
+  };
+}
+
+export function canTrimClipStart(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  return p > clip.startSec && snapTenth(clip.endSec - p) >= CLIP_MIN_SPAN_SEC;
+}
+
+export function trimClipStartToPlayhead(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number
+): EditorDocument | null {
+  const clip = doc.sequence.find((c) => c.id === clipId);
+  if (!clip || !canTrimClipStart(clip, playheadSec)) return null;
+  const p = snapTenth(playheadSec);
+  const delta = snapTenth(p - clip.startSec);
+  return {
+    ...doc,
+    sequence: doc.sequence.map((c) =>
+      c.id === clipId
+        ? clampClipToComposition(
+            {
+              ...c,
+              startSec: p,
+              inSec: snapTenth(c.inSec + delta),
+            },
+            doc.durationSec
+          )
+        : c
+    ),
+  };
+}
+
+export function canTrimClipEnd(clip: EditorClip, playheadSec: number): boolean {
+  if (clip.locked) return false;
+  const p = snapTenth(playheadSec);
+  return p < clip.endSec && snapTenth(p - clip.startSec) >= CLIP_MIN_SPAN_SEC;
+}
+
+export function trimClipEndToPlayhead(
+  doc: EditorDocument,
+  clipId: string,
+  playheadSec: number
+): EditorDocument | null {
+  const clip = doc.sequence.find((c) => c.id === clipId);
+  if (!clip || !canTrimClipEnd(clip, playheadSec)) return null;
+  const p = snapTenth(playheadSec);
+  return {
+    ...doc,
+    sequence: doc.sequence.map((c) =>
+      c.id === clipId
+        ? clampClipToComposition(
+            {
+              ...c,
+              endSec: p,
+            },
+            doc.durationSec
+          )
+        : c
+    ),
+  };
+}
+
 export function clampOverlayToComposition(
   overlay: EditorOverlay,
   durationSec: number
@@ -284,6 +437,7 @@ function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolea
       : null;
   return {
     id,
+    name: normalizeLayerName(o.name),
     creationId: asId(o.creationId),
     storagePath: asPath(o.storagePath),
     startSec,
@@ -312,6 +466,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
   const colorRaw = asTrimmed(o.color, 7);
   return {
     id,
+    name: normalizeLayerName(o.name),
     kind,
     startSec,
     endSec,
@@ -380,6 +535,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
     clampClipToComposition(
       {
         id: clip.id,
+        name: clip.name ?? null,
         creationId: clip.creationId,
         storagePath: clip.storagePath,
         startSec: clip.startSec,
@@ -531,6 +687,7 @@ export function validateEditorUploadFile(
   return { ok: true };
 }
 
+
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`editor-document self-check: ${msg}`);
 }
@@ -667,6 +824,195 @@ export function editorDocumentSelfCheck(): void {
 
   const videoForImage = validateEditorUploadFile({ size: 1024, type: "video/mp4", name: "v.mp4" }, "image");
   assert(!videoForImage.ok, "video rejected for image overlay");
+
+  // Split & trim pure tests
+  const testDoc: EditorDocument = {
+    v: 1,
+    aspect: "9:16",
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-split",
+        creationId: "item-1",
+        storagePath: null,
+        startSec: 1.0,
+        endSec: 5.0,
+        inSec: 0.5,
+        sourceDurationSec: 10,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+    ],
+    overlays: [],
+  };
+
+  // Split rejects:
+  assert(!canSplitClip(testDoc.sequence[0], 1.0), "split at clip start rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 5.0), "split at clip end rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 1.1), "split below min span rejected");
+  assert(!canSplitClip(testDoc.sequence[0], 4.9), "split near end below min span rejected");
+  assert(!canSplitClip({ ...testDoc.sequence[0], locked: true }, 3.0), "locked clip split rejected");
+
+  // Valid split at 3.0s:
+  const splitResult = splitEditorClip(testDoc, "c-split", 3.0, "c-split-r");
+  assert(splitResult !== null, "valid split succeeds");
+  assert(splitResult.doc.sequence.length === 2, "split produces 2 clips");
+  const left = splitResult.doc.sequence[0];
+  const right = splitResult.doc.sequence[1];
+  assert(left.id === "c-split", "left keeps original id");
+  assert(left.startSec === 1.0 && left.endSec === 3.0, "left bounds: 1.0 - 3.0");
+  assert(left.inSec === 0.5, "left inSec preserved: 0.5");
+  assert(left.order === 0, "left order is 0");
+  assert(right.id === "c-split-r", "right has specified new id");
+  assert(right.startSec === 3.0 && right.endSec === 5.0, "right bounds: 3.0 - 5.0");
+  assert(right.inSec === 2.5, "right inSec calculated correctly: 2.5");
+  assert(right.order === 1, "right order is reindexed to 1");
+
+  // Trim start tests
+  assert(!canTrimClipStart(testDoc.sequence[0], 1.0), "trim start at same position rejected");
+  assert(!canTrimClipStart(testDoc.sequence[0], 4.9), "trim start leaving < min span rejected");
+  assert(!canTrimClipStart({ ...testDoc.sequence[0], locked: true }, 2.0), "trim start on locked clip rejected");
+  const trimmedStart = trimClipStartToPlayhead(testDoc, "c-split", 2.0);
+  assert(trimmedStart !== null, "trim start succeeds");
+  assert(trimmedStart.sequence[0].startSec === 2.0, "trimmed start is 2.0");
+  assert(trimmedStart.sequence[0].inSec === 1.5, "trimmed inSec is 1.5 (0.5 + 1.0)");
+
+  // Trim end tests
+  assert(!canTrimClipEnd(testDoc.sequence[0], 5.0), "trim end at same position rejected");
+  assert(!canTrimClipEnd(testDoc.sequence[0], 1.1), "trim end leaving < min span rejected");
+  assert(!canTrimClipEnd({ ...testDoc.sequence[0], locked: true }, 4.0), "trim end on locked clip rejected");
+  const trimmedEnd = trimClipEndToPlayhead(testDoc, "c-split", 4.0);
+  assert(trimmedEnd !== null, "trim end succeeds");
+  assert(trimmedEnd.sequence[0].endSec === 4.0, "trimmed end is 4.0");
+  assert(trimmedEnd.sequence[0].inSec === 0.5, "trim end leaves inSec unchanged: 0.5");
+
+  // Multi-clip out-of-order split, locked->null, id tidak ada->null, right clip properties
+  const outOfOrderDoc: EditorDocument = {
+    ...emptyEditorDocument(),
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-third",
+        creationId: "c3",
+        storagePath: null,
+        startSec: 6.0,
+        endSec: 9.0,
+        inSec: 0,
+        sourceDurationSec: 15,
+        order: 2,
+        locked: false,
+        hidden: true,
+      },
+      {
+        id: "c-first",
+        creationId: "c1",
+        storagePath: null,
+        startSec: 0.0,
+        endSec: 3.0,
+        inSec: 0,
+        sourceDurationSec: 10,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+      {
+        id: "c-second",
+        creationId: "c2",
+        storagePath: null,
+        startSec: 3.0,
+        endSec: 6.0,
+        inSec: 0,
+        sourceDurationSec: null,
+        order: 1,
+        locked: false,
+        hidden: false,
+      },
+    ],
+  };
+
+  // locked -> null
+  const lockedDoc: EditorDocument = {
+    ...outOfOrderDoc,
+    sequence: outOfOrderDoc.sequence.map((c) => (c.id === "c-first" ? { ...c, locked: true } : c)),
+  };
+  assert(splitEditorClip(lockedDoc, "c-first", 1.5) === null, "locked clip split returns null");
+
+  // id tidak ada -> null
+  assert(splitEditorClip(outOfOrderDoc, "non-existent-id", 1.5) === null, "non-existent id split returns null");
+
+  // Multi-clip out-of-order split on c-third
+  const oooSplit = splitEditorClip(outOfOrderDoc, "c-third", 7.5, "c-third-r");
+  assert(oooSplit !== null, "out-of-order multi-clip split succeeds");
+  assert(oooSplit.doc.sequence.length === 4, "out-of-order split results in 4 clips");
+  const reindexedIds = oooSplit.doc.sequence.map((c) => c.id);
+  assert(
+    reindexedIds.join(",") === "c-first,c-second,c-third,c-third-r",
+    "reindexed in sorted order with right clip immediately after left"
+  );
+  assert(oooSplit.doc.sequence.every((c, i) => c.order === i), "all orders sequential 0..3");
+
+  // Right clip preserves non-default sourceDurationSec, locked, hidden
+  const rightOoo = oooSplit.doc.sequence.find((c) => c.id === "c-third-r")!;
+  assert(rightOoo.sourceDurationSec === 15, "right clip preserves non-default sourceDurationSec");
+  assert(rightOoo.hidden === true, "right clip preserves non-default hidden");
+  assert(rightOoo.locked === false, "right clip preserves locked state");
+
+  // Trim start near source boundary
+  const sourceCappedDoc: EditorDocument = {
+    ...emptyEditorDocument(),
+    durationSec: 10,
+    sequence: [
+      {
+        id: "c-bounded",
+        creationId: "b1",
+        storagePath: null,
+        startSec: 0.0,
+        endSec: 4.0,
+        inSec: 0.0,
+        sourceDurationSec: 5.0,
+        order: 0,
+        locked: false,
+        hidden: false,
+      },
+    ],
+  };
+  const trimmedNearBound = trimClipStartToPlayhead(sourceCappedDoc, "c-bounded", 3.5);
+  assert(trimmedNearBound !== null, "trim start near source boundary succeeds");
+  assert(trimmedNearBound.sequence[0].startSec === 3.5, "trimmed startSec is 3.5");
+  assert(trimmedNearBound.sequence[0].inSec === 3.5, "trimmed inSec is 3.5 near source boundary");
+
+  const trimmedMinSpan = trimClipStartToPlayhead(sourceCappedDoc, "c-bounded", 3.8);
+  assert(trimmedMinSpan !== null, "trim start leaving min span succeeds");
+  assert(trimmedMinSpan.sequence[0].startSec === 3.8, "trimmed startSec is 3.8");
+  assert(trimmedMinSpan.sequence[0].inSec === 3.8, "trimmed inSec is 3.8");
+
+  // Layer name normalization & resolution tests
+  assert(normalizeLayerName(null) === null, "null name normalizes to null");
+  assert(normalizeLayerName("   ") === null, "whitespace name normalizes to null");
+  assert(normalizeLayerName("  Intro Clip  ") === "Intro Clip", "name trims whitespace");
+  assert(normalizeLayerName("a".repeat(100))?.length === LAYER_NAME_MAX, "name caps to max length");
+
+  const namedDoc = parseEditorDocument({
+    durationSec: 5,
+    sequence: [
+      { id: "n1", creationId: "x", startSec: 0, endSec: 2, inSec: 0, order: 0, name: "  Scene 1  " },
+      { id: "n2", creationId: "y", startSec: 2, endSec: 4, inSec: 0, order: 1 },
+    ],
+    overlays: [
+      { id: "no1", kind: "text", startSec: 0, endSec: 2, text: "Sub", name: "Custom Caption" },
+      { id: "no2", kind: "image", startSec: 0, endSec: 2, name: null },
+    ],
+  });
+  assert(namedDoc?.sequence[0].name === "Scene 1", "clip name parsed and trimmed");
+  assert(namedDoc?.sequence[1].name === null, "clip without name defaults to null");
+  assert(namedDoc?.overlays[0].name === "Custom Caption", "overlay custom name parsed");
+  assert(namedDoc?.overlays[1].name === null, "overlay null name parsed as null");
+
+  assert(resolveLayerLabel(namedDoc!.sequence[0], 0) === "Scene 1", "resolveLayerLabel uses custom name");
+  assert(resolveLayerLabel(namedDoc!.sequence[1], 1) === "Clip 2", "resolveLayerLabel falls back to Clip 2");
+  assert(resolveLayerLabel(namedDoc!.overlays[0]) === "Custom Caption", "resolveLayerLabel uses custom overlay name");
+  assert(resolveLayerLabel(namedDoc!.overlays[1]) === "Image overlay", "resolveLayerLabel falls back to Image overlay");
 }
 
 if (require.main === module) {
