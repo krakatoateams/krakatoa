@@ -124,13 +124,14 @@
     "nanoid": "3.3.18",
     "postcss": "8.5.28",
     "@workflow/core": {
-      "nanoid": "5.1.16"
+      "nanoid": "5.1.16",
+      "devalue": "5.9.4"
     },
     "@workflow/world-local": {
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     },
     "@workflow/world-vercel": {
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     }
   }
 }
