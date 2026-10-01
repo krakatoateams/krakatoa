@@ -3,8 +3,12 @@
  * `durationSec`, overlay each clip full-frame in its time window, then
  * overlay / drawtext with enable='between(t,…)'.
  *
+ * Audio: each audible layer (see `isAudibleLayer`) whose source has an audio
+ * stream is trimmed, delayed to its timeline window, and mixed; with no
+ * audible source the export stays picture-only (`-an`).
+ *
  * Pure graph builder — runnable as `npx tsx lib/editor-render.ts`.
- * The route calls `runEditorRender` which talks to Rendi.
+ * The route calls `runEditorRender`, which probes source audio and talks to Rendi.
  */
 
 import {
@@ -13,6 +17,7 @@ import {
   type RunRendiOptions,
 } from "@/lib/rendi";
 import { getFontUrl } from "@/lib/reels-pipeline/rendi-stitch";
+import { probeAudioSources } from "@/lib/editor-audio-probe";
 import {
   EDITOR_CANVAS,
   clipLayerDurationSec,
@@ -67,6 +72,35 @@ function mediaUrlFor(
   return null;
 }
 
+/**
+ * Visible, unmuted sequence clip or video overlay — the layers the preview
+ * plays sound for. The export also requires the source to have an audio stream.
+ */
+export function isAudibleLayer(layer: EditorClip | EditorOverlay): boolean {
+  if (layer.hidden || layer.muted === true) return false;
+  return !("kind" in layer) || layer.kind === "video";
+}
+
+/** Source URLs of audible layers — what `runEditorRender` probes for audio. */
+export function audibleLayerUrls(doc: EditorDocument, urls: EditorMediaUrls): string[] {
+  return [...doc.sequence, ...doc.overlays]
+    .filter(isAudibleLayer)
+    .map((layer) => mediaUrlFor(urls, layer.creationId, layer.storagePath, layer.id))
+    .filter((url): url is string => Boolean(url));
+}
+
+/** Common sample format so `amix` never renegotiates between sources. */
+const AUDIO_FORMAT = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo";
+
+function placeAudioFilter(inputIndex: number, trim: string, startSec: number, label: string): string {
+  const delayMs = Math.round(startSec * 1000);
+  return `[${inputIndex}:a]${trim},asetpts=PTS-STARTPTS,${AUDIO_FORMAT},adelay=${delayMs}:all=1[${label}]`;
+}
+
+function overlayDurationSec(overlay: EditorOverlay): number {
+  return round2(Math.max(0.04, overlay.endSec - overlay.startSec));
+}
+
 function placeClipFilter(
   inputIndex: number,
   clip: EditorClip,
@@ -84,9 +118,14 @@ function placeClipFilter(
   );
 }
 
+/**
+ * @param audioUrls source URLs verified to carry an audio stream. A layer whose
+ *   URL is absent is treated as silent, so FFmpeg never reads a missing `[n:a]`.
+ */
 export function buildEditorFfmpegGraph(
   doc: EditorDocument,
-  urls: EditorMediaUrls
+  urls: EditorMediaUrls,
+  audioUrls: ReadonlySet<string>
 ): EditorFfmpegGraph {
   const invalid = validateEditorExport(doc);
   if (invalid) throw new Error(invalid.message);
@@ -104,6 +143,14 @@ export function buildEditorFfmpegGraph(
     `color=c=black:s=${width}x${height}:d=${durationSec}:r=30,format=yuv420p[base]`,
   ];
 
+  const audioLabels: string[] = [];
+  const addAudio = (layer: EditorClip | EditorOverlay, url: string, index: number, trim: string) => {
+    if (!isAudibleLayer(layer) || !audioUrls.has(url)) return;
+    const label = `a${audioLabels.length}`;
+    filters.push(placeAudioFilter(index, trim, layer.startSec, label));
+    audioLabels.push(label);
+  };
+
   const clipOverlays: { clip: EditorClip; index: number; label: string }[] = [];
   for (const clip of sequence) {
     const url = mediaUrlFor(urls, clip.creationId, clip.storagePath, clip.id);
@@ -113,6 +160,7 @@ export function buildEditorFfmpegGraph(
     inputArgs.push(`-i {{${alias}}}`);
     const label = `v${clipOverlays.length}`;
     filters.push(placeClipFilter(inputIndex, clip, width, height, label));
+    addAudio(clip, url, inputIndex, `atrim=start=${round2(clip.inSec)}:end=${round2(clipSourceOutSec(clip))}`);
     clipOverlays.push({ clip, index: inputIndex, label });
     inputIndex += 1;
   }
@@ -139,6 +187,7 @@ export function buildEditorFfmpegGraph(
     inputFiles[alias] = url;
     inputArgs.push(`-i {{${alias}}}`);
     overlayInputs.push({ overlay, index: inputIndex, kind: overlay.kind });
+    addAudio(overlay, url, inputIndex, `atrim=duration=${overlayDurationSec(overlay)}`);
     inputIndex += 1;
   }
 
@@ -176,7 +225,7 @@ export function buildEditorFfmpegGraph(
     const mapped = overlayInputs.find((item) => item.overlay.id === overlay.id);
     if (!mapped) continue;
     const ovLabel = `ov${step}`;
-    const dur = round2(Math.max(0.04, overlay.endSec - overlay.startSec));
+    const dur = overlayDurationSec(overlay);
     if (mapped.kind === "video") {
       filters.push(
         `[${mapped.index}:v]trim=duration=${dur},setpts=PTS-STARTPTS,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
@@ -191,9 +240,18 @@ export function buildEditorFfmpegGraph(
     step += 1;
   }
 
+  let audioArgs = "-an";
+  if (audioLabels.length > 0) {
+    filters.push(
+      `${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,` +
+        `apad,atrim=duration=${durationSec}[aout]`
+    );
+    audioArgs = `-map "[aout]" -c:a aac -b:a 192k`;
+  }
+
   const command =
     `${inputArgs.join(" ")} -filter_complex "${filters.join(";")}" ` +
-    `-map "[${current}]" -t ${durationSec} -c:v libx264 -crf 20 -pix_fmt yuv420p -an {{out_v}}`;
+    `-map "[${current}]" -t ${durationSec} -c:v libx264 -crf 20 -pix_fmt yuv420p ${audioArgs} {{out_v}}`;
 
   return {
     command,
@@ -210,7 +268,9 @@ export async function runEditorRender(
   urls: EditorMediaUrls,
   rendiOptions?: RunRendiOptions
 ): Promise<{ url: string; durationSec: number; width: number; height: number }> {
-  const graph = buildEditorFfmpegGraph(doc, urls);
+  // Probe failures resolve to "silent" so a source without audio never fails the export.
+  const audioUrls = await probeAudioSources(audibleLayerUrls(doc, urls));
+  const graph = buildEditorFfmpegGraph(doc, urls, audioUrls);
   const result = await runRendiCommandWithRetry(
     graph.command,
     graph.inputFiles,
@@ -299,11 +359,12 @@ export function editorRenderSelfCheck(): void {
       },
     ],
   };
-  const graph = buildEditorFfmpegGraph(doc, {
+  const urls: EditorMediaUrls = {
     c1: "https://example.com/a.mp4",
     c2: "https://example.com/b.mp4",
     i1: "https://example.com/logo.png",
-  });
+  };
+  const graph = buildEditorFfmpegGraph(doc, urls, new Set());
   assert(graph.durationSec === 8, "composition duration is the export length");
   assert(graph.width === 720 && graph.height === 1280, "9:16 canvas");
   assert(graph.command.includes("color=c=black"), "black composition base");
@@ -316,16 +377,107 @@ export function editorRenderSelfCheck(): void {
   assert(graph.command.includes("Hello\\: world") || graph.command.includes("Hello\\:"), "colon escaped in drawtext");
   assert(graph.inputFiles.in_s0 === "https://example.com/a.mp4", "clip urls mapped");
   assert(Boolean(graph.inputFiles.in_font), "Poppins attached for text");
-  assert(graph.command.includes("-an"), "v1 export is picture-only");
+  assert(graph.command.includes("-an"), "no source with audio → picture-only");
+  assert(!graph.command.includes("[0:a]") && !graph.command.includes("amix"), "no audio chains without audio sources");
   assert(clipLayerDurationSec(doc.sequence[0]) === 2, "clip layer span");
 
   let threw = false;
   try {
-    buildEditorFfmpegGraph(doc, { c1: "https://example.com/a.mp4" });
+    buildEditorFfmpegGraph(doc, { c1: "https://example.com/a.mp4" }, new Set());
   } catch {
     threw = true;
   }
   assert(threw, "missing clip URL fails the graph");
+
+  // --- Audio ---
+  const fmt = AUDIO_FORMAT;
+  const withAudio = new Set(["https://example.com/a.mp4", "https://example.com/b.mp4", "https://example.com/v.mp4"]);
+  const videoOverlay: EditorOverlay = {
+    ...doc.overlays[1],
+    id: "v1",
+    kind: "video",
+    startSec: 2,
+    endSec: 4.5,
+    creationId: "vid1",
+    muted: false,
+  };
+  const avDoc: EditorDocument = { ...doc, overlays: [...doc.overlays, videoOverlay] };
+  const avUrls = { ...urls, v1: "https://example.com/v.mp4" };
+  const av = buildEditorFfmpegGraph(avDoc, avUrls, withAudio).command;
+  assert(
+    av.includes(`[0:a]atrim=start=0:end=2,asetpts=PTS-STARTPTS,${fmt},adelay=0:all=1[a0]`),
+    "unmuted clip audio trimmed to its source window"
+  );
+  assert(
+    av.includes(`[1:a]atrim=start=1:end=3,asetpts=PTS-STARTPTS,${fmt},adelay=3000:all=1[a1]`),
+    "non-zero inSec and startSec: atrim from inSec, adelay to startSec"
+  );
+  assert(
+    av.includes(`[3:a]atrim=duration=2.5,asetpts=PTS-STARTPTS,${fmt},adelay=2000:all=1[a2]`),
+    "unmuted video overlay audio from source 0 for its window"
+  );
+  assert(!av.includes("[2:a]"), "image overlay never contributes audio");
+  assert(
+    av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=8[aout]"),
+    "overlapping layers mixed, padded/trimmed to durationSec"
+  );
+  assert(av.includes(`-map "[aout]" -c:a aac`) && !av.includes("-an"), "mixed audio mapped and AAC-encoded");
+  assert((av.match(/-i /g) ?? []).length === 4, "audio reuses video inputs (no duplicate -i)");
+
+  const mutedClip = buildEditorFfmpegGraph(
+    { ...avDoc, sequence: [doc.sequence[0], { ...doc.sequence[1], muted: true }] },
+    avUrls,
+    withAudio
+  ).command;
+  assert(!mutedClip.includes("[1:a]") && mutedClip.includes("amix=inputs=2"), "muted clip is silent");
+
+  const mutedOverlay = buildEditorFfmpegGraph(
+    { ...avDoc, overlays: [...doc.overlays, { ...videoOverlay, muted: true }] },
+    avUrls,
+    withAudio
+  ).command;
+  assert(!mutedOverlay.includes("[3:a]") && mutedOverlay.includes("amix=inputs=2"), "muted video overlay is silent");
+
+  const hidden = buildEditorFfmpegGraph(
+    { ...avDoc, sequence: [doc.sequence[0], { ...doc.sequence[1], hidden: true }] },
+    avUrls,
+    withAudio
+  ).command;
+  assert(
+    !hidden.includes("atrim=start=1:end=3") && hidden.includes("[a0][a1]amix=inputs=2"),
+    "hidden clip is silent (only c1 + video overlay mixed)"
+  );
+
+  const mixedSources = buildEditorFfmpegGraph(avDoc, avUrls, new Set(["https://example.com/a.mp4"])).command;
+  assert(
+    mixedSources.includes("[0:a]") && !mixedSources.includes("[1:a]") && !mixedSources.includes("[3:a]") &&
+      mixedSources.includes("amix=inputs=1"),
+    "source without audio stream is silent; others still export"
+  );
+
+  const allMuted = buildEditorFfmpegGraph(
+    {
+      ...avDoc,
+      sequence: avDoc.sequence.map((c) => ({ ...c, muted: true })),
+      overlays: [...doc.overlays, { ...videoOverlay, muted: true }],
+    },
+    avUrls,
+    withAudio
+  );
+  assert(
+    allMuted.command.endsWith("-pix_fmt yuv420p -an {{out_v}}") && !/:a\]|amix/.test(allMuted.command),
+    "all muted → today's picture-only output (-an)"
+  );
+
+  assert(isAudibleLayer(doc.sequence[0]), "legacy clip (muted undefined) is audible");
+  assert(!isAudibleLayer({ ...doc.sequence[0], muted: true }), "muted clip not audible");
+  assert(!isAudibleLayer({ ...doc.sequence[0], hidden: true }), "hidden clip not audible");
+  assert(!isAudibleLayer(doc.overlays[0]) && !isAudibleLayer(doc.overlays[1]), "text/image overlays not audible");
+  assert(isAudibleLayer(videoOverlay), "unmuted video overlay audible");
+  assert(
+    audibleLayerUrls(avDoc, avUrls).join() === "https://example.com/a.mp4,https://example.com/b.mp4,https://example.com/v.mp4",
+    "probe list covers only audible layers"
+  );
 }
 
 if (require.main === module) {
