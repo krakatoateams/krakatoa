@@ -332,10 +332,28 @@ function LayerPanelRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(label);
+  const committedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (!editing) setEditDraft(label);
   }, [editing, label]);
+
+  const commitEdit = (raw: string) => {
+    if (committedRef.current || cancelledRef.current) return;
+    committedRef.current = true;
+    setEditing(false);
+    const trimmed = raw.trim();
+    if (trimmed !== label) {
+      onRename?.(trimmed);
+    }
+  };
+
+  const cancelEdit = () => {
+    cancelledRef.current = true;
+    setEditing(false);
+    setEditDraft(label);
+  };
 
   return (
     <div
@@ -370,17 +388,14 @@ function LayerPanelRow({
             event.stopPropagation();
             if (event.key === "Enter") {
               event.preventDefault();
-              setEditing(false);
-              onRename?.(editDraft.trim());
+              commitEdit(editDraft);
             } else if (event.key === "Escape") {
               event.preventDefault();
-              setEditing(false);
-              setEditDraft(label);
+              cancelEdit();
             }
           }}
           onBlur={() => {
-            setEditing(false);
-            onRename?.(editDraft.trim());
+            commitEdit(editDraft);
           }}
           className="min-w-0 flex-1 rounded bg-white/10 px-1 py-0.5 text-[11px] text-text-primary outline-none ring-1 ring-brand-primary"
         />
@@ -390,6 +405,8 @@ function LayerPanelRow({
             if (locked || !onRename) return;
             event.stopPropagation();
             event.preventDefault();
+            committedRef.current = false;
+            cancelledRef.current = false;
             setEditDraft(label);
             setEditing(true);
           }}
@@ -712,19 +729,15 @@ export default function EditorWorkspace() {
   let videoOverlayCount = 0;
   const overlayRows = overlays
     .map((overlay) => {
-      let label: string;
-      if (overlay.name && overlay.name.trim().length > 0) {
-        label = overlay.name.trim();
-      } else if (overlay.kind === "text") {
-        label = overlay.text?.trim().slice(0, 18) || "Text";
-      } else if (overlay.kind === "image") {
+      let typeIndex: number | undefined;
+      if (overlay.kind === "image") {
+        typeIndex = imageOverlayCount;
         imageOverlayCount += 1;
-        label = `Image overlay ${imageOverlayCount}`;
-      } else {
+      } else if (overlay.kind === "video") {
+        typeIndex = videoOverlayCount;
         videoOverlayCount += 1;
-        label = `Video overlay ${videoOverlayCount}`;
       }
-      return { overlay, label };
+      return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
 
