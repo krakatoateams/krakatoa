@@ -26,6 +26,7 @@ export const EDITOR_CANVAS: Record<EditorAspect, { w: number; h: number }> = {
 
 export type EditorClip = {
   id: string;
+  name?: string | null;
   creationId: string | null;
   storagePath: string | null;
   /** Timeline placement. */
@@ -44,6 +45,7 @@ export type EditorOverlayKind = "text" | "image" | "video";
 
 export type EditorOverlay = {
   id: string;
+  name?: string | null;
   kind: EditorOverlayKind;
   startSec: number;
   endSec: number;
@@ -81,6 +83,33 @@ const ID_MAX = 64;
 const PATH_MAX = 512;
 const TEXT_MAX = 200;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+export const LAYER_NAME_MAX = 60;
+
+export function normalizeLayerName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().slice(0, LAYER_NAME_MAX);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function resolveLayerLabel(
+  layer: EditorClip | EditorOverlay,
+  fallbackIndex?: number
+): string {
+  if (layer.name && layer.name.trim().length > 0) {
+    return layer.name.trim();
+  }
+  if ("kind" in layer) {
+    if (layer.kind === "text") {
+      return layer.text?.trim() || "Text";
+    }
+    if (layer.kind === "image") {
+      return typeof fallbackIndex === "number" ? `Image overlay ${fallbackIndex + 1}` : "Image overlay";
+    }
+    return typeof fallbackIndex === "number" ? `Video overlay ${fallbackIndex + 1}` : "Video overlay";
+  }
+  const index = typeof fallbackIndex === "number" ? fallbackIndex + 1 : layer.order + 1;
+  return `Clip ${index}`;
+}
 
 function asFiniteNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -408,6 +437,7 @@ function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolea
       : null;
   return {
     id,
+    name: normalizeLayerName(o.name),
     creationId: asId(o.creationId),
     storagePath: asPath(o.storagePath),
     startSec,
@@ -436,6 +466,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
   const colorRaw = asTrimmed(o.color, 7);
   return {
     id,
+    name: normalizeLayerName(o.name),
     kind,
     startSec,
     endSec,
@@ -504,6 +535,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
     clampClipToComposition(
       {
         id: clip.id,
+        name: clip.name ?? null,
         creationId: clip.creationId,
         storagePath: clip.storagePath,
         startSec: clip.startSec,
@@ -876,6 +908,33 @@ export function editorDocumentSelfCheck(): void {
   assert(trimmedMinSpan !== null, "trim start leaving min span succeeds");
   assert(trimmedMinSpan.sequence[0].startSec === 3.8, "trimmed startSec is 3.8");
   assert(trimmedMinSpan.sequence[0].inSec === 3.8, "trimmed inSec is 3.8");
+
+  // Layer name normalization & resolution tests
+  assert(normalizeLayerName(null) === null, "null name normalizes to null");
+  assert(normalizeLayerName("   ") === null, "whitespace name normalizes to null");
+  assert(normalizeLayerName("  Intro Clip  ") === "Intro Clip", "name trims whitespace");
+  assert(normalizeLayerName("a".repeat(100))?.length === LAYER_NAME_MAX, "name caps to max length");
+
+  const namedDoc = parseEditorDocument({
+    durationSec: 5,
+    sequence: [
+      { id: "n1", creationId: "x", startSec: 0, endSec: 2, inSec: 0, order: 0, name: "  Scene 1  " },
+      { id: "n2", creationId: "y", startSec: 2, endSec: 4, inSec: 0, order: 1 },
+    ],
+    overlays: [
+      { id: "no1", kind: "text", startSec: 0, endSec: 2, text: "Sub", name: "Custom Caption" },
+      { id: "no2", kind: "image", startSec: 0, endSec: 2, name: null },
+    ],
+  });
+  assert(namedDoc?.sequence[0].name === "Scene 1", "clip name parsed and trimmed");
+  assert(namedDoc?.sequence[1].name === null, "clip without name defaults to null");
+  assert(namedDoc?.overlays[0].name === "Custom Caption", "overlay custom name parsed");
+  assert(namedDoc?.overlays[1].name === null, "overlay null name parsed as null");
+
+  assert(resolveLayerLabel(namedDoc!.sequence[0], 0) === "Scene 1", "resolveLayerLabel uses custom name");
+  assert(resolveLayerLabel(namedDoc!.sequence[1], 1) === "Clip 2", "resolveLayerLabel falls back to Clip 2");
+  assert(resolveLayerLabel(namedDoc!.overlays[0]) === "Custom Caption", "resolveLayerLabel uses custom overlay name");
+  assert(resolveLayerLabel(namedDoc!.overlays[1]) === "Image overlay", "resolveLayerLabel falls back to Image overlay");
 }
 
 if (require.main === module) {

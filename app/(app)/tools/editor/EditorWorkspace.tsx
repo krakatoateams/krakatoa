@@ -43,6 +43,7 @@ import {
   canSplitClip,
   canTrimClipEnd,
   canTrimClipStart,
+  LAYER_NAME_MAX,
   clampClipToComposition,
   clampOverlayToComposition,
   clipAtPlayhead,
@@ -50,9 +51,11 @@ import {
   emptyEditorDocument,
   maxClipLayerDurationSec,
   normalizeEditorTitle,
+  normalizeLayerName,
   parseEditorDocument,
   projectDurationSec,
   reorderById,
+  resolveLayerLabel,
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
@@ -316,6 +319,7 @@ function LayerPanelRow({
   onToggleLock,
   onToggleHidden,
   onDelete,
+  onRename,
 }: {
   id: string;
   selected: boolean;
@@ -331,13 +335,39 @@ function LayerPanelRow({
   onToggleLock: () => void;
   onToggleHidden: () => void;
   onDelete: () => void;
+  onRename?: (nextName: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(label);
+  const committedRef = useRef(false);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setEditDraft(label);
+  }, [editing, label]);
+
+  const commitEdit = (raw: string) => {
+    if (committedRef.current || cancelledRef.current) return;
+    committedRef.current = true;
+    setEditing(false);
+    const trimmed = raw.trim();
+    if (trimmed !== label) {
+      onRename?.(trimmed);
+    }
+  };
+
+  const cancelEdit = () => {
+    cancelledRef.current = true;
+    setEditing(false);
+    setEditDraft(label);
+  };
+
   return (
     <div
       data-layer-row
       data-layer-id={id}
       onPointerDown={(event) => {
-        if (locked || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
+        if (locked || editing || event.button !== 0 || (event.target as HTMLElement).closest("[data-nodrag]")) {
           return;
         }
         onReorderStart();
@@ -345,13 +375,54 @@ function LayerPanelRow({
       }}
       onClick={onSelect}
       className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
-        locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+        locked ? "cursor-default" : editing ? "cursor-text" : "cursor-grab active:cursor-grabbing"
       } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
       }`}
     >
       <span className={`shrink-0 opacity-70 ${hidden ? "opacity-30" : ""}`}>{icon}</span>
-      <span className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}>{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={editDraft}
+          maxLength={LAYER_NAME_MAX}
+          data-nodrag
+          onChange={(event) => setEditDraft(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitEdit(editDraft);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEdit();
+            }
+          }}
+          onBlur={() => {
+            commitEdit(editDraft);
+          }}
+          className="min-w-0 flex-1 rounded bg-white/10 px-1 py-0.5 text-[11px] text-text-primary outline-none ring-1 ring-brand-primary"
+        />
+      ) : (
+        <span
+          onDoubleClick={(event) => {
+            if (locked || !onRename) return;
+            event.stopPropagation();
+            event.preventDefault();
+            committedRef.current = false;
+            cancelledRef.current = false;
+            setEditDraft(label);
+            setEditing(true);
+          }}
+          className={`min-w-0 flex-1 truncate ${hidden ? "opacity-50" : ""}`}
+          title="Double-click to rename"
+        >
+          {label}
+        </span>
+      )}
       <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
         <button
           type="button"
@@ -359,7 +430,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleHidden();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={hidden ? "Show layer" : "Hide layer"}
           title={hidden ? "Show layer" : "Hide layer"}
         >
@@ -371,7 +442,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onToggleLock();
           }}
-          className="rounded p-0.5 hover:bg-white/10"
+          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
           aria-label={locked ? "Unlock layer" : "Lock layer"}
           title={locked ? "Unlock layer" : "Lock layer"}
         >
@@ -383,7 +454,7 @@ function LayerPanelRow({
             event.stopPropagation();
             onDelete();
           }}
-          className="rounded p-0.5 text-error hover:bg-error/10"
+          className="rounded p-0.5 text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error"
           aria-label="Delete layer"
           title="Delete layer"
         >
@@ -665,23 +736,21 @@ export default function EditorWorkspace() {
 
   // Stack order ascending (order/z 0 = back). Panel/lane rows show frontmost on top.
   const clipRows = sequence
-    .map((clip, i) => ({ clip, label: `Clip ${i + 1}` }))
+    .map((clip, i) => ({ clip, label: resolveLayerLabel(clip, i) }))
     .reverse();
   let imageOverlayCount = 0;
   let videoOverlayCount = 0;
   const overlayRows = overlays
     .map((overlay) => {
-      let label: string;
-      if (overlay.kind === "text") {
-        label = overlay.text?.trim().slice(0, 18) || "Text";
-      } else if (overlay.kind === "image") {
+      let typeIndex: number | undefined;
+      if (overlay.kind === "image") {
+        typeIndex = imageOverlayCount;
         imageOverlayCount += 1;
-        label = `Image overlay ${imageOverlayCount}`;
-      } else {
+      } else if (overlay.kind === "video") {
+        typeIndex = videoOverlayCount;
         videoOverlayCount += 1;
-        label = `Video overlay ${videoOverlayCount}`;
       }
-      return { overlay, label };
+      return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
 
@@ -1536,7 +1605,7 @@ export default function EditorWorkspace() {
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
                     onClick={() => setAddMenuOpen((current) => !current)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Add
@@ -1556,7 +1625,7 @@ export default function EditorWorkspace() {
                           openLibrary({ mediaType: "video", title: "Add a clip", onPick: addClip });
                         }}
                         disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Clip
@@ -1569,7 +1638,7 @@ export default function EditorWorkspace() {
                           uploadKindRef.current = "sequence";
                           uploadRef.current?.click();
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                       >
                         <Upload className="h-3.5 w-3.5" />
                         Upload
@@ -1587,7 +1656,7 @@ export default function EditorWorkspace() {
                           setSelectedId(overlay.id);
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Type className="h-3.5 w-3.5" />
                         Text
@@ -1604,7 +1673,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <ImagePlus className="h-3.5 w-3.5" />
                         Image
@@ -1621,7 +1690,7 @@ export default function EditorWorkspace() {
                           });
                         }}
                         disabled={doc.overlays.length >= EDITOR_MAX_OVERLAYS}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 disabled:opacity-40"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Video className="h-3.5 w-3.5" />
                         PiP
@@ -1657,7 +1726,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipStart}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip start"
                   title="Jump to clip start"
                 >
@@ -1666,7 +1735,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={() => stepPlayhead(-0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step back"
                   title="Step back"
                 >
@@ -1688,15 +1757,16 @@ export default function EditorWorkspace() {
                     }
                     setPlaying(true);
                   }}
-                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15"
+                  className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
                 >
                   {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </button>
                 <button
                   type="button"
                   onClick={() => stepPlayhead(0.1)}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Step forward"
                   title="Step forward"
                 >
@@ -1705,7 +1775,7 @@ export default function EditorWorkspace() {
                 <button
                   type="button"
                   onClick={jumpToClipEnd}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary"
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
                   aria-label="Jump to clip end"
                   title="Jump to clip end"
                 >
@@ -1731,7 +1801,7 @@ export default function EditorWorkspace() {
                     }}
                     aria-label="Jump to time in seconds"
                     title="Type a time in seconds and press Enter to jump"
-                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15"
+                    className="w-9 rounded bg-transparent px-0.5 text-right outline-none hover:bg-white/10 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span>s</span>
                   <span className="text-white/30"> / </span>
@@ -1754,7 +1824,7 @@ export default function EditorWorkspace() {
                       setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
                     }}
                     aria-label="Video duration in seconds"
-                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15"
+                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
                   />
                   <span className="text-[11px] text-text-secondary">s</span>
                 </label>
@@ -1764,7 +1834,7 @@ export default function EditorWorkspace() {
                       key={value}
                       type="button"
                       onClick={() => patchDoc((current) => withProjectAspect(current, value))}
-                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums ${
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary ${
                         doc.aspect === value
                           ? "bg-white/15 text-text-primary"
                           : "text-text-secondary hover:text-text-primary"
@@ -1860,6 +1930,7 @@ export default function EditorWorkspace() {
                         onToggleLock={() => updateOverlay(overlay.id, { locked: !overlay.locked })}
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
                         onDelete={() => removeLayer("overlay", overlay.id)}
+                        onRename={(nextName) => updateOverlay(overlay.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))}
                   </div>
@@ -1892,6 +1963,7 @@ export default function EditorWorkspace() {
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
                         onDelete={() => removeLayer("clip", clip.id)}
+                        onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))
                   )}
@@ -1943,7 +2015,7 @@ export default function EditorWorkspace() {
                   />
                   {overlayRows.length > 0 ? (
                     <div className="mb-2 space-y-1">
-                      {overlayRows.map(({ overlay }) => (
+                      {overlayRows.map(({ overlay, label }) => (
                         <TimelineLayerRow
                           key={overlay.id}
                           selected={overlay.id === selectedId}
@@ -1968,7 +2040,7 @@ export default function EditorWorkspace() {
                           }
                           label={
                             <>
-                              <span className="capitalize">{overlay.kind === "text" ? overlay.text : overlay.kind}</span>
+                              <span className="truncate capitalize">{label}</span>
                               <span className="ml-1 tabular-nums text-text-secondary">
                                 {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
                               </span>
@@ -1982,7 +2054,7 @@ export default function EditorWorkspace() {
                     {sequence.length === 0 ? (
                       <div className="h-8" />
                     ) : (
-                      clipRows.map(({ clip }) => {
+                      clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);
                         return (
                           <TimelineLayerRow
@@ -2009,7 +2081,7 @@ export default function EditorWorkspace() {
                             }
                             label={
                               <>
-                                Clip
+                                <span className="truncate">{label}</span>
                                 <span className="ml-1 tabular-nums opacity-80">
                                   {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
                                 </span>
@@ -2046,7 +2118,7 @@ export default function EditorWorkspace() {
                       startSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2062,7 +2134,7 @@ export default function EditorWorkspace() {
                       endSec: Number(event.target.value) || 0,
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2077,7 +2149,7 @@ export default function EditorWorkspace() {
                       inSec: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               {selectedClip.sourceDurationSec != null ? (
@@ -2132,7 +2204,7 @@ export default function EditorWorkspace() {
                     <input
                       value={selectedOverlay.text ?? ""}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { text: event.target.value.slice(0, 200) })}
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2141,7 +2213,7 @@ export default function EditorWorkspace() {
                       type="color"
                       value={selectedOverlay.color || "#ffffff"}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { color: event.target.value })}
-                      className="mt-1 h-8 w-full bg-transparent"
+                      className="mt-1 h-8 w-full cursor-pointer rounded-md border border-white/10 bg-white/5 px-1 py-0.5 outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">
@@ -2154,7 +2226,7 @@ export default function EditorWorkspace() {
                       onChange={(event) =>
                         updateOverlay(selectedOverlay.id, { fontSize: Number(event.target.value) || 48 })
                       }
-                      className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                 </>
@@ -2169,7 +2241,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { startSec: Math.max(0, Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2182,7 +2254,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { endSec: Number(event.target.value) || 0 })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
               <label className="block text-text-secondary">
@@ -2195,7 +2267,7 @@ export default function EditorWorkspace() {
                   onChange={(event) =>
                     updateOverlay(selectedOverlay.id, { z: Math.round(Number(event.target.value) || 0) })
                   }
-                  className="mt-1 w-full rounded-md bg-white/10 px-2 py-1 text-text-primary"
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
             </div>
