@@ -54,6 +54,7 @@ import {
   clampClipToComposition,
   clampOverlayToComposition,
   clipAtPlayhead,
+  clipsAtPlayhead,
   clipLayerDurationSec,
   emptyEditorDocument,
   maxClipLayerDurationSec,
@@ -704,6 +705,7 @@ export default function EditorWorkspace() {
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -758,10 +760,13 @@ export default function EditorWorkspace() {
   const dirty = fingerprint !== lastSavedRef.current;
   const sequence = sortedSequence(doc);
   const overlays = sortedOverlays(doc);
-  const active = clipAtPlayhead(
+  const covering = clipsAtPlayhead(
     { ...doc, sequence: doc.sequence.filter((c) => !c.hidden) },
     playhead
   );
+  const active = covering[covering.length - 1] ?? null;
+  // Lower covering clips stay audible (matching the export mix); only the top one is pictured.
+  const underlying = covering.slice(0, -1).filter((c) => !c.clip.muted);
   if (active) {
     lastActiveStoragePathRef.current = active.clip.storagePath;
     lastActiveLocalSecRef.current = active.localSec;
@@ -1257,6 +1262,10 @@ export default function EditorWorkspace() {
             el.muted = isCurrentClipMuted();
             void el.play().catch(() => undefined);
           }
+          // SignedVideo's effect also plays these; starting them here keeps the user gesture.
+          if (next) {
+            for (const v of underlyingVideosRef.current.values()) void v.play().catch(() => undefined);
+          }
           return next;
         });
       }
@@ -1578,6 +1587,20 @@ export default function EditorWorkspace() {
                     previewVideoRef.current = node;
                   }}
                 />
+              </div>
+              <div className="hidden" aria-hidden>
+                {underlying.map(({ clip, localSec }) => (
+                  <SignedVideo
+                    key={clip.id}
+                    storagePath={clip.storagePath}
+                    currentTime={localSec}
+                    playing={playing}
+                    videoRef={(node) => {
+                      if (node) underlyingVideosRef.current.set(clip.id, node);
+                      else underlyingVideosRef.current.delete(clip.id);
+                    }}
+                  />
+                ))}
               </div>
               {!active && doc.sequence.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 flex h-full min-h-[240px] items-center justify-center px-6 text-center text-sm text-text-secondary">
@@ -1911,6 +1934,7 @@ export default function EditorWorkspace() {
                       el.muted = isCurrentClipMuted();
                       void el.play().catch(() => undefined);
                     }
+                    for (const v of underlyingVideosRef.current.values()) void v.play().catch(() => undefined);
                     setPlaying(true);
                   }}
                   className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"

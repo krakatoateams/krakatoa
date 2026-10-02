@@ -197,20 +197,23 @@ export function sortedOverlays(doc: EditorDocument): EditorOverlay[] {
   return [...doc.overlays].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
 }
 
-export function clipAtPlayhead(
-  doc: EditorDocument,
-  playheadSec: number
-): { clip: EditorClip; localSec: number; timelineStart: number } | null {
-  const covering = doc.sequence
+export type ClipAtPlayhead = { clip: EditorClip; localSec: number; timelineStart: number };
+
+/** Every clip covering the playhead (end-exclusive), bottom to top. */
+export function clipsAtPlayhead(doc: EditorDocument, playheadSec: number): ClipAtPlayhead[] {
+  return doc.sequence
     .filter((clip) => playheadSec >= clip.startSec && playheadSec < clip.endSec)
-    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  const clip = covering[covering.length - 1];
-  if (!clip) return null;
-  return {
-    clip,
-    localSec: clip.inSec + (playheadSec - clip.startSec),
-    timelineStart: clip.startSec,
-  };
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .map((clip) => ({
+      clip,
+      localSec: clip.inSec + (playheadSec - clip.startSec),
+      timelineStart: clip.startSec,
+    }));
+}
+
+export function clipAtPlayhead(doc: EditorDocument, playheadSec: number): ClipAtPlayhead | null {
+  const covering = clipsAtPlayhead(doc, playheadSec);
+  return covering[covering.length - 1] ?? null;
 }
 
 export function clampClipToComposition(clip: EditorClip, durationSec: number): EditorClip {
@@ -754,6 +757,22 @@ export function editorDocumentSelfCheck(): void {
   assert(clipAtPlayhead(parsed!, 0)?.clip.id === "b", "playhead 0 is first packed clip");
   assert(clipAtPlayhead(parsed!, 2.5)?.clip.id === "a", "playhead crosses into second clip");
   assert(clipAtPlayhead(parsed!, 7.5) === null, "gap after clips is empty");
+
+  const stacked = parseEditorDocument({
+    durationSec: 10,
+    sequence: [
+      { id: "top", startSec: 1, endSec: 4, inSec: 0, outSec: 3, order: 1 },
+      { id: "low", startSec: 0, endSec: 3, inSec: 2, outSec: 5, order: 0 },
+    ],
+  })!;
+  const at2 = clipsAtPlayhead(stacked, 2);
+  assert(at2.map((c) => c.clip.id).join(",") === "low,top", "covering clips sort bottom to top");
+  assert(at2[0].localSec === 4 && at2[1].localSec === 1, "each covering clip gets its own localSec");
+  assert(clipAtPlayhead(stacked, 2)?.clip.id === "top", "clipAtPlayhead is the topmost covering clip");
+  assert(clipsAtPlayhead(stacked, 3).map((c) => c.clip.id).join(",") === "top", "lower clip end is exclusive");
+  assert(clipsAtPlayhead(stacked, 4).length === 0, "nothing covers the last clip end");
+  assert(clipsAtPlayhead(parsed!, 2.5).length === 1, "single covering clip");
+  assert(clipsAtPlayhead(parsed!, 2.5)[0].clip.id === clipAtPlayhead(parsed!, 2.5)?.clip.id, "single-clip parity");
 
   const placed = parseEditorDocument({
     durationSec: 10,
