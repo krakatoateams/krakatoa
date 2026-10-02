@@ -69,7 +69,9 @@ export function textOverlayLayout(
       horizontal: "center",
       vertical: "center",
     },
-    lineHeight: 1.25,
+    // Poppins' font-defined line height (hhea ascent - descent + lineGap = 1.5em),
+    // which FFmpeg 7 drawtext uses as its line pitch. Keeps multi-line text aligned.
+    lineHeight: 1.5,
     shadow: {
       color: "black@0.6",
       colorCss: "rgba(0, 0, 0, 0.6)",
@@ -1135,6 +1137,7 @@ export function editorDocumentSelfCheck(): void {
   assert(layout916.box.w === 576 && layout916.box.h === 192, "box w/h scaled to 9:16 canvas");
   assert(layout916.fontSize === 48, "explicit font size preserved");
   assert(layout916.alignment.horizontal === "center" && layout916.alignment.vertical === "center", "center alignment");
+  assert(layout916.lineHeight === 1.5, "line height matches drawtext Poppins line pitch");
   assert(layout916.shadow.color === "black@0.6" && layout916.shadow.x === 2 && layout916.shadow.y === 2, "shadow parameters");
 
   // Clamping tests
