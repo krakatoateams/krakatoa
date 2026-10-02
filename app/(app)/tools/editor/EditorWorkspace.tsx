@@ -68,6 +68,7 @@ import {
   sortedOverlays,
   sortedSequence,
   splitEditorClip,
+  textOverlayLayout,
   trimClipEndToPlayhead,
   trimClipStartToPlayhead,
   validateEditorExport,
@@ -77,12 +78,19 @@ import {
   type EditorDocument,
   type EditorOverlay,
 } from "@/lib/editor-document";
+import { Poppins } from "next/font/google";
 import { containSize } from "@/lib/editor-preview-size";
 import { useEditorViewport } from "./useEditorViewport";
 import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
 import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
+
+const poppins = Poppins({
+  weight: "800",
+  subsets: ["latin"],
+  display: "swap",
+});
 
 function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -1658,14 +1666,27 @@ export default function EditorWorkspace() {
                       zIndex: overlay.z + 1,
                     }}
                   >
-                    {overlay.kind === "text" ? (
-                      <div
-                        className="flex h-full w-full items-center justify-center text-center font-semibold drop-shadow"
-                        style={{ color: overlay.color || "#fff", fontSize: Math.max(12, (overlay.fontSize || 48) * 0.35) }}
-                      >
-                        {overlay.text}
-                      </div>
-                    ) : overlay.kind === "image" ? (
+                    {overlay.kind === "text" ? (() => {
+                      const layout = textOverlayLayout(overlay, canvas);
+                      const scale = (previewSize.width || canvas.w) / canvas.w;
+                      const previewFontSize = Math.max(1, layout.fontSize * scale);
+                      const previewShadowX = layout.shadow.x * scale;
+                      const previewShadowY = layout.shadow.y * scale;
+
+                      return (
+                        <div
+                          className={`${poppins.className} flex h-full w-full items-center justify-center text-center font-extrabold whitespace-pre`}
+                          style={{
+                            color: overlay.color || "#FFFFFF",
+                            fontSize: previewFontSize,
+                            lineHeight: layout.lineHeight,
+                            textShadow: `${previewShadowX}px ${previewShadowY}px 0px ${layout.shadow.colorCss}`,
+                          }}
+                        >
+                          {overlay.text}
+                        </div>
+                      );
+                    })() : overlay.kind === "image" ? (
                       <SignedImage
                         storagePath={overlay.storagePath}
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
@@ -2415,10 +2436,11 @@ export default function EditorWorkspace() {
                 <>
                   <label className="block text-text-secondary">
                     Text
-                    <input
+                    <textarea
+                      rows={2}
                       value={selectedOverlay.text ?? ""}
                       onChange={(event) => updateOverlay(selectedOverlay.id, { text: event.target.value.slice(0, 200) })}
-                      className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
+                      className="mt-1 w-full resize-y rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                     />
                   </label>
                   <label className="block text-text-secondary">

@@ -22,6 +22,7 @@ import {
   sequenceDurationSec,
   sortedOverlays,
   sortedSequence,
+  textOverlayLayout,
   validateEditorExport,
   type EditorClip,
   type EditorDocument,
@@ -43,9 +44,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function escapeDrawtext(text: string): string {
+export function escapeDrawtext(text: string): string {
   return text
     .slice(0, 200)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
     .replace(/\\/g, "\\\\")
     .replace(/'/g, "\u2019")
     .replace(/:/g, "\\:")
@@ -231,12 +234,15 @@ export function buildEditorFfmpegGraph(
     const next = `t${step}`;
 
     if (overlay.kind === "text") {
+      const layout = textOverlayLayout(overlay, { w: width, h: height });
       const text = escapeDrawtext(overlay.text || "");
-      const fontsize = Math.max(12, Math.round(overlay.fontSize || 48));
       const fontcolor = colorToFfmpeg(overlay.color || "#FFFFFF");
       const fontfile = inputFiles.in_font ? `:fontfile={{in_font}}` : "";
+      const drawX = `${layout.box.x}+(${layout.box.w}-text_w)/2`;
+      const drawY = `${layout.box.y}+(${layout.box.h}-text_h)/2`;
+      const shadowArgs = `:shadowcolor=${layout.shadow.color}:shadowx=${layout.shadow.x}:shadowy=${layout.shadow.y}`;
       filters.push(
-        `[${current}]drawtext=text='${text}':fontsize=${fontsize}:fontcolor=${fontcolor}:x=${x}:y=${y}${fontfile}:${enable}[${next}]`
+        `[${current}]drawtext=text='${text}':fontsize=${layout.fontSize}:fontcolor=${fontcolor}:x=${drawX}:y=${drawY}${shadowArgs}${fontfile}:${enable}[${next}]`
       );
       current = next;
       step += 1;
@@ -402,6 +408,30 @@ export function editorRenderSelfCheck(): void {
   assert(graph.command.includes("overlay="), "image overlay uses overlay");
   assert(graph.command.includes("enable='between(t,"), "time-window enable");
   assert(graph.command.includes("Hello\\: world") || graph.command.includes("Hello\\:"), "colon escaped in drawtext");
+
+  const expectedTextLayout = textOverlayLayout(doc.overlays[0], { w: 720, h: 1280 });
+  assert(
+    graph.command.includes(`x=${expectedTextLayout.box.x}+(${expectedTextLayout.box.w}-text_w)/2`),
+    "drawtext centers x in overlay box"
+  );
+  assert(
+    graph.command.includes(`y=${expectedTextLayout.box.y}+(${expectedTextLayout.box.h}-text_h)/2`),
+    "drawtext centers y in overlay box"
+  );
+  assert(graph.command.includes(`fontsize=${expectedTextLayout.fontSize}`), "drawtext uses shared font size");
+  assert(
+    graph.command.includes(
+      `shadowcolor=${expectedTextLayout.shadow.color}:shadowx=${expectedTextLayout.shadow.x}:shadowy=${expectedTextLayout.shadow.y}`
+    ),
+    "drawtext uses shared shadow values"
+  );
+
+  const escapedText = escapeDrawtext("It's 100%: perfect\nSecond line");
+  assert(
+    escapedText === "It\u2019s 100\\%\\: perfect\nSecond line",
+    "escapeDrawtext handles colon, apostrophe, percent, and explicit newline"
+  );
+
   assert(graph.inputFiles.in_s0 === "https://example.com/a.mp4", "clip urls mapped");
   assert(Boolean(graph.inputFiles.in_font), "Poppins attached for text");
   assert(graph.command.includes("-an"), "no source with audio → picture-only");
