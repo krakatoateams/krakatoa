@@ -1,7 +1,8 @@
 /**
  * Persistable Editor timeline. Clips and overlays are layers on a composition
- * of fixed duration. Media is referenced by creationId or storagePath — never
- * blob/signed URLs — so a reload can re-sign.
+ * whose duration is derived from the latest layer end (projectDurationSec).
+ * Media is referenced by creationId or storagePath — never blob/signed URLs —
+ * so a reload can re-sign.
  *
  * Pure — runnable as `npx tsx lib/editor-document.ts`.
  */
@@ -117,15 +118,17 @@ export type EditorOverlay = {
   color: string | null;
   creationId: string | null;
   storagePath: string | null;
+  /** Video overlays only: known source length; layer span cannot exceed it. */
+  sourceDurationSec?: number | null;
   locked: boolean;
   hidden: boolean;
   muted?: boolean;
 };
 
+/** Duration is not stored; it is derived from layers by projectDurationSec. */
 export type EditorDocument = {
   v: typeof EDITOR_DOCUMENT_VERSION;
   aspect: EditorAspect;
-  durationSec: number;
   sequence: EditorClip[];
   overlays: EditorOverlay[];
 };
@@ -204,7 +207,6 @@ export function emptyEditorDocument(): EditorDocument {
   return {
     v: EDITOR_DOCUMENT_VERSION,
     aspect: "9:16",
-    durationSec: DEFAULT_EDITOR_DURATION_SEC,
     sequence: [],
     overlays: [],
   };
@@ -235,8 +237,18 @@ export function maxClipLayerDurationSec(clip: EditorClip): number {
   return EDITOR_MAX_DURATION_SEC;
 }
 
+export function maxOverlayLayerDurationSec(overlay: EditorOverlay): number {
+  if (overlay.kind === "video" && overlay.sourceDurationSec != null && overlay.sourceDurationSec > 0) {
+    return Math.max(0.1, snapTenth(overlay.sourceDurationSec));
+  }
+  return EDITOR_MAX_DURATION_SEC;
+}
+
+/** Latest layer end, capped at EDITOR_MAX_DURATION_SEC; the default length while empty. */
 export function projectDurationSec(doc: EditorDocument): number {
-  return snapTenth(clamp(doc.durationSec, 0.1, EDITOR_MAX_DURATION_SEC));
+  const ends = [...doc.sequence, ...doc.overlays].map((layer) => layer.endSec);
+  if (ends.length === 0) return DEFAULT_EDITOR_DURATION_SEC;
+  return snapTenth(clamp(Math.max(...ends), 0.1, EDITOR_MAX_DURATION_SEC));
 }
 
 /** Composition length — clips no longer concatenate to define duration. */
@@ -273,8 +285,9 @@ export function clipAtPlayhead(doc: EditorDocument, playheadSec: number): ClipAt
   return covering[covering.length - 1] ?? null;
 }
 
-export function clampClipToComposition(clip: EditorClip, durationSec: number): EditorClip {
-  const duration = snapTenth(clamp(durationSec, 0.1, EDITOR_MAX_DURATION_SEC));
+/** Clamps a clip to the composition cap and its source length. */
+export function clampClipToComposition(clip: EditorClip): EditorClip {
+  const duration = EDITOR_MAX_DURATION_SEC;
   const maxSpan = Math.min(maxClipLayerDurationSec(clip), duration);
   let startSec = snapTenth(clamp(clip.startSec, 0, Math.max(0, duration - 0.1)));
   let endSec = snapTenth(clamp(clip.endSec, startSec + 0.1, duration));
@@ -324,8 +337,7 @@ export function splitEditorClip(
     {
       ...target,
       endSec: p,
-    },
-    doc.durationSec
+    }
   );
 
   const delta = snapTenth(p - target.startSec);
@@ -337,8 +349,7 @@ export function splitEditorClip(
       startSec: p,
       endSec: target.endSec,
       inSec: snapTenth(target.inSec + delta),
-    },
-    doc.durationSec
+    }
   );
 
   const newSequence: EditorClip[] = [];
@@ -383,8 +394,7 @@ export function trimClipStartToPlayhead(
               ...c,
               startSec: p,
               inSec: snapTenth(c.inSec + delta),
-            },
-            doc.durationSec
+            }
           )
         : c
     ),
@@ -413,21 +423,19 @@ export function trimClipEndToPlayhead(
             {
               ...c,
               endSec: p,
-            },
-            doc.durationSec
+            }
           )
         : c
     ),
   };
 }
 
-export function clampOverlayToComposition(
-  overlay: EditorOverlay,
-  durationSec: number
-): EditorOverlay {
-  const duration = snapTenth(clamp(durationSec, 0.1, EDITOR_MAX_DURATION_SEC));
+/** Clamps an overlay to the composition cap and, for video, its source length. */
+export function clampOverlayToComposition(overlay: EditorOverlay): EditorOverlay {
+  const duration = EDITOR_MAX_DURATION_SEC;
+  const maxSpan = maxOverlayLayerDurationSec(overlay);
   let startSec = snapTenth(clamp(overlay.startSec, 0, Math.max(0, duration - 0.1)));
-  let endSec = snapTenth(clamp(overlay.endSec, startSec + 0.1, duration));
+  let endSec = snapTenth(clamp(overlay.endSec, startSec + 0.1, Math.min(duration, startSec + maxSpan)));
   if (endSec <= startSec) {
     startSec = 0;
     endSec = snapTenth(Math.min(duration, 0.1));
@@ -435,14 +443,29 @@ export function clampOverlayToComposition(
   return { ...overlay, startSec, endSec };
 }
 
-export function withProjectDuration(doc: EditorDocument, durationSec: number): EditorDocument {
-  const next = snapTenth(clamp(durationSec, 0.1, EDITOR_MAX_DURATION_SEC));
-  return {
-    ...doc,
-    durationSec: next,
-    sequence: doc.sequence.map((clip) => clampClipToComposition(clip, next)),
-    overlays: doc.overlays.map((overlay) => clampOverlayToComposition(overlay, next)),
-  };
+/**
+ * Records a probed source length. With `fillSpan` (the layer still has its
+ * placeholder span) the layer grows to the remaining source, fit to the cap;
+ * otherwise a user edit made before the probe returned is kept, only capped.
+ */
+export function withProbedClipSource(clip: EditorClip, sourceSec: number, fillSpan = true): EditorClip {
+  if (clip.sourceDurationSec != null) return clip;
+  const sourceDurationSec = snapTenth(sourceSec);
+  return clampClipToComposition({
+    ...clip,
+    sourceDurationSec,
+    endSec: fillSpan ? clip.startSec + Math.max(0.1, sourceDurationSec - clip.inSec) : clip.endSec,
+  });
+}
+
+export function withProbedOverlaySource(overlay: EditorOverlay, sourceSec: number, fillSpan = true): EditorOverlay {
+  if (overlay.kind !== "video" || overlay.sourceDurationSec != null) return overlay;
+  const sourceDurationSec = snapTenth(sourceSec);
+  return clampOverlayToComposition({
+    ...overlay,
+    sourceDurationSec,
+    endSec: fillSpan ? overlay.startSec + sourceDurationSec : overlay.endSec,
+  });
 }
 
 function reprojectOverlayToAspect(
@@ -527,6 +550,9 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
   );
   if (endSec <= startSec) return null;
   const colorRaw = asTrimmed(o.color, 7);
+  const sourceRaw = o.sourceDurationSec;
+  const sourceDurationSec =
+    typeof sourceRaw === "number" && Number.isFinite(sourceRaw) && sourceRaw > 0 ? snapTenth(sourceRaw) : null;
   return {
     id,
     name: normalizeLayerName(o.name),
@@ -543,6 +569,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
     color: kind === "text" && COLOR_RE.test(colorRaw) ? colorRaw : kind === "text" ? "#FFFFFF" : null,
     creationId: kind === "text" ? null : asId(o.creationId),
     storagePath: kind === "text" ? null : asPath(o.storagePath),
+    sourceDurationSec: kind === "video" ? sourceDurationSec : undefined,
     locked: Boolean(o.locked),
     hidden: Boolean(o.hidden),
     muted: kind === "video" ? Boolean(o.muted) : undefined,
@@ -580,21 +607,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
     seen.add(overlay.id);
     overlays.push(overlay);
   }
-  const clipEnds = parsedClips.map((c) => c.endSec);
-  const overlayEnds = overlays.map((ov) => ov.endSec);
-  const inferred = Math.max(
-    DEFAULT_EDITOR_DURATION_SEC,
-    ...clipEnds,
-    ...overlayEnds,
-    0
-  );
-  const durationSec = snapTenth(
-    clamp(
-      asFiniteNumber(o.durationSec, inferred) || inferred,
-      0.1,
-      EDITOR_MAX_DURATION_SEC
-    )
-  );
+  // Legacy `durationSec` is ignored: duration is derived, and layers were already clamped to it.
   const sequence = parsedClips.map((clip) =>
     clampClipToComposition(
       {
@@ -610,16 +623,13 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
         locked: clip.locked,
         hidden: clip.hidden,
         muted: clip.muted,
-      },
-      durationSec
-    )
+      })
   );
   return {
     v: EDITOR_DOCUMENT_VERSION,
     aspect: asAspect(o.aspect),
-    durationSec,
     sequence,
-    overlays: overlays.map((overlay) => clampOverlayToComposition(overlay, durationSec)),
+    overlays: overlays.map((overlay) => clampOverlayToComposition(overlay)),
   };
 }
 
@@ -777,7 +787,7 @@ export function reorderById<T extends { id: string }>(
 export function editorDocumentSelfCheck(): void {
   const empty = emptyEditorDocument();
   assert(empty.sequence.length === 0 && empty.aspect === "9:16", "empty document defaults");
-  assert(empty.durationSec === DEFAULT_EDITOR_DURATION_SEC, "empty composition is 8s");
+  assert(projectDurationSec(empty) === DEFAULT_EDITOR_DURATION_SEC, "empty composition is 8s");
   assert(parseEditorDocument(null) === null, "null is not a document");
 
   const parsed = parseEditorDocument({
@@ -809,7 +819,7 @@ export function editorDocumentSelfCheck(): void {
   assert(sortedSequence(parsed!).map((c) => c.id).join(",") === "b,a", "legacy clips pack in order");
   assert(parsed!.sequence.find((c) => c.id === "b")?.startSec === 0, "first packed clip starts at 0");
   assert(parsed!.sequence.find((c) => c.id === "a")?.startSec === 2, "second packed clip follows");
-  assert(parsed!.durationSec === 8, "composition defaults to 8s when longer than packed clips");
+  assert(projectDurationSec(parsed!) === 5, "duration is the latest packed clip end");
   assert(validateEditorExport(parsed!) === null, "valid export");
   assert(clipAtPlayhead(parsed!, 0)?.clip.id === "b", "playhead 0 is first packed clip");
   assert(clipAtPlayhead(parsed!, 2.5)?.clip.id === "a", "playhead crosses into second clip");
@@ -845,11 +855,10 @@ export function editorDocumentSelfCheck(): void {
       },
     ],
   });
-  assert(placed?.durationSec === 10, "explicit duration kept");
-  assert(placed!.sequence[0].endSec - placed!.sequence[0].startSec === 3, "layer span 3s");
+  assert(projectDurationSec(placed!) === 4, "legacy stored duration ignored; derived from layers");
+  assert(placed!.sequence[0].startSec === 1 && placed!.sequence[0].endSec === 4, "legacy layer timing kept");
   const tooLong = clampClipToComposition(
-    { ...placed!.sequence[0], endSec: 9, startSec: 1, inSec: 0, sourceDurationSec: 5 },
-    10
+    { ...placed!.sequence[0], endSec: 9, startSec: 1, inSec: 0, sourceDurationSec: 5 }
   );
   assert(tooLong.endSec - tooLong.startSec === 5, "layer cannot exceed source duration");
 
@@ -865,7 +874,59 @@ export function editorDocumentSelfCheck(): void {
     })),
   });
   assert(over?.sequence.length === EDITOR_MAX_SEQUENCE, "sequence cap at parse");
-  assert(over?.durationSec === EDITOR_MAX_DURATION_SEC, "duration clamps to 60s");
+  assert(projectDurationSec(over!) === 4, "duration derived even when stored duration is out of range");
+
+  // Duration derivation and source caps (#249)
+  const clipAt = (id: string, startSec: number, endSec: number, extra: Partial<EditorClip> = {}): EditorClip => ({
+    id, creationId: "x", storagePath: null, startSec, endSec, inSec: 0, sourceDurationSec: null,
+    order: 0, locked: false, hidden: false, ...extra,
+  });
+  const ov = (id: string, kind: EditorOverlayKind, startSec: number, endSec: number, extra: Partial<EditorOverlay> = {}): EditorOverlay => ({
+    id, kind, startSec, endSec, x: 0, y: 0, w: 0.3, h: 0.3, z: 0, text: kind === "text" ? "t" : null,
+    fontSize: null, color: null, creationId: kind === "text" ? null : "m", storagePath: null,
+    locked: false, hidden: false, ...extra,
+  });
+  const base = emptyEditorDocument();
+  const probedClip = withProbedClipSource(clipAt("v", 0, 3), 5.2);
+  assert(probedClip.sourceDurationSec === 5.2 && probedClip.endSec === 5.2, "new video spans its source length");
+  assert(projectDurationSec({ ...base, sequence: [probedClip] }) === 5.2, "duration is the last-ending layer");
+  assert(withProbedClipSource(probedClip, 9).endSec === 5.2, "re-probe does not reset a known source");
+  const editedClip = withProbedClipSource(clipAt("v", 0, 1.5), 5.2, false);
+  assert(editedClip.endSec === 1.5 && editedClip.sourceDurationSec === 5.2, "probe keeps a span the user already edited");
+  assert(withProbedClipSource(clipAt("v", 0, 8), 5.2, false).endSec === 5.2, "edited span is still capped by the source");
+  const longClip = withProbedClipSource(clipAt("v", 10, 13), 120);
+  assert(longClip.endSec === EDITOR_MAX_DURATION_SEC, "long video default span fits the cap");
+  const offsetClip = withProbedClipSource(clipAt("v", 1, 3, { inSec: 2 }), 5);
+  assert(offsetClip.endSec === 4, "probed span is source minus inSec");
+  const stretchedText = clampOverlayToComposition(ov("t", "text", 0, 20));
+  const stretchedImage = clampOverlayToComposition(ov("i", "image", 2, 20));
+  assert(stretchedText.endSec === 20 && stretchedImage.endSec === 20, "text and images stretch freely");
+  assert(projectDurationSec({ ...base, overlays: [stretchedText] }) === 20, "stretching a strip grows the duration");
+  assert(clampOverlayToComposition(ov("t", "text", 0, 90)).endSec === EDITOR_MAX_DURATION_SEC, "overlay capped at 60s");
+  assert(
+    clampClipToComposition(clipAt("v", 1, 20, { inSec: 2, sourceDurationSec: 6 })).endSec === 5,
+    "video clip end stops at sourceDuration - inSec"
+  );
+  assert(clampClipToComposition(clipAt("v", 0, 20)).endSec === 20, "unprobed clip stays uncapped");
+  const probedOverlay = withProbedOverlaySource(ov("o", "video", 1, 3), 4);
+  assert(probedOverlay.sourceDurationSec === 4 && probedOverlay.endSec === 5, "new video overlay spans its source");
+  assert(clampOverlayToComposition({ ...probedOverlay, endSec: 30 }).endSec === 5, "video overlay end stops at source length");
+  assert(withProbedOverlaySource(ov("i", "image", 0, 2), 4).sourceDurationSec === undefined, "image overlays have no source length");
+  const twoLayers = { ...base, sequence: [clipAt("a", 0, 4), clipAt("b", 2, 9)], overlays: [ov("t", "text", 0, 6)] };
+  assert(projectDurationSec(twoLayers) === 9, "duration is the latest end across layers");
+  assert(projectDurationSec({ ...twoLayers, sequence: [clipAt("a", 0, 4)] }) === 6, "deleting the last layer shrinks duration");
+  assert(
+    projectDurationSec({ ...twoLayers, sequence: [clipAt("a", 0, 4), clipAt("b", 2, 3)] }) === 6,
+    "shortening the last layer shrinks duration"
+  );
+  assert(
+    projectDurationSec({ ...base, sequence: [clipAt("a", 50, 70)] }) === EDITOR_MAX_DURATION_SEC,
+    "duration never exceeds the cap"
+  );
+  const savedOverlay = parseEditorDocument({
+    overlays: [{ id: "sv", kind: "video", startSec: 0, endSec: 9, sourceDurationSec: 3 }],
+  });
+  assert(savedOverlay?.overlays[0].sourceDurationSec === 3 && savedOverlay.overlays[0].endSec === 3, "video overlay source parsed and enforced");
 
   assert(normalizeEditorTitle("   ") === DEFAULT_EDITOR_TITLE, "blank title falls back");
   assert(normalizeEditorTitle("x".repeat(200)).length === EDITOR_TITLE_MAX, "title cap");
@@ -939,7 +1000,6 @@ export function editorDocumentSelfCheck(): void {
   const testDoc: EditorDocument = {
     v: 1,
     aspect: "9:16",
-    durationSec: 10,
     sequence: [
       {
         id: "c-split",
@@ -1000,7 +1060,6 @@ export function editorDocumentSelfCheck(): void {
   // Multi-clip out-of-order split, locked->null, non-existent id->null, right clip properties
   const outOfOrderDoc: EditorDocument = {
     ...emptyEditorDocument(),
-    durationSec: 10,
     sequence: [
       {
         id: "c-third",
@@ -1071,7 +1130,6 @@ export function editorDocumentSelfCheck(): void {
   // Trim start near source boundary
   const sourceCappedDoc: EditorDocument = {
     ...emptyEditorDocument(),
-    durationSec: 10,
     sequence: [
       {
         id: "c-bounded",

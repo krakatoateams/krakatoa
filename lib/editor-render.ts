@@ -1,6 +1,6 @@
 /**
  * Build the Rendi FFmpeg graph for an Editor export: black composition of
- * `durationSec`, overlay each clip full-frame in its time window, then
+ * the derived `durationSec` (latest layer end), overlay each clip full-frame in its time window, then
  * overlay / drawtext with enable='between(t,…)'.
  *
  * Pure graph builder — runnable as `npx tsx --conditions=react-server lib/editor-render.ts`
@@ -326,7 +326,6 @@ export function editorRenderSelfCheck(): void {
   const doc: EditorDocument = {
     v: 1,
     aspect: "9:16",
-    durationSec: 8,
     sequence: [
       {
         id: "c1",
@@ -398,7 +397,7 @@ export function editorRenderSelfCheck(): void {
     i1: "https://example.com/logo.png",
   };
   const graph = buildEditorFfmpegGraph(doc, urls, new Set());
-  assert(graph.durationSec === 8, "composition duration is the export length");
+  assert(graph.durationSec === 5, "export length is the latest layer end");
   assert(graph.width === 720 && graph.height === 1280, "9:16 canvas");
   assert(graph.command.includes("color=c=black"), "black composition base");
   assert(!graph.command.includes("concat="), "clips are layers, not concatenated");
@@ -475,7 +474,7 @@ export function editorRenderSelfCheck(): void {
   );
   assert(!av.includes("[2:a]") && !av.includes("[3:a]"), "image overlay and video inputs never contribute audio");
   assert(
-    av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=8[aout]"),
+    av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=5[aout]"),
     "overlapping layers mixed, padded/trimmed to durationSec"
   );
   assert(av.includes(`-map "[aout]" -c:a aac`) && !av.includes("-an"), "mixed audio mapped and AAC-encoded");
@@ -516,7 +515,6 @@ export function editorRenderSelfCheck(): void {
   const duplicateSourceDoc: EditorDocument = {
     v: 1,
     aspect: "9:16",
-    durationSec: 10,
     sequence: [
       { id: "c1", creationId: "a", storagePath: null, startSec: 1.2, endSec: 3.2, inSec: 3.7, sourceDurationSec: 8, order: 0, locked: false, hidden: false },
       { id: "c2", creationId: "a", storagePath: null, startSec: 2.0, endSec: 3.8, inSec: 6.2, sourceDurationSec: 8, order: 1, locked: false, hidden: false },
