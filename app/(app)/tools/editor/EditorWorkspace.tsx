@@ -267,11 +267,17 @@ function TimelineLayerRow({
   onTrimStart: (startSec: number) => void;
   onTrimEnd: (endSec: number) => void;
   /** Video layers: source range to show as a frame strip behind the label. */
-  filmstrip?: { storagePath: string | null; inSec: number; outSec: number };
+  filmstrip?: { storagePath: string | null; localUrl: string | null; inSec: number; outSec: number };
 }) {
   const span = Math.max(0.2, endSec - startSec);
   const width = Math.max(28, span * pxPerSec);
-  const frames = useClipFilmstrip(filmstrip?.storagePath, filmstrip?.inSec ?? 0, filmstrip?.outSec ?? 0, width);
+  const frames = useClipFilmstrip(
+    filmstrip?.storagePath,
+    filmstrip?.localUrl,
+    filmstrip?.inSec ?? 0,
+    filmstrip?.outSec ?? 0,
+    width
+  );
   return (
     <div className="relative h-8" style={{ width: trackWidth }}>
       <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
@@ -2444,7 +2450,12 @@ export default function EditorWorkspace() {
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
                           filmstrip={
                             overlay.kind === "video"
-                              ? { storagePath: overlay.storagePath, inSec: 0, outSec: overlay.endSec - overlay.startSec }
+                              ? {
+                                  storagePath: overlay.storagePath,
+                                  localUrl: localUrlFor(overlay),
+                                  inSec: 0,
+                                  outSec: overlay.endSec - overlay.startSec,
+                                }
                               : undefined
                           }
                           onSelect={() => setSelectedId(overlay.id)}
@@ -2489,7 +2500,12 @@ export default function EditorWorkspace() {
                             maxEnd={EDITOR_MAX_DURATION_SEC}
                             maxSpan={maxClipLayerDurationSec(clip)}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
-                            filmstrip={{ storagePath: clip.storagePath, inSec: clip.inSec, outSec: clipSourceOutSec(clip) }}
+                            filmstrip={{
+                              storagePath: clip.storagePath,
+                              localUrl: localUrlFor(clip),
+                              inSec: clip.inSec,
+                              outSec: clipSourceOutSec(clip),
+                            }}
                             onSelect={() => setSelectedId(clip.id)}
                             onMove={(startSec, endSec) =>
                               updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })

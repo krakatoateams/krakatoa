@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { FILMSTRIP_ROW_PX, filmstripCount, filmstripTimes } from "@/lib/editor-filmstrip";
 
-// Frames are keyed by storage path + 0.1 s source time, so moves never re-extract and
-// trims only capture the times they have not seen. Session memory only; data URLs at
-// 2x row height are a few KB each.
+// Frames are keyed by source (storage path or device object URL) + 0.1 s source time,
+// so moves never re-extract and trims only capture the times they have not seen.
+// Session memory only; data URLs at 2x row height are a few KB each.
 const FRAME_CACHE_LIMIT = 600;
 const frameCache = new Map<string, string>();
 const aspectCache = new Map<string, number>();
@@ -53,17 +53,20 @@ function waitFor(video: HTMLVideoElement, event: "loadedmetadata" | "seeked"): P
 
 /**
  * Filmstrip frames for a timeline clip over its trimmed source range. Loads one hidden
- * video from the stable signed URL, seeks through the missing times, and releases it.
+ * video from the device file's object URL (no network) or else the stable signed URL,
+ * seeks through the missing times, and releases it.
  * Returns null while loading or when the source cannot be captured (plain block).
  */
 export function useClipFilmstrip(
   storagePath: string | null | undefined,
+  localUrl: string | null | undefined,
   inSec: number,
   outSec: number,
   blockWidthPx: number
 ): string[] | null {
-  const path = storagePath?.trim() || null;
-  const url = useSignedMediaUrl(path);
+  const storage = storagePath?.trim() || null;
+  const url = useSignedMediaUrl(localUrl ? null : storage, localUrl);
+  const path = localUrl || storage;
   const [frames, setFrames] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -119,8 +122,9 @@ export function useClipFilmstrip(
         }
         const next = cachedFrames(path, times);
         if (next) setFrames(next);
-      } catch {
-        if (!cancelled) failedPaths.add(path);
+      } catch (error) {
+        // A timeout (busy tab, slow network) retries on the next change; real failures stay plain.
+        if (!cancelled && !(error instanceof Error && error.message === "timeout")) failedPaths.add(path);
       } finally {
         if (video === el) release();
       }
