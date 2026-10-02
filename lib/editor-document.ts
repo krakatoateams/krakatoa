@@ -708,7 +708,8 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
 }
 
 
-export const EDITOR_MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+export const EDITOR_MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB, editor-only client limit
+export const EDITOR_MAX_UPLOAD_MB = EDITOR_MAX_UPLOAD_BYTES / (1024 * 1024);
 
 export const EDITOR_ACCEPTED_VIDEO_MIME_TYPES = [
   "video/mp4",
@@ -735,7 +736,7 @@ export function validateEditorUploadFile(
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
     return {
       ok: false,
-      error: `File is too large (${sizeMB} MB). The maximum size is 100 MB.`,
+      error: `File is too large (${sizeMB} MB). The maximum size is ${EDITOR_MAX_UPLOAD_MB} MB.`,
     };
   }
 
@@ -977,6 +978,12 @@ export function editorDocumentSelfCheck(): void {
   // Upload validation tests
   const oversized = validateEditorUploadFile({ size: EDITOR_MAX_UPLOAD_BYTES + 1, type: "video/mp4", name: "big.mp4" });
   assert(!oversized.ok && oversized.error.includes("too large"), "oversized file rejected");
+  assert(!oversized.ok && oversized.error.includes("25 MB"), "oversized error mentions 25 MB");
+  // Literal 25 MB on purpose: pins the #243 limit so a constant change fails here.
+  const atLimit = validateEditorUploadFile({ size: 25 * 1024 * 1024, type: "video/mp4", name: "limit.mp4" });
+  assert(atLimit.ok, "exactly 25 MB upload accepted");
+  const overLimit = validateEditorUploadFile({ size: 25 * 1024 * 1024 + 1, type: "video/mp4", name: "over.mp4" });
+  assert(!overLimit.ok, "25 MB + 1 byte upload rejected");
 
   const badType = validateEditorUploadFile({ size: 1024, type: "application/pdf", name: "doc.pdf" });
   assert(!badType.ok && badType.error.includes("isn't supported"), "unsupported mime type rejected");
