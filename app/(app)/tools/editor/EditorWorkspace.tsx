@@ -744,13 +744,11 @@ export default function EditorWorkspace() {
   selectedIdRef.current = selectedId;
   playheadRef.current = playhead;
 
-  const isCurrentClipMuted = () => {
-    const cur = clipAtPlayhead(
+  const currentVisibleClip = () =>
+    clipAtPlayhead(
       { ...docRef.current, sequence: docRef.current.sequence.filter((c) => !c.hidden) },
       playheadRef.current
     );
-    return Boolean(cur?.clip.muted);
-  };
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -1252,9 +1250,12 @@ export default function EditorWorkspace() {
         setPlaying((current) => {
           const next = current ? false : sequenceDurationSec(docRef.current) > 0;
           const el = previewVideoRef.current;
+          const activeClip = next ? currentVisibleClip() : null;
           if (!next) el?.pause();
-          else if (el) {
-            el.muted = isCurrentClipMuted();
+          // Only start the element directly when a clip covers the playhead; at the end
+          // or in a gap SignedVideo's playing prop stays false and would never pause it.
+          else if (el && activeClip) {
+            el.muted = Boolean(activeClip.clip.muted);
             void el.play().catch(() => undefined);
           }
           return next;
@@ -1907,8 +1908,9 @@ export default function EditorWorkspace() {
                       return;
                     }
                     if (duration <= 0) return;
-                    if (el) {
-                      el.muted = isCurrentClipMuted();
+                    const activeClip = currentVisibleClip();
+                    if (el && activeClip) {
+                      el.muted = Boolean(activeClip.clip.muted);
                       void el.play().catch(() => undefined);
                     }
                     setPlaying(true);
