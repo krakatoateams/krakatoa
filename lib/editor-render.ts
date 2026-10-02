@@ -145,14 +145,6 @@ export function buildEditorFfmpegGraph(
     `color=c=black:s=${width}x${height}:d=${durationSec}:r=30,format=yuv420p[base]`,
   ];
 
-  const audioLabels: string[] = [];
-  const addAudio = (layer: EditorClip | EditorOverlay, url: string, index: number, trim: string) => {
-    if (!isAudibleLayer(layer) || !audioUrls.has(url)) return;
-    const label = `a${audioLabels.length}`;
-    filters.push(placeAudioFilter(index, trim, layer.startSec, label));
-    audioLabels.push(label);
-  };
-
   const clipOverlays: { clip: EditorClip; index: number; label: string }[] = [];
   for (const clip of sequence) {
     const url = mediaUrlFor(urls, clip.creationId, clip.storagePath, clip.id);
@@ -162,7 +154,6 @@ export function buildEditorFfmpegGraph(
     inputArgs.push(`-i {{${alias}}}`);
     const label = `v${clipOverlays.length}`;
     filters.push(placeClipFilter(inputIndex, clip, width, height, label));
-    addAudio(clip, url, inputIndex, `atrim=start=${round2(clip.inSec)}:end=${round2(clipSourceOutSec(clip))}`);
     clipOverlays.push({ clip, index: inputIndex, label });
     inputIndex += 1;
   }
@@ -189,8 +180,36 @@ export function buildEditorFfmpegGraph(
     inputFiles[alias] = url;
     inputArgs.push(`-i {{${alias}}}`);
     overlayInputs.push({ overlay, index: inputIndex, kind: overlay.kind });
-    addAudio(overlay, url, inputIndex, `atrim=duration=${overlayDurationSec(overlay)}`);
     inputIndex += 1;
+  }
+
+  // Dedicated audio inputs prevent FFmpeg demuxer buffer deadlocks between concurrent video overlay and audio amix filters.
+  const audioLabels: string[] = [];
+  const addAudio = (layer: EditorClip | EditorOverlay, url: string, trim: string) => {
+    if (!isAudibleLayer(layer) || !audioUrls.has(url)) return;
+    const alias = `in_a${audioLabels.length}`;
+    inputFiles[alias] = url;
+    inputArgs.push(`-i {{${alias}}}`);
+    const audioInputIndex = inputIndex;
+    inputIndex += 1;
+    const label = `a${audioLabels.length}`;
+    filters.push(placeAudioFilter(audioInputIndex, trim, layer.startSec, label));
+    audioLabels.push(label);
+  };
+
+  for (const clip of sequence) {
+    const url = mediaUrlFor(urls, clip.creationId, clip.storagePath, clip.id);
+    if (url) {
+      addAudio(clip, url, `atrim=start=${round2(clip.inSec)}:end=${round2(clipSourceOutSec(clip))}`);
+    }
+  }
+
+  for (const overlay of overlays) {
+    if (overlay.kind !== "video") continue;
+    const url = mediaUrlFor(urls, overlay.creationId, overlay.storagePath, overlay.id);
+    if (url) {
+      addAudio(overlay, url, `atrim=duration=${overlayDurationSec(overlay)}`);
+    }
   }
 
   const hasText = overlays.some((o) => o.kind === "text");
@@ -273,11 +292,17 @@ export async function runEditorRender(
   // Probe failures resolve to "silent" so a source without audio never fails the export.
   const audioUrls = await probeAudioSources(audibleLayerUrls(doc, urls));
   const graph = buildEditorFfmpegGraph(doc, urls, audioUrls);
+  const options: RunRendiOptions = {
+    pollIntervalMs: 2500,
+    maxAttempts: 80, // 80 * 2.5s = 200s, fits well inside maxDuration = 300 with headroom for upload
+    retryOnCommandFailure: false,
+    ...rendiOptions,
+  };
   const result = await runRendiCommandWithRetry(
     graph.command,
     graph.inputFiles,
     graph.outputFiles,
-    rendiOptions
+    options
   );
   return {
     url: getRendiOutputUrl(result, "out_v"),
@@ -407,38 +432,38 @@ export function editorRenderSelfCheck(): void {
   const avUrls = { ...urls, v1: "https://example.com/v.mp4" };
   const av = buildEditorFfmpegGraph(avDoc, avUrls, withAudio).command;
   assert(
-    av.includes(`[0:a]atrim=start=0:end=2,asetpts=PTS-STARTPTS,${fmt},adelay=0:all=1[a0]`),
+    av.includes(`[4:a]atrim=start=0:end=2,asetpts=PTS-STARTPTS,${fmt},adelay=0:all=1[a0]`),
     "unmuted clip audio trimmed to its source window"
   );
   assert(
-    av.includes(`[1:a]atrim=start=1:end=3,asetpts=PTS-STARTPTS,${fmt},adelay=3000:all=1[a1]`),
+    av.includes(`[5:a]atrim=start=1:end=3,asetpts=PTS-STARTPTS,${fmt},adelay=3000:all=1[a1]`),
     "non-zero inSec and startSec: atrim from inSec, adelay to startSec"
   );
   assert(
-    av.includes(`[3:a]atrim=duration=2.5,asetpts=PTS-STARTPTS,${fmt},adelay=2000:all=1[a2]`),
+    av.includes(`[6:a]atrim=duration=2.5,asetpts=PTS-STARTPTS,${fmt},adelay=2000:all=1[a2]`),
     "unmuted video overlay audio from source 0 for its window"
   );
-  assert(!av.includes("[2:a]"), "image overlay never contributes audio");
+  assert(!av.includes("[2:a]") && !av.includes("[3:a]"), "image overlay and video inputs never contribute audio");
   assert(
     av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=8[aout]"),
     "overlapping layers mixed, padded/trimmed to durationSec"
   );
   assert(av.includes(`-map "[aout]" -c:a aac`) && !av.includes("-an"), "mixed audio mapped and AAC-encoded");
-  assert((av.match(/-i /g) ?? []).length === 4, "audio reuses video inputs (no duplicate -i)");
+  assert((av.match(/-i /g) ?? []).length === 7, "audio uses dedicated inputs to prevent demuxer deadlock");
 
   const mutedClip = buildEditorFfmpegGraph(
     { ...avDoc, sequence: [doc.sequence[0], { ...doc.sequence[1], muted: true }] },
     avUrls,
     withAudio
   ).command;
-  assert(!mutedClip.includes("[1:a]") && mutedClip.includes("amix=inputs=2"), "muted clip is silent");
+  assert(!mutedClip.includes("atrim=start=1:end=3") && mutedClip.includes("amix=inputs=2"), "muted clip is silent");
 
   const mutedOverlay = buildEditorFfmpegGraph(
     { ...avDoc, overlays: [...doc.overlays, { ...videoOverlay, muted: true }] },
     avUrls,
     withAudio
   ).command;
-  assert(!mutedOverlay.includes("[3:a]") && mutedOverlay.includes("amix=inputs=2"), "muted video overlay is silent");
+  assert(!mutedOverlay.includes("atrim=duration=2.5") && mutedOverlay.includes("amix=inputs=2"), "muted video overlay is silent");
 
   const hidden = buildEditorFfmpegGraph(
     { ...avDoc, sequence: [doc.sequence[0], { ...doc.sequence[1], hidden: true }] },
@@ -452,10 +477,31 @@ export function editorRenderSelfCheck(): void {
 
   const mixedSources = buildEditorFfmpegGraph(avDoc, avUrls, new Set(["https://example.com/a.mp4"])).command;
   assert(
-    mixedSources.includes("[0:a]") && !mixedSources.includes("[1:a]") && !mixedSources.includes("[3:a]") &&
+    mixedSources.includes("[4:a]") && !mixedSources.includes("[5:a]") && !mixedSources.includes("[6:a]") &&
       mixedSources.includes("amix=inputs=1"),
     "source without audio stream is silent; others still export"
   );
+
+  // Issue #244 regression check: multi-clip timeline reusing same source media across overlapping intervals
+  const duplicateSourceDoc: EditorDocument = {
+    v: 1,
+    aspect: "9:16",
+    durationSec: 10,
+    sequence: [
+      { id: "c1", creationId: "a", storagePath: null, startSec: 1.2, endSec: 3.2, inSec: 3.7, sourceDurationSec: 8, order: 0, locked: false, hidden: false },
+      { id: "c2", creationId: "a", storagePath: null, startSec: 2.0, endSec: 3.8, inSec: 6.2, sourceDurationSec: 8, order: 1, locked: false, hidden: false },
+    ],
+    overlays: [],
+  };
+  const dupGraph = buildEditorFfmpegGraph(
+    duplicateSourceDoc,
+    { c1: "https://example.com/same.mp4", c2: "https://example.com/same.mp4" },
+    new Set(["https://example.com/same.mp4"])
+  );
+  // Video inputs are 0 and 1; audio inputs are 2 and 3 (separate demuxers)
+  assert((dupGraph.command.match(/-i /g) ?? []).length === 4, "reused sources separate video and audio inputs");
+  assert(dupGraph.command.includes("[2:a]") && dupGraph.command.includes("[3:a]"), "audio reads from dedicated audio inputs");
+  assert(!dupGraph.command.includes("[0:a]") && !dupGraph.command.includes("[1:a]"), "video inputs are not read as audio");
 
   const allMuted = buildEditorFfmpegGraph(
     {

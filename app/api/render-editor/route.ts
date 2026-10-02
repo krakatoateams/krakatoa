@@ -416,9 +416,16 @@ export async function POST(req: Request) {
       : error instanceof Error
         ? error.message
         : String(error ?? "Unknown error");
-    const errJson = cancelled
-      ? { message, code: "GENERATION_CANCELLED" }
-      : { message };
+    const code =
+      cancelled
+        ? "GENERATION_CANCELLED"
+        : error &&
+            typeof error === "object" &&
+            "code" in error &&
+            typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : undefined;
+    const errJson = code ? { message, code } : { message };
 
     if (currentStepId && profileId) {
       await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
