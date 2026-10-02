@@ -746,13 +746,11 @@ export default function EditorWorkspace() {
   selectedIdRef.current = selectedId;
   playheadRef.current = playhead;
 
-  const isCurrentClipMuted = () => {
-    const cur = clipAtPlayhead(
+  const currentVisibleClip = () =>
+    clipAtPlayhead(
       { ...docRef.current, sequence: docRef.current.sequence.filter((c) => !c.hidden) },
       playheadRef.current
     );
-    return Boolean(cur?.clip.muted);
-  };
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -902,7 +900,7 @@ export default function EditorWorkspace() {
   // a >650ms pause mid-drag splits into two undo steps. Upgrade to explicit
   // begin/end-gesture calls if that granularity ever bothers users.
   const patchDoc = useCallback(
-    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string }) => {
+    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
       const current = docRef.current;
       const next = updater(current);
       const key = opts?.coalesceKey ?? null;
@@ -916,7 +914,7 @@ export default function EditorWorkspace() {
       lastPatchRef.current = key != null ? { key, at: now } : null;
       docRef.current = next;
       setDoc(next);
-      setPlaying(false);
+      if (!opts?.keepPlaying) setPlaying(false);
     },
     []
   );
@@ -1257,9 +1255,12 @@ export default function EditorWorkspace() {
         setPlaying((current) => {
           const next = current ? false : sequenceDurationSec(docRef.current) > 0;
           const el = previewVideoRef.current;
+          const activeClip = next ? currentVisibleClip() : null;
           if (!next) el?.pause();
-          else if (el) {
-            el.muted = isCurrentClipMuted();
+          // Only start the element directly when a clip covers the playhead; at the end
+          // or in a gap SignedVideo's playing prop stays false and would never pause it.
+          else if (el && activeClip) {
+            el.muted = Boolean(activeClip.clip.muted);
             void el.play().catch(() => undefined);
           }
           // SignedVideo's effect also plays these; starting them here keeps the user gesture.
@@ -1411,7 +1412,7 @@ export default function EditorWorkspace() {
     }
   };
 
-  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string }) => {
+  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorClip> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -1426,7 +1427,7 @@ export default function EditorWorkspace() {
     }), opts);
   };
 
-  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string }) => {
+  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorOverlay> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -1930,8 +1931,9 @@ export default function EditorWorkspace() {
                       return;
                     }
                     if (duration <= 0) return;
-                    if (el) {
-                      el.muted = isCurrentClipMuted();
+                    const activeClip = currentVisibleClip();
+                    if (el && activeClip) {
+                      el.muted = Boolean(activeClip.clip.muted);
                       void el.play().catch(() => undefined);
                     }
                     for (const v of underlyingVideosRef.current.values()) void v.play().catch(() => undefined);
@@ -2113,7 +2115,7 @@ export default function EditorWorkspace() {
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
                         onToggleMute={
                           overlay.kind === "video"
-                            ? () => updateOverlay(overlay.id, { muted: !overlay.muted })
+                            ? () => updateOverlay(overlay.id, { muted: !overlay.muted }, { keepPlaying: true })
                             : undefined
                         }
                         onDelete={() => removeLayer("overlay", overlay.id)}
@@ -2151,7 +2153,7 @@ export default function EditorWorkspace() {
                         }}
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
-                        onToggleMute={() => updateClip(clip.id, { muted: !clip.muted })}
+                        onToggleMute={() => updateClip(clip.id, { muted: !clip.muted }, { keepPlaying: true })}
                         onDelete={() => removeLayer("clip", clip.id)}
                         onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
