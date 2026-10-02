@@ -24,6 +24,61 @@ export const EDITOR_CANVAS: Record<EditorAspect, { w: number; h: number }> = {
   "16:9": { w: 1280, h: 720 },
 };
 
+export const EDITOR_TEXT_MIN_FONT_SIZE = 12;
+export const EDITOR_TEXT_MAX_FONT_SIZE = 200;
+export const EDITOR_TEXT_DEFAULT_FONT_SIZE = 48;
+
+export type TextOverlayLayout = {
+  fontSize: number;
+  box: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+  alignment: {
+    horizontal: "center";
+    vertical: "center";
+  };
+  lineHeight: number;
+  shadow: {
+    color: string;
+    colorCss: string;
+    x: number;
+    y: number;
+  };
+};
+
+export function textOverlayLayout(
+  overlay: Pick<EditorOverlay, "x" | "y" | "w" | "h" | "fontSize">,
+  canvas: { w: number; h: number }
+): TextOverlayLayout {
+  const fontSize = Math.max(
+    EDITOR_TEXT_MIN_FONT_SIZE,
+    Math.min(EDITOR_TEXT_MAX_FONT_SIZE, Math.round(overlay.fontSize ?? EDITOR_TEXT_DEFAULT_FONT_SIZE))
+  );
+  const x = Math.round(overlay.x * canvas.w);
+  const y = Math.round(overlay.y * canvas.h);
+  const w = Math.max(2, Math.round(overlay.w * canvas.w));
+  const h = Math.max(2, Math.round(overlay.h * canvas.h));
+
+  return {
+    fontSize,
+    box: { x, y, w, h },
+    alignment: {
+      horizontal: "center",
+      vertical: "center",
+    },
+    lineHeight: 1.25,
+    shadow: {
+      color: "black@0.6",
+      colorCss: "rgba(0, 0, 0, 0.6)",
+      x: 2,
+      y: 2,
+    },
+  };
+}
+
 export type EditorClip = {
   id: string;
   name?: string | null;
@@ -1066,6 +1121,29 @@ export function editorDocumentSelfCheck(): void {
   assert(resolveLayerLabel(namedDoc!.sequence[1], 1) === "Clip 2", "resolveLayerLabel falls back to Clip 2");
   assert(resolveLayerLabel(namedDoc!.overlays[0]) === "Custom Caption", "resolveLayerLabel uses custom overlay name");
   assert(resolveLayerLabel(namedDoc!.overlays[1]) === "Image overlay", "resolveLayerLabel falls back to Image overlay");
+
+  // textOverlayLayout tests
+  const sampleOverlay: Pick<EditorOverlay, "x" | "y" | "w" | "h" | "fontSize"> = {
+    x: 0.1,
+    y: 0.2,
+    w: 0.8,
+    h: 0.15,
+    fontSize: 48,
+  };
+  const layout916 = textOverlayLayout(sampleOverlay, EDITOR_CANVAS["9:16"]);
+  assert(layout916.box.x === 72 && layout916.box.y === 256, "box x/y scaled to 9:16 canvas");
+  assert(layout916.box.w === 576 && layout916.box.h === 192, "box w/h scaled to 9:16 canvas");
+  assert(layout916.fontSize === 48, "explicit font size preserved");
+  assert(layout916.alignment.horizontal === "center" && layout916.alignment.vertical === "center", "center alignment");
+  assert(layout916.shadow.color === "black@0.6" && layout916.shadow.x === 2 && layout916.shadow.y === 2, "shadow parameters");
+
+  // Clamping tests
+  const clampedLow = textOverlayLayout({ ...sampleOverlay, fontSize: 5 }, EDITOR_CANVAS["9:16"]);
+  assert(clampedLow.fontSize === EDITOR_TEXT_MIN_FONT_SIZE, "font size clamped to min 12");
+  const clampedHigh = textOverlayLayout({ ...sampleOverlay, fontSize: 500 }, EDITOR_CANVAS["9:16"]);
+  assert(clampedHigh.fontSize === EDITOR_TEXT_MAX_FONT_SIZE, "font size clamped to max 200");
+  const defaultSize = textOverlayLayout({ ...sampleOverlay, fontSize: null }, EDITOR_CANVAS["9:16"]);
+  assert(defaultSize.fontSize === EDITOR_TEXT_DEFAULT_FONT_SIZE, "null font size defaults to 48");
 }
 
 if (require.main === module) {
