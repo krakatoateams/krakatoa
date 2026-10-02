@@ -897,7 +897,7 @@ export default function EditorWorkspace() {
   // a >650ms pause mid-drag splits into two undo steps. Upgrade to explicit
   // begin/end-gesture calls if that granularity ever bothers users.
   const patchDoc = useCallback(
-    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string }) => {
+    (updater: (current: EditorDocument) => EditorDocument, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
       const current = docRef.current;
       const next = updater(current);
       const key = opts?.coalesceKey ?? null;
@@ -911,7 +911,7 @@ export default function EditorWorkspace() {
       lastPatchRef.current = key != null ? { key, at: now } : null;
       docRef.current = next;
       setDoc(next);
-      setPlaying(false);
+      if (!opts?.keepPlaying) setPlaying(false);
     },
     []
   );
@@ -1402,7 +1402,7 @@ export default function EditorWorkspace() {
     }
   };
 
-  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string }) => {
+  const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorClip> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -1417,7 +1417,7 @@ export default function EditorWorkspace() {
     }), opts);
   };
 
-  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string }) => {
+  const updateOverlay = (id: string, patch: Partial<EditorOverlay>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorOverlay> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
     if (next.endSec != null) next.endSec = snapTenth(next.endSec);
@@ -2089,7 +2089,7 @@ export default function EditorWorkspace() {
                         onToggleHidden={() => updateOverlay(overlay.id, { hidden: !overlay.hidden })}
                         onToggleMute={
                           overlay.kind === "video"
-                            ? () => updateOverlay(overlay.id, { muted: !overlay.muted })
+                            ? () => updateOverlay(overlay.id, { muted: !overlay.muted }, { keepPlaying: true })
                             : undefined
                         }
                         onDelete={() => removeLayer("overlay", overlay.id)}
@@ -2127,7 +2127,7 @@ export default function EditorWorkspace() {
                         }}
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
-                        onToggleMute={() => updateClip(clip.id, { muted: !clip.muted })}
+                        onToggleMute={() => updateClip(clip.id, { muted: !clip.muted }, { keepPlaying: true })}
                         onDelete={() => removeLayer("clip", clip.id)}
                         onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
