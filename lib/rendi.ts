@@ -144,7 +144,8 @@ export async function runRendiCommand(
     }
   }
 
-  throw new Error("Rendi polling timed out.");
+  // Typed so callers with retryOnCommandFailure=false (editor) don't re-poll past their time budget.
+  throw new RendiCommandError("Rendi polling timed out.", "RENDI_POLL_TIMEOUT");
 }
 
 const RENDI_MAX_RETRIES = 3;
@@ -179,7 +180,7 @@ function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`rendi self-check: ${msg}`);
 }
 
-export function rendiSelfCheck(): void {
+export async function rendiSelfCheck(): Promise<void> {
   const rawMsg = "Failed at https://storage.supabase.co/v1/object/sign/krakatoa/user/video.mp4?token=eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3OTA5NTQzODF9.abc with error";
   const sanitized = sanitizeRendiErrorMessage(rawMsg);
   assert(!sanitized.includes("token="), "tokens must be stripped");
@@ -190,11 +191,26 @@ export function rendiSelfCheck(): void {
   assert(err.code === "ACCOUNT_FFMPEG_RUN_TIMEOUT", "code is errorStatus");
   assert(err.errorStatus === "ACCOUNT_FFMPEG_RUN_TIMEOUT", "errorStatus set");
   assert(err.errorMessage === "Timeout", "errorMessage set");
+
+  // Issue #244: a poll timeout must not be retried when command retries are off (editor time budget).
+  const realFetch = globalThis.fetch;
+  let submits = 0;
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    if (String(url).endsWith("/run-ffmpeg-command")) submits += 1;
+    return new Response(JSON.stringify({ command_id: "c1", status: "PROCESSING" }));
+  }) as typeof fetch;
+  try {
+    const opts = { apiKey: "k", pollIntervalMs: 0, maxAttempts: 1, retryOnCommandFailure: false };
+    const timedOut = await runRendiCommandWithRetry("", {}, {}, opts).catch((e: unknown) => e);
+    assert(timedOut instanceof RendiCommandError && timedOut.code === "RENDI_POLL_TIMEOUT", "poll timeout is typed");
+    assert(submits === 1, "poll timeout not retried when retryOnCommandFailure=false");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 if (require.main === module) {
-  rendiSelfCheck();
-  console.log("rendiSelfCheck: ok");
+  rendiSelfCheck().then(() => console.log("rendiSelfCheck: ok"));
 }
 
 /** Read a hosted output URL from a successful Rendi poll result. */
