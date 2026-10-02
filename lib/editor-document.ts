@@ -2,10 +2,13 @@
  * Persistable Editor timeline. Clips and overlays are layers on a composition
  * whose duration is derived from the latest layer end (projectDurationSec).
  * Media is referenced by creationId or storagePath — never blob/signed URLs —
- * so a reload can re-sign.
+ * so a reload can re-sign. Device files are `localMediaId` only (a key into the
+ * browser's IndexedDB copy) until export uploads them.
  *
  * Pure — runnable as `npx tsx lib/editor-document.ts`.
  */
+
+import { isVideosTempRefPath } from "./storage-buckets";
 
 export const EDITOR_DOCUMENT_VERSION = 1;
 export const EDITOR_TITLE_MAX = 80;
@@ -87,6 +90,8 @@ export type EditorClip = {
   name?: string | null;
   creationId: string | null;
   storagePath: string | null;
+  /** Device file kept in this browser (lib/editor-local-media.ts); uploaded only on export. */
+  localMediaId?: string | null;
   /** Timeline placement. */
   startSec: number;
   endSec: number;
@@ -118,6 +123,8 @@ export type EditorOverlay = {
   color: string | null;
   creationId: string | null;
   storagePath: string | null;
+  /** Device file kept in this browser (lib/editor-local-media.ts); uploaded only on export. */
+  localMediaId?: string | null;
   /** Video overlays only: known source length; layer span cannot exceed it. */
   sourceDurationSec?: number | null;
   locked: boolean;
@@ -197,6 +204,12 @@ function asId(value: unknown): string | null {
 function asPath(value: unknown): string | null {
   const path = asTrimmed(value, PATH_MAX);
   return path.length > 0 ? path : null;
+}
+
+const LOCAL_MEDIA_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+
+function asLocalMediaId(value: unknown): string | null {
+  return typeof value === "string" && LOCAL_MEDIA_ID_RE.test(value) ? value : null;
 }
 
 function asAspect(value: unknown): EditorAspect {
@@ -525,6 +538,7 @@ function parseClip(raw: unknown, index: number): (EditorClip & { packed?: boolea
     name: normalizeLayerName(o.name),
     creationId: asId(o.creationId),
     storagePath: asPath(o.storagePath),
+    localMediaId: asLocalMediaId(o.localMediaId),
     startSec,
     endSec,
     inSec,
@@ -569,6 +583,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
     color: kind === "text" && COLOR_RE.test(colorRaw) ? colorRaw : kind === "text" ? "#FFFFFF" : null,
     creationId: kind === "text" ? null : asId(o.creationId),
     storagePath: kind === "text" ? null : asPath(o.storagePath),
+    localMediaId: kind === "text" ? null : asLocalMediaId(o.localMediaId),
     sourceDurationSec: kind === "video" ? sourceDurationSec : undefined,
     locked: Boolean(o.locked),
     hidden: Boolean(o.hidden),
@@ -615,6 +630,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
         name: clip.name ?? null,
         creationId: clip.creationId,
         storagePath: clip.storagePath,
+        localMediaId: clip.localMediaId,
         startSec: clip.startSec,
         endSec: clip.endSec,
         inSec: clip.inSec,
@@ -637,18 +653,28 @@ export function editorDocumentJsonTooLarge(doc: EditorDocument): boolean {
   return JSON.stringify(doc).length > EDITOR_DOCUMENT_JSON_MAX;
 }
 
-export function clipHasSource(clip: EditorClip): boolean {
-  return Boolean(clip.creationId || clip.storagePath);
+/** A device file that lives only in this browser until export. */
+export function isLocalOnlyLayer(layer: EditorClip | EditorOverlay): boolean {
+  return Boolean(layer.localMediaId && !layer.creationId && !layer.storagePath);
 }
 
-export function overlayHasSource(overlay: EditorOverlay): boolean {
+/** `allowLocal`: count browser-only device media as a source (client pre-export check). */
+export function clipHasSource(clip: EditorClip, allowLocal = false): boolean {
+  return Boolean(clip.creationId || clip.storagePath || (allowLocal && clip.localMediaId));
+}
+
+export function overlayHasSource(overlay: EditorOverlay, allowLocal = false): boolean {
   if (overlay.kind === "text") return Boolean(overlay.text?.trim());
-  return Boolean(overlay.creationId || overlay.storagePath);
+  return Boolean(overlay.creationId || overlay.storagePath || (allowLocal && overlay.localMediaId));
 }
 
 export type EditorExportError = { code: string; message: string };
 
-export function validateEditorExport(doc: EditorDocument): EditorExportError | null {
+export function validateEditorExport(
+  doc: EditorDocument,
+  opts?: { allowLocal?: boolean }
+): EditorExportError | null {
+  const allowLocal = Boolean(opts?.allowLocal);
   if (doc.sequence.length === 0) {
     return { code: "EMPTY_SEQUENCE", message: "Add at least one clip before exporting." };
   }
@@ -669,7 +695,7 @@ export function validateEditorExport(doc: EditorDocument): EditorExportError | n
     };
   }
   for (const clip of doc.sequence) {
-    if (!clipHasSource(clip)) {
+    if (!clipHasSource(clip, allowLocal)) {
       return { code: "CLIP_SOURCE", message: "Every sequence clip needs a library item or upload." };
     }
     if (clip.endSec - clip.startSec > maxClipLayerDurationSec(clip) + 0.05) {
@@ -677,7 +703,7 @@ export function validateEditorExport(doc: EditorDocument): EditorExportError | n
     }
   }
   for (const overlay of doc.overlays) {
-    if (!overlayHasSource(overlay)) {
+    if (!overlayHasSource(overlay, allowLocal)) {
       return { code: "OVERLAY_SOURCE", message: "Every overlay needs text or a media source." };
     }
   }
@@ -707,6 +733,57 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
   return { creationIds, storagePaths };
 }
 
+export type EditorExportUpload = { localMediaId: string; storagePath: string };
+
+/**
+ * Validates the device files an export uploaded. A path is accepted only when it
+ * sits directly under the caller's own temp refs prefix (`ownerPrefix`) and a
+ * layer with the same `localMediaId` references it. Null = reject the request.
+ * Only accepted paths may be deleted after the export.
+ */
+export function acceptEditorExportUploads(
+  raw: unknown,
+  doc: EditorDocument,
+  ownerPrefix: string
+): EditorExportUpload[] | null {
+  if (raw == null) return [];
+  if (!Array.isArray(raw) || raw.length > EDITOR_MAX_SEQUENCE + EDITOR_MAX_OVERLAYS) return null;
+  const layers = [...doc.sequence, ...doc.overlays];
+  const accepted: EditorExportUpload[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return null;
+    const { localMediaId, storagePath } = entry as Record<string, unknown>;
+    if (typeof localMediaId !== "string" || typeof storagePath !== "string") return null;
+    const filename = storagePath.startsWith(ownerPrefix) ? storagePath.slice(ownerPrefix.length) : "";
+    if (!filename || filename.includes("/") || !isVideosTempRefPath(storagePath)) return null;
+    const referenced = layers.some(
+      (layer) => layer.localMediaId === localMediaId && layer.storagePath === storagePath
+    );
+    if (!referenced) return null;
+    if (seen.has(storagePath)) continue;
+    seen.add(storagePath);
+    accepted.push({ localMediaId, storagePath });
+  }
+  return accepted;
+}
+
+/**
+ * The document as the export request hash sees it: layers whose storagePath is a
+ * fresh export upload hash their localMediaId instead, so a retry that re-uploads
+ * the same device files reuses its idempotency key.
+ */
+export function editorExportHashDocument(
+  doc: EditorDocument,
+  uploads: EditorExportUpload[]
+): EditorDocument {
+  const uploaded = new Set(uploads.map((u) => u.storagePath));
+  const swap = <T extends EditorClip | EditorOverlay>(layer: T): T =>
+    layer.storagePath && uploaded.has(layer.storagePath) && layer.localMediaId
+      ? { ...layer, storagePath: `local:${layer.localMediaId}` }
+      : layer;
+  return { ...doc, sequence: doc.sequence.map(swap), overlays: doc.overlays.map(swap) };
+}
 
 export const EDITOR_MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB, editor-only client limit
 export const EDITOR_MAX_UPLOAD_MB = EDITOR_MAX_UPLOAD_BYTES / (1024 * 1024);
@@ -1188,6 +1265,57 @@ export function editorDocumentSelfCheck(): void {
   assert(resolveLayerLabel(namedDoc!.sequence[1], 1) === "Clip 2", "resolveLayerLabel falls back to Clip 2");
   assert(resolveLayerLabel(namedDoc!.overlays[0]) === "Custom Caption", "resolveLayerLabel uses custom overlay name");
   assert(resolveLayerLabel(namedDoc!.overlays[1]) === "Image overlay", "resolveLayerLabel falls back to Image overlay");
+
+  // Device media kept local until export (#245)
+  assert(parsed!.sequence.every((c) => c.localMediaId === null), "old documents parse with localMediaId null");
+  const localDoc = parseEditorDocument({
+    sequence: [{ id: "l1", localMediaId: "abc-123", startSec: 0, endSec: 2 }],
+    overlays: [
+      { id: "lo1", kind: "image", localMediaId: "img-1", startSec: 0, endSec: 2 },
+      { id: "lt1", kind: "text", localMediaId: "nope", text: "t", startSec: 0, endSec: 2 },
+      { id: "lb1", kind: "video", localMediaId: "blob:http://x/y", startSec: 0, endSec: 2 },
+    ],
+  })!;
+  assert(localDoc.sequence[0].localMediaId === "abc-123", "clip localMediaId kept");
+  assert(localDoc.overlays[0].localMediaId === "img-1", "overlay localMediaId kept");
+  assert(localDoc.overlays[1].localMediaId === null, "text overlays never hold local media");
+  assert(localDoc.overlays[2].localMediaId === null, "invalid localMediaId (blob URL) dropped");
+  assert(isLocalOnlyLayer(localDoc.sequence[0]), "localMediaId without storage is local-only");
+  assert(validateEditorExport(localDoc)?.code === "CLIP_SOURCE", "server export rejects local-only layers");
+  assert(
+    validateEditorExport({ ...localDoc, overlays: localDoc.overlays.slice(0, 2) }, { allowLocal: true }) === null,
+    "client pre-check accepts local layers"
+  );
+
+  const owner = "user-1/videos/temp/refs/";
+  const tmp = `${owner}1-a-clip.mp4`;
+  const exportDoc: EditorDocument = {
+    ...localDoc,
+    sequence: [{ ...localDoc.sequence[0], storagePath: tmp }],
+    overlays: [{ ...localDoc.overlays[0], storagePath: "user-1/videos/generated/keep.mp4" }],
+  };
+  const ok = acceptEditorExportUploads([{ localMediaId: "abc-123", storagePath: tmp }], exportDoc, owner);
+  assert(ok?.length === 1 && ok[0].storagePath === tmp, "own temp upload referenced by its layer accepted");
+  assert(acceptEditorExportUploads(undefined, exportDoc, owner)?.length === 0, "no exportUploads is fine");
+  const reject = (raw: unknown, why: string) =>
+    assert(acceptEditorExportUploads(raw, exportDoc, owner) === null, why);
+  reject([{ localMediaId: "abc-123", storagePath: "user-2/videos/temp/refs/1-a-clip.mp4" }], "another user's path rejected");
+  reject([{ localMediaId: "img-1", storagePath: "user-1/videos/generated/keep.mp4" }], "non-temp path rejected");
+  reject([{ localMediaId: "abc-123", storagePath: `${owner}sub/x.mp4` }], "nested path rejected");
+  reject([{ localMediaId: "abc-123", storagePath: owner }], "bare prefix rejected");
+  reject([{ localMediaId: "other", storagePath: tmp }], "path not referenced by a matching layer rejected");
+  reject([{ localMediaId: "abc-123", storagePath: `${owner}1-b-unused.mp4` }], "unreferenced own temp path rejected");
+  reject("x", "non-array rejected");
+
+  const hashDoc = editorExportHashDocument(exportDoc, ok!);
+  assert(hashDoc.sequence[0].storagePath === "local:abc-123", "uploaded layer hashes its localMediaId");
+  assert(hashDoc.overlays[0].storagePath === "user-1/videos/generated/keep.mp4", "stored layers hash their path");
+  const retryDoc: EditorDocument = { ...exportDoc, sequence: [{ ...exportDoc.sequence[0], storagePath: `${owner}2-c-clip.mp4` }] };
+  const retryHash = editorExportHashDocument(
+    retryDoc,
+    acceptEditorExportUploads([{ localMediaId: "abc-123", storagePath: `${owner}2-c-clip.mp4` }], retryDoc, owner)!
+  );
+  assert(JSON.stringify(retryHash) === JSON.stringify(hashDoc), "re-uploaded retry hashes identically");
 
   // textOverlayLayout tests
   const sampleOverlay: Pick<EditorOverlay, "x" | "y" | "w" | "h" | "fontSize"> = {
