@@ -135,6 +135,7 @@ export default function EditorTopBar({
           cancelling={cancelling}
           cancelAllowed
           onCancel={onCancel}
+          ariaLabel="Cancel export"
         />
         <button
           type="button"
