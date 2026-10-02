@@ -26,6 +26,33 @@ export interface RendiPollData {
   [key: string]: unknown;
 }
 
+export class RendiCommandError extends Error {
+  readonly errorStatus?: string;
+  readonly errorMessage?: string;
+  readonly code?: string;
+
+  constructor(message: string, errorStatus?: string, errorMessage?: string) {
+    super(message);
+    this.name = "RendiCommandError";
+    this.errorStatus = errorStatus;
+    this.errorMessage = errorMessage;
+    if (errorStatus && /^[A-Z0-9_]{1,64}$/.test(errorStatus)) {
+      this.code = errorStatus;
+    }
+  }
+}
+
+export function sanitizeRendiErrorMessage(raw: unknown): string {
+  if (typeof raw !== "string" && !raw) return "";
+  const str = typeof raw === "string" ? raw : String(raw);
+  return str
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-jwt]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
 export interface RunRendiOptions {
   apiKey?: string;
   /** Delay between status polls. Default 3000ms. */
@@ -34,6 +61,11 @@ export interface RunRendiOptions {
   maxAttempts?: number;
   /** Polled before each status check; throw to abort (e.g. user cancelled generation). */
   abortCheck?: () => Promise<void>;
+  /**
+   * When false, do not retry deterministic Rendi command failures (FAILED / ERROR).
+   * Transport errors (non-OK HTTP status from API) are still retried. Default true.
+   */
+  retryOnCommandFailure?: boolean;
 }
 
 export function getRendiApiKey(): string {
@@ -95,7 +127,20 @@ export async function runRendiCommand(
     const status = (data.status || "").toUpperCase();
     if (status === "SUCCESS" || status === "COMPLETED") return data;
     if (status === "FAILED" || status === "ERROR") {
-      throw new Error("Rendi command failed.");
+      const sanitizedStatus =
+        typeof data.error_status === "string" && data.error_status.trim()
+          ? data.error_status.trim().slice(0, 64)
+          : undefined;
+      const sanitizedMessage = sanitizeRendiErrorMessage(data.error_message);
+      const detailParts = [
+        sanitizedStatus ? `status=${sanitizedStatus}` : null,
+        sanitizedMessage ? `message=${sanitizedMessage}` : null,
+      ].filter(Boolean);
+      const errText =
+        detailParts.length > 0
+          ? `Rendi command failed (${detailParts.join(", ")})`
+          : "Rendi command failed.";
+      throw new RendiCommandError(errText, sanitizedStatus, sanitizedMessage);
     }
   }
 
@@ -111,12 +156,16 @@ export async function runRendiCommandWithRetry(
   outputFiles: Record<string, string>,
   options: RunRendiOptions = {},
 ): Promise<RendiPollData> {
+  const retryOnCommandFailure = options.retryOnCommandFailure ?? true;
   let lastError: unknown;
   for (let attempt = 0; attempt < RENDI_MAX_RETRIES; attempt++) {
     try {
       return await runRendiCommand(ffmpegCommand, inputFiles, outputFiles, options);
     } catch (e) {
       if (isCancellation(e)) throw e;
+      if (!retryOnCommandFailure && e instanceof RendiCommandError) {
+        throw e;
+      }
       lastError = e;
       if (attempt < RENDI_MAX_RETRIES - 1) {
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
@@ -124,6 +173,28 @@ export async function runRendiCommandWithRetry(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function assert(cond: boolean, msg: string): void {
+  if (!cond) throw new Error(`rendi self-check: ${msg}`);
+}
+
+export function rendiSelfCheck(): void {
+  const rawMsg = "Failed at https://storage.supabase.co/v1/object/sign/krakatoa/user/video.mp4?token=eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3OTA5NTQzODF9.abc with error";
+  const sanitized = sanitizeRendiErrorMessage(rawMsg);
+  assert(!sanitized.includes("token="), "tokens must be stripped");
+  assert(sanitized.includes("[redacted-url]"), "URLs must be redacted");
+
+  const err = new RendiCommandError("Rendi command failed (status=ACCOUNT_FFMPEG_RUN_TIMEOUT)", "ACCOUNT_FFMPEG_RUN_TIMEOUT", "Timeout");
+  assert(err.name === "RendiCommandError", "name is RendiCommandError");
+  assert(err.code === "ACCOUNT_FFMPEG_RUN_TIMEOUT", "code is errorStatus");
+  assert(err.errorStatus === "ACCOUNT_FFMPEG_RUN_TIMEOUT", "errorStatus set");
+  assert(err.errorMessage === "Timeout", "errorMessage set");
+}
+
+if (require.main === module) {
+  rendiSelfCheck();
+  console.log("rendiSelfCheck: ok");
 }
 
 /** Read a hosted output URL from a successful Rendi poll result. */
