@@ -15,6 +15,7 @@ import {
   Pause,
   Play,
   Plus,
+  Repeat,
   Scissors,
   SkipBack,
   SkipForward,
@@ -722,6 +723,8 @@ export default function EditorWorkspace() {
   const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
+  // Session-only: not part of EditorDocument, autosave, undo history, or export.
+  const [loop, setLoop] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -752,6 +755,7 @@ export default function EditorWorkspace() {
   const lastActiveStoragePathRef = useRef<string | null>(null);
   const lastActiveLocalSecRef = useRef(0);
   const playheadRef = useRef(playhead);
+  const loopRef = useRef(loop);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
@@ -759,12 +763,20 @@ export default function EditorWorkspace() {
   futureRef.current = future;
   selectedIdRef.current = selectedId;
   playheadRef.current = playhead;
+  loopRef.current = loop;
 
   const currentVisibleClip = () =>
     clipAtPlayhead(
       { ...docRef.current, sequence: docRef.current.sequence.filter((c) => !c.hidden) },
       playheadRef.current
     );
+
+  // With loop on, playing from the end restarts at the first frame.
+  const rewindForLoop = () => {
+    if (!loopRef.current || playheadRef.current < sequenceDurationSec(docRef.current)) return;
+    playheadRef.current = 0;
+    setPlayhead(0);
+  };
 
   const duration = sequenceDurationSec(doc);
   const exportCheck = validateEditorExport(doc);
@@ -1202,6 +1214,13 @@ export default function EditorWorkspace() {
       const next = Math.min(duration, playStartHead.current + elapsed);
       setPlayhead(next);
       if (next >= duration) {
+        if (loopRef.current && duration > 0) {
+          playStartPerf.current = performance.now();
+          playStartHead.current = 0;
+          setPlayhead(0);
+          raf = requestAnimationFrame(tick);
+          return;
+        }
         setPlaying(false);
         return;
       }
@@ -1258,6 +1277,8 @@ export default function EditorWorkspace() {
       if (event.code === "Space" && !event.repeat) {
         if (editable) return;
         event.preventDefault();
+        // No-op while looping playback runs: the clock wraps before the playhead rests at the end.
+        rewindForLoop();
         setPlaying((current) => {
           const next = current ? false : sequenceDurationSec(docRef.current) > 0;
           const el = previewVideoRef.current;
@@ -1949,6 +1970,7 @@ export default function EditorWorkspace() {
                       return;
                     }
                     if (duration <= 0) return;
+                    rewindForLoop();
                     const activeClip = currentVisibleClip();
                     if (el && activeClip) {
                       el.muted = Boolean(activeClip.clip.muted);
@@ -1980,6 +2002,18 @@ export default function EditorWorkspace() {
                   title="Jump to clip end"
                 >
                   <SkipForward className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoop((current) => !current)}
+                  className={`rounded-lg p-1.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary ${
+                    loop ? "bg-brand-primary/20 text-brand-primary" : "text-text-secondary hover:text-text-primary"
+                  }`}
+                  aria-pressed={loop}
+                  aria-label="Loop playback"
+                  title={loop ? "Loop on" : "Loop off"}
+                >
+                  <Repeat className="h-3.5 w-3.5" />
                 </button>
                 <span className="ml-1 flex items-center text-xs tabular-nums text-text-secondary">
                   <input
