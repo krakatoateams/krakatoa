@@ -2192,6 +2192,8 @@ export default function EditorWorkspace() {
               <div
                 role="separator"
                 aria-orientation="vertical"
+                aria-label="Resize layer panel"
+                title="Drag to resize"
                 onPointerDown={(event) => {
                   const startWidth = panelWidth;
                   startTimelineDrag(event, 1, (deltaPx) => {
@@ -2200,7 +2202,7 @@ export default function EditorWorkspace() {
                     );
                   });
                 }}
-                className="hidden w-1.5 shrink-0 cursor-col-resize bg-white/5 hover:bg-brand-primary/50 active:bg-brand-primary md:block"
+                className="relative hidden w-1.5 shrink-0 cursor-col-resize self-stretch min-h-full touch-none select-none bg-white/10 transition-colors hover:bg-brand-primary/50 active:bg-brand-primary md:block before:absolute before:-left-1 before:-right-1 before:inset-y-0"
               />
 
               <div
