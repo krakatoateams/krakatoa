@@ -45,9 +45,10 @@ export function HelloFooter() {
           className="h-9 w-auto shrink-0 object-contain sm:justify-self-start"
         />
 
-        <p className="text-center text-[11px] font-medium tracking-wide text-text-disabled sm:justify-self-center sm:text-xs">
-          {FOOTER.copyright}
-        </p>
+        <div className="flex flex-col items-center gap-1 text-center text-[11px] font-medium tracking-wide text-text-disabled sm:justify-self-center sm:text-xs">
+          <p>{FOOTER.copyright}</p>
+          <p>{FOOTER.operatedBy}</p>
+        </div>
 
         <a
           href={`mailto:${FOOTER.supportEmail}`}

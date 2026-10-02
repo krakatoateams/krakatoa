@@ -346,6 +346,8 @@ export const FOOTER = {
   heading: "All eyes on your next post.",
   body: "Sign up free and start creating reels, product photos, and posts with Kelolako's AI suite.",
   copyright: "\u00a9 2026 Kelolako. Built for the future of content.",
+  // Legal operator name: must match Meta business verification documents.
+  operatedBy: "Kelolako is operated by Muhammad Septian Hadiguna",
   supportEmail: "support@kelolako.com",
   supportLabel: "Need support? We are here",
 };
