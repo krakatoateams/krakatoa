@@ -166,6 +166,7 @@ export async function POST(req: Request) {
         inSec: c.inSec,
         sourceDurationSec: c.sourceDurationSec,
         order: c.order,
+        muted: c.muted,
       })),
       overlays: document.overlays.map((o) => ({
         id: o.id,
@@ -180,6 +181,7 @@ export async function POST(req: Request) {
         text: o.text,
         creationId: o.creationId,
         storagePath: o.storagePath,
+        muted: o.muted,
       })),
     });
     const begin = await beginGenerationRequest({

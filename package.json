@@ -26,11 +26,12 @@
     "test:skills": "tsx lib/skills.ts && tsx lib/skills-catalog-display-self-check.ts",
     "test:admin-skills-catalog": "tsx lib/admin-skills-catalog-self-check.ts",
     "test:canvas": "tsx lib/canvas-graph.ts && tsx lib/canvas-handoff.ts && tsx lib/canvas-document.ts && tsx lib/canvas-text-models.ts",
-    "test:editor": "tsx lib/editor-document.ts && tsx lib/editor-handoff.ts && tsx lib/editor-render.ts && tsx lib/editor-preview-size.ts && tsx lib/editor-viewport.ts",
+    "test:editor": "tsx lib/editor-document.ts && tsx lib/editor-handoff.ts && tsx --conditions=react-server lib/editor-render.ts && tsx lib/editor-preview-size.ts && tsx lib/editor-viewport.ts && tsx lib/editor-audio-probe.ts",
     "test:aspect-ratio": "tsx lib/aspect-ratio-match.ts",
     "test:active-generations": "tsx lib/active-generations-pure.ts",
     "test:metered-generation": "tsx lib/metered-generation/settlement-self-check.ts && tsx lib/metered-generation/lifecycle-self-check.ts",
     "test:creation-item-actions": "tsx lib/use-creation-item-actions.ts",
+    "test:creation-user-prompt": "tsx lib/creation-user-prompt-self-check.ts",
     "test:studio-submit": "tsx lib/idempotent-submit-state-self-check.ts && tsx lib/studio-generation-response-self-check.ts && tsx lib/studio-generation-submit-self-check.ts",
     "test:video-studio": "tsx lib/video-studio-deep-link.ts && tsx lib/video-studio-composer-selection-self-check.ts && tsx lib/pending-form-draft-self-check.ts && tsx lib/video-composer-attempt-contracts-self-check.ts",
     "test:auth": "tsx lib/auth-session-self-check.ts",
@@ -123,13 +124,14 @@
     "nanoid": "3.3.18",
     "postcss": "8.5.28",
     "@workflow/core": {
-      "nanoid": "5.1.16"
+      "nanoid": "5.1.16",
+      "devalue": "5.9.4"
     },
     "@workflow/world-local": {
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     },
     "@workflow/world-vercel": {
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     }
   }
 }
