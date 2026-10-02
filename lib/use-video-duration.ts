@@ -2,25 +2,30 @@
 
 import { useEffect, useState } from "react";
 
-/** Read clip length from a video URL or blob URL (metadata only). */
+// A background tab may never load metadata; give up so a later pass can retry.
+export const VIDEO_PROBE_TIMEOUT_MS = 15_000;
+
+/** Read clip length from a video URL or blob URL (metadata only). Null on error or timeout. */
 export function probeVideoDurationSec(src: string): Promise<number | null> {
   return new Promise((resolve) => {
     const el = document.createElement("video");
     el.preload = "metadata";
     // Do not set crossOrigin — on public CDNs without ACAO it blocks metadata.
-    const cleanup = () => {
+    let settled = false;
+    const finish = (d: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       el.removeAttribute("src");
       el.load();
+      resolve(d);
     };
+    const timer = setTimeout(() => finish(null), VIDEO_PROBE_TIMEOUT_MS);
     el.onloadedmetadata = () => {
       const d = el.duration;
-      cleanup();
-      resolve(typeof d === "number" && Number.isFinite(d) && d > 0 ? d : null);
+      finish(typeof d === "number" && Number.isFinite(d) && d > 0 ? d : null);
     };
-    el.onerror = () => {
-      cleanup();
-      resolve(null);
-    };
+    el.onerror = () => finish(null);
     el.src = src;
   });
 }

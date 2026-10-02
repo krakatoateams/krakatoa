@@ -62,6 +62,7 @@ import {
   clipLayerDurationSec,
   emptyEditorDocument,
   isLocalOnlyLayer,
+  isPlaceholderSpan,
   maxClipLayerDurationSec,
   maxOverlayLayerDurationSec,
   normalizeEditorTitle,
@@ -78,6 +79,7 @@ import {
   trimClipStartToPlayhead,
   validateEditorExport,
   withProbedClipSource,
+  withProbedLayerSource,
   withProbedOverlaySource,
   withProjectAspect,
   type EditorClip,
@@ -1402,38 +1404,83 @@ export default function EditorWorkspace() {
     };
   }, [handleSave, undo, redo, deleteSelected, handleSplitSelected]);
 
+  // Layer ids with a source-length probe in flight (add-time or re-measure), so one
+  // layer is never probed twice at once.
+  const probingRef = useRef<Set<string>>(new Set());
   // Works for clips and video overlays: the layer id is unique across both.
-  // `placeholder` is the span the layer was created with; a layer still at it grows to its source.
+  // `fillSpan` says whether the layer is still at its placeholder span (it then grows to its source).
   // `localUrl` probes a device file directly instead of signing a storage path.
-  const attachSourceDuration = useCallback(async (
+  const probeLayerSource = useCallback(async (
     layerId: string,
     storagePath: string | null,
-    placeholder: { startSec: number; endSec: number },
-    localUrl?: string
+    fillSpan: (layer: EditorClip | EditorOverlay) => boolean,
+    apply: (updater: (current: EditorDocument) => EditorDocument) => void,
+    localUrl?: string | null
   ) => {
-    const untouched = (layer: { startSec: number; endSec: number }) =>
-      layer.startSec === placeholder.startSec && layer.endSec === placeholder.endSec;
-    if (!storagePath && !localUrl) return;
+    if ((!storagePath && !localUrl) || probingRef.current.has(layerId)) return;
+    probingRef.current.add(layerId);
     try {
       const url = localUrl ?? (await fetchSignedUrl({ path: storagePath! })).url;
       if (!url) return;
       const sourceDurationSec = await probeVideoDurationSec(url);
       if (sourceDurationSec == null) return;
-      patchDoc((current) => ({
-        ...current,
-        sequence: current.sequence.map((clip) =>
-          clip.id === layerId ? withProbedClipSource(clip, sourceDurationSec, untouched(clip)) : clip
-        ),
-        overlays: current.overlays.map((overlay) =>
-          overlay.id === layerId
-            ? withProbedOverlaySource(overlay, sourceDurationSec, untouched(overlay))
-            : overlay
-        ),
-      }));
+      apply((current) => withProbedLayerSource(current, layerId, sourceDurationSec, fillSpan));
     } catch {
-      // Unknown source length stays uncapped except by the overall cap.
+      // Unknown source length stays uncapped until the next re-measure pass.
+    } finally {
+      probingRef.current.delete(layerId);
     }
-  }, [patchDoc]);
+  }, []);
+
+  // `placeholder` is the span the layer was created with.
+  const attachSourceDuration = useCallback((
+    layerId: string,
+    storagePath: string | null,
+    placeholder: { startSec: number; endSec: number },
+    localUrl?: string
+  ) =>
+    probeLayerSource(
+      layerId,
+      storagePath,
+      (layer) => layer.startSec === placeholder.startSec && layer.endSec === placeholder.endSec,
+      patchDoc,
+      localUrl
+    ),
+  [patchDoc, probeLayerSource]);
+
+  // Measures every clip / video overlay saved without a source length (a probe that
+  // hung in a background tab, or a project saved before the probe could finish), so
+  // the source cap applies. Idempotent; runs on load, when device media resolves and
+  // when the tab becomes visible. Applied without an undo step; autosave persists it.
+  // ponytail: undo/redo snapshots taken before the measurement keep the null source
+  // until the next pass; re-run on undo if that ever shows up.
+  const measureMissingSources = useCallback(() => {
+    const apply = (updater: (current: EditorDocument) => EditorDocument) => {
+      const next = updater(docRef.current);
+      if (next === docRef.current) return;
+      docRef.current = next;
+      setDoc(next);
+    };
+    const { sequence, overlays } = docRef.current;
+    for (const layer of [...sequence, ...overlays.filter((o) => o.kind === "video")]) {
+      if (layer.sourceDurationSec != null) continue;
+      const localUrl = layer.localMediaId ? localUrlsRef.current[layer.localMediaId] : null;
+      void probeLayerSource(layer.id, layer.storagePath, isPlaceholderSpan, apply, localUrl);
+    }
+  }, [probeLayerSource]);
+
+  // projectId changes when a project loads; localUrls when its device media resolves.
+  useEffect(() => {
+    measureMissingSources();
+  }, [projectId, localUrls, measureMissingSources]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") measureMissingSources();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [measureMissingSources]);
 
   const addClip = (item: CreationHistoryItem) => {
     if (item.mediaType !== "video" || !canDropOnEditor(item)) return;
