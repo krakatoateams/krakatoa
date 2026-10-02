@@ -46,6 +46,7 @@ import {
   EDITOR_MAX_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
+  EDITOR_MAX_UPLOAD_MB,
   validateEditorUploadFile,
   canSplitClip,
   canTrimClipEnd,
@@ -1410,7 +1411,7 @@ export default function EditorWorkspace() {
           message.toLowerCase().includes("payload too large") ||
           message.toLowerCase().includes("too large")
         ) {
-          message = "File is too large. The maximum size is 100 MB.";
+          message = `File is too large. The maximum size is ${EDITOR_MAX_UPLOAD_MB} MB.`;
         }
       }
       showToast({ type: "error", message });
@@ -1827,7 +1828,7 @@ export default function EditorWorkspace() {
                           uploadRef.current?.click();
                         }}
                         className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                        title="Upload video from device (max 100 MB)"
+                        title={`Upload video from device (max ${EDITOR_MAX_UPLOAD_MB} MB)`}
                       >
                         <span className="flex items-center gap-2">
                           {uploadState?.isUploading ? (
@@ -1837,7 +1838,7 @@ export default function EditorWorkspace() {
                           )}
                           Upload
                         </span>
-                        <span className="text-[10px] text-text-secondary">Max 100 MB</span>
+                        <span className="text-[10px] text-text-secondary">Max {EDITOR_MAX_UPLOAD_MB} MB</span>
                       </button>
                       <button
                         type="button"
