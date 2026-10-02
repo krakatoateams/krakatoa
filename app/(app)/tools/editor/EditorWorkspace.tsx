@@ -230,6 +230,7 @@ function TimelineLayerRow({
   endSec,
   pxPerSec,
   trackWidth,
+  laneWidth,
   maxEnd,
   maxSpan,
   label,
@@ -245,7 +246,10 @@ function TimelineLayerRow({
   startSec: number;
   endSec: number;
   pxPerSec: number;
+  /** Full scrollable width, including drag headroom past the project end. */
   trackWidth: number;
+  /** Filled lane width: ends exactly at the project end. */
+  laneWidth: number;
   maxEnd: number;
   maxSpan: number;
   label: ReactNode;
@@ -258,7 +262,8 @@ function TimelineLayerRow({
   const span = Math.max(0.2, endSec - startSec);
   const width = Math.max(28, span * pxPerSec);
   return (
-    <div className="relative h-8 rounded-sm bg-white/[0.03]" style={{ width: trackWidth }}>
+    <div className="relative h-8" style={{ width: trackWidth }}>
+      <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
       <div
         role="button"
         tabIndex={0}
@@ -1524,6 +1529,7 @@ export default function EditorWorkspace() {
   // Headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
   const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, Math.max(DEFAULT_EDITOR_DURATION_SEC, duration + 4));
   const timelineWidth = Math.max(320, Math.ceil(timelineSec * pxPerSec));
+  const laneWidth = duration * pxPerSec;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-N50 text-text-primary">
@@ -2052,7 +2058,7 @@ export default function EditorWorkspace() {
                   {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
                     <div
                       key={i}
-                      className="absolute top-0 flex flex-col items-start"
+                      className={`absolute top-0 flex flex-col items-start ${i > duration ? "opacity-40" : ""}`}
                       style={{ left: i * pxPerSec }}
                     >
                       <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
@@ -2218,6 +2224,7 @@ export default function EditorWorkspace() {
                           endSec={overlay.endSec}
                           pxPerSec={pxPerSec}
                           trackWidth={timelineWidth}
+                          laneWidth={laneWidth}
                           maxEnd={EDITOR_MAX_DURATION_SEC}
                           maxSpan={maxOverlayLayerDurationSec(overlay)}
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
@@ -2245,7 +2252,7 @@ export default function EditorWorkspace() {
                   ) : null}
                   <div className="space-y-1">
                     {sequence.length === 0 && uploadState?.kind !== "sequence" ? (
-                      <div className="h-8" />
+                      <div className="h-8 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
                     ) : (
                       clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);
@@ -2259,6 +2266,7 @@ export default function EditorWorkspace() {
                             endSec={clip.endSec}
                             pxPerSec={pxPerSec}
                             trackWidth={timelineWidth}
+                            laneWidth={laneWidth}
                             maxEnd={EDITOR_MAX_DURATION_SEC}
                             maxSpan={maxClipLayerDurationSec(clip)}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
