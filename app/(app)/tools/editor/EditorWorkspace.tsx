@@ -44,6 +44,7 @@ import {
   EDITOR_ASPECTS,
   EDITOR_CANVAS,
   EDITOR_MAX_DURATION_SEC,
+  DEFAULT_EDITOR_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
   EDITOR_MAX_UPLOAD_MB,
@@ -59,10 +60,10 @@ import {
   clipLayerDurationSec,
   emptyEditorDocument,
   maxClipLayerDurationSec,
+  maxOverlayLayerDurationSec,
   normalizeEditorTitle,
   normalizeLayerName,
   parseEditorDocument,
-  projectDurationSec,
   reorderById,
   resolveLayerLabel,
   sequenceDurationSec,
@@ -73,8 +74,9 @@ import {
   trimClipEndToPlayhead,
   trimClipStartToPlayhead,
   validateEditorExport,
+  withProbedClipSource,
+  withProbedOverlaySource,
   withProjectAspect,
-  withProjectDuration,
   type EditorClip,
   type EditorDocument,
   type EditorOverlay,
@@ -181,29 +183,25 @@ function fingerprintOf(title: string, doc: EditorDocument): string {
   return JSON.stringify({ title: normalizeEditorTitle(title), document: doc });
 }
 
-function placeClipStart(playheadSec: number, durationSec: number, preferredSpan = 3): number {
-  const duration = Math.max(0.1, durationSec);
-  const span = Math.min(preferredSpan, duration);
-  if (playheadSec + 0.2 <= duration) {
-    return snapTenth(Math.min(playheadSec, Math.max(0, duration - 0.1)));
-  }
-  return snapTenth(Math.max(0, duration - span));
+/** New layers start at the playhead; the project grows to fit them, up to the cap. */
+function placeLayer(playheadSec: number, span: number): { start: number; end: number } {
+  const start = snapTenth(Math.max(0, Math.min(playheadSec, EDITOR_MAX_DURATION_SEC - span)));
+  return { start, end: snapTenth(start + span) };
 }
 
 function newClipLayer(
   source: { creationId: string | null; storagePath: string | null },
   order: number,
-  startSec: number,
-  durationSec: number
+  playheadSec: number
 ): EditorClip {
-  const start = placeClipStart(startSec, durationSec);
-  const span = Math.min(3, Math.max(0.1, durationSec - start));
+  // Placeholder span until the source length is probed (see withProbedClipSource).
+  const { start, end } = placeLayer(playheadSec, 3);
   return {
     id: newId("clip"),
     creationId: source.creationId,
     storagePath: source.storagePath,
     startSec: start,
-    endSec: snapTenth(start + span),
+    endSec: end,
     inSec: 0,
     sourceDurationSec: null,
     order,
@@ -213,17 +211,16 @@ function newClipLayer(
   };
 }
 
-function clipFromLibrary(item: CreationHistoryItem, order: number, startSec: number, durationSec: number): EditorClip {
+function clipFromLibrary(item: CreationHistoryItem, order: number, playheadSec: number): EditorClip {
   return newClipLayer(
     { creationId: item.id, storagePath: item.storagePath?.trim() || null },
     order,
-    startSec,
-    durationSec
+    playheadSec
   );
 }
 
-function clipFromUpload(storagePath: string, order: number, startSec: number, durationSec: number): EditorClip {
-  return newClipLayer({ creationId: null, storagePath }, order, startSec, durationSec);
+function clipFromUpload(storagePath: string, order: number, playheadSec: number): EditorClip {
+  return newClipLayer({ creationId: null, storagePath }, order, playheadSec);
 }
 
 function TimelineLayerRow({
@@ -234,6 +231,7 @@ function TimelineLayerRow({
   endSec,
   pxPerSec,
   trackWidth,
+  laneWidth,
   maxEnd,
   maxSpan,
   label,
@@ -249,7 +247,10 @@ function TimelineLayerRow({
   startSec: number;
   endSec: number;
   pxPerSec: number;
+  /** Full scrollable width, including drag headroom past the project end. */
   trackWidth: number;
+  /** Filled lane width: ends exactly at the project end. */
+  laneWidth: number;
   maxEnd: number;
   maxSpan: number;
   label: ReactNode;
@@ -262,7 +263,8 @@ function TimelineLayerRow({
   const span = Math.max(0.2, endSec - startSec);
   const width = Math.max(28, span * pxPerSec);
   return (
-    <div className="relative h-8 rounded-sm bg-white/[0.03]" style={{ width: trackWidth }}>
+    <div className="relative h-8" style={{ width: trackWidth }}>
+      <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
       <div
         role="button"
         tabIndex={0}
@@ -553,6 +555,7 @@ function mediaOverlay(
     color: null,
     creationId: item.id ?? null,
     storagePath: item.storagePath?.trim() || null,
+    sourceDurationSec: kind === "video" ? null : undefined,
     locked: false,
     hidden: false,
     muted: kind === "video" ? false : undefined,
@@ -697,7 +700,9 @@ export default function EditorWorkspace() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [doc, setDoc] = useState<EditorDocument>(emptyEditorDocument);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [playhead, setPlayhead] = useState(0);
+  const [rawPlayhead, setPlayhead] = useState(0);
+  // Duration is derived from layers, so it can shrink under the playhead; clamp on read.
+  const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
@@ -1156,16 +1161,10 @@ export default function EditorWorkspace() {
         const item = data.items?.[0];
         if (!res.ok || !item || !canDropOnEditor(item) || item.mediaType !== "video") return;
         const storagePath = item.storagePath?.trim() || null;
-        setDoc((current) => {
-          const duration = projectDurationSec(current);
-          return {
-            ...current,
-            sequence: [
-              ...current.sequence,
-              clipFromLibrary(item, current.sequence.length, 0, duration),
-            ],
-          };
-        });
+        setDoc((current) => ({
+          ...current,
+          sequence: [...current.sequence, clipFromLibrary(item, current.sequence.length, 0)],
+        }));
         if (storagePath) {
           void (async () => {
             try {
@@ -1176,16 +1175,14 @@ export default function EditorWorkspace() {
               setDoc((current) => ({
                 ...current,
                 sequence: current.sequence.map((row) =>
-                  row.creationId === item.id && row.sourceDurationSec == null
-                    ? clampClipToComposition(
-                        { ...row, sourceDurationSec: snapTenth(sourceDurationSec) },
-                        projectDurationSec(current)
-                      )
+                  row.creationId === item.id
+                    ? // Deep-linked clips start as a 0–3s placeholder; keep any edit made since.
+                      withProbedClipSource(row, sourceDurationSec, row.startSec === 0 && row.endSec === 3)
                     : row
                 ),
               }));
             } catch {
-              // Keep uncapped until the user trims against composition duration.
+              // Unknown source length stays uncapped except by the overall cap.
             }
           })();
         }
@@ -1288,7 +1285,15 @@ export default function EditorWorkspace() {
     };
   }, [handleSave, undo, redo, deleteSelected, handleSplitSelected]);
 
-  const attachSourceDuration = useCallback(async (clipId: string, storagePath: string | null) => {
+  // Works for clips and video overlays: the layer id is unique across both.
+  // `placeholder` is the span the layer was created with; a layer still at it grows to its source.
+  const attachSourceDuration = useCallback(async (
+    layerId: string,
+    storagePath: string | null,
+    placeholder: { startSec: number; endSec: number }
+  ) => {
+    const untouched = (layer: { startSec: number; endSec: number }) =>
+      layer.startSec === placeholder.startSec && layer.endSec === placeholder.endSec;
     if (!storagePath) return;
     try {
       const signed = await fetchSignedUrl({ path: storagePath });
@@ -1298,29 +1303,28 @@ export default function EditorWorkspace() {
       patchDoc((current) => ({
         ...current,
         sequence: current.sequence.map((clip) =>
-          clip.id === clipId
-            ? clampClipToComposition(
-                { ...clip, sourceDurationSec: snapTenth(sourceDurationSec) },
-                projectDurationSec(current)
-              )
-            : clip
+          clip.id === layerId ? withProbedClipSource(clip, sourceDurationSec, untouched(clip)) : clip
+        ),
+        overlays: current.overlays.map((overlay) =>
+          overlay.id === layerId
+            ? withProbedOverlaySource(overlay, sourceDurationSec, untouched(overlay))
+            : overlay
         ),
       }));
     } catch {
-      // Unknown source length stays uncapped except by composition duration.
+      // Unknown source length stays uncapped except by the overall cap.
     }
   }, [patchDoc]);
 
   const addClip = (item: CreationHistoryItem) => {
     if (item.mediaType !== "video" || !canDropOnEditor(item)) return;
     if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) return;
-    const duration = projectDurationSec(docRef.current);
-    const clip = clipFromLibrary(item, docRef.current.sequence.length, playhead, duration);
+    const clip = clipFromLibrary(item, docRef.current.sequence.length, playhead);
     patchDoc((current) => ({
       ...current,
       sequence: [...current.sequence, clip],
     }));
-    void attachSourceDuration(clip.id, clip.storagePath);
+    void attachSourceDuration(clip.id, clip.storagePath, clip);
   };
 
   const addOverlayFromItem = (kind: "image" | "video", item: CreationHistoryItem) => {
@@ -1328,18 +1332,17 @@ export default function EditorWorkspace() {
     if (kind === "image" && item.mediaType !== "image") return;
     if (kind === "video" && item.mediaType !== "video") return;
     if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) return;
-    patchDoc((current) => {
-      const duration = projectDurationSec(current);
-      const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-      const end = snapTenth(Math.min(duration, start + 2));
-      return {
-        ...current,
-        overlays: [
-          ...current.overlays,
-          mediaOverlay(kind, item, start, end, current.overlays.length, EDITOR_CANVAS[current.aspect]),
-        ],
-      };
-    });
+    const { start, end } = placeLayer(playhead, 2);
+    const overlay = mediaOverlay(
+      kind,
+      item,
+      start,
+      end,
+      docRef.current.overlays.length,
+      EDITOR_CANVAS[docRef.current.aspect]
+    );
+    patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+    if (kind === "video") void attachSourceDuration(overlay.id, overlay.storagePath, overlay);
   };
 
   const onUpload = async (file: File) => {
@@ -1363,14 +1366,13 @@ export default function EditorWorkspace() {
           });
           return;
         }
-        const duration = projectDurationSec(docRef.current);
-        const clip = clipFromUpload(uploaded.path, docRef.current.sequence.length, playhead, duration);
+        const clip = clipFromUpload(uploaded.path, docRef.current.sequence.length, playhead);
         patchDoc((current) => ({
           ...current,
           sequence: [...current.sequence, clip],
         }));
         setSelectedId(clip.id);
-        void attachSourceDuration(clip.id, clip.storagePath);
+        void attachSourceDuration(clip.id, clip.storagePath, clip);
         showToast({ type: "success", message: "Media added" });
         return;
       }
@@ -1381,26 +1383,18 @@ export default function EditorWorkspace() {
         });
         return;
       }
-      let newOverlayId: string | null = null;
-      patchDoc((current) => {
-        const duration = projectDurationSec(current);
-        const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-        const end = snapTenth(Math.min(duration, start + 2));
-        const overlay = mediaOverlay(
-          kind,
-          { storagePath: uploaded.path },
-          start,
-          end,
-          current.overlays.length,
-          EDITOR_CANVAS[current.aspect]
-        );
-        newOverlayId = overlay.id;
-        return {
-          ...current,
-          overlays: [...current.overlays, overlay],
-        };
-      });
-      if (newOverlayId) setSelectedId(newOverlayId);
+      const { start, end } = placeLayer(playhead, 2);
+      const overlay = mediaOverlay(
+        kind,
+        { storagePath: uploaded.path },
+        start,
+        end,
+        docRef.current.overlays.length,
+        EDITOR_CANVAS[docRef.current.aspect]
+      );
+      patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+      setSelectedId(overlay.id);
+      if (kind === "video") void attachSourceDuration(overlay.id, overlay.storagePath, overlay);
       showToast({ type: "success", message: "Media added" });
     } catch (err) {
       let message = "Upload failed.";
@@ -1430,7 +1424,7 @@ export default function EditorWorkspace() {
       ...current,
       sequence: current.sequence.map((clip) =>
         clip.id === id
-          ? clampClipToComposition({ ...clip, ...next }, projectDurationSec(current))
+          ? clampClipToComposition({ ...clip, ...next })
           : clip
       ),
     }), opts);
@@ -1444,7 +1438,7 @@ export default function EditorWorkspace() {
       ...current,
       overlays: current.overlays.map((overlay) =>
         overlay.id === id
-          ? clampOverlayToComposition({ ...overlay, ...next }, projectDurationSec(current))
+          ? clampOverlayToComposition({ ...overlay, ...next })
           : overlay
       ),
     }), opts);
@@ -1533,7 +1527,10 @@ export default function EditorWorkspace() {
   };
 
   const pxPerSec = 64;
-  const timelineWidth = Math.max(320, Math.ceil(Math.max(duration, 0.1) * pxPerSec));
+  // Headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
+  const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, Math.max(DEFAULT_EDITOR_DURATION_SEC, duration + 4));
+  const timelineWidth = Math.max(320, Math.ceil(timelineSec * pxPerSec));
+  const laneWidth = duration * pxPerSec;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-N50 text-text-primary">
@@ -1846,9 +1843,8 @@ export default function EditorWorkspace() {
                         onClick={() => {
                           setAddMenuOpen(false);
                           if (doc.overlays.length >= EDITOR_MAX_OVERLAYS) return;
-                          const start = snapTenth(Math.min(playhead, Math.max(0, duration - 0.2)));
-                          const end = snapTenth(Math.min(duration, start + 3));
-                          const overlay = textOverlay(start, Math.max(start + 0.2, end), doc.overlays.length);
+                          const { start, end } = placeLayer(playhead, 3);
+                          const overlay = textOverlay(start, end, doc.overlays.length);
                           patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
                           setSelectedId(overlay.id);
                         }}
@@ -2014,24 +2010,6 @@ export default function EditorWorkspace() {
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <label className="flex items-center gap-1">
-                  <span className="hidden text-[11px] text-text-secondary sm:inline">Duration</span>
-                  <input
-                    type="number"
-                    min={0.1}
-                    max={EDITOR_MAX_DURATION_SEC}
-                    step={0.1}
-                    value={duration}
-                    onChange={(event) => {
-                      const next = Number(event.target.value) || 0.1;
-                      patchDoc((current) => withProjectDuration(current, next));
-                      setPlayhead((head) => Math.min(head, snapTenth(Math.max(0.1, Math.min(EDITOR_MAX_DURATION_SEC, next)))));
-                    }}
-                    aria-label="Video duration in seconds"
-                    className="h-8 w-[4.25rem] rounded-lg bg-white/10 px-2 text-xs font-semibold tabular-nums text-text-primary outline-none hover:bg-white/15 focus:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary"
-                  />
-                  <span className="text-[11px] text-text-secondary">s</span>
-                </label>
                 <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
                   {EDITOR_ASPECTS.map((value) => (
                     <button
@@ -2081,7 +2059,7 @@ export default function EditorWorkspace() {
                   {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
                     <div
                       key={i}
-                      className="absolute top-0 flex flex-col items-start"
+                      className={`absolute top-0 flex flex-col items-start ${i > duration ? "opacity-40" : ""}`}
                       style={{ left: i * pxPerSec }}
                     >
                       <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
@@ -2247,8 +2225,9 @@ export default function EditorWorkspace() {
                           endSec={overlay.endSec}
                           pxPerSec={pxPerSec}
                           trackWidth={timelineWidth}
-                          maxEnd={duration}
-                          maxSpan={duration}
+                          laneWidth={laneWidth}
+                          maxEnd={EDITOR_MAX_DURATION_SEC}
+                          maxSpan={maxOverlayLayerDurationSec(overlay)}
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
                           onSelect={() => setSelectedId(overlay.id)}
                           onMove={(startSec, endSec) =>
@@ -2274,7 +2253,7 @@ export default function EditorWorkspace() {
                   ) : null}
                   <div className="space-y-1">
                     {sequence.length === 0 && uploadState?.kind !== "sequence" ? (
-                      <div className="h-8" />
+                      <div className="h-8 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
                     ) : (
                       clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);
@@ -2288,8 +2267,9 @@ export default function EditorWorkspace() {
                             endSec={clip.endSec}
                             pxPerSec={pxPerSec}
                             trackWidth={timelineWidth}
-                            maxEnd={duration}
-                            maxSpan={Math.min(maxClipLayerDurationSec(clip), duration)}
+                            laneWidth={laneWidth}
+                            maxEnd={EDITOR_MAX_DURATION_SEC}
+                            maxSpan={maxClipLayerDurationSec(clip)}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
                             onSelect={() => setSelectedId(clip.id)}
                             onMove={(startSec, endSec) =>
@@ -2348,7 +2328,7 @@ export default function EditorWorkspace() {
                 <input
                   type="number"
                   min={0}
-                  max={duration}
+                  max={EDITOR_MAX_DURATION_SEC}
                   step={0.1}
                   value={snapTenth(selectedClip.startSec)}
                   onChange={(event) =>
@@ -2364,7 +2344,7 @@ export default function EditorWorkspace() {
                 <input
                   type="number"
                   min={0.1}
-                  max={duration}
+                  max={EDITOR_MAX_DURATION_SEC}
                   step={0.1}
                   value={snapTenth(selectedClip.endSec)}
                   onChange={(event) =>
@@ -2512,7 +2492,7 @@ export default function EditorWorkspace() {
             </div>
           ) : (
             <p className="text-xs text-text-secondary">
-              Set Duration in the timeline header. Select a clip or overlay to place it on the timeline.
+              The video ends where the last layer ends. Select a clip or overlay to place it on the timeline.
             </p>
           )}
         </aside>
