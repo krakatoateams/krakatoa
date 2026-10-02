@@ -7,6 +7,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  Info,
   Eye,
   EyeOff,
   ImagePlus,
@@ -38,6 +39,7 @@ import { uploadRefFile } from "@/components/studio/RefGroup";
 import { useStudioGenerationPreview } from "@/components/studio";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import { probeVideoDurationSec } from "@/lib/use-video-duration";
+import { getLocalMedia, localMediaKey, putLocalMedia } from "@/lib/editor-local-media";
 import type { CreationHistoryItem } from "@/lib/creations";
 import {
   DEFAULT_EDITOR_TITLE,
@@ -60,6 +62,7 @@ import {
   clipLayerDurationSec,
   clipSourceOutSec,
   emptyEditorDocument,
+  isLocalOnlyLayer,
   maxClipLayerDurationSec,
   maxOverlayLayerDurationSec,
   normalizeEditorTitle,
@@ -192,7 +195,7 @@ function placeLayer(playheadSec: number, span: number): { start: number; end: nu
 }
 
 function newClipLayer(
-  source: { creationId: string | null; storagePath: string | null },
+  source: { creationId: string | null; storagePath: string | null; localMediaId?: string | null },
   order: number,
   playheadSec: number
 ): EditorClip {
@@ -202,6 +205,7 @@ function newClipLayer(
     id: newId("clip"),
     creationId: source.creationId,
     storagePath: source.storagePath,
+    localMediaId: source.localMediaId ?? null,
     startSec: start,
     endSec: end,
     inSec: 0,
@@ -221,8 +225,8 @@ function clipFromLibrary(item: CreationHistoryItem, order: number, playheadSec: 
   );
 }
 
-function clipFromUpload(storagePath: string, order: number, playheadSec: number): EditorClip {
-  return newClipLayer({ creationId: null, storagePath }, order, playheadSec);
+function clipFromDevice(localMediaId: string, order: number, playheadSec: number): EditorClip {
+  return newClipLayer({ creationId: null, storagePath: null, localMediaId }, order, playheadSec);
 }
 
 function TimelineLayerRow({
@@ -361,6 +365,7 @@ function LayerPanelRow({
   onToggleLock,
   onToggleHidden,
   onToggleMute,
+  onRepick,
   onDelete,
   onRename,
 }: {
@@ -380,6 +385,8 @@ function LayerPanelRow({
   onToggleLock: () => void;
   onToggleHidden: () => void;
   onToggleMute?: () => void;
+  /** Set when the layer's device file is missing from this browser. */
+  onRepick?: () => void;
   onDelete: () => void;
   onRename?: (nextName: string) => void;
 }) {
@@ -470,6 +477,20 @@ function LayerPanelRow({
         </span>
       )}
       <span className="flex shrink-0 items-center gap-0.5" data-nodrag>
+        {onRepick ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRepick();
+            }}
+            className="rounded px-1 py-0.5 text-[10px] font-medium text-warning hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning"
+            aria-label="Media missing, re-pick the file"
+            title="Media missing, re-pick the file"
+          >
+            Re-pick
+          </button>
+        ) : null}
         {canMute && onToggleMute ? (
           <button
             type="button"
@@ -548,7 +569,7 @@ function textOverlay(startSec: number, endSec: number, z: number): EditorOverlay
 
 function mediaOverlay(
   kind: "image" | "video",
-  item: { id?: string; storagePath?: string | null },
+  item: { id?: string; storagePath?: string | null; localMediaId?: string | null },
   startSec: number,
   endSec: number,
   z: number,
@@ -575,6 +596,7 @@ function mediaOverlay(
     color: null,
     creationId: item.id ?? null,
     storagePath: item.storagePath?.trim() || null,
+    localMediaId: item.localMediaId ?? null,
     sourceDurationSec: kind === "video" ? null : undefined,
     locked: false,
     hidden: false,
@@ -582,8 +604,23 @@ function mediaOverlay(
   };
 }
 
+function MissingMedia() {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-white/5 p-2 text-center text-[11px] text-warning">
+      <AlertCircle className="h-4 w-4" />
+      Media missing, re-pick the file
+    </div>
+  );
+}
+
+/**
+ * `localUrl` — object URL of a device file kept in this browser; skips signing.
+ * `missing` — a device file this browser no longer has.
+ */
 function SignedVideo({
   storagePath,
+  localUrl,
+  missing = false,
   currentTime,
   playing,
   muted = false,
@@ -591,13 +628,15 @@ function SignedVideo({
   videoRef,
 }: {
   storagePath: string | null;
+  localUrl?: string | null;
+  missing?: boolean;
   currentTime: number;
   playing: boolean;
   muted?: boolean;
   onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
   videoRef?: (node: HTMLVideoElement | null) => void;
 }) {
-  const url = useSignedMediaUrl(storagePath);
+  const url = useSignedMediaUrl(localUrl ? null : storagePath, localUrl);
   const ref = useRef<HTMLVideoElement | null>(null) as React.MutableRefObject<
     HTMLVideoElement | null
   >;
@@ -612,6 +651,7 @@ function SignedVideo({
     else el.pause();
   }, [currentTime, playing, url, muted]);
 
+  if (missing) return <MissingMedia />;
   if (!url) {
     return <div className="h-full w-full animate-pulse bg-white/5" />;
   }
@@ -635,13 +675,35 @@ function SignedVideo({
 
 function SignedImage({
   storagePath,
+  localUrl,
+  missing = false,
   onNaturalSize,
 }: {
   storagePath: string | null;
+  localUrl?: string | null;
+  missing?: boolean;
   onNaturalSize?: (naturalWidth: number, naturalHeight: number) => void;
 }) {
-  const url = useSignedMediaUrl(storagePath);
+  const url = useSignedMediaUrl(localUrl ? null : storagePath, localUrl);
+  if (missing) return <MissingMedia />;
   if (!url) return <div className="h-full w-full animate-pulse bg-white/10" />;
+  if (localUrl) {
+    // A blob: URL never leaves the browser, so the Next image optimizer can't fetch it.
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={localUrl}
+        alt=""
+        className="absolute inset-0 h-full w-full object-contain"
+        draggable={false}
+        onDragStart={(event) => event.preventDefault()}
+        onLoad={(event) => {
+          const img = event.currentTarget;
+          onNaturalSize?.(img.naturalWidth, img.naturalHeight);
+        }}
+      />
+    );
+  }
   return (
     <Image
       src={url}
@@ -659,15 +721,9 @@ function SignedImage({
   );
 }
 
-type UploadState = {
-  isUploading: boolean;
-  fileName: string;
-  kind: "sequence" | "image" | "video";
-};
-
 type EditorToastState = {
   id: string;
-  type: "success" | "error";
+  type: "success" | "error" | "info";
   message: string;
 };
 
@@ -686,11 +742,15 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
       className={`fixed bottom-6 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 ${
         isSuccess
           ? "border-success/30 bg-N100/95 text-text-primary"
-          : "border-error/30 bg-N100/95 text-text-primary"
+          : toast.type === "info"
+            ? "border-white/15 bg-N100/95 text-text-primary"
+            : "border-error/30 bg-N100/95 text-text-primary"
       }`}
     >
       {isSuccess ? (
         <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+      ) : toast.type === "info" ? (
+        <Info className="h-4 w-4 shrink-0 text-text-secondary" />
       ) : (
         <AlertCircle className="h-4 w-4 shrink-0 text-error" />
       )}
@@ -710,7 +770,8 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { status } = useCurrentUser();
+  const { status, user } = useCurrentUser();
+  const userId = user?.id ?? null;
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
   const { openPreview } = useStudioGenerationPreview();
@@ -725,10 +786,13 @@ export default function EditorWorkspace() {
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
+  const [exportUploading, setExportUploading] = useState(false);
+  // Session-only device media: localMediaId → object URL (null = this browser no longer has it).
+  // Never written to the document.
+  const [localUrls, setLocalUrls] = useState<Record<string, string | null>>({});
   const [toast, setToast] = useState<EditorToastState | null>(null);
 
-  const showToast = useCallback((t: { type: "success" | "error"; message: string }) => {
+  const showToast = useCallback((t: { type: EditorToastState["type"]; message: string }) => {
     setToast({ id: crypto.randomUUID(), ...t });
   }, []);
 
@@ -767,9 +831,13 @@ export default function EditorWorkspace() {
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
-  const uploadingRef = useRef(false);
+  const repickLayerIdRef = useRef<string | null>(null);
+  // Device files for this session (and the export upload), by localMediaId.
+  const localFilesRef = useRef<Map<string, File>>(new Map());
+  const localUrlsRef = useRef(localUrls);
+  localUrlsRef.current = localUrls;
   const dragLayerIdRef = useRef<string | null>(null);
-  const lastActiveStoragePathRef = useRef<string | null>(null);
+  const lastActiveClipRef = useRef<EditorClip | null>(null);
   const lastActiveLocalSecRef = useRef(0);
   const playheadRef = useRef(playhead);
   titleRef.current = title;
@@ -787,7 +855,14 @@ export default function EditorWorkspace() {
     );
 
   const duration = sequenceDurationSec(doc);
-  const exportCheck = validateEditorExport(doc);
+  const localUrlFor = (layer: EditorClip | EditorOverlay): string | null =>
+    layer.localMediaId ? localUrls[layer.localMediaId] ?? null : null;
+  const isMissingMedia = (layer: EditorClip | EditorOverlay): boolean =>
+    isLocalOnlyLayer(layer) && localUrls[layer.localMediaId!] === null;
+  const hasMissingMedia = [...doc.sequence, ...doc.overlays].some(isMissingMedia);
+  const exportCheck =
+    validateEditorExport(doc, { allowLocal: true }) ??
+    (hasMissingMedia ? { code: "LOCAL_MEDIA_MISSING", message: "Re-pick missing media to export." } : null);
   const fingerprint = useMemo(() => fingerprintOf(title, doc), [title, doc]);
   const dirty = fingerprint !== lastSavedRef.current;
   const sequence = sortedSequence(doc);
@@ -800,7 +875,7 @@ export default function EditorWorkspace() {
   // Lower covering clips stay audible (matching the export mix); only the top one is pictured.
   const underlying = covering.slice(0, -1).filter((c) => !c.clip.muted);
   if (active) {
-    lastActiveStoragePathRef.current = active.clip.storagePath;
+    lastActiveClipRef.current = active.clip;
     lastActiveLocalSecRef.current = active.localSec;
   }
   const canvas = EDITOR_CANVAS[doc.aspect];
@@ -1212,6 +1287,48 @@ export default function EditorWorkspace() {
     })();
   }, [searchParams]);
 
+  // Gives every device-media layer an object URL (new file, reopened project, undo)
+  // and revokes URLs no layer uses any more. A file this browser no longer has → null.
+  const resolvingLocalRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const usedIds = (current: EditorDocument) =>
+      new Set([...current.sequence, ...current.overlays].flatMap((layer) => layer.localMediaId ?? []));
+    const ids = usedIds(doc);
+    const urls = localUrlsRef.current;
+    const unused = Object.keys(urls).filter((id) => !ids.has(id));
+    if (unused.length > 0) {
+      for (const id of unused) if (urls[id]) URL.revokeObjectURL(urls[id]!);
+      setLocalUrls((current) => {
+        const next = { ...current };
+        for (const id of unused) delete next[id];
+        return next;
+      });
+    }
+    for (const id of ids) {
+      if (id in urls || resolvingLocalRef.current.has(id)) continue;
+      const inMemory = localFilesRef.current.get(id);
+      // Wait for the signed-in user before reading this browser's copy, so a slow
+      // auth load is not mistaken for missing media.
+      if (!inMemory && !userId) continue;
+      resolvingLocalRef.current.add(id);
+      void (async () => {
+        const file = inMemory ?? (await getLocalMedia(localMediaKey(userId!, id)));
+        resolvingLocalRef.current.delete(id);
+        if (file) localFilesRef.current.set(id, file);
+        if (!usedIds(docRef.current).has(id)) return;
+        const url = file ? URL.createObjectURL(file) : null;
+        setLocalUrls((current) => ({ ...current, [id]: url }));
+      })();
+    }
+  }, [doc, userId]);
+
+  useEffect(
+    () => () => {
+      for (const url of Object.values(localUrlsRef.current)) if (url) URL.revokeObjectURL(url);
+    },
+    []
+  );
+
   useEffect(() => {
     if (!playing) return;
     playStartPerf.current = performance.now();
@@ -1307,18 +1424,20 @@ export default function EditorWorkspace() {
 
   // Works for clips and video overlays: the layer id is unique across both.
   // `placeholder` is the span the layer was created with; a layer still at it grows to its source.
+  // `localUrl` probes a device file directly instead of signing a storage path.
   const attachSourceDuration = useCallback(async (
     layerId: string,
     storagePath: string | null,
-    placeholder: { startSec: number; endSec: number }
+    placeholder: { startSec: number; endSec: number },
+    localUrl?: string
   ) => {
     const untouched = (layer: { startSec: number; endSec: number }) =>
       layer.startSec === placeholder.startSec && layer.endSec === placeholder.endSec;
-    if (!storagePath) return;
+    if (!storagePath && !localUrl) return;
     try {
-      const signed = await fetchSignedUrl({ path: storagePath });
-      if (!signed.url) return;
-      const sourceDurationSec = await probeVideoDurationSec(signed.url);
+      const url = localUrl ?? (await fetchSignedUrl({ path: storagePath! })).url;
+      if (!url) return;
+      const sourceDurationSec = await probeVideoDurationSec(url);
       if (sourceDurationSec == null) return;
       patchDoc((current) => ({
         ...current,
@@ -1365,75 +1484,119 @@ export default function EditorWorkspace() {
     if (kind === "video") void attachSourceDuration(overlay.id, overlay.storagePath, overlay);
   };
 
-  const onUpload = async (file: File) => {
-    if (uploadingRef.current) return;
+  // Keeps a device file in this browser and returns its new localMediaId + object URL.
+  const keepDeviceFile = (file: File): { localMediaId: string; url: string } => {
+    const localMediaId = crypto.randomUUID();
+    const url = URL.createObjectURL(file);
+    localFilesRef.current.set(localMediaId, file);
+    localUrlsRef.current = { ...localUrlsRef.current, [localMediaId]: url };
+    setLocalUrls((current) => ({ ...current, [localMediaId]: url }));
+    void (async () => {
+      const stored = userId ? await putLocalMedia(localMediaKey(userId, localMediaId), file) : false;
+      if (!stored) {
+        showToast({
+          type: "info",
+          message: "This browser couldn't keep a copy of the file. Re-pick it after reloading.",
+        });
+      }
+    })();
+    return { localMediaId, url };
+  };
+
+  // Device files stay in the browser; nothing uploads until Export.
+  const onUpload = (file: File) => {
     const kind = uploadKindRef.current;
+    const repickId = repickLayerIdRef.current;
+    repickLayerIdRef.current = null;
     const validation = validateEditorUploadFile(file, kind);
     if (!validation.ok) {
       showToast({ type: "error", message: validation.error });
       return;
     }
-
-    uploadingRef.current = true;
-    setUploadState({ isUploading: true, fileName: file.name, kind });
-    try {
-      const uploaded = await uploadRefFile(file);
-      if (kind === "sequence") {
-        if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
-          showToast({
-            type: "error",
-            message: `Sequence limit reached (${EDITOR_MAX_SEQUENCE} clips).`,
-          });
-          return;
-        }
-        const clip = clipFromUpload(uploaded.path, docRef.current.sequence.length, playhead);
-        patchDoc((current) => ({
-          ...current,
-          sequence: [...current.sequence, clip],
-        }));
-        setSelectedId(clip.id);
-        void attachSourceDuration(clip.id, clip.storagePath, clip);
-        showToast({ type: "success", message: "Media added" });
-        return;
-      }
-      if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
+    if (repickId) {
+      void repickMedia(repickId, file);
+      return;
+    }
+    if (kind === "sequence") {
+      if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
         showToast({
           type: "error",
-          message: `Overlay limit reached (${EDITOR_MAX_OVERLAYS}).`,
+          message: `Sequence limit reached (${EDITOR_MAX_SEQUENCE} clips).`,
         });
         return;
       }
-      const { start, end } = placeLayer(playhead, 2);
-      const overlay = mediaOverlay(
-        kind,
-        { storagePath: uploaded.path },
-        start,
-        end,
-        docRef.current.overlays.length,
-        EDITOR_CANVAS[docRef.current.aspect]
-      );
-      patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
-      setSelectedId(overlay.id);
-      if (kind === "video") void attachSourceDuration(overlay.id, overlay.storagePath, overlay);
+      const { localMediaId, url } = keepDeviceFile(file);
+      const clip = clipFromDevice(localMediaId, docRef.current.sequence.length, playhead);
+      patchDoc((current) => ({
+        ...current,
+        sequence: [...current.sequence, clip],
+      }));
+      setSelectedId(clip.id);
+      void attachSourceDuration(clip.id, null, clip, url);
       showToast({ type: "success", message: "Media added" });
-    } catch (err) {
-      let message = "Upload failed.";
-      if (err instanceof Error) {
-        message = err.message;
-        if (
-          message.includes("413") ||
-          message.toLowerCase().includes("payload too large") ||
-          message.toLowerCase().includes("too large")
-        ) {
-          message = `File is too large. The maximum size is ${EDITOR_MAX_UPLOAD_MB} MB.`;
-        }
-      }
-      showToast({ type: "error", message });
-    } finally {
-      uploadingRef.current = false;
-      setUploadState(null);
+      return;
     }
+    if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
+      showToast({
+        type: "error",
+        message: `Overlay limit reached (${EDITOR_MAX_OVERLAYS}).`,
+      });
+      return;
+    }
+    const { localMediaId, url } = keepDeviceFile(file);
+    const { start, end } = placeLayer(playhead, 2);
+    const overlay = mediaOverlay(
+      kind,
+      { localMediaId },
+      start,
+      end,
+      docRef.current.overlays.length,
+      EDITOR_CANVAS[docRef.current.aspect]
+    );
+    patchDoc((current) => ({ ...current, overlays: [...current.overlays, overlay] }));
+    setSelectedId(overlay.id);
+    if (kind === "video") void attachSourceDuration(overlay.id, null, overlay, url);
+    showToast({ type: "success", message: "Media added" });
   };
+
+  // Replaces a layer's missing device file in one history step, keeping its timing
+  // (clamped if the new file is shorter).
+  const repickMedia = async (layerId: string, file: File) => {
+    const { localMediaId, url } = keepDeviceFile(file);
+    // Bounded: a probe that never reports metadata must not block the re-pick.
+    const sourceSec = file.type.startsWith("video/")
+      ? await Promise.race([
+          probeVideoDurationSec(url).catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        ])
+      : null;
+    const clip = (c: EditorClip): EditorClip => {
+      const next = { ...c, localMediaId, sourceDurationSec: null };
+      return sourceSec != null ? withProbedClipSource(next, sourceSec, false) : next;
+    };
+    const overlay = (o: EditorOverlay): EditorOverlay => {
+      const next = { ...o, localMediaId, sourceDurationSec: o.kind === "video" ? null : o.sourceDurationSec };
+      return sourceSec != null ? withProbedOverlaySource(next, sourceSec, false) : next;
+    };
+    fittedOverlaysRef.current.delete(layerId);
+    patchDoc((current) => ({
+      ...current,
+      sequence: current.sequence.map((c) => (c.id === layerId ? clip(c) : c)),
+      overlays: current.overlays.map((o) => (o.id === layerId ? overlay(o) : o)),
+    }));
+  };
+
+  const openFilePicker = (kind: "sequence" | "image" | "video", repickLayerId: string | null = null) => {
+    const input = uploadRef.current;
+    if (!input) return;
+    uploadKindRef.current = kind;
+    repickLayerIdRef.current = repickLayerId;
+    input.accept = kind === "image" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm";
+    input.click();
+  };
+
+  const pickRepick = (layer: EditorClip | EditorOverlay) =>
+    openFilePicker("kind" in layer ? (layer.kind === "image" ? "image" : "video") : "sequence", layer.id);
 
   const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorClip> = { ...patch };
@@ -1514,6 +1677,45 @@ export default function EditorWorkspace() {
     if (!attempt) return;
     setExporting(true);
     setExportError(null);
+    // Device files upload only now, to temp paths the export route deletes when it finishes.
+    // The editor's own doc stays local-only; the server gets a copy with storagePath filled.
+    const localIds = [
+      ...new Set([...doc.sequence, ...doc.overlays].filter(isLocalOnlyLayer).map((l) => l.localMediaId!)),
+    ];
+    const exportUploads: { localMediaId: string; storagePath: string }[] = [];
+    if (localIds.length > 0) {
+      setExportUploading(true);
+      try {
+        for (const localMediaId of localIds) {
+          const file = localFilesRef.current.get(localMediaId);
+          if (!file) throw new Error("Re-pick missing media to export.");
+          const uploaded = await uploadRefFile(file);
+          exportUploads.push({ localMediaId, storagePath: uploaded.path });
+        }
+      } catch (err) {
+        for (const { storagePath } of exportUploads) {
+          void fetch("/api/upload/ref/sign", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: storagePath }),
+          }).catch(() => undefined);
+        }
+        attempt.settle(false);
+        setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
+        setExporting(false);
+        return;
+      } finally {
+        setExportUploading(false);
+      }
+    }
+    const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
+    const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
+      isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
+    const exportDoc: EditorDocument = {
+      ...doc,
+      sequence: doc.sequence.map(withUpload),
+      overlays: doc.overlays.map(withUpload),
+    };
     try {
       const res = await fetch("/api/render-editor", {
         method: "POST",
@@ -1521,7 +1723,7 @@ export default function EditorWorkspace() {
           "Content-Type": "application/json",
           "Idempotency-Key": attempt.key,
         },
-        body: JSON.stringify({ title, document: doc }),
+        body: JSON.stringify({ title, document: exportDoc, exportUploads }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -1606,7 +1808,12 @@ export default function EditorWorkspace() {
             >
               <div className={`h-full w-full ${active ? "" : "invisible"}`}>
                 <SignedVideo
-                  storagePath={active ? active.clip.storagePath : lastActiveStoragePathRef.current}
+                  storagePath={(active?.clip ?? lastActiveClipRef.current)?.storagePath ?? null}
+                  localUrl={(() => {
+                    const shown = active?.clip ?? lastActiveClipRef.current;
+                    return shown ? localUrlFor(shown) : null;
+                  })()}
+                  missing={active ? isMissingMedia(active.clip) : false}
                   currentTime={active ? active.localSec : lastActiveLocalSecRef.current}
                   playing={playing && !!active}
                   muted={active?.clip.muted ?? false}
@@ -1620,6 +1827,7 @@ export default function EditorWorkspace() {
                   <SignedVideo
                     key={clip.id}
                     storagePath={clip.storagePath}
+                    localUrl={localUrlFor(clip)}
                     currentTime={localSec}
                     playing={playing}
                     videoRef={(node) => {
@@ -1707,11 +1915,15 @@ export default function EditorWorkspace() {
                     })() : overlay.kind === "image" ? (
                       <SignedImage
                         storagePath={overlay.storagePath}
+                        localUrl={localUrlFor(overlay)}
+                        missing={isMissingMedia(overlay)}
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
                       />
                     ) : (
                       <SignedVideo
                         storagePath={overlay.storagePath}
+                        localUrl={localUrlFor(overlay)}
+                        missing={isMissingMedia(overlay)}
                         currentTime={0}
                         playing={playing && visible}
                         muted={overlay.muted ?? false}
@@ -1804,15 +2016,10 @@ export default function EditorWorkspace() {
                     type="button"
                     aria-haspopup="true"
                     aria-expanded={addMenuOpen}
-                    disabled={uploadState?.isUploading}
                     onClick={() => setAddMenuOpen((current) => !current)}
                     className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-2.5 text-xs font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {uploadState?.isUploading ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
-                    ) : (
-                      <Plus className="h-3.5 w-3.5" />
-                    )}
+                    <Plus className="h-3.5 w-3.5" />
                     Add
                     <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
@@ -1838,21 +2045,16 @@ export default function EditorWorkspace() {
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={uploadState?.isUploading || doc.sequence.length >= EDITOR_MAX_SEQUENCE}
+                        disabled={doc.sequence.length >= EDITOR_MAX_SEQUENCE}
                         onClick={() => {
                           setAddMenuOpen(false);
-                          uploadKindRef.current = "sequence";
-                          uploadRef.current?.click();
+                          openFilePicker("sequence");
                         }}
                         className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
                         title={`Upload video from device (max ${EDITOR_MAX_UPLOAD_MB} MB)`}
                       >
                         <span className="flex items-center gap-2">
-                          {uploadState?.isUploading ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-primary" />
-                          ) : (
-                            <Upload className="h-3.5 w-3.5" />
-                          )}
+                          <Upload className="h-3.5 w-3.5" />
                           Upload
                         </span>
                         <span className="text-[10px] text-text-secondary">Max {EDITOR_MAX_UPLOAD_MB} MB</span>
@@ -1925,17 +2127,12 @@ export default function EditorWorkspace() {
                 <input
                   ref={uploadRef}
                   type="file"
-                  accept={
-                    uploadKindRef.current === "image"
-                      ? "image/jpeg,image/png,image/webp"
-                      : "video/mp4,video/quicktime,video/webm"
-                  }
+                  accept="video/mp4,video/quicktime,video/webm"
                   className="hidden"
-                  disabled={uploadState?.isUploading}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
-                    if (file) void onUpload(file);
+                    if (file) onUpload(file);
                   }}
                 />
               </div>
@@ -2138,6 +2335,7 @@ export default function EditorWorkspace() {
                             ? () => updateOverlay(overlay.id, { muted: !overlay.muted }, { keepPlaying: true })
                             : undefined
                         }
+                        onRepick={isMissingMedia(overlay) ? () => pickRepick(overlay) : undefined}
                         onDelete={() => removeLayer("overlay", overlay.id)}
                         onRename={(nextName) => updateOverlay(overlay.id, { name: normalizeLayerName(nextName) })}
                       />
@@ -2145,7 +2343,7 @@ export default function EditorWorkspace() {
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  {clipRows.length === 0 && uploadState?.kind !== "sequence" ? (
+                  {clipRows.length === 0 ? (
                     <div className="h-8" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
@@ -2174,17 +2372,12 @@ export default function EditorWorkspace() {
                         onToggleLock={() => updateClip(clip.id, { locked: !clip.locked })}
                         onToggleHidden={() => updateClip(clip.id, { hidden: !clip.hidden })}
                         onToggleMute={() => updateClip(clip.id, { muted: !clip.muted }, { keepPlaying: true })}
+                        onRepick={isMissingMedia(clip) ? () => pickRepick(clip) : undefined}
                         onDelete={() => removeLayer("clip", clip.id)}
                         onRename={(nextName) => updateClip(clip.id, { name: normalizeLayerName(nextName) })}
                       />
                     ))
                   )}
-                  {uploadState?.kind === "sequence" ? (
-                    <div className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-brand-primary/50 bg-brand-primary/10 px-2.5 text-xs text-brand-primary animate-pulse select-none">
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand-primary" />
-                      <span className="truncate text-[11px] font-medium">Uploading...</span>
-                    </div>
-                  ) : null}
                 </div>
               </div>
 
@@ -2277,7 +2470,7 @@ export default function EditorWorkspace() {
                     </div>
                   ) : null}
                   <div className="space-y-1">
-                    {sequence.length === 0 && uploadState?.kind !== "sequence" ? (
+                    {sequence.length === 0 ? (
                       <div className="h-8 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
                     ) : (
                       clipRows.map(({ clip, label }) => {
@@ -2320,27 +2513,15 @@ export default function EditorWorkspace() {
                         );
                       })
                     )}
-                    {uploadState?.kind === "sequence" ? (
-                      <div
-                        role="status"
-                        aria-label={`Uploading ${uploadState.fileName}`}
-                        className="relative flex h-8 items-center rounded-md border border-dashed border-brand-primary/60 bg-brand-primary/20 px-2 text-xs text-brand-primary animate-pulse select-none overflow-hidden"
-                        style={{
-                          left: Math.max(0, playhead * pxPerSec),
-                          width: Math.max(90, 3 * pxPerSec),
-                        }}
-                      >
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin shrink-0 text-brand-primary" />
-                        <span className="truncate text-[11px] font-medium text-text-primary">
-                          Uploading {uploadState.fileName}...
-                        </span>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               </div>
             </div>
-            {exportError ? <p className="px-3 pb-2 text-xs text-error">{exportError}</p> : null}
+            {exportError ? (
+              <p className="px-3 pb-2 text-xs text-error">{exportError}</p>
+            ) : hasMissingMedia ? (
+              <p className="px-3 pb-2 text-xs text-warning">Re-pick missing media to export.</p>
+            ) : null}
           </div>
         </div>
 
@@ -2547,7 +2728,7 @@ export default function EditorWorkspace() {
         }}
       />
 
-      {uploadState?.isUploading ? (
+      {exportUploading ? (
         <div
           role="status"
           aria-live="polite"
@@ -2555,7 +2736,7 @@ export default function EditorWorkspace() {
         >
           <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
           <span className="font-medium text-text-primary">
-            Uploading <span className="font-semibold text-brand-primary">{uploadState.fileName}</span>...
+            Uploading media for export…
           </span>
         </div>
       ) : null}

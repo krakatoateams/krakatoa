@@ -25,13 +25,16 @@ import {
   MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   videosGeneratedVideoPath,
+  videosUserTempRefPath,
 } from "@/lib/storage-buckets";
 import { supabaseServer } from "@/lib/supabase-server";
 import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
 import { CREATION_TOOLS } from "@/lib/creations";
 import {
+  acceptEditorExportUploads,
   collectEditorMediaRefs,
+  editorExportHashDocument,
   parseEditorDocument,
   sequenceDurationSec,
   validateEditorExport,
@@ -55,6 +58,8 @@ export async function POST(req: Request) {
   let currentStepId: string | null = null;
   let generationRequestId: string | null = null;
   let videoAssetId: string | null = null;
+  // Device files uploaded only for this export (#245); removed on every exit below.
+  let exportUploadPaths: string[] = [];
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -116,6 +121,20 @@ export async function POST(req: Request) {
     if (invalid) {
       return NextResponse.json({ error: invalid.message, code: invalid.code }, { status: 400 });
     }
+    const exportUploads = acceptEditorExportUploads(
+      b.exportUploads,
+      document,
+      videosUserTempRefPath(userId!, "")
+    );
+    if (!exportUploads) {
+      return NextResponse.json({ error: "Invalid export uploads." }, { status: 400 });
+    }
+    try {
+      for (const upload of exportUploads) await assertPathOwnedByUser(upload.storagePath, userId!);
+    } catch {
+      return NextResponse.json({ error: "Invalid export uploads." }, { status: 400 });
+    }
+    exportUploadPaths = exportUploads.map((u) => u.storagePath);
 
     const refs = collectEditorMediaRefs(document);
     const urls: Record<string, string> = {};
@@ -153,11 +172,12 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    const hashDoc = editorExportHashDocument(document, exportUploads);
     const requestHash = computeRequestHash({
       route: "render_editor",
       aspect: document.aspect,
       durationSec,
-      sequence: document.sequence.map((c) => ({
+      sequence: hashDoc.sequence.map((c) => ({
         id: c.id,
         creationId: c.creationId,
         storagePath: c.storagePath,
@@ -168,7 +188,7 @@ export async function POST(req: Request) {
         order: c.order,
         muted: c.muted,
       })),
-      overlays: document.overlays.map((o) => ({
+      overlays: hashDoc.overlays.map((o) => ({
         id: o.id,
         kind: o.kind,
         startSec: o.startSec,
@@ -462,5 +482,16 @@ export async function POST(req: Request) {
       { error: GENERIC_GENERATION_CLIENT_ERROR },
       { status: 500 }
     );
+  } finally {
+    // Rendi no longer needs its inputs; keep only the exported MP4.
+    if (exportUploadPaths.length > 0) {
+      const { error } = await supabaseServer.storage
+        .from(STORAGE_BUCKET)
+        .remove(exportUploadPaths)
+        .catch((e: unknown) => ({ error: e }));
+      if (error) {
+        console.warn("[render-editor] export upload cleanup failed:", generationErrorLogSafe(error));
+      }
+    }
   }
 }
