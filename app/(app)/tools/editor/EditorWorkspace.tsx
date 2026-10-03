@@ -1523,18 +1523,18 @@ export default function EditorWorkspace() {
   };
 
   // Device files stay in the browser; nothing uploads until Export.
-  const onUpload = (file: File) => {
-    const kind = uploadKindRef.current;
+  // Returns false when a layer limit stops further adds (so a multi-file drop can stop).
+  const onUpload = (file: File, kind = uploadKindRef.current): boolean => {
     const repickId = repickLayerIdRef.current;
     repickLayerIdRef.current = null;
     const validation = validateEditorUploadFile(file, kind);
     if (!validation.ok) {
       showToast({ type: "error", message: validation.error });
-      return;
+      return true;
     }
     if (repickId) {
       void repickMedia(repickId, file);
-      return;
+      return true;
     }
     if (kind === "sequence") {
       if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
@@ -1542,7 +1542,7 @@ export default function EditorWorkspace() {
           type: "error",
           message: `Sequence limit reached (${EDITOR_MAX_SEQUENCE} clips).`,
         });
-        return;
+        return false;
       }
       const { localMediaId, url } = keepDeviceFile(file);
       const clip = clipFromDevice(localMediaId, docRef.current.sequence.length, playhead);
@@ -1553,14 +1553,14 @@ export default function EditorWorkspace() {
       setSelectedId(clip.id);
       void attachSourceDuration(clip.id, null, clip, url);
       showToast({ type: "success", message: "Media added" });
-      return;
+      return true;
     }
     if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
       showToast({
         type: "error",
         message: `Overlay limit reached (${EDITOR_MAX_OVERLAYS}).`,
       });
-      return;
+      return false;
     }
     const { localMediaId, url } = keepDeviceFile(file);
     const { start, end } = placeLayer(playhead, 2);
@@ -1576,6 +1576,46 @@ export default function EditorWorkspace() {
     setSelectedId(overlay.id);
     if (kind === "video") void attachSourceDuration(overlay.id, null, overlay, url);
     showToast({ type: "success", message: "Media added" });
+    return true;
+  };
+
+  // Files dragged from the computer onto the preview: videos become clips, images overlays.
+  // Only OS file drags count, so internal drags and viewport panning are unaffected.
+  const fileDragDepthRef = useRef(0);
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const isFileDrag = (event: React.DragEvent) => event.dataTransfer.types.includes("Files");
+  const endFileDrag = () => {
+    fileDragDepthRef.current = 0;
+    setFileDragOver(false);
+  };
+  const stageDropHandlers = {
+    onDragEnter: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      fileDragDepthRef.current += 1;
+      setFileDragOver(true);
+    },
+    onDragOver: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+      if (fileDragDepthRef.current === 0) setFileDragOver(false);
+    },
+    onDragEnd: endFileDrag,
+    onDrop: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      endFileDrag();
+      // A Re-pick whose file dialog was dismissed must not capture this drop.
+      repickLayerIdRef.current = null;
+      for (const file of Array.from(event.dataTransfer.files)) {
+        if (!onUpload(file, file.type.startsWith("image/") ? "image" : "sequence")) break;
+      }
+    },
   };
 
   // Replaces a layer's missing device file in one history step, keeping its timing
@@ -1834,8 +1874,16 @@ export default function EditorWorkspace() {
                   : ""
             }`}
             {...viewport.stageHandlers}
+            {...stageDropHandlers}
             onClick={() => setSelectedId(null)}
           >
+            {fileDragOver ? (
+              <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-brand-primary bg-brand-primary/10 ring-2 ring-brand-primary/30">
+                <span className="rounded-lg bg-N50/90 px-3 py-1.5 text-xs font-medium text-text-primary">
+                  Drop videos or images to add them
+                </span>
+              </div>
+            ) : null}
             <div
               className="relative max-h-full max-w-full"
               style={{
