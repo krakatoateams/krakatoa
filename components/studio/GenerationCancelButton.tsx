@@ -8,11 +8,13 @@ export function GenerationCancelButton({
   cancelling,
   cancelAllowed,
   onCancel,
+  ariaLabel,
 }: {
   visible: boolean;
   cancelling: boolean;
   cancelAllowed: boolean;
   onCancel: () => void;
+  ariaLabel?: string;
 }) {
   if (!visible) return null;
   if (!cancelAllowed) {
@@ -24,7 +26,13 @@ export function GenerationCancelButton({
     );
   }
   return (
-    <button type="button" onClick={onCancel} disabled={cancelling} className={CANCEL_BTN_CLASS}>
+    <button
+      type="button"
+      onClick={onCancel}
+      disabled={cancelling}
+      aria-label={ariaLabel}
+      className={`${CANCEL_BTN_CLASS} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error`}
+    >
       {cancelling ? (
         <>
           <Loader2 className="h-4 w-4 animate-spin" />

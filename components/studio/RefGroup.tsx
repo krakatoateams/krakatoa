@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Film, Image as ImageIcon, Info, Loader2, Music, Plus, X } from "lucide-react";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
+import { TEMP_REF_CACHE_CONTROL } from "@/lib/storage-buckets";
 import { Tooltip } from "./Tooltip";
 
 export type RefKind = "image" | "video" | "audio";
@@ -21,7 +21,13 @@ export type MediaRef = {
 };
 
 // Mint a signed upload URL and push the bytes straight to Supabase (videos/temp/refs/).
-export async function uploadRefFile(file: File): Promise<{ url: string; path: string }> {
+// `signal` aborts the sign call and the byte upload; `onSigned` reports the object path
+// as soon as it is reserved, so a caller can delete a partial upload after aborting.
+export async function uploadRefFile(
+  file: File,
+  opts?: { signal?: AbortSignal; onSigned?: (path: string) => void }
+): Promise<{ url: string; path: string }> {
+  const signal = opts?.signal;
   const signRes = await fetch("/api/upload/ref/sign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -30,6 +36,7 @@ export async function uploadRefFile(file: File): Promise<{ url: string; path: st
       contentType: file.type,
       size: file.size,
     }),
+    signal,
   });
   const signData = await signRes.json().catch(() => null);
   if (!signRes.ok || !signData) {
@@ -42,12 +49,42 @@ export async function uploadRefFile(file: File): Promise<{ url: string; path: st
     storagePath?: string;
   };
   const objectPath = storagePath?.trim() || path;
-  const { error } = await getSupabaseBrowser()
-    .storage.from(bucket)
-    .uploadToSignedUrl(objectPath, token, file, { contentType: file.type });
-  if (error) throw new Error(error.message || "Upload failed.");
+  opts?.onSigned?.(objectPath);
+  await putToSignedUploadUrl(bucket, objectPath, token, file, signal);
+  signal?.throwIfAborted();
   const signed = await fetchSignedUrl({ path: objectPath });
   return { url: signed.url, path: objectPath };
+}
+
+/**
+ * Same request as storage-js `uploadToSignedUrl` (multipart, default cacheControl, no
+ * upsert), which takes no AbortSignal; a plain fetch lets the upload be cancelled.
+ */
+async function putToSignedUploadUrl(
+  bucket: string,
+  objectPath: string,
+  token: string,
+  file: File,
+  signal?: AbortSignal
+): Promise<void> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl || !anonKey) throw new Error("Uploads are not configured.");
+  const url = new URL(`${supabaseUrl}/storage/v1/object/upload/sign/${bucket}/${objectPath}`);
+  url.searchParams.set("token", token);
+  const body = new FormData();
+  body.append("cacheControl", TEMP_REF_CACHE_CONTROL);
+  body.append("", file);
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "x-upsert": "false" },
+    body,
+    signal,
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+    throw new Error(data?.message || data?.error || "Upload failed.");
+  }
 }
 
 export type RefGroupApi = {

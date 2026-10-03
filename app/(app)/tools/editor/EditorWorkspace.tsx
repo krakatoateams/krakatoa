@@ -183,6 +183,17 @@ function startLayerReorderDrag(
   window.addEventListener("pointerup", up);
 }
 
+/** Best-effort removal of temp ref uploads; the 24 h temp sweep is the backstop. */
+function deleteRefUploads(paths: string[]): void {
+  for (const path of paths) {
+    void fetch("/api/upload/ref/sign", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).catch(() => undefined);
+  }
+}
+
 function fingerprintOf(title: string, doc: EditorDocument): string {
   return JSON.stringify({ title: normalizeEditorTitle(title), document: doc });
 }
@@ -767,7 +778,7 @@ export default function EditorWorkspace() {
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [exportUploading, setExportUploading] = useState(false);
+  const [exportPhase, setExportPhase] = useState<"uploading" | "rendering" | null>(null);
   // Session-only device media: localMediaId → object URL (null = this browser no longer has it).
   // Never written to the document.
   const [localUrls, setLocalUrls] = useState<Record<string, string | null>>({});
@@ -819,6 +830,8 @@ export default function EditorWorkspace() {
   const localFilesRef = useRef<Map<string, File>>(new Map());
   const localUrlsRef = useRef(localUrls);
   localUrlsRef.current = localUrls;
+  // The export's upload phase; null once the render request is sent.
+  const exportUploadRef = useRef<{ controller: AbortController; paths: string[] } | null>(null);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveClipRef = useRef<EditorClip | null>(null);
   const lastActiveLocalSecRef = useRef(0);
@@ -1317,6 +1330,11 @@ export default function EditorWorkspace() {
   useEffect(
     () => () => {
       for (const url of Object.values(localUrlsRef.current)) if (url) URL.revokeObjectURL(url);
+      const upload = exportUploadRef.current;
+      if (upload) {
+        upload.controller.abort();
+        deleteRefUploads(upload.paths.splice(0));
+      }
     },
     []
   );
@@ -1685,30 +1703,37 @@ export default function EditorWorkspace() {
     ];
     const exportUploads: { localMediaId: string; storagePath: string }[] = [];
     if (localIds.length > 0) {
-      setExportUploading(true);
+      const upload = { controller: new AbortController(), paths: [] as string[] };
+      const { signal } = upload.controller;
+      exportUploadRef.current = upload;
+      setExportPhase("uploading");
       try {
         for (const localMediaId of localIds) {
           const file = localFilesRef.current.get(localMediaId);
           if (!file) throw new Error("Re-pick missing media to export.");
-          const uploaded = await uploadRefFile(file);
+          const uploaded = await uploadRefFile(file, {
+            signal,
+            onSigned: (path) => upload.paths.push(path),
+          });
+          signal.throwIfAborted();
           exportUploads.push({ localMediaId, storagePath: uploaded.path });
         }
+        signal.throwIfAborted();
       } catch (err) {
-        for (const { storagePath } of exportUploads) {
-          void fetch("/api/upload/ref/sign", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: storagePath }),
-          }).catch(() => undefined);
-        }
+        deleteRefUploads(upload.paths.splice(0));
         attempt.settle(false);
-        setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
+        if (signal.aborted) showToast({ type: "info", message: "Export cancelled" });
+        else setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
         setExporting(false);
+        setExportPhase(null);
         return;
       } finally {
-        setExportUploading(false);
+        if (exportUploadRef.current === upload) exportUploadRef.current = null;
       }
     }
+    // From here the render route owns the uploads (it deletes them on every exit),
+    // so Cancel goes through the generation cancel flow.
+    setExportPhase("rendering");
     const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
     const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
       isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
@@ -1728,12 +1753,18 @@ export default function EditorWorkspace() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
+        code?: string;
         ok?: boolean;
         creation?: { id?: string };
       };
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
+        return;
+      }
+      if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+        attempt.settle(false);
+        showToast({ type: "info", message: "Export cancelled" });
         return;
       }
       if (!res.ok) {
@@ -1746,7 +1777,20 @@ export default function EditorWorkspace() {
       setExportError(err instanceof Error ? err.message : "Export failed.");
     } finally {
       setExporting(false);
+      setExportPhase(null);
     }
+  };
+
+  // Upload phase: abort and delete this export's uploads here (no generation request exists
+  // yet). Render phase: the generation cancel flow; the route deletes the uploads.
+  const cancelExport = () => {
+    const upload = exportUploadRef.current;
+    if (upload) {
+      upload.controller.abort();
+      deleteRefUploads(upload.paths.splice(0));
+      return;
+    }
+    void cancel();
   };
 
   const pxPerSec = 64;
@@ -1775,7 +1819,7 @@ export default function EditorWorkspace() {
           setOpenList(true);
         }}
         onExport={() => void handleExport()}
-        onCancel={() => void cancel()}
+        onCancel={cancelExport}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -2736,7 +2780,7 @@ export default function EditorWorkspace() {
         }}
       />
 
-      {exportUploading ? (
+      {exportPhase === "uploading" ? (
         <div
           role="status"
           aria-live="polite"
