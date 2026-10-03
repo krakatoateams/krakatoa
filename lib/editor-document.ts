@@ -481,6 +481,30 @@ export function withProbedOverlaySource(overlay: EditorOverlay, sourceSec: numbe
   });
 }
 
+/** A layer still at the span it was created with: a 3 s clip from the source start, or a 2 s video overlay. */
+export function isPlaceholderSpan(layer: EditorClip | EditorOverlay): boolean {
+  const span = snapTenth(layer.endSec - layer.startSec);
+  return "kind" in layer ? span === 2 : layer.inSec === 0 && span === 3;
+}
+
+/**
+ * Applies a probed source length to the clip or video overlay with `layerId`
+ * (ids are unique across both). Returns `doc` itself when nothing changed.
+ */
+export function withProbedLayerSource(
+  doc: EditorDocument,
+  layerId: string,
+  sourceSec: number,
+  fillSpan: (layer: EditorClip | EditorOverlay) => boolean
+): EditorDocument {
+  const sequence = doc.sequence.map((c) => (c.id === layerId ? withProbedClipSource(c, sourceSec, fillSpan(c)) : c));
+  const overlays = doc.overlays.map((o) =>
+    o.id === layerId ? withProbedOverlaySource(o, sourceSec, fillSpan(o)) : o
+  );
+  const changed = sequence.some((c, i) => c !== doc.sequence[i]) || overlays.some((o, i) => o !== doc.overlays[i]);
+  return changed ? { ...doc, sequence, overlays } : doc;
+}
+
 function reprojectOverlayToAspect(
   overlay: EditorOverlay,
   oldCanvas: { w: number; h: number },
@@ -990,6 +1014,24 @@ export function editorDocumentSelfCheck(): void {
   assert(probedOverlay.sourceDurationSec === 4 && probedOverlay.endSec === 5, "new video overlay spans its source");
   assert(clampOverlayToComposition({ ...probedOverlay, endSec: 30 }).endSec === 5, "video overlay end stops at source length");
   assert(withProbedOverlaySource(ov("i", "image", 0, 2), 4).sourceDurationSec === undefined, "image overlays have no source length");
+  // Re-measuring a saved layer with no source length (#270)
+  const unmeasured = {
+    ...base,
+    sequence: [clipAt("placeholder", 0, 3), clipAt("stretched", 2.1, 16.7)],
+    overlays: [ov("ovPlaceholder", "video", 1, 3), ov("ovStretched", "video", 0, 20)],
+  };
+  const measureAll = (doc: EditorDocument, sec: number) =>
+    [...doc.sequence, ...doc.overlays].reduce(
+      (current, layer) => withProbedLayerSource(current, layer.id, sec, isPlaceholderSpan),
+      doc
+    );
+  const remeasured = measureAll(unmeasured, 10);
+  const byId = (id: string) => [...remeasured.sequence, ...remeasured.overlays].find((l) => l.id === id)!;
+  assert(byId("placeholder").endSec === 10 && byId("placeholder").sourceDurationSec === 10, "placeholder clip fills its source");
+  assert(byId("stretched").endSec === 12.1, "stretched clip is capped at its source end");
+  assert(byId("ovPlaceholder").endSec === 11, "placeholder video overlay fills its source");
+  assert(byId("ovStretched").endSec === 10, "stretched video overlay is capped at its source");
+  assert(measureAll(remeasured, 4) === remeasured, "measured layers are left alone");
   const twoLayers = { ...base, sequence: [clipAt("a", 0, 4), clipAt("b", 2, 9)], overlays: [ov("t", "text", 0, 6)] };
   assert(projectDurationSec(twoLayers) === 9, "duration is the latest end across layers");
   assert(projectDurationSec({ ...twoLayers, sequence: [clipAt("a", 0, 4)] }) === 6, "deleting the last layer shrinks duration");
