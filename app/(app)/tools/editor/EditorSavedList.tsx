@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderKanban, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { EditorSummary } from "@/lib/editor-document";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 function formatUpdated(iso: string): string {
   const date = new Date(iso);
@@ -37,6 +38,7 @@ export default function EditorSavedList({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<EditorSummary | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
@@ -72,6 +74,7 @@ export default function EditorSavedList({
 
   useEffect(() => {
     if (open) return;
+    setPendingDelete(null);
     setRenamingId(null);
     setRenameValue("");
     setRenameSaving(false);
@@ -95,7 +98,6 @@ export default function EditorSavedList({
   }, [onClose, open, renamingId]);
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this edit? This cannot be undone.")) return;
     setDeletingId(id);
     try {
       const res = await fetch(`/api/editor/projects/${id}`, { method: "DELETE" });
@@ -109,6 +111,7 @@ export default function EditorSavedList({
       setError(err instanceof Error ? err.message : "Failed to delete.");
     } finally {
       setDeletingId(null);
+      setPendingDelete(null);
     }
   };
 
@@ -295,7 +298,7 @@ export default function EditorSavedList({
                           aria-label={`Delete ${item.title}`}
                           title={`Delete ${item.title}`}
                           disabled={deletingId === item.id}
-                          onClick={() => void handleDelete(item.id)}
+                          onClick={() => setPendingDelete(item)}
                           className="rounded-lg p-1.5 text-icon-low-emphasis transition-colors hover:bg-white/10 hover:text-error focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {deletingId === item.id ? (
@@ -313,6 +316,17 @@ export default function EditorSavedList({
           )}
         </div>
       </aside>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete “${pendingDelete?.title ?? ""}”?`}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        busy={deletingId !== null}
+        onConfirm={() => {
+          if (pendingDelete) void handleDelete(pendingDelete.id);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>,
     document.body
   );
