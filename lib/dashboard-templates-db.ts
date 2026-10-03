@@ -257,7 +257,6 @@ export async function saveAllDashboardTemplates(
   kind: DashboardTemplateKind,
   templates: AdminDashboardTemplate[]
 ): Promise<AdminDashboardTemplate[]> {
-  const slugs = templates.map((template) => template.slug);
   const { data: existingRows, error: readError } = await supabaseServer
     .from(TABLE)
     .select("id, slug")

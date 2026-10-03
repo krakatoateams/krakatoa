@@ -44,9 +44,9 @@ export function deploymentCiSelfCheck(): void {
     "ci:checks must preserve the secretless deployment quality gates",
   );
   assert(
-    vercel.git?.deploymentEnabled?.["**"] === false &&
+    vercel.git?.deploymentEnabled?.["**"] === true &&
       vercel.git.deploymentEnabled.main === true,
-    "Vercel must deploy main only while GitHub CI validates pull requests",
+    "Vercel must deploy main and provide preview deployments for other branches",
   );
   assert(
     read("CLAUDE.md").split(/\r?\n/).length < 200,
