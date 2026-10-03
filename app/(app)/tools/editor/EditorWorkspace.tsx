@@ -16,6 +16,7 @@ import {
   Pause,
   Play,
   Plus,
+  Repeat,
   Scissors,
   SkipBack,
   SkipForward,
@@ -182,6 +183,17 @@ function startLayerReorderDrag(
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
+}
+
+/** Best-effort removal of temp ref uploads; the 24 h temp sweep is the backstop. */
+function deleteRefUploads(paths: string[]): void {
+  for (const path of paths) {
+    void fetch("/api/upload/ref/sign", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).catch(() => undefined);
+  }
 }
 
 function fingerprintOf(title: string, doc: EditorDocument): string {
@@ -792,7 +804,7 @@ export default function EditorWorkspace() {
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [exportUploading, setExportUploading] = useState(false);
+  const [exportPhase, setExportPhase] = useState<"uploading" | "rendering" | null>(null);
   // Session-only device media: localMediaId → object URL (null = this browser no longer has it).
   // Never written to the document.
   const [localUrls, setLocalUrls] = useState<Record<string, string | null>>({});
@@ -812,6 +824,8 @@ export default function EditorWorkspace() {
   const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
+  // Session-only: not part of EditorDocument, autosave, undo history, or export.
+  const [loop, setLoop] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -842,10 +856,13 @@ export default function EditorWorkspace() {
   const localFilesRef = useRef<Map<string, File>>(new Map());
   const localUrlsRef = useRef(localUrls);
   localUrlsRef.current = localUrls;
+  // The export's upload phase; null once the render request is sent.
+  const exportUploadRef = useRef<{ controller: AbortController; paths: string[] } | null>(null);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveClipRef = useRef<EditorClip | null>(null);
   const lastActiveLocalSecRef = useRef(0);
   const playheadRef = useRef(playhead);
+  const loopRef = useRef(loop);
   titleRef.current = title;
   docRef.current = doc;
   projectIdRef.current = projectId;
@@ -853,12 +870,20 @@ export default function EditorWorkspace() {
   futureRef.current = future;
   selectedIdRef.current = selectedId;
   playheadRef.current = playhead;
+  loopRef.current = loop;
 
   const currentVisibleClip = () =>
     clipAtPlayhead(
       { ...docRef.current, sequence: docRef.current.sequence.filter((c) => !c.hidden) },
       playheadRef.current
     );
+
+  // With loop on, playing from the end restarts at the first frame.
+  const rewindForLoop = () => {
+    if (!loopRef.current || playheadRef.current < sequenceDurationSec(docRef.current)) return;
+    playheadRef.current = 0;
+    setPlayhead(0);
+  };
 
   const duration = sequenceDurationSec(doc);
   const localUrlFor = (layer: EditorClip | EditorOverlay): string | null =>
@@ -1331,6 +1356,11 @@ export default function EditorWorkspace() {
   useEffect(
     () => () => {
       for (const url of Object.values(localUrlsRef.current)) if (url) URL.revokeObjectURL(url);
+      const upload = exportUploadRef.current;
+      if (upload) {
+        upload.controller.abort();
+        deleteRefUploads(upload.paths.splice(0));
+      }
     },
     []
   );
@@ -1345,6 +1375,13 @@ export default function EditorWorkspace() {
       const next = Math.min(duration, playStartHead.current + elapsed);
       setPlayhead(next);
       if (next >= duration) {
+        if (loopRef.current && duration > 0) {
+          playStartPerf.current = performance.now();
+          playStartHead.current = 0;
+          setPlayhead(0);
+          raf = requestAnimationFrame(tick);
+          return;
+        }
         setPlaying(false);
         return;
       }
@@ -1401,6 +1438,8 @@ export default function EditorWorkspace() {
       if (event.code === "Space" && !event.repeat) {
         if (editable) return;
         event.preventDefault();
+        // No-op while looping playback runs: the clock wraps before the playhead rests at the end.
+        rewindForLoop();
         setPlaying((current) => {
           const next = current ? false : sequenceDurationSec(docRef.current) > 0;
           const el = previewVideoRef.current;
@@ -1510,18 +1549,18 @@ export default function EditorWorkspace() {
   };
 
   // Device files stay in the browser; nothing uploads until Export.
-  const onUpload = (file: File) => {
-    const kind = uploadKindRef.current;
+  // Returns false when a layer limit stops further adds (so a multi-file drop can stop).
+  const onUpload = (file: File, kind = uploadKindRef.current): boolean => {
     const repickId = repickLayerIdRef.current;
     repickLayerIdRef.current = null;
     const validation = validateEditorUploadFile(file, kind);
     if (!validation.ok) {
       showToast({ type: "error", message: validation.error });
-      return;
+      return true;
     }
     if (repickId) {
       void repickMedia(repickId, file);
-      return;
+      return true;
     }
     if (kind === "sequence") {
       if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
@@ -1529,7 +1568,7 @@ export default function EditorWorkspace() {
           type: "error",
           message: `Sequence limit reached (${EDITOR_MAX_SEQUENCE} clips).`,
         });
-        return;
+        return false;
       }
       const { localMediaId, url } = keepDeviceFile(file);
       const clip = clipFromDevice(localMediaId, docRef.current.sequence.length, playhead);
@@ -1540,14 +1579,14 @@ export default function EditorWorkspace() {
       setSelectedId(clip.id);
       void attachSourceDuration(clip.id, null, clip, url);
       showToast({ type: "success", message: "Media added" });
-      return;
+      return true;
     }
     if (docRef.current.overlays.length >= EDITOR_MAX_OVERLAYS) {
       showToast({
         type: "error",
         message: `Overlay limit reached (${EDITOR_MAX_OVERLAYS}).`,
       });
-      return;
+      return false;
     }
     const { localMediaId, url } = keepDeviceFile(file);
     const { start, end } = placeLayer(playhead, 2);
@@ -1563,6 +1602,46 @@ export default function EditorWorkspace() {
     setSelectedId(overlay.id);
     if (kind === "video") void attachSourceDuration(overlay.id, null, overlay, url);
     showToast({ type: "success", message: "Media added" });
+    return true;
+  };
+
+  // Files dragged from the computer onto the preview: videos become clips, images overlays.
+  // Only OS file drags count, so internal drags and viewport panning are unaffected.
+  const fileDragDepthRef = useRef(0);
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const isFileDrag = (event: React.DragEvent) => event.dataTransfer.types.includes("Files");
+  const endFileDrag = () => {
+    fileDragDepthRef.current = 0;
+    setFileDragOver(false);
+  };
+  const stageDropHandlers = {
+    onDragEnter: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      fileDragDepthRef.current += 1;
+      setFileDragOver(true);
+    },
+    onDragOver: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+      if (fileDragDepthRef.current === 0) setFileDragOver(false);
+    },
+    onDragEnd: endFileDrag,
+    onDrop: (event: React.DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      endFileDrag();
+      // A Re-pick whose file dialog was dismissed must not capture this drop.
+      repickLayerIdRef.current = null;
+      for (const file of Array.from(event.dataTransfer.files)) {
+        if (!onUpload(file, file.type.startsWith("image/") ? "image" : "sequence")) break;
+      }
+    },
   };
 
   // Replaces a layer's missing device file in one history step, keeping its timing
@@ -1690,30 +1769,37 @@ export default function EditorWorkspace() {
     ];
     const exportUploads: { localMediaId: string; storagePath: string }[] = [];
     if (localIds.length > 0) {
-      setExportUploading(true);
+      const upload = { controller: new AbortController(), paths: [] as string[] };
+      const { signal } = upload.controller;
+      exportUploadRef.current = upload;
+      setExportPhase("uploading");
       try {
         for (const localMediaId of localIds) {
           const file = localFilesRef.current.get(localMediaId);
           if (!file) throw new Error("Re-pick missing media to export.");
-          const uploaded = await uploadRefFile(file);
+          const uploaded = await uploadRefFile(file, {
+            signal,
+            onSigned: (path) => upload.paths.push(path),
+          });
+          signal.throwIfAborted();
           exportUploads.push({ localMediaId, storagePath: uploaded.path });
         }
+        signal.throwIfAborted();
       } catch (err) {
-        for (const { storagePath } of exportUploads) {
-          void fetch("/api/upload/ref/sign", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: storagePath }),
-          }).catch(() => undefined);
-        }
+        deleteRefUploads(upload.paths.splice(0));
         attempt.settle(false);
-        setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
+        if (signal.aborted) showToast({ type: "info", message: "Export cancelled" });
+        else setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
         setExporting(false);
+        setExportPhase(null);
         return;
       } finally {
-        setExportUploading(false);
+        if (exportUploadRef.current === upload) exportUploadRef.current = null;
       }
     }
+    // From here the render route owns the uploads (it deletes them on every exit),
+    // so Cancel goes through the generation cancel flow.
+    setExportPhase("rendering");
     const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
     const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
       isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
@@ -1733,12 +1819,18 @@ export default function EditorWorkspace() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
+        code?: string;
         ok?: boolean;
         creation?: { id?: string };
       };
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
+        return;
+      }
+      if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+        attempt.settle(false);
+        showToast({ type: "info", message: "Export cancelled" });
         return;
       }
       if (!res.ok) {
@@ -1751,7 +1843,20 @@ export default function EditorWorkspace() {
       setExportError(err instanceof Error ? err.message : "Export failed.");
     } finally {
       setExporting(false);
+      setExportPhase(null);
     }
+  };
+
+  // Upload phase: abort and delete this export's uploads here (no generation request exists
+  // yet). Render phase: the generation cancel flow; the route deletes the uploads.
+  const cancelExport = () => {
+    const upload = exportUploadRef.current;
+    if (upload) {
+      upload.controller.abort();
+      deleteRefUploads(upload.paths.splice(0));
+      return;
+    }
+    void cancel();
   };
 
   const pxPerSec = 64;
@@ -1780,7 +1885,7 @@ export default function EditorWorkspace() {
           setOpenList(true);
         }}
         onExport={() => void handleExport()}
-        onCancel={() => void cancel()}
+        onCancel={cancelExport}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -1795,8 +1900,16 @@ export default function EditorWorkspace() {
                   : ""
             }`}
             {...viewport.stageHandlers}
+            {...stageDropHandlers}
             onClick={() => setSelectedId(null)}
           >
+            {fileDragOver ? (
+              <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-brand-primary bg-brand-primary/10 ring-2 ring-brand-primary/30">
+                <span className="rounded-lg bg-N50/90 px-3 py-1.5 text-xs font-medium text-text-primary">
+                  Drop videos or images to add them
+                </span>
+              </div>
+            ) : null}
             <div
               className="relative max-h-full max-w-full"
               style={{
@@ -2172,6 +2285,7 @@ export default function EditorWorkspace() {
                       return;
                     }
                     if (duration <= 0) return;
+                    rewindForLoop();
                     const activeClip = currentVisibleClip();
                     if (el && activeClip) {
                       el.muted = Boolean(activeClip.clip.muted);
@@ -2203,6 +2317,18 @@ export default function EditorWorkspace() {
                   title="Jump to clip end"
                 >
                   <SkipForward className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoop((current) => !current)}
+                  className={`rounded-lg p-1.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary ${
+                    loop ? "bg-brand-primary/20 text-brand-primary" : "text-text-secondary hover:text-text-primary"
+                  }`}
+                  aria-pressed={loop}
+                  aria-label="Loop playback"
+                  title={loop ? "Loop on" : "Loop off"}
+                >
+                  <Repeat className="h-3.5 w-3.5" />
                 </button>
                 <span className="ml-1 flex items-center text-xs tabular-nums text-text-secondary">
                   <input
@@ -2744,7 +2870,7 @@ export default function EditorWorkspace() {
         }}
       />
 
-      {exportUploading ? (
+      {exportPhase === "uploading" ? (
         <div
           role="status"
           aria-live="polite"

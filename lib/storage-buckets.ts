@@ -30,6 +30,9 @@ export const STORAGE_BUCKET =
  */
 export const MEDIA_CACHE_CONTROL = "31536000, immutable";
 
+/** Short-lived reference uploads (videos/temp/refs/); storage-js's default for signed uploads. */
+export const TEMP_REF_CACHE_CONTROL = "3600";
+
 /** Top-level folder for ReelsGen (.ass, .mp4) — legacy layout only */
 export const VIDEOS_FOLDER = "videos";
 
