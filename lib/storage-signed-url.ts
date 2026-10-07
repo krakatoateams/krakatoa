@@ -6,6 +6,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import {
   STORAGE_BUCKET,
   isStorageRelativePath,
+  isVideosTempRefPath,
   storagePathFromPublicUrl,
   storagePathFromSignedUrl,
   storagePathOwnerUserId,
@@ -251,6 +252,9 @@ export async function signStoragePathForPipeline(
   return signed.url;
 }
 
+export const REF_MISSING_MESSAGE =
+  "Your reference image is no longer available. Please upload it again.";
+
 /** Resolve a client ref attachment to a fetchable URL for Replicate/Rendi (pipeline TTL). */
 export async function resolveRefForPipeline(
   userId: string,
@@ -258,6 +262,13 @@ export async function resolveRefForPipeline(
 ): Promise<string | null> {
   const path = resolveStoragePath(ref.path, ref.url);
   if (path) {
+    // Temp refs are deleted after every run, so a retry/replay can point at a
+    // missing object; the provider would then answer 400 on the signed URL.
+    if (isVideosTempRefPath(path)) {
+      await assertPathOwnedByUser(path, userId);
+      const { data } = await supabaseServer.storage.from(STORAGE_BUCKET).exists(path);
+      if (data === false) throw new Error(REF_MISSING_MESSAGE);
+    }
     try {
       return await signStoragePathForPipeline(path, userId);
     } catch (err: unknown) {
