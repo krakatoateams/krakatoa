@@ -24,11 +24,36 @@ export function pickGenerateCreationId(data: {
   return id || null;
 }
 
+// Vercel caps request bodies at 4.5 MB, so connected references are re-encoded
+// to JPEG (long side <= 2048px) before upload; the model input doesn't need more.
+const REFERENCE_MAX_SIDE = 2048;
+const REFERENCE_JPEG_QUALITY = 0.85;
+
 export async function blobFileFromUrl(url: string, filename: string): Promise<File> {
   const res = await fetch(url);
   if (!res.ok) throw new Error("Couldn't read the connected image.");
   const blob = await res.blob();
   const type = blob.type || "image/jpeg";
+  if (!type.startsWith("image/") || type === "image/gif") return new File([blob], filename, { type });
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, REFERENCE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.fillStyle = "#fff"; // JPEG has no alpha
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const jpeg = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", REFERENCE_JPEG_QUALITY)
+    );
+    if (jpeg && jpeg.size < blob.size) return new File([jpeg], filename, { type: "image/jpeg" });
+  } catch {
+    // fall through: upload the original and let the status mapping explain a rejection
+  }
   return new File([blob], filename, { type });
 }
 

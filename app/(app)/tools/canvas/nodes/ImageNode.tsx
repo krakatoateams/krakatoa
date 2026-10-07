@@ -56,6 +56,7 @@ import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
 import type { ImageNodeData } from "../node-data";
+import { describeGenerateHttpError } from "@/lib/canvas-generation-error";
 
 export type ImageFlowNode = Node<ImageNodeData, "image">;
 
@@ -203,7 +204,7 @@ export default function ImageNode({
         }
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
-        throw new Error(result.error || "Generation failed");
+        throw new Error(result.error || describeGenerateHttpError(response.status));
       }
       attempt.settle(true);
       refetchCredits();
