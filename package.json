@@ -102,7 +102,7 @@
     "replicate": "^1.4.0",
     "server-only": "^0.0.1",
     "shaders": "^2.5.126",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "workflow": "^4.8.4"
   },
   "devDependencies": {
