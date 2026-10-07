@@ -19,16 +19,21 @@ function Wordmark() {
     <Link
       href="/"
       aria-label="Kelolako home"
-      className="flex shrink-0 items-center justify-self-center"
+      className="flex shrink-0 items-center gap-2 justify-self-center"
     >
       <Image
         src="/Logo White transparent.svg"
-        alt="Kelolako"
+        alt=""
         width={368}
         height={332}
         priority
         className="h-7 w-auto object-contain sm:h-8"
       />
+      {/* Visible text name: Google OAuth verification requires the app
+          name as readable text on the home page, not just in the logo. */}
+      <span className="font-display text-base font-semibold tracking-tight text-N900 sm:text-lg">
+        Kelolako
+      </span>
     </Link>
   );
 }
