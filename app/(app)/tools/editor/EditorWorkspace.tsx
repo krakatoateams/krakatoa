@@ -1,5 +1,7 @@
 "use client";
 
+import EditorExportDialog from "./EditorExportDialog";
+import type { EditorExportSettings } from "@/lib/editor-export-settings";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -196,6 +198,12 @@ function deleteRefUploads(paths: string[]): void {
       body: JSON.stringify({ path }),
     }).catch(() => undefined);
   }
+}
+
+function exportTimestampName(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
 function fingerprintOf(title: string, doc: EditorDocument): string {
@@ -831,6 +839,7 @@ export default function EditorWorkspace() {
   const [saving, setSaving] = useState(false);
   const [openList, setOpenList] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
   const [tracksHeight, setTracksHeight] = useState(TIMELINE_TRACKS_DEFAULT_HEIGHT);
@@ -1796,7 +1805,7 @@ export default function EditorWorkspace() {
     });
   };
 
-  const handleExport = async () => {
+  const handleExport = async (exportName: string, exportSettings: EditorExportSettings) => {
     if (status !== "authenticated") {
       openSignInModal();
       return;
@@ -1805,7 +1814,7 @@ export default function EditorWorkspace() {
       setExportError(exportCheck.message);
       return;
     }
-    const attempt = begin(fingerprint);
+    const attempt = begin(`${fingerprint}|${exportName}|${JSON.stringify(exportSettings)}`);
     if (!attempt) return;
     setExporting(true);
     setExportError(null);
@@ -1862,7 +1871,7 @@ export default function EditorWorkspace() {
           "Content-Type": "application/json",
           "Idempotency-Key": attempt.key,
         },
-        body: JSON.stringify({ title, document: exportDoc, exportUploads }),
+        body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -1931,9 +1940,26 @@ export default function EditorWorkspace() {
           }
           setOpenList(true);
         }}
-        onExport={() => void handleExport()}
+        onExport={() => {
+          if (status !== "authenticated") {
+            openSignInModal();
+            return;
+          }
+          setExportDialogOpen(true);
+        }}
         onCancel={cancelExport}
       />
+
+      {exportDialogOpen ? (
+        <EditorExportDialog
+          defaultName={exportTimestampName()}
+          onClose={() => setExportDialogOpen(false)}
+          onConfirm={(name, exportSettings) => {
+            setExportDialogOpen(false);
+            void handleExport(name, exportSettings);
+          }}
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
