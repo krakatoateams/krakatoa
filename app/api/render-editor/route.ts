@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseExportSettings, sanitizeExportTitle } from "@/lib/editor-export-settings";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
@@ -117,6 +118,10 @@ export async function POST(req: Request) {
     if (!document) {
       return NextResponse.json({ error: "That timeline could not be exported." }, { status: 400 });
     }
+    const exportSettings = parseExportSettings(b.settings);
+    if (!exportSettings) {
+      return NextResponse.json({ error: "Unsupported export settings.", code: "INVALID_EXPORT_SETTINGS" }, { status: 400 });
+    }
     const invalid = validateEditorExport(document);
     if (invalid) {
       return NextResponse.json({ error: invalid.message, code: invalid.code }, { status: 400 });
@@ -175,6 +180,7 @@ export async function POST(req: Request) {
     const hashDoc = editorExportHashDocument(document, exportUploads);
     const requestHash = computeRequestHash({
       route: "render_editor",
+      settings: exportSettings,
       aspect: document.aspect,
       durationSec,
       sequence: hashDoc.sequence.map((c) => ({
@@ -308,13 +314,18 @@ export async function POST(req: Request) {
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
     }
-    const rendered = await runEditorRender(document, urls, {
-      abortCheck: async () => {
-        if (generationRequestId && profileId) {
-          await assertNotCancelled(profileId, generationRequestId);
-        }
+    const rendered = await runEditorRender(
+      document,
+      urls,
+      {
+        abortCheck: async () => {
+          if (generationRequestId && profileId) {
+            await assertNotCancelled(profileId, generationRequestId);
+          }
+        },
       },
-    });
+      exportSettings
+    );
     await endStep({ durationSec: rendered.durationSec });
 
     if (generationRequestId && profileId) {
@@ -348,7 +359,7 @@ export async function POST(req: Request) {
     const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
     await endStep({ storagePath });
 
-    const title = typeof b.title === "string" && b.title.trim() ? b.title.trim().slice(0, 80) : "Editor export";
+    const title = sanitizeExportTitle(b.title);
     const historyItem = await safe("insertUserCreation", () =>
       insertUserCreation({
         userId: userId!,
@@ -359,6 +370,9 @@ export async function POST(req: Request) {
         title,
         metadata: {
           aspect: document.aspect,
+          resolution: exportSettings.resolution,
+          quality: exportSettings.quality,
+          fps: exportSettings.fps,
           durationSec: rendered.durationSec,
           clipCount: document.sequence.length,
           overlayCount: document.overlays.length,

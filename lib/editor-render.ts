@@ -9,6 +9,13 @@
  */
 
 import {
+  DEFAULT_EXPORT_SETTINGS,
+  exportCrf,
+  exportDimensions,
+  parseExportSettings,
+  type EditorExportSettings,
+} from "@/lib/editor-export-settings";
+import {
   runRendiCommandWithRetry,
   getRendiOutputUrl,
   type RunRendiOptions,
@@ -130,12 +137,15 @@ function placeClipFilter(
 export function buildEditorFfmpegGraph(
   doc: EditorDocument,
   urls: EditorMediaUrls,
-  audioUrls: ReadonlySet<string>
+  audioUrls: ReadonlySet<string>,
+  settings: EditorExportSettings = DEFAULT_EXPORT_SETTINGS
 ): EditorFfmpegGraph {
   const invalid = validateEditorExport(doc);
   if (invalid) throw new Error(invalid.message);
 
+  // Compose on the fixed canvas (overlay coordinates live there), then scale to the export size.
   const { w: width, h: height } = EDITOR_CANVAS[doc.aspect];
+  const out = exportDimensions(doc.aspect, settings.resolution);
   const durationSec = round2(sequenceDurationSec(doc));
   const sequence = sortedSequence(doc).filter((clip) => !clip.hidden);
   const overlays = sortedOverlays(doc).filter((overlay) => !overlay.hidden);
@@ -267,6 +277,12 @@ export function buildEditorFfmpegGraph(
     step += 1;
   }
 
+  const needsScale = out.w !== width || out.h !== height;
+  filters.push(
+    `[${current}]${needsScale ? `scale=${out.w}:${out.h}:flags=lanczos,` : ""}fps=${settings.fps},format=yuv420p[vfinal]`
+  );
+  current = "vfinal";
+
   let audioArgs = "-an";
   if (audioLabels.length > 0) {
     filters.push(
@@ -278,26 +294,27 @@ export function buildEditorFfmpegGraph(
 
   const command =
     `${inputArgs.join(" ")} -filter_complex "${filters.join(";")}" ` +
-    `-map "[${current}]" -t ${durationSec} -c:v libx264 -crf 20 -pix_fmt yuv420p ${audioArgs} {{out_v}}`;
+    `-map "[${current}]" -t ${durationSec} -c:v libx264 -crf ${exportCrf(settings.quality)} -pix_fmt yuv420p ${audioArgs} {{out_v}}`;
 
   return {
     command,
     inputFiles,
     outputFiles: { out_v: "editor_export.mp4" },
     durationSec,
-    width,
-    height,
+    width: out.w,
+    height: out.h,
   };
 }
 
 export async function runEditorRender(
   doc: EditorDocument,
   urls: EditorMediaUrls,
-  rendiOptions?: RunRendiOptions
+  rendiOptions?: RunRendiOptions,
+  settings: EditorExportSettings = DEFAULT_EXPORT_SETTINGS
 ): Promise<{ url: string; durationSec: number; width: number; height: number }> {
   // Probe failures resolve to "silent" so a source without audio never fails the export.
   const audioUrls = await probeAudioSources(audibleLayerUrls(doc, urls));
-  const graph = buildEditorFfmpegGraph(doc, urls, audioUrls);
+  const graph = buildEditorFfmpegGraph(doc, urls, audioUrls, settings);
   const options: RunRendiOptions = {
     pollIntervalMs: 2500,
     maxAttempts: 80, // 80 * 2.5s = 200s, fits well inside maxDuration = 300 with headroom for upload
@@ -399,6 +416,12 @@ export function editorRenderSelfCheck(): void {
   const graph = buildEditorFfmpegGraph(doc, urls, new Set());
   assert(graph.durationSec === 5, "export length is the latest layer end");
   assert(graph.width === 720 && graph.height === 1280, "9:16 canvas");
+  assert(graph.command.includes("-crf 23"), "default quality is Standard (CRF 23)");
+  const hq = buildEditorFfmpegGraph(doc, urls, new Set(), { resolution: 480, quality: "high", fps: 60 });
+  assert(hq.width === 480 && hq.height === 854, "480p keeps 9:16 with even dimensions");
+  assert(hq.command.includes("-crf 20") && hq.command.includes("fps=60"), "quality + fps applied");
+  assert(parseExportSettings({ resolution: 999 }) === null, "unsupported resolution rejected");
+  assert(parseExportSettings({ fps: 24 }) === null, "unsupported fps rejected");
   assert(graph.command.includes("color=c=black"), "black composition base");
   assert(!graph.command.includes("concat="), "clips are layers, not concatenated");
   assert(graph.command.includes("overlay=0:0:enable='between(t,0,2)'"), "first clip window");
