@@ -202,7 +202,7 @@ export function CreationPreviewModal({
         </div>
 
         {/* Sidebar: header, scrollable details, sticky actions */}
-        <div className="flex min-h-0 w-full shrink-0 flex-col border-t border-white/10 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px]">
+        <div className="flex min-h-0 w-full shrink-0 flex-col border-t border-white/10 lg:w-[460px] lg:border-l lg:border-t-0">
           <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-3 lg:px-5">
             <div className="min-w-0 flex-1 leading-tight">
               <time
