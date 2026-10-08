@@ -263,7 +263,7 @@ export function CreationPreviewModal({
             )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 border-t border-white/10 bg-gradient-to-t from-white/[0.04] to-transparent px-4 py-3.5">
+          <div className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-2 border-t border-white/10 bg-gradient-to-t from-white/[0.04] to-transparent px-4 py-3.5">
             {richUI && !trashed && (
               <Tooltip label={isFavorite ? "Remove favorite" : "Add to favorites"}>
                 <button
