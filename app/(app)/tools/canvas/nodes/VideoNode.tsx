@@ -17,6 +17,11 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
+import {
+  CANVAS_VIDEO_NOT_SAVED_MESSAGE,
+  hasSavedVideo,
+  pollCanvasVideoResult,
+} from "@/lib/canvas-video-completion";
 import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import {
   TEXT_TO_VIDEO_MODELS,
@@ -232,19 +237,29 @@ export default function VideoNode({
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(result.error || "Generation failed");
       }
+      // HTTP 202 / "processing" is non-terminal: keep loading + the idempotency lock until polling is terminal.
+      const saved =
+        response.status === 202 || result.status === "processing"
+          ? await pollCanvasVideoResult(attempt.key)
+          : result;
+      if (!hasSavedVideo(saved)) throw new Error(CANVAS_VIDEO_NOT_SAVED_MESSAGE);
       attempt.settle(true);
       refetchCredits();
-      const storagePath = pickGenerateStoragePath(result);
       patch({
         loading: false,
         error: null,
         imported: false,
-        resultUrl: result.videoUrl ?? null,
-        resultStoragePath: storagePath,
-        creationId: pickGenerateCreationId(result),
+        resultUrl: saved.videoUrl ?? null,
+        resultStoragePath: pickGenerateStoragePath(saved),
+        creationId: pickGenerateCreationId(saved),
       });
     } catch (err) {
       attempt.settle(false);
+      if ((err as { code?: string })?.code === "GENERATION_CANCELLED") {
+        refetchCredits();
+        patch({ loading: false });
+        return;
+      }
       patch({
         loading: false,
         error: err instanceof Error ? err.message : "Generation failed",
