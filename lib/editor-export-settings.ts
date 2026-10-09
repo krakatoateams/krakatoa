@@ -108,7 +108,8 @@ export function exportVideoBitrateCapKbps(p: {
 /** Encoder args for the video stream; `capKbps` (see `exportVideoBitrateCapKbps`) bounds the file size. */
 export function exportVideoArgs(settings: Pick<EditorExportSettings, "format" | "quality">, capKbps: number | null = null): string[] {
   if (settings.format === "webm") {
-    // VP9 constrained quality: CRF, with -b:v as the average-rate ceiling (0 = unconstrained).
+    // VP9 constrained quality: CRF with -b:v as the target average bitrate (0 = unconstrained); a file that still
+    // overshoots fails as EDITOR_EXPORT_FILE_TOO_LARGE.
     return [
       "-c:v", EXPORT_FORMAT_SPEC.webm.videoCodec, "-b:v", capKbps ? `${capKbps}k` : "0", "-crf", String(VP9_CRF[settings.quality]),
       "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-threads", "8", "-pix_fmt", "yuv420p",
