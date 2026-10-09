@@ -48,6 +48,7 @@ import {
 } from "@/lib/canvas-graph";
 import {
   describeCanvasIdempotencyError,
+  isIdempotencyConflict,
   pickGenerateCreationId,
   resolveCanvasRefFrames,
 } from "../canvas-api";
@@ -208,9 +209,19 @@ export default function VideoNode({
       generateAudio,
       references: { firstFrame, referenceImages },
     };
-    const attempt = beginSubmit(JSON.stringify(body));
+    // Signed URLs are minted per click; sign only the stable storage paths.
+    const attempt = beginSubmit(
+      JSON.stringify({
+        ...body,
+        references: {
+          firstFrame: firstFrame && { path: firstFrame.path },
+          referenceImages: referenceImages.map((frame) => ({ path: frame.path })),
+        },
+      }),
+    );
     if (!attempt) return;
 
+    let rotateKey = false;
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-video", {
@@ -234,6 +245,7 @@ export default function VideoNode({
             `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(result.error || "Generation failed");
@@ -255,7 +267,7 @@ export default function VideoNode({
         creationId: pickGenerateCreationId(saved),
       });
     } catch (err) {
-      attempt.settle(false);
+      attempt.settle(false, { rotate: rotateKey });
       if ((err as { code?: string })?.code === "GENERATION_CANCELLED") {
         refetchCredits();
         patch({ loading: false });

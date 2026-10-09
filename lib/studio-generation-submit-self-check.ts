@@ -26,11 +26,18 @@ function fakeResponse(status: number, body: string): Response {
   return new Response(body, { status });
 }
 
-function collectAttempt(): StudioGenerationSubmitAttempt & { settled: boolean | null } {
-  const attempt: StudioGenerationSubmitAttempt & { settled: boolean | null } = {
+type CollectedAttempt = StudioGenerationSubmitAttempt & {
+  settled: boolean | null;
+  rotated: boolean;
+};
+
+function collectAttempt(): CollectedAttempt {
+  const attempt: CollectedAttempt = {
     settled: null,
-    settle(succeeded: boolean) {
+    rotated: false,
+    settle(succeeded: boolean, options) {
       attempt.settled = succeeded;
+      attempt.rotated = options?.rotate === true;
     },
   };
   return attempt;
@@ -192,6 +199,19 @@ export async function studioGenerationSubmitSelfCheck(): Promise<void> {
       "402 exact message",
     );
     assert(attempt.settled === false, "402 settles false");
+  }
+
+  {
+    const attempt = collectAttempt();
+    const effects = collectEffects();
+    const result = await runStudioGenerationSubmit(
+      fakeResponse(409, JSON.stringify({ code: "IDEMPOTENCY_CONFLICT" })),
+      "key-4",
+      attempt,
+      effects,
+    );
+    assert(result.kind === "error", "409 conflict → error result");
+    assert(attempt.settled === false && attempt.rotated, "409 conflict rotates the key");
   }
 
   {

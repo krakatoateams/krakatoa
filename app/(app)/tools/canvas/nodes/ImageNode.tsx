@@ -49,9 +49,11 @@ import {
 import {
   blobFileFromUrl,
   describeCanvasIdempotencyError,
+  isIdempotencyConflict,
   pickGenerateCreationId,
   resolveCanvasRefFrames,
 } from "../canvas-api";
+import { canvasImageAttemptSignature } from "@/lib/canvas-image-signature";
 import CanvasNodeFrame from "./CanvasNodeFrame";
 import CanvasOmniForm from "./CanvasOmniForm";
 import CanvasSourceRefs from "./CanvasSourceRefs";
@@ -168,9 +170,11 @@ export default function ImageNode({
     formData.append("prompt", prompt);
     formData.append("mode", "image");
 
+    let resolvedRefFrameCount = 0;
     if (refImages.length > 0) {
       try {
         const frames = await resolveCanvasRefFrames(refImages);
+        resolvedRefFrameCount = frames.length;
         for (const [index, frame] of Array.from(frames.entries())) {
           const file = await blobFileFromUrl(frame.url, `reference-${index + 1}.jpg`);
           formData.append("reference", file);
@@ -183,17 +187,19 @@ export default function ImageNode({
       }
     }
 
-    const signature = [
+    const signature = canvasImageAttemptSignature({
       prompt,
-      data.modelTier,
-      data.aspectRatio,
-      data.resolution,
-      tier.qualities ? quality : "",
-      refImages.map((image) => image.id).join(","),
-    ].join("|");
+      modelTier,
+      aspectRatio: data.aspectRatio,
+      resolution: tier.hasResolution ? data.resolution : null,
+      quality: tier.qualities ? quality : null,
+      refImageIds: refImages.map((image) => image.id),
+      resolvedRefFrameCount,
+    });
     const attempt = beginSubmit(signature);
     if (!attempt) return;
 
+    let rotateKey = false;
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-photo", {
@@ -214,6 +220,7 @@ export default function ImageNode({
             `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(result.error || describeGenerateHttpError(response.status));
@@ -230,7 +237,7 @@ export default function ImageNode({
         creationId: pickGenerateCreationId(result),
       });
     } catch (err) {
-      attempt.settle(false);
+      attempt.settle(false, { rotate: rotateKey });
       patch({
         loading: false,
         error: err instanceof Error ? err.message : "Generation failed",

@@ -70,6 +70,37 @@ export function idempotentSubmitStateSelfCheck(): void {
     "terminal success clears matching key",
   );
 
+  // Server 409 (key bound to a different request): rotate clears the record, so the
+  // next click mints a fresh key; a plain failure (settle(false)) keeps it.
+  const conflictScope = "canvas:image:n1";
+  const lease2 = () => "lease-x";
+  const stuck = resolveIdempotentAttemptState("S", null, () => "stale-key", lease2);
+  writePersistedIdempotentAttempt(storage, conflictScope, stuck);
+  const plainRetry = resolveIdempotentAttemptState(
+    "S",
+    readPersistedIdempotentAttempt(storage, conflictScope),
+    () => "fresh-key",
+    lease2,
+  );
+  assert(plainRetry.key === "stale-key", "retry after settle(false) reuses the key");
+  clearPersistedIdempotentAttempt(storage, conflictScope, plainRetry); // settle(false, { rotate: true })
+  assert(readPersistedIdempotentAttempt(storage, conflictScope) === null, "conflict clears record");
+  const second = resolveIdempotentAttemptState(
+    "S",
+    readPersistedIdempotentAttempt(storage, conflictScope),
+    () => "fresh-key",
+    lease2,
+  );
+  assert(second.key === "fresh-key", "click after conflict sends a different key");
+  writePersistedIdempotentAttempt(storage, conflictScope, second);
+  const third = resolveIdempotentAttemptState(
+    "S",
+    readPersistedIdempotentAttempt(storage, conflictScope),
+    () => "another-key",
+    lease2,
+  );
+  assert(third.key === "fresh-key", "third identical click reuses the second key");
+
   storage.setItem("krakatoa:generation-attempt:invalid", "{oops");
   assert(
     readPersistedIdempotentAttempt(storage, "invalid") === null,

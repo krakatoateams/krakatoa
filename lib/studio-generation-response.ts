@@ -1,3 +1,5 @@
+import { IDEMPOTENCY_CONFLICT_MESSAGE } from "@/lib/idempotent-submit-state";
+
 /** Shared client-side parsing + outcome classification for studio generation fetch responses. */
 
 export type StudioGenerationResponseData = {
@@ -38,8 +40,7 @@ export const STUDIO_GENERATION_UNEXPECTED_OK_MESSAGE = "Unexpected response from
 export const STUDIO_GENERATION_IN_PROGRESS_MESSAGE =
   "Generation already in progress, please wait.";
 
-export const STUDIO_GENERATION_IDEMPOTENCY_CONFLICT_FALLBACK =
-  "This request conflicts with a previous one.";
+export const STUDIO_GENERATION_IDEMPOTENCY_CONFLICT_FALLBACK = IDEMPOTENCY_CONFLICT_MESSAGE;
 
 export const STUDIO_GENERATION_IDEMPOTENCY_KEY_REQUIRED_FALLBACK =
   "Missing idempotency key. Please retry.";
@@ -84,7 +85,7 @@ export function describeStudioIdempotencyError(
     return STUDIO_GENERATION_IN_PROGRESS_MESSAGE;
   }
   if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
-    return data?.error || STUDIO_GENERATION_IDEMPOTENCY_CONFLICT_FALLBACK;
+    return STUDIO_GENERATION_IDEMPOTENCY_CONFLICT_FALLBACK;
   }
   if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
     return data?.error || STUDIO_GENERATION_IDEMPOTENCY_KEY_REQUIRED_FALLBACK;

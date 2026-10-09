@@ -70,8 +70,8 @@ export async function studioGenerationResponseSelfCheck(): Promise<void> {
     describeStudioIdempotencyError(409, {
       code: "IDEMPOTENCY_CONFLICT",
       error: "Custom conflict",
-    }) === "Custom conflict",
-    "conflict uses server error",
+    }) === STUDIO_GENERATION_IDEMPOTENCY_CONFLICT_FALLBACK,
+    "conflict shows the actionable copy, not the server text",
   );
   assert(
     describeStudioIdempotencyError(409, { code: "IDEMPOTENCY_CONFLICT" }) ===

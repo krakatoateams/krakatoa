@@ -1,4 +1,9 @@
+import { IDEMPOTENCY_CONFLICT_MESSAGE } from "@/lib/idempotent-submit-state";
 import { fetchSignedUrlBatch } from "@/lib/storage-sign-client";
+
+export function isIdempotencyConflict(status: number, data: { code?: string }): boolean {
+  return status === 409 && data?.code === "IDEMPOTENCY_CONFLICT";
+}
 
 export function describeCanvasIdempotencyError(
   status: number,
@@ -9,7 +14,7 @@ export function describeCanvasIdempotencyError(
     return "Generation already in progress, please wait.";
   }
   if (status === 409 && data?.code === "IDEMPOTENCY_CONFLICT") {
-    return data?.error || "This request conflicts with a previous one.";
+    return IDEMPOTENCY_CONFLICT_MESSAGE;
   }
   if (status === 400 && data?.code === "IDEMPOTENCY_KEY_REQUIRED") {
     return data?.error || "Missing idempotency key. Please retry.";

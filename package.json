@@ -33,7 +33,7 @@
     "test:metered-generation": "tsx lib/metered-generation/settlement-self-check.ts && tsx lib/metered-generation/lifecycle-self-check.ts",
     "test:creation-item-actions": "tsx lib/use-creation-item-actions.ts",
     "test:creation-user-prompt": "tsx lib/creation-user-prompt-self-check.ts",
-    "test:studio-submit": "tsx lib/idempotent-submit-state-self-check.ts && tsx lib/studio-generation-response-self-check.ts && tsx lib/studio-generation-submit-self-check.ts",
+    "test:studio-submit": "tsx lib/idempotent-submit-state-self-check.ts && tsx lib/canvas-image-signature-self-check.ts && tsx lib/studio-generation-response-self-check.ts && tsx lib/studio-generation-submit-self-check.ts",
     "test:video-studio": "tsx lib/video-studio-deep-link.ts && tsx lib/video-studio-composer-selection-self-check.ts && tsx lib/pending-form-draft-self-check.ts && tsx lib/video-composer-attempt-contracts-self-check.ts",
     "test:auth": "tsx lib/auth-session-self-check.ts",
     "test:public-auth-flow": "tsx lib/public-route-policy-self-check.ts && tsx lib/public-auth-flow-self-check.ts && tsx lib/auth-session-self-check.ts && tsx lib/pending-form-draft-self-check.ts",

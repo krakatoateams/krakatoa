@@ -36,7 +36,7 @@ export function guardStudioGenerationSubmitEffects(
 }
 
 export type StudioGenerationSubmitAttempt = {
-  settle: (succeeded: boolean) => void;
+  settle: (succeeded: boolean, options?: { rotate?: boolean }) => void;
 };
 
 export type StudioGenerationSubmitLock = {
@@ -173,8 +173,10 @@ export async function applyStudioGenerationOutcome(
         message: recoverableMessageOf(outcome, data, options.recoverableMessage),
       };
     case "insufficient_credits":
-    case "in_progress":
     case "idempotency_conflict":
+      attempt.settle(false, { rotate: true });
+      return { kind: "error", message: outcome.message };
+    case "in_progress":
     case "idempotency_key_required":
     case "error":
       attempt.settle(false);
