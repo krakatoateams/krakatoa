@@ -114,7 +114,7 @@ async function finalizeStep(
   const core = await import("@/lib/editor-export-core");
   // Never throws: a Workflow retry after a partial write would duplicate the library row.
   try {
-    const fileSizeBytes = await core.encodedFileSizeCore(name);
+    const fileSizeBytes = await core.encodedFileSizeCore(params, name);
     await core.finalizeSuccessCore(params, stepId, { storagePath, fileSizeBytes, ...meta });
     return true;
   } catch (e) {

@@ -6,10 +6,13 @@ import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
 import {
   DEFAULT_EXPORT_SETTINGS,
+  EXPORT_FORMATS,
+  EXPORT_FORMAT_SPEC,
   EXPORT_FPS,
   EXPORT_QUALITIES,
   EXPORT_QUALITY_LABEL,
   EXPORT_RESOLUTIONS,
+  EXPORT_RESOLUTION_LABEL,
   type EditorExportSettings,
 } from "@/lib/editor-export-settings";
 
@@ -69,8 +72,8 @@ export default function EditorExportDialog({
           <ChipDropdown
             field
             icon={null}
-            value={`${settings.resolution}p`}
-            options={EXPORT_RESOLUTIONS.map((r) => ({ id: String(r), label: `${r}p` }))}
+            value={EXPORT_RESOLUTION_LABEL[settings.resolution]}
+            options={EXPORT_RESOLUTIONS.map((r) => ({ id: String(r), label: EXPORT_RESOLUTION_LABEL[r] }))}
             activeId={String(settings.resolution)}
             onSelect={(id) => setSettings({ ...settings, resolution: Number(id) as EditorExportSettings["resolution"] })}
             sheetTitle="Select resolution"
@@ -101,15 +104,15 @@ export default function EditorExportDialog({
         <Field label="Format">
           <ChipDropdown
             field
-            disabled
             icon={null}
-            value="MP4"
-            options={[{ id: "mp4", label: "MP4" }]}
-            activeId="mp4"
-            onSelect={() => {}}
+            value={EXPORT_FORMAT_SPEC[settings.format].label}
+            options={EXPORT_FORMATS.map((f) => ({ id: f, label: EXPORT_FORMAT_SPEC[f].label }))}
+            activeId={settings.format}
+            onSelect={(id) => setSettings({ ...settings, format: id as EditorExportSettings["format"] })}
             sheetTitle="Select format"
           />
         </Field>
+        {settings.resolution === 2160 && <p className="text-xs text-text-secondary">4K exports take longer.</p>}
         <button
           type="button"
           onClick={() => onConfirm(name, settings)}
