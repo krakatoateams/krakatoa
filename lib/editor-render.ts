@@ -10,7 +10,11 @@
 
 import {
   DEFAULT_EXPORT_SETTINGS,
-  exportCrf,
+  EXPORT_FORMAT_SPEC,
+  exportAudioArgs,
+  exportOutputFilename,
+  exportContainerArgs,
+  exportVideoArgs,
   exportDimensions,
   parseExportSettings,
   type EditorExportSettings,
@@ -285,7 +289,7 @@ export function buildEditorFfmpegGraph(
       `${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,` +
         `apad,atrim=duration=${durationSec}[aout]`
     );
-    audioArgs = ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"];
+    audioArgs = ["-map", "[aout]", ...exportAudioArgs(settings.format)];
   }
 
   const args = [
@@ -293,8 +297,9 @@ export function buildEditorFfmpegGraph(
     "-filter_complex", filters.join(";"),
     "-map", `[${current}]`,
     "-t", String(durationSec),
-    "-c:v", "libx264", "-crf", String(exportCrf(settings.quality)), "-pix_fmt", "yuv420p",
+    ...exportVideoArgs(settings),
     ...audioArgs,
+    ...exportContainerArgs(settings.format),
     "{{out_v}}",
   ];
   const command = args.map((a) => (/[\s[\]";]/.test(a) ? `"${a}"` : a)).join(" ");
@@ -303,7 +308,7 @@ export function buildEditorFfmpegGraph(
     command,
     args,
     inputFiles,
-    outputFiles: { out_v: "editor_export.mp4" },
+    outputFiles: { out_v: exportOutputFilename(settings.format) },
     durationSec,
     width: out.w,
     height: out.h,
@@ -410,7 +415,7 @@ export function editorRenderSelfCheck(): void {
   assert(graph.durationSec === 5, "export length is the latest layer end");
   assert(graph.width === 720 && graph.height === 1280, "9:16 canvas");
   assert(graph.command.includes("-crf 23"), "default quality is Standard (CRF 23)");
-  const hq = buildEditorFfmpegGraph(doc, urls, new Set(), { resolution: 480, quality: "high", fps: 60 });
+  const hq = buildEditorFfmpegGraph(doc, urls, new Set(), { resolution: 480, quality: "high", fps: 60, format: "mp4" });
   assert(hq.width === 480 && hq.height === 854, "480p keeps 9:16 with even dimensions");
   assert(hq.command.includes("-crf 20") && hq.command.includes("fps=60"), "quality + fps applied");
   assert(parseExportSettings({ resolution: 999 }) === null, "unsupported resolution rejected");
@@ -452,6 +457,33 @@ export function editorRenderSelfCheck(): void {
   assert(graph.command.includes("-an"), "no source with audio → picture-only");
   assert(!graph.command.includes("[0:a]") && !graph.command.includes("amix"), "no audio chains without audio sources");
   assert(clipLayerDurationSec(doc.sequence[0]) === 2, "clip layer span");
+
+  // --- #296: formats and 4K ---
+  assert(parseExportSettings(undefined)?.format === "mp4", "missing settings default to mp4");
+  assert(parseExportSettings({ resolution: 720 })?.format === "mp4", "missing format defaults to mp4 (older clients)");
+  assert(parseExportSettings({ format: "webm" })?.format === "webm", "webm accepted");
+  assert(parseExportSettings({ format: "mkv" }) === null && parseExportSettings({ format: "video/mp4" }) === null, "unknown format rejected");
+  assert(parseExportSettings({ resolution: 2160 })?.resolution === 2160, "2160 accepted");
+  assert(parseExportSettings({ resolution: 1440 }) === null, "unknown resolution still rejected");
+  const dims = (aspect: EditorDocument["aspect"]) => exportDimensions(aspect, 2160);
+  assert(dims("16:9").w === 3840 && dims("16:9").h === 2160, "4K 16:9 is 3840x2160");
+  assert(dims("9:16").w === 2160 && dims("9:16").h === 3840, "4K 9:16 is 2160x3840");
+  assert(dims("1:1").w === 2160 && dims("1:1").h === 2160, "4K 1:1 is 2160x2160");
+  const mp4 = buildEditorFfmpegGraph(doc, urls, new Set(["https://example.com/a.mp4"]), { ...DEFAULT_EXPORT_SETTINGS, format: "mp4" });
+  assert(
+    mp4.command.includes("libx264") && mp4.command.includes("-c:a aac") && mp4.command.includes("+faststart") && !mp4.command.includes("libvpx"),
+    "mp4 = H.264 + AAC + faststart"
+  );
+  assert(mp4.outputFiles.out_v === `editor_export.${EXPORT_FORMAT_SPEC.mp4.ext}` && EXPORT_FORMAT_SPEC.mp4.mime === "video/mp4", "mp4 ext/mime from table");
+  const webm = buildEditorFfmpegGraph(doc, urls, new Set(["https://example.com/a.mp4"]), { resolution: 2160, quality: "standard", fps: 60, format: "webm" });
+  assert(
+    webm.command.includes("libvpx-vp9") && webm.command.includes("libopus") && webm.command.includes("-b:v 0 -crf 33") &&
+      webm.command.includes("-row-mt 1") && !webm.command.includes("libx264") && !webm.command.includes("faststart"),
+    "webm = VP9 constant quality + Opus"
+  );
+  assert(webm.width === 2160 && webm.height === 3840, "4K 9:16 graph dimensions");
+  assert(webm.outputFiles.out_v === "editor_export.webm" && EXPORT_FORMAT_SPEC.webm.mime === "video/webm", "webm ext/mime from table");
+  assert(buildEditorFfmpegGraph(doc, urls, new Set(), { ...DEFAULT_EXPORT_SETTINGS, format: "webm" }).command.includes("-an"), "webm without audio is -an");
 
   // --- In-system run: placeholders resolve to argv entries (no shell) ---
   const local = localizeFfmpegArgs(graph.args, {
@@ -584,7 +616,7 @@ export function editorRenderSelfCheck(): void {
     withAudio
   );
   assert(
-    allMuted.command.endsWith("-pix_fmt yuv420p -an {{out_v}}") && !/:a\]|amix/.test(allMuted.command),
+    allMuted.command.includes(" -an ") && allMuted.command.includes("-movflags +faststart") && allMuted.command.endsWith("{{out_v}}") && !/:a\]|amix/.test(allMuted.command),
     "all muted → today's picture-only output (-an)"
   );
 
