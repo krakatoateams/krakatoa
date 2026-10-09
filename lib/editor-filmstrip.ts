@@ -125,6 +125,10 @@ export function editorFilmstripSelfCheck(): void {
     // One tile of trim: the remaining tiles keep their exact absolute frames.
     const trimmed = slotsAt(inSec + tw / px, outSec, px);
     assert(trimmed.slice(1).every((s, i) => s === slots[i + 2]), `trim by one tile keeps shared frames (${px})`);
+    // A trim by one step moves every tile edge, but most frames are still ones already captured.
+    const before = new Set(slots);
+    const stepTrimmed = slotsAt(inSec + step, outSec, px);
+    assert(stepTrimmed.filter((s) => before.has(s)).length * 2 >= stepTrimmed.length, `trim by one step reuses most frames (${px})`);
     prevCount = slots.length;
     prevStep = step;
   }
@@ -134,6 +138,11 @@ export function editorFilmstripSelfCheck(): void {
       const got = coarsestInRange(a, b);
       for (let v = a; v <= b; v++) assert(valuation(got) >= valuation(v) && got >= a && got <= b, `coarsest in [${a}, ${b}]`);
     }
+  }
+  // Nested across the listed zoom levels: every coarse frame is still shown one level finer.
+  for (let k = 0; k + 1 < ZOOMS.length; k++) {
+    const fine = new Set(slotsAt(inSec, outSec, ZOOMS[k + 1]));
+    assert(slotsAt(inSec, outSec, ZOOMS[k]).every((s) => fine.has(s)), `nested ${ZOOMS[k]} -> ${ZOOMS[k + 1]} px/s`);
   }
   // Doubling the zoom splits every tile in two: each coarse frame is still shown at the finer level.
   for (const px of [6, 12, 24, 48, 96, 192, 384]) {

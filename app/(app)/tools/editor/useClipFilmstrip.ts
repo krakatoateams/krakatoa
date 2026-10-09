@@ -14,8 +14,7 @@ import {
 // Frames are keyed by source (storage path or device object URL) + capture DPR bucket +
 // 1/30 s source-time slot, so moves never re-extract and trims only capture times not yet seen.
 // Tile slots come from a nested zoom ladder (filmstripTileSlot), so zooming reuses these frames.
-// Session memory only; a tile frame is a few KB of data URL. The limit is unchanged: only
-// visible tiles are captured, and the ladder makes zoom levels share slots instead of adding new ones.
+// Session memory only; a tile frame is a few KB of data URL. Limit kept: the ladder shares slots.
 const FRAME_CACHE_LIMIT = 1500;
 const frameCache = new Map<string, Map<number, string>>();
 let frameCacheSize = 0;
