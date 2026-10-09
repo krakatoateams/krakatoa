@@ -34,11 +34,13 @@ import {
   classifySandboxCreateError,
   EditorExportPhaseTimeout,
   editorExportErrorJson,
+  editorExportMaxFileBytes,
   editorExportPhaseLimitMs,
   editorExportTimeoutMs,
   editorExportVcpus,
   nextEncodeStall,
   signedUploadArgs,
+  uploadHttpStatus,
   withPhaseTimeout,
   type EditorExportErrorCode,
   type EditorExportPhase,
@@ -178,7 +180,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       limit("sign")
     );
     const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)), limit("probe"));
-    const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
+    const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings, editorExportMaxFileBytes(process.env));
     const hasFont = Boolean(graph.inputFiles.in_font);
 
     // Cancel is honored between phases, so it never waits for a full sandbox boot.
@@ -304,8 +306,15 @@ export async function pollCommandCore(
       await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
       return { state: "running", stall: next.stall };
     }
+    if (stage === "upload") {
+      // curl prints only the HTTP status (never the URL or token); null = no response (exit code != 0).
+      const httpStatus = uploadHttpStatus(await cmd.stdout().catch(() => ""));
+      if (exitCode === 0 && httpStatus !== null && httpStatus < 300) return { state: "done" };
+      console.warn("[editor-export] upload failed:", { exitCode, httpStatus });
+      return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode, httpStatus }) };
+    }
     if (exitCode === 0) return { state: "done" };
-    const stderr = stage === "encode" ? await cmd.stderr().catch(() => "") : "";
+    const stderr = await cmd.stderr().catch(() => "");
     return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode, stderr }) };
   } catch (e) {
     // Past the time budget the sandbox is gone: a timeout. Otherwise a transient API error must not

@@ -67,15 +67,55 @@ export function exportOutputFilename(format: ExportFormat): string {
   return `editor_export.${EXPORT_FORMAT_SPEC[format].ext}`;
 }
 
-/** Encoder args for the video stream. */
-export function exportVideoArgs(settings: Pick<EditorExportSettings, "format" | "quality">): string[] {
+/**
+ * Supabase Storage per-file limit for exports: the bucket is "Unset", so the 50 MB global limit applies (45 MB
+ * uploads, 60 MB gets 413). Server override: `EDITOR_EXPORT_MAX_FILE_BYTES` (see `editorExportMaxFileBytes`).
+ */
+export const EDITOR_EXPORT_MAX_FILE_BYTES = 50_000_000;
+/** Share of the limit the encode aims for (~42 MB); the rest absorbs container overhead and rate-control slack. */
+const EXPORT_SIZE_TARGET_SHARE = 0.84;
+/** VBV buffer in seconds of the cap rate (bufsize = 2 x maxrate). A full buffer can add this much on top of rate x length. */
+const VBV_BUFFER_SEC = 2;
+/**
+ * CRF output on real footage stays under this many bits per pixel per frame at the graph's 30 fps content rate
+ * (60 fps only duplicates frames, which cost almost nothing). A cap above that never binds, so it is left out and
+ * exports that already fit keep their exact args.
+ * ponytail: heuristic ceiling; a noisier source that still overshoots gets EDITOR_EXPORT_FILE_TOO_LARGE, not a lost file.
+ */
+const CRF_WORST_BITS_PER_PIXEL = 0.2;
+const CONTENT_FPS = 30;
+
+/**
+ * Video bitrate ceiling (kbit/s) that keeps the whole file under `maxFileBytes`, or null when the export cannot
+ * reach the limit anyway. Bound: video bits <= rate x (length + VBV buffer), plus audio at its fixed bitrate.
+ */
+export function exportVideoBitrateCapKbps(p: {
+  format: ExportFormat;
+  width: number;
+  height: number;
+  durationSec: number;
+  hasAudio: boolean;
+  maxFileBytes?: number;
+}): number | null {
+  const sec = Math.max(p.durationSec, 0.1);
+  const audioBits = p.hasAudio ? Number.parseInt(EXPORT_FORMAT_SPEC[p.format].audioBitrate, 10) * 1000 * sec : 0;
+  const videoBits = (p.maxFileBytes ?? EDITOR_EXPORT_MAX_FILE_BYTES) * 8 * EXPORT_SIZE_TARGET_SHARE - audioBits;
+  const capBps = videoBits / (sec + VBV_BUFFER_SEC);
+  if (capBps >= p.width * p.height * CONTENT_FPS * CRF_WORST_BITS_PER_PIXEL) return null;
+  return Math.max(100, Math.floor(capBps / 1000));
+}
+
+/** Encoder args for the video stream; `capKbps` (see `exportVideoBitrateCapKbps`) bounds the file size. */
+export function exportVideoArgs(settings: Pick<EditorExportSettings, "format" | "quality">, capKbps: number | null = null): string[] {
   if (settings.format === "webm") {
+    // VP9 constrained quality: CRF, with -b:v as the average-rate ceiling (0 = unconstrained).
     return [
-      "-c:v", EXPORT_FORMAT_SPEC.webm.videoCodec, "-b:v", "0", "-crf", String(VP9_CRF[settings.quality]),
+      "-c:v", EXPORT_FORMAT_SPEC.webm.videoCodec, "-b:v", capKbps ? `${capKbps}k` : "0", "-crf", String(VP9_CRF[settings.quality]),
       "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-threads", "8", "-pix_fmt", "yuv420p",
     ];
   }
-  return ["-c:v", EXPORT_FORMAT_SPEC.mp4.videoCodec, "-crf", String(exportCrf(settings.quality)), "-pix_fmt", "yuv420p"];
+  const vbv = capKbps ? ["-maxrate", `${capKbps}k`, "-bufsize", `${capKbps * VBV_BUFFER_SEC}k`] : [];
+  return ["-c:v", EXPORT_FORMAT_SPEC.mp4.videoCodec, "-crf", String(exportCrf(settings.quality)), ...vbv, "-pix_fmt", "yuv420p"];
 }
 
 /** Audio codec args (only when the export has audio; otherwise `-an`). */

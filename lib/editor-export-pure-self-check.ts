@@ -9,13 +9,23 @@ import {
   classifyEditorExportFailure,
   classifySandboxCreateError,
   editorExportEncodePollMs,
+  editorExportMaxFileBytes,
   editorExportPhaseLimitMs,
   editorExportTimeoutMs,
   editorExportVcpus,
   nextEncodeStall,
   signedUploadArgs,
+  uploadHttpStatus,
   withPhaseTimeout,
 } from "./editor-export-pure";
+import {
+  EDITOR_EXPORT_MAX_FILE_BYTES,
+  EXPORT_FORMATS,
+  EXPORT_RESOLUTIONS,
+  exportDimensions,
+  exportVideoArgs,
+  exportVideoBitrateCapKbps,
+} from "./editor-export-settings";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export self-check: ${msg}`);
@@ -49,6 +59,48 @@ async function editorExportPureSelfCheck(): Promise<void> {
   assert(classifySandboxCreateError(apiErr(500)) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE" && classifySandboxCreateError(null) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE", "other create errors");
   const args = signedUploadArgs({ url: "https://x/y", file: "export/o.mp4", contentType: "video/mp4", cacheControl: "31536000, immutable" });
   assert(args.includes("cache-control: max-age=31536000, immutable") && args.at(-1) === "https://x/y", "signed upload argv");
+  assert(!args.includes("--fail") && args.includes("\\n%{http_code}"), "upload prints the HTTP status last");
+  assert(uploadHttpStatus('{"Key":"krakatoa/u/v.mp4"}\n200') === 200 && uploadHttpStatus("413") === 413, "upload status parsed");
+  const supabaseTooLarge = '{"statusCode":"413","error":"Payload too large","message":"The object exceeded the maximum allowed size"}\n400';
+  assert(uploadHttpStatus(supabaseTooLarge) === 413, "Supabase 400 with statusCode 413 = too large");
+  assert(uploadHttpStatus('{"statusCode":"4130"}\n400') === 400 && uploadHttpStatus('{"statusCode":"403"}\n400') === 400, "other 400s stay 400");
+  assert(uploadHttpStatus("") === null && uploadHttpStatus("000") === null && uploadHttpStatus("junk") === null, "no response = null");
+  assert(c({ stage: "upload", exitCode: 0, httpStatus: 413 }) === "EDITOR_EXPORT_FILE_TOO_LARGE", "413 = file too large");
+  assert(c({ stage: "upload", exitCode: 0, httpStatus: 400 }) === "EDITOR_EXPORT_UPLOAD_FAILED", "other HTTP errors stay upload failed");
+  assert(c({ stage: "upload", exitCode: 7, httpStatus: null }) === "EDITOR_EXPORT_UPLOAD_FAILED", "network failure stays upload failed");
+
+  // Size cap: whenever applied, worst case (rate x (length + 2 s VBV buffer) + audio) fits ~42 MB of the 50 MB limit.
+  assert(editorExportMaxFileBytes({}) === 50_000_000 && EDITOR_EXPORT_MAX_FILE_BYTES === 50_000_000, "50 MB default limit");
+  assert(editorExportMaxFileBytes({ EDITOR_EXPORT_MAX_FILE_BYTES: "100000000" }) === 100_000_000, "limit env override");
+  assert(editorExportMaxFileBytes({ EDITOR_EXPORT_MAX_FILE_BYTES: "junk" }) === 50_000_000, "invalid limit env");
+  const cap = (format: (typeof EXPORT_FORMATS)[number], resolution: (typeof EXPORT_RESOLUTIONS)[number], durationSec: number, hasAudio = true, maxFileBytes?: number) => {
+    const { w, h } = exportDimensions("16:9", resolution);
+    return exportVideoBitrateCapKbps({ format, width: w, height: h, durationSec, hasAudio, maxFileBytes });
+  };
+  for (const format of EXPORT_FORMATS) {
+    const audioKbps = format === "mp4" ? 192 : 128;
+    for (const resolution of EXPORT_RESOLUTIONS) {
+      for (const sec of [0.1, 1, 5, 10, 20, 30, 45, 60]) {
+        for (const hasAudio of [true, false]) {
+          const k = cap(format, resolution, sec, hasAudio);
+          if (k === null) continue;
+          const worstBytes = ((k * (sec + 2) + (hasAudio ? audioKbps * sec : 0)) * 1000) / 8;
+          assert(worstBytes <= 42_000_000, `${format} ${resolution}p ${sec}s fits the target (${Math.round(worstBytes)})`);
+        }
+      }
+    }
+  }
+  assert(cap("mp4", 2160, 20) !== null && cap("mp4", 2160, 60)! < cap("mp4", 2160, 20)!, "4K is capped, tighter when longer");
+  assert(cap("mp4", 2160, 60)! >= 5_000, "4K 60 s still gets ~5 Mbps");
+  assert(cap("mp4", 2160, 1) === null, "short 4K never reaches the limit: uncapped");
+  for (const resolution of [480, 720, 1080] as const) assert(cap("mp4", resolution, 20) === null, `${resolution}p 20 s unaffected`);
+  assert(cap("mp4", 480, 60) === null, "480p never capped");
+  assert(cap("mp4", 2160, 20, true, 1_000_000_000) === null, "a larger limit lifts the cap");
+  assert(cap("mp4", 2160, 60, false)! > cap("mp4", 2160, 60, true)!, "audio bits come out of the video budget");
+  const mp4Args = exportVideoArgs({ format: "mp4", quality: "high" }, 5000).join(" ");
+  assert(mp4Args.includes("-crf 20 -maxrate 5000k -bufsize 10000k"), "x264 keeps CRF, capped by VBV");
+  assert(exportVideoArgs({ format: "webm", quality: "high" }, 5000).join(" ").includes("-b:v 5000k -crf 28"), "VP9 constrained quality");
+  assert(exportVideoArgs({ format: "mp4", quality: "high" }).join(" ") === "-c:v libx264 -crf 20 -pix_fmt yuv420p", "uncapped args unchanged");
 
   const order: EditorExportPhase[] = ["sign", "probe", "create", "prepare", "ffmpegStart"];
   for (const snapshot of [true, false]) {

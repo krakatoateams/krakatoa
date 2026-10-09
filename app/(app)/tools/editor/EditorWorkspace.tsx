@@ -2521,6 +2521,8 @@ export default function EditorWorkspace() {
       {exportDialogOpen ? (
         <EditorExportDialog
           defaultName={exportTimestampName()}
+          aspect={doc.aspect}
+          durationSec={duration}
           onClose={() => setExportDialogOpen(false)}
           onConfirm={(name, exportSettings) => {
             setExportDialogOpen(false);

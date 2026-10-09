@@ -2,7 +2,7 @@
  * Pure helpers for the in-system Editor export (runs FFmpeg in a Vercel Sandbox,
  * never Rendi). Self-check: `lib/editor-export-pure-self-check.ts`.
  */
-import type { EditorExportSettings } from "@/lib/editor-export-settings";
+import { EDITOR_EXPORT_MAX_FILE_BYTES, type EditorExportSettings } from "@/lib/editor-export-settings";
 
 export const EDITOR_EXPORT_ERRORS = {
   EDITOR_EXPORT_TIMEOUT: "Export timed out. Try a lower resolution, 30 fps or MP4, or a shorter timeline.",
@@ -14,6 +14,8 @@ export const EDITOR_EXPORT_ERRORS = {
   EDITOR_EXPORT_OUT_OF_MEMORY: "The export ran out of memory. Try a lower resolution.",
   EDITOR_EXPORT_RUNNER_UNAVAILABLE: "The export service is unavailable. Please try again in a moment.",
   EDITOR_EXPORT_UPLOAD_FAILED: "The exported video could not be saved. Please try again.",
+  EDITOR_EXPORT_FILE_TOO_LARGE:
+    "The exported video is too large to save. Try a lower resolution, 30 fps, Standard quality or a shorter timeline.",
   EDITOR_EXPORT_START_TIMEOUT: "The export took too long to start. Please try again.",
   EDITOR_EXPORT_STALLED: "The export stopped making progress. Please try again.",
 } as const;
@@ -32,13 +34,15 @@ export type EditorExportFailureInput = {
   exitCode?: number | null;
   /** Raw FFmpeg stderr. Only pattern-matched here, never stored or logged. */
   stderr?: string;
+  /** Upload: HTTP status from `uploadHttpStatus`. */
+  httpStatus?: number | null;
 };
 
 /** Maps a failed runner stage to a sanitized code (no URLs, tokens, or command lines). */
 export function classifyEditorExportFailure(f: EditorExportFailureInput): EditorExportErrorCode {
   if (f.timedOut) return "EDITOR_EXPORT_TIMEOUT";
   if (f.stage === "setup") return "EDITOR_EXPORT_RUNNER_UNAVAILABLE";
-  if (f.stage === "upload") return "EDITOR_EXPORT_UPLOAD_FAILED";
+  if (f.stage === "upload") return f.httpStatus === 413 ? "EDITOR_EXPORT_FILE_TOO_LARGE" : "EDITOR_EXPORT_UPLOAD_FAILED";
   const err = f.stderr ?? "";
   if (f.exitCode === 137 || /cannot allocate memory|out of memory|\bkilled\b/i.test(err)) {
     return "EDITOR_EXPORT_OUT_OF_MEMORY";
@@ -70,6 +74,11 @@ const positiveInt = (v: string | undefined): number | null => {
 export function editorExportTimeoutMs(env: EnvLike): number {
   const ceiling = positiveInt(env.EDITOR_EXPORT_PLAN_MAX_MS) ?? HOBBY_MAX_SESSION_MS;
   return Math.min(positiveInt(env.EDITOR_EXPORT_TIMEOUT_MS) ?? DEFAULT_EXPORT_TIMEOUT_MS, ceiling);
+}
+
+/** Storage limit an export must fit: `EDITOR_EXPORT_MAX_FILE_BYTES` env, else the 50 MB default. */
+export function editorExportMaxFileBytes(env: EnvLike): number {
+  return positiveInt(env.EDITOR_EXPORT_MAX_FILE_BYTES) ?? EDITOR_EXPORT_MAX_FILE_BYTES;
 }
 
 /** vCPUs for the encode, never above the plan max (`EDITOR_EXPORT_MAX_VCPUS`, default 4). No length/fps cap. */
@@ -161,10 +170,14 @@ export function classifySandboxCreateError(e: unknown): EditorExportErrorCode {
   return "EDITOR_EXPORT_RUNNER_UNAVAILABLE";
 }
 
-/** `curl` argv that PUTs the file to a Supabase signed upload URL (mirrors storage-js raw-body upload). */
+/**
+ * `curl` argv that PUTs the file to a Supabase signed upload URL (mirrors storage-js raw-body upload). No `--fail`:
+ * stdout is the response body then the HTTP status, read only by `uploadHttpStatus` (never logged or stored).
+ */
 export function signedUploadArgs(p: { url: string; file: string; contentType: string; cacheControl: string }): string[] {
   return [
-    "--fail", "--silent", "--show-error",
+    "--silent", "--show-error",
+    "--write-out", "\\n%{http_code}",
     "--request", "PUT",
     "--upload-file", p.file,
     "--header", `content-type: ${p.contentType}`,
@@ -172,4 +185,16 @@ export function signedUploadArgs(p: { url: string; file: string; contentType: st
     "--header", "x-upsert: false",
     p.url,
   ];
+}
+
+/**
+ * Effective HTTP status from the upload's stdout (body, then the status line); null when curl got no response.
+ * Supabase answers an oversized signed upload with HTTP 400 and `"statusCode":"413"` in the body (verified), so
+ * that counts as 413.
+ */
+export function uploadHttpStatus(stdout: string): number | null {
+  const lines = stdout.trimEnd().split("\n");
+  const n = Number.parseInt(lines.at(-1) ?? "", 10);
+  if (!(n >= 100 && n <= 599)) return null;
+  return n >= 400 && /"statusCode"\s*:\s*"?413\b/.test(lines.slice(0, -1).join("\n")) ? 413 : n;
 }
