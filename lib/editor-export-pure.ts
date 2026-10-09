@@ -84,8 +84,9 @@ export function editorExportEncodePollMs(pollIndex: number): number {
 }
 
 /**
- * Per-phase limits for the encode start step. Their sum (255 s) stays under the 300 s function limit, so a hung
- * phase fails the export instead of the step being killed and retried. Constants, not env knobs.
+ * Per-phase caps for the encode start step (snapshot mode; sum 255 s). Each phase also gets clamped to what is left
+ * of `EDITOR_EXPORT_START_BUDGET_MS` (see `editorExportPhaseLimitMs`), so a hung phase fails the export instead of
+ * the 300 s step being killed and retried. Constants, not env knobs.
  */
 export const EDITOR_EXPORT_PHASE_TIMEOUT_MS = {
   /** Signing every media path. */
@@ -94,15 +95,29 @@ export const EDITOR_EXPORT_PHASE_TIMEOUT_MS = {
   probe: 45_000,
   /** `Sandbox.create` (snapshot boot). */
   create: 60_000,
-  /** Pinned-tool install fallback + capability check. */
+  /** Capability check (snapshot); the no-snapshot install uses `EDITOR_EXPORT_PREPARE_NO_SNAPSHOT_MS`. */
   prepare: 90_000,
   /** Launching FFmpeg detached. */
   ffmpegStart: 30_000,
 } as const;
 export type EditorExportPhase = keyof typeof EDITOR_EXPORT_PHASE_TIMEOUT_MS;
 
+/** All start phases end within this, under the 300 s step limit with margin for the DB writes between phases. */
+export const EDITOR_EXPORT_START_BUDGET_MS = 285_000;
+/** No snapshot: `prepare` downloads, verifies and extracts ~130 MB of FFmpeg, which takes 100-140 s on slow links. */
+export const EDITOR_EXPORT_PREPARE_NO_SNAPSHOT_MS = 170_000;
+
+/** Phase limit: its cap, clamped to the start budget left after `elapsedMs` (keeping `ffmpegStart` reserved). */
+export function editorExportPhaseLimitMs(phase: EditorExportPhase, elapsedMs: number, snapshot: boolean): number {
+  const cap = phase === "prepare" && !snapshot ? EDITOR_EXPORT_PREPARE_NO_SNAPSHOT_MS : EDITOR_EXPORT_PHASE_TIMEOUT_MS[phase];
+  const reserve = phase === "ffmpegStart" ? 0 : EDITOR_EXPORT_PHASE_TIMEOUT_MS.ffmpegStart;
+  return Math.max(0, Math.min(cap, EDITOR_EXPORT_START_BUDGET_MS - elapsedMs - reserve));
+}
+
 /** Encode fails when FFmpeg's `out_time_us` has not advanced for this long. The 40 min budget still applies. */
 export const EDITOR_EXPORT_STALL_MS = 5 * 60 * 1000;
+/** Before the first `out_time_us` FFmpeg may still be opening/seeking remote inputs, so it gets longer. */
+export const EDITOR_EXPORT_FIRST_PROGRESS_MS = 10 * 60 * 1000;
 
 export class EditorExportPhaseTimeout extends Error {
   constructor(readonly phase: EditorExportPhase) {
@@ -123,11 +138,15 @@ export function withPhaseTimeout<T>(phase: EditorExportPhase, work: Promise<T>, 
 /** Encode stall tracker carried between polls: the furthest `out_time_us` seen and when it last advanced. */
 export type EncodeStall = { outUs: number | null; sinceMs: number };
 
-/** Advances the tracker with this poll's reading; `stalled` once nothing advanced for `EDITOR_EXPORT_STALL_MS`. */
+/**
+ * Advances the tracker with this poll's reading; `stalled` once nothing advanced for `EDITOR_EXPORT_STALL_MS`, or
+ * no reading arrived within `EDITOR_EXPORT_FIRST_PROGRESS_MS` of the first poll.
+ */
 export function nextEncodeStall(prev: EncodeStall | null, outUs: number | null, nowMs: number): { stall: EncodeStall; stalled: boolean } {
   const advanced = outUs != null && (prev?.outUs == null || outUs > prev.outUs);
   const stall = !prev || advanced ? { outUs: advanced ? outUs : null, sinceMs: nowMs } : prev;
-  return { stall, stalled: nowMs - stall.sinceMs >= EDITOR_EXPORT_STALL_MS };
+  const limit = stall.outUs == null ? EDITOR_EXPORT_FIRST_PROGRESS_MS : EDITOR_EXPORT_STALL_MS;
+  return { stall, stalled: nowMs - stall.sinceMs >= limit };
 }
 
 /**

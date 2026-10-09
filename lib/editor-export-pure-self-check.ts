@@ -2,11 +2,14 @@
 import {
   EDITOR_EXPORT_ERRORS,
   EDITOR_EXPORT_PHASE_TIMEOUT_MS,
+  EDITOR_EXPORT_START_BUDGET_MS,
   EditorExportPhaseTimeout,
+  type EditorExportPhase,
   type EditorExportErrorCode,
   classifyEditorExportFailure,
   classifySandboxCreateError,
   editorExportEncodePollMs,
+  editorExportPhaseLimitMs,
   editorExportTimeoutMs,
   editorExportVcpus,
   nextEncodeStall,
@@ -47,8 +50,17 @@ async function editorExportPureSelfCheck(): Promise<void> {
   const args = signedUploadArgs({ url: "https://x/y", file: "export/o.mp4", contentType: "video/mp4", cacheControl: "31536000, immutable" });
   assert(args.includes("cache-control: max-age=31536000, immutable") && args.at(-1) === "https://x/y", "signed upload argv");
 
-  const phases = Object.values(EDITOR_EXPORT_PHASE_TIMEOUT_MS).reduce((a, b) => a + b, 0);
-  assert(phases < 300_000, "start phases fit the 300 s step limit");
+  const order: EditorExportPhase[] = ["sign", "probe", "create", "prepare", "ffmpegStart"];
+  for (const snapshot of [true, false]) {
+    // Worst case: every phase runs to its limit. The total still ends inside the step.
+    let elapsed = 0;
+    for (const phase of order) elapsed += editorExportPhaseLimitMs(phase, elapsed, snapshot);
+    assert(elapsed <= EDITOR_EXPORT_START_BUDGET_MS && EDITOR_EXPORT_START_BUDGET_MS < 300_000, `start phases fit the 300 s step (snapshot=${snapshot})`);
+    assert(editorExportPhaseLimitMs("ffmpegStart", elapsed - EDITOR_EXPORT_PHASE_TIMEOUT_MS.ffmpegStart, snapshot) === 30_000, "ffmpegStart keeps its reserve");
+  }
+  assert(editorExportPhaseLimitMs("prepare", 10_000, true) === 90_000, "snapshot prepare unchanged");
+  assert(editorExportPhaseLimitMs("prepare", 10_000, false) >= 140_000, "slow no-snapshot install fits");
+  assert(editorExportPhaseLimitMs("prepare", 300_000, false) === 0, "exhausted budget times out at once");
   const hung = await withPhaseTimeout("create", new Promise(() => {}), 5).catch((e: unknown) => e);
   assert(hung instanceof EditorExportPhaseTimeout && hung.phase === "create", "hung phase times out");
   assert((await withPhaseTimeout("sign", Promise.resolve(7), 50)) === 7, "fast phase resolves");
@@ -56,7 +68,8 @@ async function editorExportPureSelfCheck(): Promise<void> {
   const M = 60_000;
   let s = nextEncodeStall(null, null, 0);
   assert(!s.stalled && s.stall.sinceMs === 0, "first poll starts the clock");
-  assert(nextEncodeStall(s.stall, null, 5 * M).stalled, "no out_time_us for 5 min stalls");
+  assert(!nextEncodeStall(s.stall, null, 9 * M).stalled, "slow input open before first progress is not a stall");
+  assert(nextEncodeStall(s.stall, null, 10 * M).stalled, "no out_time_us within the allowance stalls");
   s = nextEncodeStall(s.stall, 1_000, 4 * M);
   assert(!s.stalled && s.stall.sinceMs === 4 * M, "first reading resets the clock");
   assert(nextEncodeStall(s.stall, 1_000, 9 * M).stalled, "frozen out_time_us stalls");
