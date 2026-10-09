@@ -34,6 +34,7 @@ function generationStatusPayload(params: {
   phase: string | null;
   jobId: string | null;
   executionBackend: ExecutionBackend;
+  jobType?: string | null;
   heartbeatAt: string | null;
   updatedAt: string | null;
   jobStatus: string | null;
@@ -51,6 +52,7 @@ function generationStatusPayload(params: {
     params.updatedAt && params.jobStatus
       ? activeGenerationStale({
           executionBackend: params.executionBackend,
+          jobType: params.jobType,
           heartbeatAt: params.heartbeatAt,
           updatedAt: params.updatedAt,
           jobStatus: params.jobStatus,
@@ -118,6 +120,7 @@ export async function GET(req: Request) {
           phase,
           jobId: job.id,
           executionBackend: job.execution_backend === "workflow" ? "workflow" : "legacy",
+          jobType: job.job_type,
           heartbeatAt: job.heartbeat_at ?? null,
           updatedAt: job.updated_at,
           jobStatus: job.status,
@@ -168,6 +171,7 @@ export async function GET(req: Request) {
     let phase: string | null = null;
     let jobStatus: string | null = null;
     let executionBackend: ExecutionBackend = "legacy";
+    let jobType: string | null = null;
     let heartbeatAt: string | null = null;
     let updatedAt: string | null = null;
     let progress: ExportProgress | null = null;
@@ -177,6 +181,7 @@ export async function GET(req: Request) {
       if (job) {
         jobStatus = job.status;
         executionBackend = job.execution_backend === "workflow" ? "workflow" : "legacy";
+        jobType = job.job_type;
         heartbeatAt = job.heartbeat_at ?? null;
         updatedAt = job.updated_at;
       }
@@ -209,6 +214,7 @@ export async function GET(req: Request) {
         phase,
         jobId: generationRequest.job_id ?? null,
         executionBackend,
+        jobType,
         heartbeatAt,
         updatedAt,
         jobStatus: jobStatus ?? generationRequest.status,
