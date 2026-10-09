@@ -1118,8 +1118,9 @@ function PhotoOmniPage({
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
-                    value={photoAspectRatioDisplayForTier(tier, aspectRatio)}
-                    activeId={photoAspectRatioDisplayForTier(tier, aspectRatio)}
+                    // Social mode offers its own fixed ratios, so never clamp the chip there.
+                    value={isSocialMode ? aspectRatio : photoAspectRatioDisplayForTier(tier, aspectRatio)}
+                    activeId={isSocialMode ? aspectRatio : photoAspectRatioDisplayForTier(tier, aspectRatio)}
                     // Social posts are limited to the two ratios Instagram shows
                     // uncropped in the feed; other modes offer the full set.
                     options={

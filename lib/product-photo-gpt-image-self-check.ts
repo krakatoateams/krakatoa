@@ -48,6 +48,11 @@ assert.deepEqual(input, {
 assert.equal("input_images" in buildPhotoProviderInput({
   tier, prompt: "p", aspectRatio: "4:5", providerResolution: null, quality: "low",
 }), false);
+assert.deepEqual(
+  PRODUCT_PHOTO_TIERS.filter((t) => t.limitAspectRatioPicker).map((t) => t.id),
+  ["gpt_image_2"],
+  "only GPT Image 2 opts into the restricted aspect-ratio picker",
+);
 // Aspect-ratio picker: restricted for GPT Image 2 only; every other tier is unchanged.
 assert.deepEqual(
   photoAspectRatioOptionsForTier(tier).map((a) => a.id),
