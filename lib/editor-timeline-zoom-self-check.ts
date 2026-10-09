@@ -4,7 +4,10 @@ import {
   MIN_PX_PER_SEC,
   anchoredScrollLeft,
   clampScale,
+  OPEN_FIT_MAX_PX_PER_SEC,
+  OPEN_FIT_MIN_PX_PER_SEC,
   fitPxPerSec,
+  openFitPxPerSec,
   formatRulerLabel,
   rulerIntervalSec,
   stepScale,
@@ -33,9 +36,14 @@ export function editorTimelineZoomSelfCheck(): void {
   assert(formatRulerLabel(0.5) === "0.5s" && formatRulerLabel(70) === "1m 10s" && formatRulerLabel(120) === "2m", "labels");
   assert(formatRulerLabel(0.30000000000000004) === "0.3s", "label float noise is removed");
 
-  assert(fitPxPerSec(10, 1040) === 100, "fit fills width with margin");
+  assert(fitPxPerSec(9.5, 1000) === 100, "fit fills width with margin");
   assert(fitPxPerSec(0.1, 1000) === MAX_PX_PER_SEC && fitPxPerSec(600, 100) === MIN_PX_PER_SEC, "fit is clamped");
   assert(fitPxPerSec(0, 500) === DEFAULT_PX_PER_SEC && fitPxPerSec(10, 0) === DEFAULT_PX_PER_SEC, "empty/zero width");
+
+  assert(openFitPxPerSec(1, 1500) === OPEN_FIT_MAX_PX_PER_SEC, "very short project is not stretched past the open cap");
+  assert(openFitPxPerSec(60, 300) === OPEN_FIT_MIN_PX_PER_SEC, "long project keeps a grabbable scale");
+  assert(openFitPxPerSec(5.5, 600) === 100, "open fit uses the plain fit scale in range");
+  assert(openFitPxPerSec(0, 800) === 64 && openFitPxPerSec(5, 0) === 64, "empty or unmeasured uses the default");
 
   const [a, b] = visibleTickRange(0, 1000, 100, 1, 500);
   assert(a === 0 && b === 5, "tick range capped by content width");

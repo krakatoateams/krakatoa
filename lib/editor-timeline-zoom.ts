@@ -9,8 +9,11 @@ export const MAX_PX_PER_SEC = 600;
 export const ZOOM_STEP = 1.25;
 /** Horizontal padding (`px-3`) on each side of the timeline scroller. */
 export const TIMELINE_PAD_PX = 12;
-/** Fraction of the project length kept free at the right edge when fitting. */
-export const FIT_MARGIN = 0.04;
+/** Seconds kept free after the last layer when fitting; also the drag headroom past the project end. */
+export const FIT_MARGIN_SEC = 0.5;
+/** A fitted scale on project open stays usable: not stretched for tiny projects, not unreadable for long ones. */
+export const OPEN_FIT_MIN_PX_PER_SEC = 12;
+export const OPEN_FIT_MAX_PX_PER_SEC = 250;
 
 const RULER_INTERVALS_SEC = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120];
 const MIN_LABEL_GAP_PX = 70;
@@ -27,7 +30,15 @@ export function stepScale(px: number, direction: 1 | -1): number {
 /** Scale that makes `durationSec` plus a small margin fill `availableWidthPx`. */
 export function fitPxPerSec(durationSec: number, availableWidthPx: number): number {
   if (!(durationSec > 0) || !(availableWidthPx > 0)) return DEFAULT_PX_PER_SEC;
-  return clampScale(availableWidthPx / (durationSec * (1 + FIT_MARGIN)));
+  return clampScale(availableWidthPx / (durationSec + FIT_MARGIN_SEC));
+}
+
+/** Scale chosen once when a project opens. */
+export function openFitPxPerSec(durationSec: number, availableWidthPx: number): number {
+  return Math.min(
+    OPEN_FIT_MAX_PX_PER_SEC,
+    Math.max(OPEN_FIT_MIN_PX_PER_SEC, fitPxPerSec(durationSec, availableWidthPx))
+  );
 }
 
 /**
