@@ -1,5 +1,6 @@
 // Pure stage/percentage model for the Video Editor export progress dialog (#300).
 // Percentages come only from real signals; no signal means null (indeterminate).
+// Also holds the accepted-export status poller (pollEditorExport), the one fetching piece.
 
 // Encode step order: preparing (sign + probe media) -> starting (boot runner, verify FFmpeg) -> encoding.
 export type ExportStage = "uploading" | "preparing" | "starting" | "encoding" | "saving" | "finalizing";
@@ -202,7 +203,7 @@ export async function editorExportPollSelfCheck(): Promise<void> {
 if (require.main === module) {
   editorExportProgressSelfCheck();
   void editorExportPollSelfCheck().then(
-    () => console.log("editorExportProgressSelfCheck: ok"),
+    () => console.log("editorExportProgressSelfCheck + editorExportPollSelfCheck: ok"),
     (err: unknown) => {
       console.error(err);
       process.exit(1);
