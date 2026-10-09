@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
-import { AlertCircle, Clock, Cpu, Crop, ImageIcon } from "lucide-react";
+import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Sparkles } from "lucide-react";
 import {
   ChipDropdown,
   CreditActionButton,
@@ -21,11 +21,16 @@ import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-med
 import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_STYLE,
-  PHOTO_ASPECT_RATIOS,
+  DEFAULT_PRODUCT_PHOTO_QUALITY,
   PRODUCT_PHOTO_TIERS,
+  clampAspectRatioForTier,
   getProductPhotoTier,
+  photoAspectRatioOptionsForTier,
+  photoTierEntryPricing,
+  photoTierPricingKey,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
+  type ProductPhotoQuality,
   type ProductPhotoResolution,
 } from "@/lib/product-photo";
 import {
@@ -102,10 +107,8 @@ export default function ImageNode({
     [hasImageRefs]
   );
   const tier = getProductPhotoTier(data.modelTier);
-  const photoPricingKey = tier.hasResolution
-    ? tier.resolutions.find((r) => r.id === data.resolution)?.pricingKey ??
-      tier.resolutions[0].pricingKey
-    : tier.basicPricingKey!;
+  const quality = data.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
+  const photoPricingKey = photoTierPricingKey(tier, data.resolution, quality);
   const cost = imageCredits(photoPricingKey, 1);
   const canGenerate = prompt.length > 0 && !data.uploading && photoTiers.length > 0;
 
@@ -154,6 +157,7 @@ export default function ImageNode({
     formData.append("modelTier", modelTier);
     formData.append("aspectRatio", data.aspectRatio);
     if (tier.hasResolution) formData.append("resolution", data.resolution);
+    if (tier.qualities) formData.append("quality", quality);
     formData.append("prompt", prompt);
     formData.append("mode", "image");
 
@@ -177,6 +181,7 @@ export default function ImageNode({
       data.modelTier,
       data.aspectRatio,
       data.resolution,
+      tier.qualities ? quality : "",
       refImages.map((image) => image.id).join(","),
     ].join("|");
     const attempt = beginSubmit(signature);
@@ -324,9 +329,7 @@ export default function ImageNode({
               options={photoTiers.map((t) => ({
                 id: t.id,
                 label: t.modelLabel,
-                hint: t.hasResolution
-                  ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
-                  : `${imageCredits(t.basicPricingKey!, 1)}`,
+                hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
               }))}
               activeId={data.modelTier}
               square
@@ -334,12 +337,26 @@ export default function ImageNode({
             />
             <ChipDropdown
               icon={<Crop className="h-3.5 w-3.5" />}
-              value={data.aspectRatio}
-              options={PHOTO_ASPECT_RATIOS.map((r) => ({ id: r.id, label: r.label }))}
-              activeId={data.aspectRatio}
+              value={clampAspectRatioForTier(tier, data.aspectRatio)}
+              options={photoAspectRatioOptionsForTier(tier).map((r) => ({ id: r.id, label: r.label }))}
+              activeId={clampAspectRatioForTier(tier, data.aspectRatio)}
               square
               onSelect={(next) => patch({ aspectRatio: next as PhotoAspectRatio })}
             />
+            {tier.qualities && (
+              <ChipDropdown
+                icon={<Sparkles className="h-3.5 w-3.5" />}
+                value={tier.qualities.find((q) => q.id === quality)?.label ?? "Quality"}
+                options={tier.qualities.map((q) => ({
+                  id: q.id,
+                  label: q.label,
+                  hint: `${imageCredits(q.pricingKey, 1)}`,
+                }))}
+                activeId={quality}
+                square
+                onSelect={(next) => patch({ quality: next as ProductPhotoQuality })}
+              />
+            )}
             {tier.hasResolution && (
               <ChipDropdown
                 icon={<Clock className="h-3.5 w-3.5" />}

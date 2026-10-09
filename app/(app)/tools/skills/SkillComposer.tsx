@@ -9,6 +9,7 @@ import {
   ImageIcon,
   Loader2,
   Maximize2,
+  Sparkles,
 } from "lucide-react";
 import {
   ChipDropdown,
@@ -38,15 +39,20 @@ import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_ASPECT_RATIO,
   DEFAULT_PHOTO_STYLE,
+  DEFAULT_PRODUCT_PHOTO_QUALITY,
   DEFAULT_PRODUCT_PHOTO_RESOLUTION,
   DEFAULT_PRODUCT_PHOTO_TIER,
-  PHOTO_ASPECT_RATIOS,
+  clampAspectRatioForTier,
+  photoAspectRatioOptionsForTier,
+  photoTierEntryPricing,
+  photoTierPricingKey,
   PRODUCT_PHOTO_TIERS,
   getProductPhotoTier,
   isValidProductPhotoTier,
   tierSupportsMultiReference,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
+  type ProductPhotoQuality,
   type ProductPhotoResolution,
 } from "@/lib/product-photo";
 import {
@@ -265,6 +271,7 @@ function SkillOmniInner({
   const [resolution, setResolution] = useState<ProductPhotoResolution>(
     DEFAULT_PRODUCT_PHOTO_RESOLUTION
   );
+  const [quality, setQuality] = useState<ProductPhotoQuality>(DEFAULT_PRODUCT_PHOTO_QUALITY);
   const [aspectRatio, setAspectRatio] = useState<PhotoAspectRatio>(DEFAULT_PHOTO_ASPECT_RATIO);
 
   const tier = getProductPhotoTier(modelTier);
@@ -430,10 +437,7 @@ function SkillOmniInner({
     }
   }, [videoModel, videoAspect, lockedVideoAspect]);
 
-  const photoPricingKey = tier.hasResolution
-    ? tier.resolutions.find((r) => r.id === resolution)?.pricingKey ??
-      tier.resolutions[0].pricingKey
-    : tier.basicPricingKey!;
+  const photoPricingKey = photoTierPricingKey(tier, resolution, quality);
   const photoCost = imageCredits(photoPricingKey, 1);
   const videoPricingKey = videoModel.pricingKey({
     resolution: videoResolution,
@@ -511,6 +515,7 @@ function SkillOmniInner({
       styleId: DEFAULT_PHOTO_STYLE,
       modelTier,
       resolution: tier.hasResolution ? resolution : null,
+      quality: tier.qualities ? quality : null,
       aspectRatio,
       imageCount: 1,
       devBlank: false,
@@ -527,6 +532,7 @@ function SkillOmniInner({
       formData.append("modelTier", modelTier);
       formData.append("aspectRatio", aspectRatio);
       if (tier.hasResolution) formData.append("resolution", resolution);
+      if (tier.qualities) formData.append("quality", quality);
       if (normalizedPrompt) formData.append("prompt", normalizedPrompt);
       formData.append("mode", resolvedPhotoMode);
       if (resolvedPhotoMode === "product") {
@@ -562,9 +568,7 @@ function SkillOmniInner({
   const photoModelOptions = photoTiers.map((t) => ({
     id: t.id,
     label: t.modelLabel,
-    hint: t.hasResolution
-      ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
-      : `${imageCredits(t.basicPricingKey!, 1)}`,
+    hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
   }));
   const showUploads = showSubjectTile || showScene || showCharacter || showStartFrame;
 
@@ -715,9 +719,9 @@ function SkillOmniInner({
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
-                    value={aspectRatio}
-                    activeId={aspectRatio}
-                    options={PHOTO_ASPECT_RATIOS.map((a) => ({
+                    value={clampAspectRatioForTier(tier, aspectRatio)}
+                    activeId={clampAspectRatioForTier(tier, aspectRatio)}
+                    options={photoAspectRatioOptionsForTier(tier).map((a) => ({
                       id: a.id,
                       label: a.label,
                       hint: a.cinematic ? "Cinematic" : undefined,
@@ -725,7 +729,23 @@ function SkillOmniInner({
                     onSelect={(id) => setAspectRatio(id as PhotoAspectRatio)}
                     disabled={loading}
                   />
-                  {tier.hasResolution ? (
+                  {tier.qualities ? (
+                    <ChipDropdown
+                      sheetTitle="Select quality"
+                      square
+                      showChevron={false}
+                      icon={<Sparkles className="h-3.5 w-3.5" />}
+                      value={tier.qualities.find((q) => q.id === quality)?.label ?? "Quality"}
+                      activeId={quality}
+                      options={tier.qualities.map((q) => ({
+                        id: q.id,
+                        label: q.label,
+                        hint: `${imageCredits(q.pricingKey, 1)}`,
+                      }))}
+                      onSelect={(id) => setQuality(id as ProductPhotoQuality)}
+                      disabled={loading}
+                    />
+                  ) : tier.hasResolution ? (
                     <ChipDropdown
                       sheetTitle="Select resolution"
                       square

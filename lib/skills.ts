@@ -152,6 +152,7 @@ export type SkillPhotoAttemptSignatureInput = {
   styleId: string;
   modelTier: string;
   resolution: string | null;
+  quality?: string | null;
   aspectRatio: string;
   imageCount: number;
   devBlank: boolean;
@@ -177,6 +178,7 @@ export function skillPhotoAttemptSignature(
     input.styleId,
     input.modelTier,
     input.resolution ?? "",
+    input.quality ?? "",
     input.aspectRatio,
     String(input.imageCount),
     input.devBlank ? "blank" : "live",

@@ -26,6 +26,7 @@ import {
   VenusAndMars,
   Cake,
   Languages,
+  Sparkles,
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -51,8 +52,12 @@ import {
   MODEL_POSES,
   PHOTO_STYLES,
   PRODUCT_PHOTO_TIERS,
-  PHOTO_ASPECT_RATIOS,
   CHARACTER_STYLES,
+  DEFAULT_PRODUCT_PHOTO_QUALITY,
+  clampAspectRatioForTier,
+  photoAspectRatioOptionsForTier,
+  photoTierEntryPricing,
+  photoTierPricingKey,
   CHARACTER_GENDERS,
   CHARACTER_AGES,
   DEFAULT_MODEL_POSE,
@@ -75,6 +80,7 @@ import {
   CharacterGenderId,
   CharacterAgeId,
   ProductPhotoModelTier,
+  ProductPhotoQuality,
   ProductPhotoResolution,
 } from "@/lib/product-photo";
 import CreationsHistory from "@/components/CreationsHistory";
@@ -545,6 +551,7 @@ function PhotoOmniPage({
   const [resolution, setResolution] = useState<ProductPhotoResolution>(
     DEFAULT_PRODUCT_PHOTO_RESOLUTION
   );
+  const [quality, setQuality] = useState<ProductPhotoQuality>(DEFAULT_PRODUCT_PHOTO_QUALITY);
   const [aspectRatio, setAspectRatio] = useState<PhotoAspectRatio>(DEFAULT_PHOTO_ASPECT_RATIO);
   const [characterStyle, setCharacterStyle] = useState<CharacterStyleId>(DEFAULT_CHARACTER_STYLE);
   const [characterGender, setCharacterGender] = useState<CharacterGenderId>(DEFAULT_CHARACTER_GENDER);
@@ -590,6 +597,7 @@ function PhotoOmniPage({
       styleId?: PhotoStyleId;
       modelTier?: ProductPhotoModelTier;
       resolution?: ProductPhotoResolution;
+      quality?: ProductPhotoQuality;
       aspectRatio?: PhotoAspectRatio;
     }>(window.location.pathname, PHOTO_DRAFT_OWNER.studio);
     if (!draft) return;
@@ -611,6 +619,7 @@ function PhotoOmniPage({
     if (draft.styleId) setStyleId(draft.styleId);
     if (draft.modelTier) setModelTier(draft.modelTier);
     if (draft.resolution) setResolution(draft.resolution);
+    if (draft.quality) setQuality(draft.quality);
     if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
     // Uploaded images (product/character/reference) can't survive the round
     // trip (see lib/pending-form-draft.ts) — say so explicitly rather than
@@ -647,9 +656,7 @@ function PhotoOmniPage({
   const { imageCredits } = usePricing();
 
   const tier = getProductPhotoTier(modelTier);
-  const selectedPricingKey = tier.hasResolution
-    ? tier.resolutions.find((r) => r.id === resolution)?.pricingKey ?? tier.resolutions[0].pricingKey
-    : tier.basicPricingKey!;
+  const selectedPricingKey = photoTierPricingKey(tier, resolution, quality);
   const photoCost = imageCredits(selectedPricingKey, 1);
 
   const selectedPose = MODEL_POSES.find((p) => p.id === poseId);
@@ -837,6 +844,7 @@ function PhotoOmniPage({
         styleId,
         modelTier,
         resolution,
+        quality,
         aspectRatio,
       });
       return;
@@ -872,6 +880,7 @@ function PhotoOmniPage({
       prompt.trim(),
       mentions.map((m) => m.id).join(","),
       tier.hasResolution ? resolution : "",
+      tier.qualities ? quality : "",
       String(requestedImageCount),
       devBlank ? "blank" : "live",
     ].join("|");
@@ -905,6 +914,7 @@ function PhotoOmniPage({
       if (tier.hasResolution) {
         formData.append("resolution", resolution);
       }
+      if (tier.qualities) formData.append("quality", quality);
       if (devBlank) {
         formData.append("devBlank", "true");
       }
@@ -1012,9 +1022,7 @@ function PhotoOmniPage({
                 options={availableTiers.map((t) => ({
                   id: t.id,
                   label: t.modelLabel,
-                  hint: t.hasResolution
-                    ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
-                    : `${imageCredits(t.basicPricingKey!, 1)}`,
+                  hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
                 }))}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
                 disabled={loading}
@@ -1110,8 +1118,8 @@ function PhotoOmniPage({
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
-                    value={aspectRatio}
-                    activeId={aspectRatio}
+                    value={clampAspectRatioForTier(tier, aspectRatio)}
+                    activeId={clampAspectRatioForTier(tier, aspectRatio)}
                     // Social posts are limited to the two ratios Instagram shows
                     // uncropped in the feed; other modes offer the full set.
                     options={
@@ -1121,7 +1129,7 @@ function PhotoOmniPage({
                             label: socialPostAspectLabel(id),
                             hint: id === DEFAULT_SOCIAL_POST_ASPECT_RATIO ? "Recommended" : undefined,
                           }))
-                        : PHOTO_ASPECT_RATIOS.map((a) => ({
+                        : photoAspectRatioOptionsForTier(tier).map((a) => ({
                             id: a.id,
                             label: a.label,
                             hint: a.cinematic ? "Cinematic" : undefined,
@@ -1230,7 +1238,23 @@ function PhotoOmniPage({
                     />
                   </>
                 )}
-                {tier.hasResolution ? (
+                {tier.qualities ? (
+                  <ChipDropdown
+                    sheetTitle="Select quality"
+                    square
+                    showChevron={false}
+                    icon={<Sparkles className="h-3.5 w-3.5" />}
+                    value={tier.qualities.find((q) => q.id === quality)?.label ?? "Quality"}
+                    activeId={quality}
+                    options={tier.qualities.map((q) => ({
+                      id: q.id,
+                      label: q.label,
+                      hint: `${imageCredits(q.pricingKey, 1)}`,
+                    }))}
+                    onSelect={(id) => setQuality(id as ProductPhotoQuality)}
+                    disabled={loading}
+                  />
+                ) : tier.hasResolution ? (
                   <ChipDropdown
                     sheetTitle="Select resolution"
                     square
@@ -1300,9 +1324,7 @@ function PhotoOmniPage({
                 options={availableTiers.map((t) => ({
                   id: t.id,
                   label: t.modelLabel,
-                  hint: t.hasResolution
-                    ? `${imageCredits(t.resolutions[0].pricingKey, 1)}+`
-                    : `${imageCredits(t.basicPricingKey!, 1)}`,
+                  hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
                 }))}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
                 disabled={loading}

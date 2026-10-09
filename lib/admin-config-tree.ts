@@ -358,6 +358,11 @@ function enumeratePhotoVariants(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings
 ): AdminCostVariant[] {
+  if (tier.qualities) {
+    return tier.qualities
+      .map((q) => variantFromPricingRow(q.pricingKey, q.label, map, settings))
+      .filter((v): v is AdminCostVariant => v !== null);
+  }
   if (tier.basicPricingKey) {
     const v = variantFromPricingRow(
       tier.basicPricingKey,

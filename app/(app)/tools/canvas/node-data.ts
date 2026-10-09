@@ -4,6 +4,7 @@ import {
   DEFAULT_PRODUCT_PHOTO_TIER,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
+  type ProductPhotoQuality,
   type ProductPhotoResolution,
 } from "@/lib/product-photo";
 import {
@@ -37,6 +38,8 @@ export type ImageNodeData = {
   prompt: string;
   modelTier: ProductPhotoModelTier;
   resolution: ProductPhotoResolution;
+  /** GPT Image 2 quality; absent on older canvases (treated as Medium). */
+  quality?: ProductPhotoQuality;
   aspectRatio: PhotoAspectRatio;
   resultUrl: string | null;
   resultStoragePath: string | null;
