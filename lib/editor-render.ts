@@ -16,6 +16,7 @@ import {
   exportOutputFilename,
   exportContainerArgs,
   exportVideoArgs,
+  exportVideoBitrateCapKbps,
   exportDimensions,
   parseExportSettings,
   type EditorExportSettings,
@@ -137,12 +138,14 @@ function placeClipFilter(
  *
  * @param audioUrls source URLs verified to carry an audio stream. A layer whose
  *   URL is absent is treated as silent, so FFmpeg never reads a missing `[n:a]`.
+ * @param maxFileBytes storage limit the encoded file must fit (see `exportVideoBitrateCapKbps`).
  */
 export function buildEditorFfmpegGraph(
   doc: EditorDocument,
   urls: EditorMediaUrls,
   audioUrls: ReadonlySet<string>,
-  settings: EditorExportSettings = DEFAULT_EXPORT_SETTINGS
+  settings: EditorExportSettings = DEFAULT_EXPORT_SETTINGS,
+  maxFileBytes?: number
 ): EditorFfmpegGraph {
   const invalid = validateEditorExport(doc);
   if (invalid) throw new Error(invalid.message);
@@ -299,7 +302,10 @@ export function buildEditorFfmpegGraph(
     "-filter_complex", filters.join(";"),
     "-map", `[${current}]`,
     "-t", String(durationSec),
-    ...exportVideoArgs(settings),
+    ...exportVideoArgs(
+      settings,
+      exportVideoBitrateCapKbps({ format: settings.format, width, height, durationSec, hasAudio: audioLabels.length > 0, maxFileBytes })
+    ),
     ...audioArgs,
     ...exportContainerArgs(settings.format),
     "{{out_v}}",
@@ -478,8 +484,14 @@ export function editorRenderSelfCheck(): void {
   );
   assert(mp4.outputFiles.out_v === `editor_export.${EXPORT_FORMAT_SPEC.mp4.ext}` && EXPORT_FORMAT_SPEC.mp4.mime === "video/mp4", "mp4 ext/mime from table");
   const webm = buildEditorFfmpegGraph(doc, urls, new Set(["https://example.com/a.mp4"]), { resolution: 2160, quality: "standard", fps: 60, format: "webm" });
+  assert(hq.command.includes("-crf 20 -pix_fmt"), "exports far from the size limit are not capped");
+  // 5 s of 4K + audio: a ~48 Mbps ceiling (30 MB at most), so VP9 runs constrained quality.
+  assert(/-b:v \d+k -crf 33/.test(webm.command), "4K webm gets a size ceiling");
+  const longDoc = { ...doc, sequence: doc.sequence.map((c, i) => (i === 1 ? { ...c, endSec: 60, sourceDurationSec: 60 } : c)) };
+  const long4k = buildEditorFfmpegGraph(longDoc as EditorDocument, urls, new Set(), { resolution: 2160, quality: "high", fps: 60, format: "mp4" });
+  assert(long4k.durationSec === 60 && /-crf 20 -maxrate \d+k -bufsize \d+k -pix_fmt/.test(long4k.command), "60 s 4K60 High is size-capped");
   assert(
-    webm.command.includes("libvpx-vp9") && webm.command.includes("libopus") && webm.command.includes("-b:v 0 -crf 33") &&
+    webm.command.includes("libvpx-vp9") && webm.command.includes("libopus") && webm.command.includes("-crf 33") &&
       webm.command.includes("-row-mt 1") && !webm.command.includes("libx264") && !webm.command.includes("faststart"),
     "webm = VP9 constant quality + Opus"
   );

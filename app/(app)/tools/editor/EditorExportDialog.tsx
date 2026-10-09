@@ -6,6 +6,7 @@ import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
 import {
   DEFAULT_EXPORT_SETTINGS,
+  EDITOR_EXPORT_MAX_FILE_BYTES,
   EXPORT_FORMATS,
   EXPORT_FORMAT_SPEC,
   EXPORT_FPS,
@@ -13,8 +14,11 @@ import {
   EXPORT_QUALITY_LABEL,
   EXPORT_RESOLUTIONS,
   EXPORT_RESOLUTION_LABEL,
+  exportDimensions,
+  exportVideoBitrateCapKbps,
   type EditorExportSettings,
 } from "@/lib/editor-export-settings";
+import type { EditorAspect } from "@/lib/editor-document";
 
 const FIELD =
   "h-9 w-full rounded-lg bg-white/10 px-3 text-sm text-text-primary outline-none focus-visible:ring-1 focus-visible:ring-brand-primary";
@@ -30,15 +34,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export default function EditorExportDialog({
   defaultName,
+  aspect,
+  durationSec,
   onClose,
   onConfirm,
 }: {
   defaultName: string;
+  aspect: EditorAspect;
+  durationSec: number;
   onClose: () => void;
   onConfirm: (name: string, settings: EditorExportSettings) => void;
 }) {
   const [name, setName] = useState(defaultName);
   const [settings, setSettings] = useState<EditorExportSettings>(DEFAULT_EXPORT_SETTINGS);
+  // Same cap the server encodes with (audio assumed, so the hint errs on the side of showing).
+  // ponytail: uses the 50 MB default; a server EDITOR_EXPORT_MAX_FILE_BYTES override is not visible here.
+  const { w, h } = exportDimensions(aspect, settings.resolution);
+  const sizeCapped = exportVideoBitrateCapKbps({ format: settings.format, width: w, height: h, durationSec, hasAudio: true }) !== null;
 
   return (
     <div
@@ -113,6 +125,12 @@ export default function EditorExportDialog({
           />
         </Field>
         {settings.resolution === 2160 && <p role="status" className="text-xs text-text-secondary">4K exports take longer.</p>}
+        {sizeCapped && (
+          <p role="status" className="text-xs text-text-secondary">
+            Exports are saved up to {EDITOR_EXPORT_MAX_FILE_BYTES / 1_000_000} MB, so this length at {EXPORT_RESOLUTION_LABEL[settings.resolution]} is compressed to fit and
+            may look softer. Choose a lower resolution or a shorter timeline for more detail.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => onConfirm(name, settings)}
