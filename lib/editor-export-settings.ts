@@ -56,21 +56,26 @@ export function exportCrf(quality: ExportQuality): number {
  */
 export const EXPORT_FORMAT_SPEC: Record<
   ExportFormat,
-  { ext: string; mime: string; label: string; videoCodec: string; audioCodec: string; audioBitrate: string }
+  { ext: string; mime: string; label: string; videoCodec: string; audioCodec: string; audioBitrate: string; containerArgs: string[] }
 > = {
-  mp4: { ext: "mp4", mime: "video/mp4", label: "MP4", videoCodec: "libx264", audioCodec: "aac", audioBitrate: "192k" },
-  webm: { ext: "webm", mime: "video/webm", label: "WebM", videoCodec: "libvpx-vp9", audioCodec: "libopus", audioBitrate: "128k" },
+  mp4: { ext: "mp4", mime: "video/mp4", label: "MP4", videoCodec: "libx264", audioCodec: "aac", audioBitrate: "192k", containerArgs: ["-movflags", "+faststart"] },
+  webm: { ext: "webm", mime: "video/webm", label: "WebM", videoCodec: "libvpx-vp9", audioCodec: "libopus", audioBitrate: "128k", containerArgs: [] },
 };
+
+/** Local/output filename for an export, shared by the graph and the sandbox runner. */
+export function exportOutputFilename(format: ExportFormat): string {
+  return `editor_export.${EXPORT_FORMAT_SPEC[format].ext}`;
+}
 
 /** Encoder args for the video stream. */
 export function exportVideoArgs(settings: Pick<EditorExportSettings, "format" | "quality">): string[] {
   if (settings.format === "webm") {
     return [
-      "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", String(VP9_CRF[settings.quality]),
+      "-c:v", EXPORT_FORMAT_SPEC.webm.videoCodec, "-b:v", "0", "-crf", String(VP9_CRF[settings.quality]),
       "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-threads", "8", "-pix_fmt", "yuv420p",
     ];
   }
-  return ["-c:v", "libx264", "-crf", String(exportCrf(settings.quality)), "-pix_fmt", "yuv420p"];
+  return ["-c:v", EXPORT_FORMAT_SPEC.mp4.videoCodec, "-crf", String(exportCrf(settings.quality)), "-pix_fmt", "yuv420p"];
 }
 
 /** Audio codec args (only when the export has audio; otherwise `-an`). */
@@ -81,7 +86,7 @@ export function exportAudioArgs(format: ExportFormat): string[] {
 
 /** Container args placed before the output file. */
 export function exportContainerArgs(format: ExportFormat): string[] {
-  return format === "mp4" ? ["-movflags", "+faststart"] : [];
+  return EXPORT_FORMAT_SPEC[format].containerArgs;
 }
 
 /**

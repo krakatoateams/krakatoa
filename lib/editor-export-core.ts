@@ -28,7 +28,7 @@ import {
   localizeFfmpegArgs,
 } from "@/lib/editor-render";
 import type { EditorDocument } from "@/lib/editor-document";
-import { EXPORT_FORMAT_SPEC, sanitizeExportTitle, type EditorExportSettings } from "@/lib/editor-export-settings";
+import { EXPORT_FORMAT_SPEC, exportOutputFilename, sanitizeExportTitle, type EditorExportSettings } from "@/lib/editor-export-settings";
 import {
   classifyEditorExportFailure,
   editorExportErrorJson,
@@ -67,7 +67,7 @@ export type EncodeStart =
 export const EDITOR_EXPORT_TIMEOUT_MS = Number(process.env.EDITOR_EXPORT_TIMEOUT_MS) || 3 * 60 * 60 * 1000;
 
 const WORK = "export";
-const outFile = (p: EditorExportParams) => `${WORK}/editor_export.${EXPORT_FORMAT_SPEC[p.settings.format].ext}`;
+const outFile = (p: EditorExportParams) => `${WORK}/${exportOutputFilename(p.settings.format)}`;
 const FONT_FILE = `${WORK}/Poppins.ttf`;
 const FFMPEG = `${WORK}/ff/ffmpeg`;
 // ponytail: third-party static build fetched per run; host it ourselves or bake a Sandbox snapshot if this becomes flaky.

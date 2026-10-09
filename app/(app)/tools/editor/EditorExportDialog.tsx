@@ -112,7 +112,7 @@ export default function EditorExportDialog({
             sheetTitle="Select format"
           />
         </Field>
-        {settings.resolution === 2160 && <p className="text-xs text-text-secondary">4K exports take longer.</p>}
+        {settings.resolution === 2160 && <p role="status" className="text-xs text-text-secondary">4K exports take longer.</p>}
         <button
           type="button"
           onClick={() => onConfirm(name, settings)}

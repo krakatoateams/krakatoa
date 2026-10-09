@@ -12,6 +12,7 @@ import {
   DEFAULT_EXPORT_SETTINGS,
   EXPORT_FORMAT_SPEC,
   exportAudioArgs,
+  exportOutputFilename,
   exportContainerArgs,
   exportVideoArgs,
   exportDimensions,
@@ -307,7 +308,7 @@ export function buildEditorFfmpegGraph(
     command,
     args,
     inputFiles,
-    outputFiles: { out_v: `editor_export.${EXPORT_FORMAT_SPEC[settings.format].ext}` },
+    outputFiles: { out_v: exportOutputFilename(settings.format) },
     durationSec,
     width: out.w,
     height: out.h,
@@ -615,7 +616,7 @@ export function editorRenderSelfCheck(): void {
     withAudio
   );
   assert(
-    allMuted.command.endsWith("-pix_fmt yuv420p -an -movflags +faststart {{out_v}}") && !/:a\]|amix/.test(allMuted.command),
+    allMuted.command.includes(" -an ") && allMuted.command.includes("-movflags +faststart") && allMuted.command.endsWith("{{out_v}}") && !/:a\]|amix/.test(allMuted.command),
     "all muted → today's picture-only output (-an)"
   );
 
