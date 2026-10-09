@@ -20,6 +20,11 @@ import { getGenerationRequestForJob } from "@/lib/generation-workflows/workflow-
 import type { ExecutionBackend } from "@/lib/generation-workflows/types";
 import { generationClientErrorJson } from "@/lib/generation-client-error";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import {
+  parseExportProgress,
+  stageFromStepKey,
+  type ExportProgress,
+} from "@/lib/editor-export-progress";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +40,7 @@ function generationStatusPayload(params: {
   providerCommittedAt: string | null;
   result: Record<string, unknown> | null;
   error: Record<string, unknown> | null;
+  progress?: ExportProgress | null;
 }) {
   const controls = generationControlSnapshot({
     jobStatus: params.jobStatus ?? params.status,
@@ -70,6 +76,7 @@ function generationStatusPayload(params: {
     canRetry: controls.canRetry,
     canDismiss: controls.canDismiss,
     result: params.result,
+    progress: params.progress ?? null,
     error: generationClientErrorJson(params.error),
   };
 }
@@ -144,6 +151,7 @@ export async function GET(req: Request) {
     let executionBackend: ExecutionBackend = "legacy";
     let heartbeatAt: string | null = null;
     let updatedAt: string | null = null;
+    let progress: ExportProgress | null = null;
 
     if (generationRequest.job_id) {
       const job = await getJob(profileId, generationRequest.job_id);
@@ -156,7 +164,7 @@ export async function GET(req: Request) {
 
       const { data: step } = await supabaseServer
         .from("job_steps")
-        .select("step_key, status")
+        .select("step_key, status, output")
         .eq("job_id", generationRequest.job_id)
         .eq("profile_id", profileId)
         .eq("status", "running")
@@ -164,7 +172,14 @@ export async function GET(req: Request) {
         .limit(1)
         .maybeSingle();
       if (step && typeof (step as { step_key?: string }).step_key === "string") {
-        phase = humanizePhase((step as { step_key: string }).step_key);
+        const stepKey = (step as { step_key: string }).step_key;
+        phase = humanizePhase(stepKey);
+        // Editor export: the runner writes {stage, progressPct, updatedAt} onto the step output.
+        progress =
+          parseExportProgress((step as { output?: unknown }).output) ??
+          (generationRequest.tool_key === "editor" && generationRequest.status === "started"
+            ? { stage: stageFromStepKey(stepKey), progressPct: null, updatedAt: "" }
+            : null);
       }
     }
 
@@ -181,6 +196,7 @@ export async function GET(req: Request) {
         providerCommittedAt,
         result: generationRequest.response_json ?? null,
         error: generationRequest.error_json ?? null,
+        progress,
       }),
     );
   } catch (error: unknown) {
