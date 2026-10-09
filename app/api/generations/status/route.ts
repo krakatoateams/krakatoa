@@ -34,6 +34,7 @@ function generationStatusPayload(params: {
   phase: string | null;
   jobId: string | null;
   executionBackend: ExecutionBackend;
+  jobType?: string | null;
   heartbeatAt: string | null;
   updatedAt: string | null;
   jobStatus: string | null;
@@ -51,6 +52,7 @@ function generationStatusPayload(params: {
     params.updatedAt && params.jobStatus
       ? activeGenerationStale({
           executionBackend: params.executionBackend,
+          jobType: params.jobType,
           heartbeatAt: params.heartbeatAt,
           updatedAt: params.updatedAt,
           jobStatus: params.jobStatus,
@@ -118,6 +120,7 @@ export async function GET(req: Request) {
           phase,
           jobId: job.id,
           executionBackend: job.execution_backend === "workflow" ? "workflow" : "legacy",
+          jobType: job.job_type,
           heartbeatAt: job.heartbeat_at ?? null,
           updatedAt: job.updated_at,
           jobStatus: job.status,
@@ -136,9 +139,28 @@ export async function GET(req: Request) {
       );
     }
 
-    const generationRequest = await getExistingGenerationRequest(profileId, idemKey);
+    let generationRequest = await getExistingGenerationRequest(profileId, idemKey);
     if (!generationRequest) {
       return NextResponse.json({ error: "Generation not found." }, { status: 404 });
+    }
+    // Editor export cancel the cancel route could not settle (its settle failed): settle it here, so a
+    // silent workflow never keeps the attempt running. Idempotent; 0 credits.
+    if (
+      generationRequest.tool_key === "editor" &&
+      generationRequest.status === "started" &&
+      generationRequest.cancel_requested
+    ) {
+      try {
+        const core = await import("@/lib/editor-export-core");
+        await core.settleCancelledExportCore({
+          profileId,
+          generationRequestId: generationRequest.id,
+          jobId: generationRequest.job_id ?? null,
+        });
+        generationRequest = (await getExistingGenerationRequest(profileId, idemKey)) ?? generationRequest;
+      } catch (e) {
+        console.warn("[generations/status] editor export cancel settle failed:", generationErrorLogSafe(e));
+      }
     }
 
     const cancelAllowed = await readGenerationCancelAllowed(profileId, generationRequest.id);
@@ -149,6 +171,7 @@ export async function GET(req: Request) {
     let phase: string | null = null;
     let jobStatus: string | null = null;
     let executionBackend: ExecutionBackend = "legacy";
+    let jobType: string | null = null;
     let heartbeatAt: string | null = null;
     let updatedAt: string | null = null;
     let progress: ExportProgress | null = null;
@@ -158,6 +181,7 @@ export async function GET(req: Request) {
       if (job) {
         jobStatus = job.status;
         executionBackend = job.execution_backend === "workflow" ? "workflow" : "legacy";
+        jobType = job.job_type;
         heartbeatAt = job.heartbeat_at ?? null;
         updatedAt = job.updated_at;
       }
@@ -190,6 +214,7 @@ export async function GET(req: Request) {
         phase,
         jobId: generationRequest.job_id ?? null,
         executionBackend,
+        jobType,
         heartbeatAt,
         updatedAt,
         jobStatus: jobStatus ?? generationRequest.status,

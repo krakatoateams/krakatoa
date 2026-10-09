@@ -168,13 +168,15 @@ export type MatchableRequest = {
 
 export function activeGenerationStale(params: {
   executionBackend: ExecutionBackend;
+  jobType?: string | null;
   heartbeatAt: string | null;
   updatedAt: string;
   jobStatus: string;
   nowMs?: number;
 }): boolean {
   if (isTerminalJobStatus(params.jobStatus)) return false;
-  if (params.executionBackend === "workflow") {
+  // Editor exports run on Workflow but keep a legacy job row; the run touches `updated_at` while alive (#335).
+  if (params.executionBackend === "workflow" || params.jobType === "video_editor") {
     return isWorkflowHeartbeatStale(params.heartbeatAt, params.updatedAt, params.nowMs);
   }
   return isLegacyJobForceStoppable(params.updatedAt, params.nowMs);
@@ -210,6 +212,7 @@ export function describeJob(params: {
   });
   const isStale = activeGenerationStale({
     executionBackend,
+    jobType: params.jobType,
     heartbeatAt,
     updatedAt,
     jobStatus: params.status,
@@ -438,6 +441,17 @@ export function activeGenerationsSelfCheck(): void {
     }),
     "legacy running job older than 10m is stale",
   );
+  const sixMinIdle = (jobType: string) =>
+    activeGenerationStale({
+      executionBackend: "legacy",
+      jobType,
+      heartbeatAt: null,
+      updatedAt: "2026-08-14T00:00:00.000Z",
+      jobStatus: "running",
+      nowMs: Date.parse("2026-08-14T00:06:00.000Z"),
+    });
+  assert(sixMinIdle("video_editor"), "editor export whose workflow never started is stale after 5m");
+  assert(!sixMinIdle("video_image2video"), "other legacy jobs keep the 10m threshold");
   assert(staleLegacy?.canStop === true, "stale legacy job remains stoppable via jobId path");
 
   const dismissible = describeJob({

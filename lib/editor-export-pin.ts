@@ -30,8 +30,9 @@ export function sha256SumMatches(sumOutput: string, expectedHex: string): boolea
   return sumOutput.trim().split(/\s+/)[0]?.toLowerCase() === expectedHex.toLowerCase();
 }
 
-async function downloadVerified(run: SandboxRun, url: string, dest: string, sha256: string): Promise<boolean> {
-  if (!(await run("curl", ["-fsSL", "--retry", "3", "-o", dest, url])).ok) return false;
+async function downloadVerified(run: SandboxRun, url: string, dest: string, sha256: string, maxSec: number): Promise<boolean> {
+  // --max-time ends a hung transfer inside the sandbox; the caller's phase limit is the outer bound.
+  if (!(await run("curl", ["-fsSL", "--retry", "3", "--max-time", String(maxSec), "-o", dest, url])).ok) return false;
   const sum = await run("sha256sum", [dest]);
   return sum.ok && sha256SumMatches(sum.stdout, sha256);
 }
@@ -40,9 +41,9 @@ async function downloadVerified(run: SandboxRun, url: string, dest: string, sha2
 export async function installPinnedTools(run: SandboxRun, withFont: boolean): Promise<boolean> {
   if (!(await run("mkdir", ["-p", `${WORK}/ff`])).ok) return false;
   const tarball = `${WORK}/ff.tar.xz`;
-  if (!(await downloadVerified(run, FFMPEG_URL, tarball, FFMPEG_SHA256))) return false;
+  if (!(await downloadVerified(run, FFMPEG_URL, tarball, FFMPEG_SHA256, 150))) return false;
   if (!(await run("tar", ["-xJf", tarball, "-C", `${WORK}/ff`, "--strip-components=1"])).ok) return false;
-  return !withFont || downloadVerified(run, EDITOR_FONT_URL, FONT_FILE, FONT_SHA256);
+  return !withFont || downloadVerified(run, EDITOR_FONT_URL, FONT_FILE, FONT_SHA256, 30);
 }
 
 /** Cheap sanity check of the FFmpeg build the graph needs. Whole-word encoder match ("libvpx-vp9" is not "libvpx"). */

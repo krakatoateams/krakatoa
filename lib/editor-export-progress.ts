@@ -1,5 +1,6 @@
 // Pure stage/percentage model for the Video Editor export progress dialog (#300).
 // Percentages come only from real signals; no signal means null (indeterminate).
+// Also holds the accepted-export status poller (pollEditorExport), the one fetching piece.
 
 // Encode step order: preparing (sign + probe media) -> starting (boot runner, verify FFmpeg) -> encoding.
 export type ExportStage = "uploading" | "preparing" | "starting" | "encoding" | "saving" | "finalizing";
@@ -65,6 +66,93 @@ export function stageValueText(stage: ExportStage, pct: number | null): string {
   return pct == null ? EXPORT_STAGE_LABEL[stage] : `${EXPORT_STAGE_LABEL[stage]}, ${pct} percent`;
 }
 
+// Cancel wait (#326): after Cancel, a terminal status should arrive within seconds; the wait is always bounded.
+export const CANCEL_STILL_STOPPING_MS = 10_000;
+export const CANCEL_GIVE_UP_MS = 30_000;
+export const CANCEL_STILL_STOPPING_NOTE = "Still stopping. This can take a moment.";
+export const CANCEL_FAILED_NOTE = "Couldn't cancel. Try again.";
+export const CANCEL_ABANDONED_MESSAGE = "Cancel was sent. The export may take a moment to stop.";
+/** Hard cap on waiting for an accepted export: the 45 min plan budget plus a margin. */
+// ponytail: assumes the Hobby budget; raise if EDITOR_EXPORT_PLAN_MAX_MS goes above 45 min.
+export const EXPORT_POLL_CAP_MS = 60 * 60 * 1000;
+
+export type CancelWaitPhase = "waiting" | "still_stopping" | "give_up";
+
+export function cancelWaitPhase(elapsedMs: number): CancelWaitPhase {
+  if (elapsedMs >= CANCEL_GIVE_UP_MS) return "give_up";
+  return elapsedMs >= CANCEL_STILL_STOPPING_MS ? "still_stopping" : "waiting";
+}
+
+/**
+ * What the dialog does with a cancel POST reply (`httpStatus` null = network error).
+ * wait: cancel accepted, the status poll delivers the cancelled outcome (bounded by `CANCEL_GIVE_UP_MS`).
+ * settled: already finished or failed server-side; the status poll delivers that outcome.
+ * gone: no attempt exists, so nothing is running: cancelled now.
+ */
+export type CancelReply = "wait" | "settled" | "gone" | "not_allowed" | "error";
+
+export function cancelReply(httpStatus: number | null, body: unknown): CancelReply {
+  const b = (body && typeof body === "object" ? body : {}) as { status?: unknown; code?: unknown };
+  if (httpStatus == null) return "error";
+  if (httpStatus >= 200 && httpStatus < 300) {
+    return b.status === "already_completed" || b.status === "already_failed" ? "settled" : "wait";
+  }
+  if (httpStatus === 404) return "gone";
+  if (httpStatus === 409) return b.code === "CANCEL_NOT_ALLOWED" ? "not_allowed" : "settled";
+  return "error";
+}
+
+export type EditorExportPollData = {
+  error?: string;
+  code?: string;
+  ok?: boolean;
+  storagePath?: string | null;
+  creation?: { id?: string; storagePath?: string; title?: string };
+};
+
+const EXPORT_POLL_MS = 3000;
+export const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
+const EXPORT_UNCONFIRMED_ERROR = "Couldn't confirm the export. Check My Library in a moment.";
+
+/**
+ * Polls the generation status for an accepted (202) export until it succeeds, fails, the server calls it
+ * stale, or `EXPORT_POLL_CAP_MS` passes. An aborted `signal` (export abandoned locally) ends it at once.
+ */
+export async function pollEditorExport(
+  idempotencyKey: string,
+  signal: AbortSignal,
+  pollMs = EXPORT_POLL_MS
+): Promise<{ ok: boolean; stale?: boolean; data: EditorExportPollData }> {
+  const startedAt = Date.now();
+  while (!signal.aborted && Date.now() - startedAt < EXPORT_POLL_CAP_MS) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    if (signal.aborted) break;
+    try {
+      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
+      // A missing request or lost session can never recover; anything else is transient, so the
+      // attempt stays locked and polling continues until an explicit terminal status.
+      if (res.status === 401 || res.status === 404) {
+        return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
+      }
+      if (!res.ok) continue;
+      const body = (await res.json()) as {
+        status?: string;
+        isStale?: boolean;
+        result?: EditorExportPollData | null;
+        error?: { message?: string; code?: string } | null;
+      };
+      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "started" && body.isStale) return { ok: false, stale: true, data: { error: EXPORT_STALE_ERROR } };
+      if (body.status === "failed") {
+        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
+      }
+    } catch {
+      /* transient network error: keep polling */
+    }
+  }
+  return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export-progress self-check: ${msg}`);
 }
@@ -86,9 +174,45 @@ export function editorExportProgressSelfCheck(): void {
   assert(formatElapsed(65_000) === "1:05" && formatElapsed(-5) === "0:00", "elapsed m:ss");
   assert(stageValueText("encoding", 42) === "Encoding video, 42 percent", "valuetext");
   assert(stageValueText("preparing", null) === "Preparing media", "valuetext indeterminate");
+  assert(cancelWaitPhase(0) === "waiting" && cancelWaitPhase(9_999) === "waiting", "cancelling waits");
+  assert(cancelWaitPhase(10_000) === "still_stopping" && cancelWaitPhase(29_999) === "still_stopping", "still stopping note");
+  assert(cancelWaitPhase(30_000) === "give_up", "cancel wait gives up after 30 s");
+  assert(cancelReply(200, { status: "cancelling" }) === "wait", "accepted cancel waits for the terminal status");
+  assert(cancelReply(200, { status: "already_cancelling" }) === "wait", "repeat cancel waits");
+  assert(cancelReply(200, { status: "already_completed" }) === "settled", "completed is terminal");
+  assert(cancelReply(200, { status: "already_failed" }) === "settled", "failed is terminal");
+  assert(cancelReply(404, { status: "not_found" }) === "gone", "not found is cancelled");
+  assert(cancelReply(409, { code: "CANCEL_NOT_ALLOWED" }) === "not_allowed", "provider commit locks cancel");
+  assert(cancelReply(409, { status: "failed" }) === "settled", "inactive job is terminal");
+  assert(cancelReply(500, null) === "error" && cancelReply(null, null) === "error", "5xx and network errors clear the spinner");
+}
+
+/** An abort during the poll sleep must end polling without another status fetch (#332). */
+export async function editorExportPollSelfCheck(): Promise<void> {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ status: "started" }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5);
+    const finished = await pollEditorExport("k", controller.signal, 20);
+    assert(calls === 0, `aborted poll fetched status ${calls} time(s)`);
+    assert(!finished.ok, "aborted poll is not ok");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 if (require.main === module) {
   editorExportProgressSelfCheck();
-  console.log("editorExportProgressSelfCheck: ok");
+  void editorExportPollSelfCheck().then(
+    () => console.log("editorExportProgressSelfCheck + editorExportPollSelfCheck: ok"),
+    (err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    }
+  );
 }

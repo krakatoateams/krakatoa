@@ -11,7 +11,7 @@ export const PERMANENT_DELETE_CONFIRM =
   "Permanently delete this asset? This can't be undone.";
 
 export function creationItemDownloadFilename(
-  item: CreationHistoryItem,
+  item: Pick<CreationHistoryItem, "id" | "mediaType" | "storagePath" | "title" | "toolLabel">,
   mimeType?: string
 ): string {
   const ext =
@@ -30,6 +30,28 @@ export function creationItemDownloadFilename(
       .replace(/^-+|-+$/g, "")
       .toLowerCase() || "kelolako";
   return `${base}-${item.id.slice(0, 8)}.${ext}`;
+}
+
+/** Fetch -> blob -> `<a download>`; falls back to opening the URL in a new tab. */
+export async function saveMediaUrl(
+  mediaUrl: string,
+  filenameFor: (mimeType: string) => string
+): Promise<void> {
+  try {
+    const res = await fetch(mediaUrl);
+    if (!res.ok) throw new Error("Download failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filenameFor(blob.type);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    window.open(mediaUrl, "_blank", "noopener,noreferrer");
+  }
 }
 
 function persistFavorites(next: Set<string>): void {
@@ -75,19 +97,7 @@ export function useCreationItemActions(
   const downloadItem = useCallback(async (item: CreationHistoryItem) => {
     setDownloadingId(item.id);
     try {
-      const res = await fetch(item.mediaUrl);
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = creationItemDownloadFilename(item, blob.type);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      window.open(item.mediaUrl, "_blank", "noopener,noreferrer");
+      await saveMediaUrl(item.mediaUrl, (mime) => creationItemDownloadFilename(item, mime));
     } finally {
       setDownloadingId(null);
     }

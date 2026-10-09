@@ -1,5 +1,5 @@
 import "server-only";
-import { Sandbox, Snapshot } from "@vercel/sandbox";
+import { Sandbox, Snapshot, type Command } from "@vercel/sandbox";
 import { supabaseServer } from "@/lib/supabase-server";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import {
@@ -14,7 +14,6 @@ import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { insertUserCreation } from "@/lib/creations-db";
 import { CREATION_TOOLS } from "@/lib/creations";
 import { recordUsageEvent } from "@/lib/usage-events-db";
-import { isCancelRequested } from "@/lib/generation-cancel";
 import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
@@ -35,12 +34,14 @@ import {
   classifySandboxCreateError,
   EditorExportPhaseTimeout,
   editorExportErrorJson,
+  editorExportPhaseLimitMs,
   editorExportTimeoutMs,
   editorExportVcpus,
   nextEncodeStall,
   signedUploadArgs,
   withPhaseTimeout,
   type EditorExportErrorCode,
+  type EditorExportPhase,
   type EncodeStall,
 } from "@/lib/editor-export-pure";
 
@@ -68,7 +69,8 @@ export type PollResult =
 
 export type EncodeStart =
   | { ok: true; sandboxName: string; cmdId: string; durationSec: number; width: number; height: number }
-  | { ok: false; code: EditorExportErrorCode };
+  | { ok: false; code: EditorExportErrorCode }
+  | { ok: false; cancelled: true };
 
 /** Sandbox lifetime = the export's time budget: 40 min default, clamped to the plan max (45 min Hobby). */
 export const EDITOR_EXPORT_TIMEOUT_MS = editorExportTimeoutMs(process.env);
@@ -81,11 +83,32 @@ const requiredEncoders = (s: EditorExportSettings) => {
   return [f.videoCodec, f.audioCodec];
 };
 
-const sandboxName = (p: EditorExportParams) =>
+const sandboxName = (p: Pick<EditorExportParams, "jobId" | "generationRequestId">) =>
   `editor-export-${(p.jobId ?? p.generationRequestId).replace(/[^a-zA-Z0-9-]/g, "")}`;
 
 const logSafe = (label: string, e: unknown) =>
   console.warn(`[editor-export] ${label}:`, generationErrorLogSafe(e));
+
+type AttemptState = "live" | "cancelled" | "settled" | "superseded";
+
+/**
+ * Whether this run still owns its attempt. cancelled: Cancel was requested (the cancel route may already have
+ * settled the row). settled: the row was closed elsewhere. superseded: a retry took the key over (new job).
+ * Anything but live stops the run; only live and cancelled runs write the idempotency row.
+ */
+async function attemptState(p: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId">): Promise<AttemptState> {
+  const { data, error } = await supabaseServer
+    .from("generation_requests")
+    .select("status, cancel_requested, job_id")
+    .eq("id", p.generationRequestId)
+    .eq("profile_id", p.profileId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = data as { status?: string; cancel_requested?: boolean; job_id?: string | null } | null;
+  if (!row || (p.jobId && row.job_id !== p.jobId)) return "superseded";
+  if (row.cancel_requested) return "cancelled";
+  return row.status === "started" ? "live" : "settled";
+}
 
 async function run(sandbox: Sandbox, cmd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
   const r = await sandbox.runCommand(cmd, args);
@@ -135,10 +158,15 @@ export async function endStepCore(p: EditorExportParams, stepId: string | null, 
  */
 export async function startEncodeCore(p: EditorExportParams, stepId: string | null): Promise<EncodeStart> {
   let sandbox: Sandbox | null = null;
+  const startedAtMs = Date.now();
+  const limit = (phase: EditorExportPhase) =>
+    editorExportPhaseLimitMs(phase, Date.now() - startedAtMs, Boolean(process.env.EDITOR_EXPORT_SNAPSHOT_ID));
   // A job without a step means beginStep failed: the dialog cannot show progress for this export.
   if (!stepId && p.jobId) logSafe("progress reporting disabled", new Error("no running step for this export"));
   try {
     await reportProgressCore(p, stepId, "preparing", null);
+    // Start phases write liveness too, so a healthy start never reads stale (5 min) before the first poll.
+    await touchLiveness(p);
     const urls: Record<string, string> = {};
     await withPhaseTimeout(
       "sign",
@@ -146,16 +174,20 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
         for (const [key, path] of Object.entries(p.mediaPaths)) {
           urls[key] = await signStoragePathForPipeline(path, p.userId);
         }
-      })()
+      })(),
+      limit("sign")
     );
-    const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)));
+    const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)), limit("probe"));
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
     const hasFont = Boolean(graph.inputFiles.in_font);
 
+    // Cancel is honored between phases, so it never waits for a full sandbox boot.
+    if ((await attemptState(p)) !== "live") return { ok: false, cancelled: true };
     await reportProgressCore(p, stepId, "starting", null);
+    await touchLiveness(p);
     const creating = createSandbox(p);
     try {
-      sandbox = await withPhaseTimeout("create", creating);
+      sandbox = await withPhaseTimeout("create", creating, limit("create"));
     } catch (e) {
       logSafe("sandbox create failed", e);
       if (e instanceof EditorExportPhaseTimeout) {
@@ -165,8 +197,12 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       }
       return { ok: false, code: classifySandboxCreateError(e) };
     }
-    if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings))))) {
+    if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings)), limit("prepare")))) {
       throw new Error("sandbox preparation failed");
+    }
+    if ((await attemptState(p)) !== "live") {
+      await sandbox.stop().catch(() => undefined);
+      return { ok: false, cancelled: true };
     }
 
     const values: Record<string, string> = { out_v: outFile(p), in_font: FONT_FILE };
@@ -174,7 +210,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       if (alias !== "in_font") values[alias] = url;
     }
     const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", PROGRESS_FILE, ...localizeFfmpegArgs(graph.args, values)];
-    const cmd = await withPhaseTimeout("ffmpegStart", sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true }));
+    const cmd = await withPhaseTimeout("ffmpegStart", sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true }), limit("ffmpegStart"));
     // FFmpeg is running; the percentage stays indeterminate until `out_time_us` is readable.
     await reportProgressCore(p, stepId, "encoding", null);
     return { ok: true, sandboxName: sandbox.name, cmdId: cmd.cmdId, durationSec: graph.durationSec, width: graph.width, height: graph.height };
@@ -208,6 +244,24 @@ export async function reportProgressCore(p: EditorExportParams, stepId: string |
   );
 }
 
+/** How long one poll waits for a detached command's exit before reporting it still running. */
+const EXIT_PROBE_MS = 2_000;
+
+/**
+ * Exit code of a detached command, or null while it runs. The plain `getCommand` read never reports the exit
+ * (only the wait endpoint does), so a finished encode looked running until the stall check failed it (#335).
+ */
+async function commandExitCode(cmd: Command): Promise<number | null> {
+  if (cmd.exitCode !== null) return cmd.exitCode;
+  const signal = AbortSignal.timeout(EXIT_PROBE_MS);
+  try {
+    return (await cmd.wait({ signal })).exitCode;
+  } catch (e) {
+    if (signal.aborted) return null;
+    throw e;
+  }
+}
+
 /**
  * One non-blocking check of a detached sandbox command; honors Cancel by stopping the sandbox.
  * Encode: `stall` carries the last `out_time_us` between polls; no advance for `EDITOR_EXPORT_STALL_MS` fails it.
@@ -222,7 +276,7 @@ export async function pollCommandCore(
   durationSec: number,
   stall: EncodeStall | null = null
 ): Promise<PollResult> {
-  if (await isCancelRequested(p.profileId, p.generationRequestId)) {
+  if ((await attemptState(p)) !== "live") {
     await stopSandboxCore(name);
     return { state: "cancelled" };
   }
@@ -231,7 +285,8 @@ export async function pollCommandCore(
   try {
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.getCommand(cmdId);
-    if (cmd.exitCode === null) {
+    const exitCode = await commandExitCode(cmd);
+    if (exitCode === null) {
       if (timedOut) return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
       if (stage !== "encode") return { state: "running", stall: null };
       // FFmpeg `-progress` appends blocks of key=value; the last out_time_us is the real encoded time.
@@ -245,9 +300,9 @@ export async function pollCommandCore(
       await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
       return { state: "running", stall: next.stall };
     }
-    if (cmd.exitCode === 0) return { state: "done" };
+    if (exitCode === 0) return { state: "done" };
     const stderr = stage === "encode" ? await cmd.stderr().catch(() => "") : "";
-    return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode: cmd.exitCode, stderr }) };
+    return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode, stderr }) };
   } catch (e) {
     // Past the time budget the sandbox is gone: a timeout. Otherwise a transient API error must not
     // kill a healthy encode, so rethrow and let Workflow retry this step.
@@ -314,6 +369,18 @@ export async function finalizeSuccessCore(
       return null;
     }
   };
+  // Commit fence: lock Cancel (requestCancel needs cancel_allowed=true) while this run still owns a live row.
+  // A cancel or retry that won makes this throw, so the workflow settles as cancelled and removes the upload.
+  let lock = supabaseServer
+    .from("generation_requests")
+    .update({ cancel_allowed: false })
+    .eq("id", p.generationRequestId)
+    .eq("profile_id", p.profileId)
+    .eq("status", "started")
+    .eq("cancel_requested", false);
+  if (p.jobId) lock = lock.eq("job_id", p.jobId);
+  const { data: locked, error: lockError } = await lock.select("id").maybeSingle();
+  if (lockError || !locked) throw new Error("export cancelled or cancel lock failed");
   await reportProgressCore(p, stepId, "finalizing", null);
   await endStepCore(p, stepId, { storagePath: r.storagePath });
 
@@ -384,12 +451,18 @@ export async function finalizeSuccessCore(
   });
 }
 
-/** Failure or cancel: close step, asset, job, and the idempotency row with a sanitized reason. */
+/**
+ * Failure or cancel: close step, asset, job, and the idempotency row with a sanitized reason.
+ * Once Cancel was requested the attempt always settles as cancelled, so the workflow never overwrites the
+ * row the cancel route already settled; a superseded run leaves the retry's row alone.
+ */
 export async function finalizeFailureCore(
-  p: EditorExportParams,
+  p: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId" | "videoAssetId">,
   stepId: string | null,
-  outcome: { cancelled: true } | { cancelled: false; code: EditorExportErrorCode }
+  requested: { cancelled: true } | { cancelled: false; code: EditorExportErrorCode }
 ): Promise<void> {
+  const state = await attemptState(p).catch(() => "live" as const);
+  const outcome = state === "cancelled" ? ({ cancelled: true } as const) : requested;
   const errJson = outcome.cancelled
     ? { message: "Export cancelled.", code: "GENERATION_CANCELLED" }
     : editorExportErrorJson(outcome.code);
@@ -400,7 +473,45 @@ export async function finalizeFailureCore(
   if (p.jobId) {
     await safe("failJob", () => (outcome.cancelled ? cancelJob(p.profileId, p.jobId!, errJson) : failJob(p.profileId, p.jobId!, errJson)));
   }
+  if (state === "superseded" || state === "settled") return;
   await safe("idemFailure", () =>
     finishGenerationRequestFailure({ id: p.generationRequestId, profileId: p.profileId, jobId: p.jobId, errorJson: errJson })
   );
+}
+
+/**
+ * Cancel accepted by `/api/generations/cancel`: settle the attempt now instead of waiting for the workflow to
+ * observe the flag (it may be stuck booting the runner), then stop the sandbox by its deterministic name.
+ * Idempotent and owner-scoped; 0 credits, so nothing to refund.
+ */
+export async function settleCancelledExportCore(
+  t: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId">
+): Promise<void> {
+  let stepId: string | null = null;
+  let videoAssetId: string | null = null;
+  if (t.jobId) {
+    const [step, asset] = await Promise.all([
+      supabaseServer
+        .from("job_steps")
+        .select("id")
+        .eq("job_id", t.jobId)
+        .eq("profile_id", t.profileId)
+        .eq("status", "running")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabaseServer
+        .from("assets")
+        .select("id")
+        .eq("job_id", t.jobId)
+        .eq("profile_id", t.profileId)
+        .eq("status", "processing")
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    stepId = (step.data as { id?: string } | null)?.id ?? null;
+    videoAssetId = (asset.data as { id?: string } | null)?.id ?? null;
+  }
+  await finalizeFailureCore({ ...t, videoAssetId }, stepId, { cancelled: true });
+  await stopSandboxCore(sandboxName(t));
 }
