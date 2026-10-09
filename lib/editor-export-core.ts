@@ -20,7 +20,7 @@ import {
 } from "@/lib/generation-idempotency";
 import { LOCK_TTL_MS } from "@/lib/generation-idempotency-pure";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
-import { probeAudioSources } from "@/lib/editor-audio-probe";
+import { EditorExportProbeError, probeAudioSources } from "@/lib/editor-audio-probe";
 import { FFMPEG_BIN, FONT_FILE, WORK, ffmpegHasCapabilities, installPinnedTools } from "@/lib/editor-export-pin";
 import {
   audibleLayerUrls,
@@ -217,7 +217,11 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
   } catch (e) {
     logSafe("encode start failed", e);
     await sandbox?.stop().catch(() => undefined);
-    return { ok: false, code: e instanceof EditorExportPhaseTimeout ? "EDITOR_EXPORT_START_TIMEOUT" : classifyEditorExportFailure({ stage: "setup" }) };
+    return { ok: false, code: e instanceof EditorExportPhaseTimeout
+        ? "EDITOR_EXPORT_START_TIMEOUT"
+        : e instanceof EditorExportProbeError
+          ? "EDITOR_EXPORT_INPUT_UNAVAILABLE"
+          : classifyEditorExportFailure({ stage: "setup" }) };
   }
 }
 
