@@ -25,6 +25,8 @@ export type ExportProgressState = {
   creationId: string | null;
   cancelAllowed: boolean;
   cancelling: boolean;
+  /** Inline cancel status ("Still stopping...", "Couldn't cancel..."), or null. */
+  cancelNote: string | null;
 };
 
 export const EXPORT_BUTTON_ID = "editor-export-button";
@@ -120,6 +122,7 @@ export function EditorExportProgressDialog({
               Elapsed <span className="tabular-nums">{elapsed}</span>
             </p>
             {slow ? <p className="text-xs text-text-secondary">This is taking longer than usual.</p> : null}
+            {state.cancelNote ? <p className="text-xs text-text-secondary">{state.cancelNote}</p> : null}
             {!state.cancelAllowed ? (
               <p className="text-xs text-text-secondary">
                 Cancel is unavailable while the video is being saved.
@@ -137,7 +140,9 @@ export function EditorExportProgressDialog({
           <p className="mt-3 text-sm text-text-secondary">{state.error ?? "Export failed."}</p>
         ) : null}
         {outcome === "cancelled" ? (
-          <p className="mt-3 text-sm text-text-secondary">The export was stopped. Nothing was added to your library.</p>
+          <p className="mt-3 text-sm text-text-secondary">
+            {state.error ?? "The export was stopped. Nothing was added to your library."}
+          </p>
         ) : null}
 
         {/* One polite region: announces stage changes and the outcome, never each percent. */}
@@ -158,12 +163,12 @@ export function EditorExportProgressDialog({
                 loading={state.cancelling}
                 onClick={onCancel}
               >
-                Cancel export
+                {state.cancelling ? "Cancelling..." : "Cancel export"}
               </Button>
             </>
           ) : (
             <>
-              {outcome === "failed" ? (
+              {outcome === "failed" || outcome === "cancelled" ? (
                 <Button variant="primary" size="sm" onClick={onRetry}>
                   Try again
                 </Button>

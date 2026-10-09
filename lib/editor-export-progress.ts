@@ -65,6 +65,42 @@ export function stageValueText(stage: ExportStage, pct: number | null): string {
   return pct == null ? EXPORT_STAGE_LABEL[stage] : `${EXPORT_STAGE_LABEL[stage]}, ${pct} percent`;
 }
 
+// Cancel wait (#326): after Cancel, a terminal status should arrive within seconds; the wait is always bounded.
+export const CANCEL_STILL_STOPPING_MS = 10_000;
+export const CANCEL_GIVE_UP_MS = 30_000;
+export const CANCEL_STILL_STOPPING_NOTE = "Still stopping. This can take a moment.";
+export const CANCEL_FAILED_NOTE = "Couldn't cancel. Try again.";
+export const CANCEL_ABANDONED_MESSAGE = "Cancel was sent. The export may take a moment to stop.";
+/** Hard cap on waiting for an accepted export: the 45 min plan budget plus a margin. */
+// ponytail: assumes the Hobby budget; raise if EDITOR_EXPORT_PLAN_MAX_MS goes above 45 min.
+export const EXPORT_POLL_CAP_MS = 60 * 60 * 1000;
+
+export type CancelWaitPhase = "waiting" | "still_stopping" | "give_up";
+
+export function cancelWaitPhase(elapsedMs: number): CancelWaitPhase {
+  if (elapsedMs >= CANCEL_GIVE_UP_MS) return "give_up";
+  return elapsedMs >= CANCEL_STILL_STOPPING_MS ? "still_stopping" : "waiting";
+}
+
+/**
+ * What the dialog does with a cancel POST reply (`httpStatus` null = network error).
+ * wait: cancel accepted, the status poll delivers the cancelled outcome (bounded by `CANCEL_GIVE_UP_MS`).
+ * settled: already finished or failed server-side; the status poll delivers that outcome.
+ * gone: no attempt exists, so nothing is running: cancelled now.
+ */
+export type CancelReply = "wait" | "settled" | "gone" | "not_allowed" | "error";
+
+export function cancelReply(httpStatus: number | null, body: unknown): CancelReply {
+  const b = (body && typeof body === "object" ? body : {}) as { status?: unknown; code?: unknown };
+  if (httpStatus == null) return "error";
+  if (httpStatus >= 200 && httpStatus < 300) {
+    return b.status === "already_completed" || b.status === "already_failed" ? "settled" : "wait";
+  }
+  if (httpStatus === 404) return "gone";
+  if (httpStatus === 409) return b.code === "CANCEL_NOT_ALLOWED" ? "not_allowed" : "settled";
+  return "error";
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export-progress self-check: ${msg}`);
 }
@@ -86,6 +122,17 @@ export function editorExportProgressSelfCheck(): void {
   assert(formatElapsed(65_000) === "1:05" && formatElapsed(-5) === "0:00", "elapsed m:ss");
   assert(stageValueText("encoding", 42) === "Encoding video, 42 percent", "valuetext");
   assert(stageValueText("preparing", null) === "Preparing media", "valuetext indeterminate");
+  assert(cancelWaitPhase(0) === "waiting" && cancelWaitPhase(9_999) === "waiting", "cancelling waits");
+  assert(cancelWaitPhase(10_000) === "still_stopping" && cancelWaitPhase(29_999) === "still_stopping", "still stopping note");
+  assert(cancelWaitPhase(30_000) === "give_up", "cancel wait gives up after 30 s");
+  assert(cancelReply(200, { status: "cancelling" }) === "wait", "accepted cancel waits for the terminal status");
+  assert(cancelReply(200, { status: "already_cancelling" }) === "wait", "repeat cancel waits");
+  assert(cancelReply(200, { status: "already_completed" }) === "settled", "completed is terminal");
+  assert(cancelReply(200, { status: "already_failed" }) === "settled", "failed is terminal");
+  assert(cancelReply(404, { status: "not_found" }) === "gone", "not found is cancelled");
+  assert(cancelReply(409, { code: "CANCEL_NOT_ALLOWED" }) === "not_allowed", "provider commit locks cancel");
+  assert(cancelReply(409, { status: "failed" }) === "settled", "inactive job is terminal");
+  assert(cancelReply(500, null) === "error" && cancelReply(null, null) === "error", "5xx and network errors clear the spinner");
 }
 
 if (require.main === module) {
