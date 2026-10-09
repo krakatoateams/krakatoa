@@ -136,7 +136,7 @@ export function ChipDropdown({
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(raf);
-  }, [open, isMobile, coords]);
+  }, [open, isMobile]);
 
   // Arrow/Home/End navigation inside the menu. Escape and Tab close only the
   // menu; stopPropagation keeps a parent dialog's Escape handler from firing
@@ -157,7 +157,7 @@ export function ChipDropdown({
     else if (e.key === "Escape") {
       e.stopPropagation();
       closeAndFocusTrigger();
-    } else if (e.key === "Tab") setOpen(false);
+    } else if (e.key === "Tab") closeAndFocusTrigger(); // default Tab then moves on from the trigger
   };
 
   useEffect(() => {
