@@ -207,6 +207,9 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: true,
+    // Platform cap matching its siblings (same BytePlus family). Replicate
+    // publishes no maxLength for bytedance/seedance-2.0-fast (checked 2026-10-10).
+    promptMaxChars: 4000,
     references: {
       firstFrame: true,
       lastFrame: true,

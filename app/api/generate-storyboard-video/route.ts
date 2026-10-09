@@ -47,18 +47,15 @@ import {
 } from "@/lib/generation-idempotency";
 import {
   resolveStoryboardStyle,
-  storyboardVideoStyleDirective,
   resolveStoryboardAspectRatio,
-  storyboardVideoAspectDirective,
   storyboardVideoDimensions,
   resolveStoryboardLanguage,
-  storyboardLanguageDirective,
-  fitSeedancePrompt,
-  SEEDANCE_PROMPT_MAX_CHARS,
+  assembleStoryboardVideoPrompt,
   DEFAULT_STORYBOARD_LANGUAGE,
   type StoryboardAspectRatio,
   type StoryboardLanguageId,
 } from "@/lib/storyboard-style";
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import {
   getVideoModel,
   isStoryboardVideoModelId,
@@ -208,7 +205,7 @@ export async function POST(req: Request) {
     if (!videoComposerModelEnabled(composerEnablement, "storyboard", videoModelId)) {
       return NextResponse.json({ error: "This video model isn't available." }, { status: 400 });
     }
-    const promptMaxChars = videoModel.promptMaxChars ?? SEEDANCE_PROMPT_MAX_CHARS;
+    const promptMaxChars = videoPromptMaxChars(videoModel);
 
     if (!devBlank && !process.env.REPLICATE_API_TOKEN?.trim()) {
       return NextResponse.json(
@@ -294,39 +291,20 @@ export async function POST(req: Request) {
     // 'video_generating'. The status remains whatever it was on the
     // insufficient-credits / pre-spend infra-failure paths.
 
-    // ---- Assemble the final Seedance prompt within the 2000-char limit ----
-    // The descriptive BODY (the stored/edited seedance_prompt, plus the [Image1]
-    // composition reference) carries the scene beats and dialogue; the PREFIX
-    // carries the framing directives that must survive.
-    let promptBody = seedancePrompt;
-    if (!/\[Image1\]/i.test(promptBody)) {
-      promptBody = `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${promptBody}`;
-    }
-
-    // Honor the storyboard's chosen visual style in the VIDEO, not just the sheet.
-    // Prepending here (rather than only relying on the stored seedance_prompt) makes
-    // existing storyboards — whose prompt predates style-aware generation — still
-    // render in the picked aesthetic. The storyboard image stays the primary
-    // composition reference; this directive sets the rendering style.
+    // ---- Assemble the final Seedance prompt ----
+    // Directives (style + aspect + language) + [Image1] reference + stored/edited
+    // body. The provider limit applies to this assembled prompt, so an over-limit
+    // prompt is rejected BEFORE spend/job/provider; stored text is never cut.
     const storyboardStyle = resolveStoryboardStyle(row.storyboard_style);
-    const promptPrefix = [
-      storyboardVideoStyleDirective(storyboardStyle),
-      storyboardVideoAspectDirective(aspectRatio),
-      storyboardLanguageDirective(language),
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    // Seedance 2.0 hard-truncates prompts over 2000 chars FROM THE END, which
-    // would silently drop the closing scene beats + dialogue. Build the prompt
-    // ourselves so the framing directives are preserved and only the body is
-    // trimmed at a clean sentence/word boundary when it would overflow.
-    const fitted = fitSeedancePrompt(promptPrefix, promptBody, promptMaxChars);
-    seedancePrompt = fitted.prompt;
-    if (fitted.truncated) {
-      console.warn(
-        `[Storyboard Video] Seedance prompt trimmed from ${fitted.originalLength} to ${seedancePrompt.length} chars to fit the ${promptMaxChars}-char limit (storyboard ${storyboardId}, model ${videoModelId}). Consider shortening the prompt for full fidelity.`
-      );
+    seedancePrompt = assembleStoryboardVideoPrompt({
+      body: seedancePrompt,
+      style: storyboardStyle,
+      aspectRatio,
+      language,
+    });
+    const promptLimitError = videoPromptLimitError(seedancePrompt, promptMaxChars);
+    if (promptLimitError) {
+      return NextResponse.json({ error: promptLimitError }, { status: 400 });
     }
 
     const resolvedVideoModel = await resolveModel({

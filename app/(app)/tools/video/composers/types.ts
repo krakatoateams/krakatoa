@@ -41,6 +41,8 @@ export type StoryboardListItem = {
   aspectRatio: StoryboardAspectRatio | null;
   language: StoryboardLanguageId | null;
   seedancePrompt: string;
+  /** Raw stored style; resolved with resolveStoryboardStyle before use. */
+  storyboardStyle?: string | null;
   source: string | null;
 };
 

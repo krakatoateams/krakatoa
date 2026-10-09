@@ -200,82 +200,43 @@ export function storyboardLanguageDirective(raw: unknown): string {
 }
 
 /**
- * Seedance 2.0 prompt length.
+ * Seedance 2 prompt length.
  *
- * The provider enforces a HARD 2000-character prompt limit and silently
- * truncates anything longer FROM THE END — which drops the closing scene beats
- * and dialogue (the most important content) and makes the video drift from the
- * storyboard. We therefore:
- *   - cap the GPT-authored body at SEEDANCE_PROMPT_BODY_BUDGET_CHARS at
- *     generation/import time (root cause), leaving headroom for the runtime
- *     style / aspect / language directives the video route prepends; and
- *   - assemble the final prompt with fitSeedancePrompt() at video time
- *     (safety net), keeping the framing directives intact and trimming only the
- *     body at a clean boundary instead of letting the provider blind-cut it.
+ * The provider limit is per model (4000 for the Seedance 2 family, see
+ * `promptMaxChars` in lib/video-models.ts). The stored/edited body is never cut:
+ * the video route rejects an over-limit assembled prompt with a 400 and the
+ * composer disables Generate, both via assembleStoryboardVideoPrompt().
  */
-export const SEEDANCE_PROMPT_MAX_CHARS = 2000;
 
 /**
- * Target length for the GPT-authored seedance_prompt body. Kept comfortably
- * under SEEDANCE_PROMPT_MAX_CHARS so the runtime directives (style + aspect +
- * language + [Image1] reference, ~450 chars worst case) still fit without any
- * truncation.
+ * Target length for the GPT-authored seedance_prompt body. Kept well under the
+ * provider limit so the runtime directives (style + aspect + language +
+ * [Image1] reference, ~450 chars worst case) still fit without any trimming.
  */
 export const SEEDANCE_PROMPT_BODY_BUDGET_CHARS = 1450;
 
 /**
- * Trim `text` to at most `max` characters, preferring to cut at the last
- * sentence end, then the last whitespace, so a word is never sliced in half.
- * Only cuts at a boundary that lands in the back half of the budget, otherwise
- * a hard slice is used (degenerate input with no late boundary).
+ * Final video prompt: style + aspect + language directives, then the body with
+ * an [Image1] composition reference when it lacks one. Pure and shared by the
+ * video route and the composer so the length they check is identical.
  */
-function trimToBoundary(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const slice = text.slice(0, max);
-  const sentenceEnd = Math.max(
-    slice.lastIndexOf(". "),
-    slice.lastIndexOf("! "),
-    slice.lastIndexOf("? "),
-    slice.lastIndexOf(".\n"),
-    slice.lastIndexOf("!\n"),
-    slice.lastIndexOf("?\n")
-  );
-  if (sentenceEnd >= max * 0.5) return slice.slice(0, sentenceEnd + 1).trim();
-  const wordEnd = slice.lastIndexOf(" ");
-  if (wordEnd >= max * 0.5) return slice.slice(0, wordEnd).trim();
-  return slice.trim();
-}
-
-/**
- * Assemble the final Seedance prompt from a high-priority `prefix` (framing
- * directives that MUST survive) and a `body` (the descriptive scene plan),
- * keeping the whole thing within Seedance's hard character limit. The prefix is
- * preserved verbatim; only the body is trimmed (at a sentence/word boundary)
- * when the combined length would exceed `max`. Returns the prompt plus whether
- * trimming occurred and the original combined length so callers can log it.
- */
-export function fitSeedancePrompt(
-  prefix: string,
-  body: string,
-  max: number = SEEDANCE_PROMPT_MAX_CHARS
-): { prompt: string; truncated: boolean; originalLength: number } {
-  const joiner = "\n\n";
-  const combined = `${prefix}${joiner}${body}`;
-  if (combined.length <= max) {
-    return { prompt: combined, truncated: false, originalLength: combined.length };
-  }
-  const room = max - prefix.length - joiner.length;
-  // Degenerate case: the prefix alone already fills the budget. Preserve the
-  // prefix's priority by trimming it (dropping the body) rather than overflowing.
-  if (room <= 0) {
-    return { prompt: trimToBoundary(prefix, max), truncated: true, originalLength: combined.length };
-  }
-  const trimmedBody = trimToBoundary(body, room);
-  return {
-    prompt: `${prefix}${joiner}${trimmedBody}`,
-    truncated: true,
-    originalLength: combined.length,
-  };
+export function assembleStoryboardVideoPrompt(opts: {
+  body: string;
+  style: unknown;
+  aspectRatio: StoryboardAspectRatio;
+  language: StoryboardLanguageId;
+}): string {
+  const body = /\[Image1\]/i.test(opts.body)
+    ? opts.body
+    : `Follow the six-panel cinematic plan in [Image1] for composition and beats.\n\n${opts.body}`;
+  const prefix = [
+    storyboardVideoStyleDirective(opts.style),
+    storyboardVideoAspectDirective(opts.aspectRatio),
+    storyboardLanguageDirective(opts.language),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return `${prefix}\n\n${body}`;
 }
 
 /** Image-prompt style instruction for a (possibly untrusted) style value. */
