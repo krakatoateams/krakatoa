@@ -4,7 +4,7 @@
  * overlay / drawtext with enable='between(t,…)'.
  *
  * Pure graph builder — runnable as `npx tsx --conditions=react-server lib/editor-render.ts`
- * The export runs in-system (Vercel Sandbox, see `lib/editor-export-sandbox.ts`);
+ * The export runs in-system (Vercel Sandbox, see `lib/editor-export-core.ts`);
  * the editor never calls Rendi or any third-party renderer.
  */
 
