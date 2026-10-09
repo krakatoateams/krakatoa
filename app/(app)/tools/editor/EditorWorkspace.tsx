@@ -362,6 +362,7 @@ function TimelineLayerRow({
     filmstrip?.inSec ?? 0,
     filmstrip?.outSec ?? 0,
     width,
+    pxPerSec,
     viewLeft - startSec * pxPerSec,
     viewRight - startSec * pxPerSec
   );
