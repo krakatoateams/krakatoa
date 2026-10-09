@@ -4167,6 +4167,11 @@ export default function SchedulerDashboardPage() {
             ? source
             : storagePathFromStorageUrl(source)
           : source.storagePath?.trim() || null;
+      // Scheduling publishes MP4/MOV/AVI only; Editor WebM exports must be re-exported as MP4.
+      if (!isPhoto && /\.webm$/i.test((storagePath ?? mediaUrl).split("?")[0])) {
+        setToast({ type: "error", message: "WebM videos can't be scheduled yet. Export it as MP4 to schedule." });
+        return;
+      }
       const photoRef = isPhoto ? storagePath ?? mediaUrl : null;
       const assetPatch: Partial<VideoItem> = {
         videoUrl: isPhoto ? null : mediaUrl,

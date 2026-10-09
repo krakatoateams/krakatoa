@@ -290,6 +290,7 @@ export async function POST(req: Request) {
     //   pro      -> google/nano-banana-pro   (resolution 1K/2K/4K)
     const modelTierRaw = String(formData.get("modelTier") || "").trim() || DEFAULT_PRODUCT_PHOTO_TIER;
     const resolutionRaw = String(formData.get("resolution") || "").trim();
+    const qualityRaw = String(formData.get("quality") || "").trim();
     // Optional user prompt from the omni-form. Trim + hard-cap; "" means none.
     const userPrompt = String(formData.get("prompt") || "")
       .trim()
@@ -390,11 +391,12 @@ export async function POST(req: Request) {
     const normalized = normalizeProductPhotoOptions({
       modelTier: modelTierRaw,
       resolution: resolutionRaw,
+      quality: qualityRaw,
     });
     if (!normalized.ok) {
       return NextResponse.json({ error: normalized.error }, { status: 400 });
     }
-    const { modelTier, resolution } = normalized;
+    const { modelTier, resolution, quality } = normalized;
     const tier = getProductPhotoTier(modelTier);
     // Product Try-on requires a reference-capable model. Text-to-image-only models
     // (e.g. Imagen 4, FLUX 1.1 Pro) can't consume the uploaded product image, so
@@ -598,7 +600,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const pricingKey = productPhotoPricingKey({ modelTier, resolution });
+    const pricingKey = productPhotoPricingKey({ modelTier, resolution, quality });
     const providerResolution = productPhotoProviderResolution(resolution);
 
     // ---- Resolve runtime model + pricing (Admin Phase 2 / Product Photo v2.3) ----
@@ -627,6 +629,7 @@ export async function POST(req: Request) {
       styleId,
       modelTier,
       resolution,
+      quality,
       pricingKey,
       providerModel: photoModel.model,
       providerResolution,
@@ -646,13 +649,14 @@ export async function POST(req: Request) {
       skillId: skillId ?? "",
       devBlank,
     });
-    const perImageCredits = devBlank ? 0 : await getProductPhotoCredits({ modelTier, resolution });
+    const perImageCredits = devBlank ? 0 : await getProductPhotoCredits({ modelTier, resolution, quality });
     const requiredCredits = perImageCredits * imageCount;
     const assetMetadata = {
       poseId,
       styleId,
       modelTier,
       resolution,
+      ...(quality ? { quality } : {}),
       pricingKey,
       providerResolution,
       ...(skillId ? { skillId } : {}),
@@ -678,6 +682,7 @@ export async function POST(req: Request) {
           styleId,
           modelTier,
           resolution,
+          ...(quality ? { quality } : {}),
           pricingKey,
           mode,
           imageCount,
@@ -697,6 +702,7 @@ export async function POST(req: Request) {
           styleId,
           modelTier,
           resolution,
+          ...(quality ? { quality } : {}),
           pricingKey,
           providerModel: photoModel.model,
           imageCount,
@@ -823,6 +829,7 @@ export async function POST(req: Request) {
         aspectRatio,
         imageInput,
         providerResolution,
+        quality,
       });
     }
 
@@ -1035,6 +1042,7 @@ export async function POST(req: Request) {
           styleId,
           modelTier,
           resolution,
+          ...(quality ? { quality } : {}),
           pricingKey,
           providerModel: devBlank ? "dev_blank" : photoModel.model,
           providerResolution,

@@ -2,7 +2,7 @@
 
 import EditorExportDialog from "./EditorExportDialog";
 import type { EditorExportSettings } from "@/lib/editor-export-settings";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -13,11 +13,11 @@ import {
   Eye,
   EyeOff,
   ImagePlus,
-  Loader2,
   Lock,
   Pause,
   Play,
   Plus,
+  Maximize2,
   Repeat,
   Scissors,
   SkipBack,
@@ -32,11 +32,22 @@ import {
   Volume2,
   VolumeX,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import {
+  clearPersistedIdempotentAttempt,
+  readPersistedIdempotentAttempt,
+} from "@/lib/idempotent-submit-state";
+import { monotonicPct, parseExportProgress } from "@/lib/editor-export-progress";
+import {
+  EditorExportProgressDialog,
+  type ExportProgressState,
+} from "./EditorExportProgressDialog";
 import { canDropOnEditor } from "@/lib/editor-handoff";
 import { uploadRefFile } from "@/components/studio/RefGroup";
 import { useStudioGenerationPreview } from "@/components/studio";
@@ -49,7 +60,6 @@ import {
   EDITOR_ASPECTS,
   EDITOR_CANVAS,
   EDITOR_MAX_DURATION_SEC,
-  DEFAULT_EDITOR_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
   EDITOR_MAX_UPLOAD_MB,
@@ -69,6 +79,7 @@ import {
   isPlaceholderSpan,
   maxClipLayerDurationSec,
   maxOverlayLayerDurationSec,
+  trimStartBy,
   normalizeEditorTitle,
   normalizeLayerName,
   parseEditorDocument,
@@ -92,6 +103,22 @@ import {
 } from "@/lib/editor-document";
 import { Poppins } from "next/font/google";
 import { containSize } from "@/lib/editor-preview-size";
+import {
+  DEFAULT_PX_PER_SEC,
+  MAX_PX_PER_SEC,
+  MIN_PX_PER_SEC,
+  TIMELINE_PAD_PX,
+  ZOOM_STEP,
+  anchoredScrollLeft,
+  clampScale,
+  FIT_MARGIN_SEC,
+  fitPxPerSec,
+  openFitPxPerSec,
+  formatRulerLabel,
+  rulerIntervalSec,
+  stepScale,
+  visibleTickRange,
+} from "@/lib/editor-timeline-zoom";
 import { useClipFilmstrip } from "./useClipFilmstrip";
 import { useEditorViewport } from "./useEditorViewport";
 import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
@@ -136,8 +163,14 @@ const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
 // its own height is carved out of tracksHeight to keep the resizable split intact.
 const TIMELINE_RULER_HEIGHT = 36;
 
+/** Ruler ticks render for the visible range snapped to buckets of this width. */
+const RULER_BUCKET_PX = 400;
+
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 650;
+
+/** Zoom is frozen while a drag runs so the drag keeps the scale it started with. */
+let activeTimelineDrags = 0;
 
 function startTimelineDrag(
   event: ReactPointerEvent,
@@ -147,15 +180,19 @@ function startTimelineDrag(
   event.preventDefault();
   event.stopPropagation();
   const startX = event.clientX;
+  activeTimelineDrags += 1;
   const move = (ev: PointerEvent) => {
     onMove((ev.clientX - startX) / pxPerSec);
   };
   const up = () => {
+    activeTimelineDrags = Math.max(0, activeTimelineDrags - 1);
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
 }
 
 const LAYER_ROW_ATTR = "data-layer-row";
@@ -262,6 +299,7 @@ function TimelineLayerRow({
   laneWidth,
   maxEnd,
   maxSpan,
+  inSec,
   label,
   selectedClassName,
   onSelect,
@@ -282,11 +320,13 @@ function TimelineLayerRow({
   laneWidth: number;
   maxEnd: number;
   maxSpan: number;
+  /** Source in-point for video layers; undefined when the layer has no source. */
+  inSec?: number;
   label: ReactNode;
   selectedClassName: string;
   onSelect: () => void;
   onMove: (startSec: number, endSec: number) => void;
-  onTrimStart: (startSec: number) => void;
+  onTrimStart: (startSec: number, inSec?: number) => void;
   onTrimEnd: (endSec: number) => void;
   /** Video layers: source range to show as a frame strip behind the label. */
   filmstrip?: { storagePath: string | null; localUrl: string | null; inSec: number; outSec: number };
@@ -300,6 +340,18 @@ function TimelineLayerRow({
     filmstrip?.outSec ?? 0,
     width
   );
+  const nudgeKey = (edge: "start" | "end") => (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = (event.shiftKey ? 1 : 0.1) * (event.key === "ArrowLeft" ? -1 : 1);
+    if (edge === "start") {
+      const next = trimStartBy(startSec, endSec, inSec, step);
+      onTrimStart(next.startSec, next.inSec);
+    } else {
+      onTrimEnd(Math.max(startSec + 0.2, Math.min(Math.min(maxEnd, startSec + maxSpan), snapTenth(endSec + step))));
+    }
+  };
   return (
     <div className="relative h-8" style={{ width: trackWidth }}>
       <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
@@ -341,16 +393,24 @@ function TimelineLayerRow({
         {!locked ? (
           <span
             data-trim="start"
-            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
+            role="button"
+            tabIndex={0}
+            aria-label="Trim clip start"
+            className="absolute inset-y-0 -left-1 z-10 flex w-3 cursor-ew-resize touch-none justify-start outline-none focus-visible:ring-2 focus-visible:ring-white"
+            onKeyDown={nudgeKey("start")}
+            onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => {
               const origStart = startSec;
               const origEnd = endSec;
-              const minStart = Math.max(0, origEnd - maxSpan);
+              const origIn = inSec;
               startTimelineDrag(event, pxPerSec, (delta) => {
-                onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
+                const next = trimStartBy(origStart, origEnd, origIn, delta);
+                onTrimStart(next.startSec, next.inSec);
               });
             }}
-          />
+          >
+            <span className="pointer-events-none ml-1 h-full w-1.5 rounded-l-md bg-white/50" />
+          </span>
         ) : null}
         <span
           className={`relative min-w-0 flex-1 truncate px-2 text-left text-[10px] leading-8 ${frames ? "text-white" : ""}`}
@@ -360,7 +420,12 @@ function TimelineLayerRow({
         {!locked ? (
           <span
             data-trim="end"
-            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
+            role="button"
+            tabIndex={0}
+            aria-label="Trim clip end"
+            className="absolute inset-y-0 -right-1 z-10 flex w-3 cursor-ew-resize touch-none justify-end outline-none focus-visible:ring-2 focus-visible:ring-white"
+            onKeyDown={nudgeKey("end")}
+            onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => {
               const origStart = startSec;
               const origEnd = endSec;
@@ -369,7 +434,9 @@ function TimelineLayerRow({
                 onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
               });
             }}
-          />
+          >
+            <span className="pointer-events-none mr-1 h-full w-1.5 rounded-r-md bg-white/50" />
+          </span>
         ) : null}
       </div>
     </div>
@@ -795,6 +862,39 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
   );
 }
 
+type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
+
+const EXPORT_POLL_MS = 3000;
+
+/** Polls the generation status for an accepted (202) export until it succeeds or fails. */
+async function pollEditorExport(
+  idempotencyKey: string
+): Promise<{ ok: boolean; data: EditorExportPollData }> {
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
+    try {
+      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
+      // A missing request or lost session can never recover; anything else is transient, so the
+      // attempt stays locked and polling continues until an explicit terminal status.
+      if (res.status === 401 || res.status === 404) {
+        return { ok: false, data: { error: "Couldn't confirm the export. Check My Library in a moment." } };
+      }
+      if (!res.ok) continue;
+      const body = (await res.json()) as {
+        status?: string;
+        result?: EditorExportPollData | null;
+        error?: { message?: string; code?: string } | null;
+      };
+      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "failed") {
+        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
+      }
+    } catch {
+      /* transient network error: keep polling */
+    }
+  }
+}
+
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -803,7 +903,7 @@ export default function EditorWorkspace() {
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
   const { openPreview } = useStudioGenerationPreview();
-  const { begin, cancel, cancelling } = useIdempotentSubmit("editor:export");
+  const { begin } = useIdempotentSubmit("editor:export");
 
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -814,7 +914,13 @@ export default function EditorWorkspace() {
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [exportPhase, setExportPhase] = useState<"uploading" | "rendering" | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
+  const [exportProgressOpen, setExportProgressOpen] = useState(false);
+  // Idempotency-Key being polled for display / resume; null stops polling.
+  const [pollKey, setPollKey] = useState<string | null>(null);
+  // True when this tab did not start the render fetch (page reload): polling decides the outcome.
+  const resumedExportRef = useRef(false);
+  const lastExportRef = useRef<{ name: string; settings: EditorExportSettings } | null>(null);
   // Session-only device media: localMediaId → object URL (null = this browser no longer has it).
   // Never written to the document.
   const [localUrls, setLocalUrls] = useState<Record<string, string | null>>({});
@@ -830,6 +936,30 @@ export default function EditorWorkspace() {
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
+  const pxPerSecRef = useRef(DEFAULT_PX_PER_SEC);
+  /** scrollLeft to apply once the new width is laid out (anchored zoom). */
+  const pendingScrollRef = useRef<number | null>(null);
+  const preFitScaleRef = useRef<number | null>(null);
+  /** Set by loadProject; the first non-empty measured layout after it fits the timeline once. */
+  const fitOnOpenRef = useRef(false);
+  const setScaleAndRewind = useCallback((next: number) => {
+    const scroller = tracksScrollRef.current;
+    preFitScaleRef.current = null;
+    if (next !== pxPerSecRef.current) {
+      pendingScrollRef.current = 0;
+      pxPerSecRef.current = next;
+      setPxPerSec(next);
+    } else if (scroller) {
+      scroller.scrollLeft = 0;
+      if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = 0;
+    }
+  }, []);
+  /** Latest zoom actions for the long-lived keydown listener. */
+  const applyScaleRef = useRef<(next: number, anchorX: number) => void>(() => {});
+  const measureViewportRef = useRef(() => {});
+  const zoomActionsRef = useRef<{ zoomBy: (dir: 1 | -1) => void; fit: () => void }>({ zoomBy: () => {}, fit: () => {} });
+  const [rulerView, setRulerView] = useState({ width: 0, bucket: 0 });
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
@@ -1166,6 +1296,7 @@ export default function EditorWorkspace() {
       setTitle(data.project.title);
       persistedTitleRef.current = data.project.title;
       setDoc(parsed);
+      fitOnOpenRef.current = true;
       setSelectedId(null);
       setPlayhead(0);
       setPlaying(false);
@@ -1183,6 +1314,8 @@ export default function EditorWorkspace() {
     setTitle(DEFAULT_EDITOR_TITLE);
     persistedTitleRef.current = DEFAULT_EDITOR_TITLE;
     setDoc(empty);
+    fitOnOpenRef.current = false;
+    setScaleAndRewind(DEFAULT_PX_PER_SEC);
     setSelectedId(null);
     setPlayhead(0);
     setPlaying(false);
@@ -1190,7 +1323,7 @@ export default function EditorWorkspace() {
     setFuture([]);
     lastSavedRef.current = fingerprintOf(DEFAULT_EDITOR_TITLE, empty);
     applyUrl(null);
-  }, [applyUrl]);
+  }, [applyUrl, setScaleAndRewind]);
 
   const handleSave = useCallback(async () => {
     if (status !== "authenticated") {
@@ -1440,6 +1573,23 @@ export default function EditorWorkspace() {
         if (event.key.toLowerCase() === "y" || event.shiftKey) redo();
         else undo();
         return;
+      }
+      if (!editable && !meta && !event.altKey) {
+        if (event.key === "+" || event.key === "=") {
+          event.preventDefault();
+          zoomActionsRef.current.zoomBy(1);
+          return;
+        }
+        if (event.key === "-" || event.key === "_") {
+          event.preventDefault();
+          zoomActionsRef.current.zoomBy(-1);
+          return;
+        }
+        if (event.shiftKey && event.key.toLowerCase() === "z" && !event.repeat) {
+          event.preventDefault();
+          zoomActionsRef.current.fit();
+          return;
+        }
       }
       if (!editable && (event.key === "Delete" || event.key === "Backspace")) {
         event.preventDefault();
@@ -1816,8 +1966,32 @@ export default function EditorWorkspace() {
     }
     const attempt = begin(`${fingerprint}|${exportName}|${JSON.stringify(exportSettings)}`);
     if (!attempt) return;
+    lastExportRef.current = { name: exportName, settings: exportSettings };
+    resumedExportRef.current = false;
     setExporting(true);
     setExportError(null);
+    const startedAt = Date.now();
+    const finishExport = (patch: Partial<ExportProgressState>) => {
+      setPollKey(null);
+      setExportProgress((p) =>
+        p ? { ...p, outcome: "failed", cancelling: false, endedAt: Date.now(), ...patch } : p,
+      );
+      setExportProgressOpen(true);
+    };
+    setExportProgress({
+      outcome: "running",
+      stage: [...doc.sequence, ...doc.overlays].some(isLocalOnlyLayer) ? "uploading" : "preparing",
+      pct: null,
+      uploadDone: 0,
+      uploadTotal: 0,
+      startedAt,
+      endedAt: null,
+      error: null,
+      creationId: null,
+      cancelAllowed: true,
+      cancelling: false,
+    });
+    setExportProgressOpen(true);
     // Device files upload only now, to temp paths the export route deletes when it finishes.
     // The editor's own doc stays local-only; the server gets a copy with storagePath filled.
     const localIds = [
@@ -1828,7 +2002,7 @@ export default function EditorWorkspace() {
       const upload = { controller: new AbortController(), paths: [] as string[] };
       const { signal } = upload.controller;
       exportUploadRef.current = upload;
-      setExportPhase("uploading");
+      setExportProgress((p) => (p ? { ...p, uploadTotal: localIds.length } : p));
       try {
         for (const localMediaId of localIds) {
           const file = localFilesRef.current.get(localMediaId);
@@ -1839,15 +2013,15 @@ export default function EditorWorkspace() {
           });
           signal.throwIfAborted();
           exportUploads.push({ localMediaId, storagePath: uploaded.path });
+          setExportProgress((p) => (p ? { ...p, uploadDone: exportUploads.length } : p));
         }
         signal.throwIfAborted();
       } catch (err) {
         deleteRefUploads(upload.paths.splice(0));
         attempt.settle(false);
-        if (signal.aborted) showToast({ type: "info", message: "Export cancelled" });
-        else setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
+        if (signal.aborted) finishExport({ outcome: "cancelled" });
+        else finishExport({ error: err instanceof Error ? err.message : "Couldn't upload media for export." });
         setExporting(false);
-        setExportPhase(null);
         return;
       } finally {
         if (exportUploadRef.current === upload) exportUploadRef.current = null;
@@ -1855,7 +2029,8 @@ export default function EditorWorkspace() {
     }
     // From here the render route owns the uploads (it deletes them on every exit),
     // so Cancel goes through the generation cancel flow.
-    setExportPhase("rendering");
+    setExportProgress((p) => (p ? { ...p, stage: "preparing", pct: null } : p));
+    setPollKey(attempt.key);
     const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
     const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
       isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
@@ -1872,8 +2047,9 @@ export default function EditorWorkspace() {
           "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
+        // A dropped connection is not a terminal answer: treat it like 202 and poll the attempt's status.
+      }).catch(() => new Response(null, { status: 202 }));
+      let data = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
         ok?: boolean;
@@ -1882,26 +2058,153 @@ export default function EditorWorkspace() {
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
+        finishExport({ error: "Sign in again to export." });
         return;
       }
-      if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
-        attempt.settle(false);
-        showToast({ type: "info", message: "Export cancelled" });
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(data.error || "Export failed.");
+      // 202 is non-terminal: stay locked on this attempt until the export reports a terminal status.
+      if (res.status === 202) {
+        const finished = await pollEditorExport(attempt.key);
+        data = finished.data;
+        if (!finished.ok) {
+          if (data.code === "GENERATION_CANCELLED") {
+            attempt.settle(false);
+            finishExport({ outcome: "cancelled" });
+            return;
+          }
+          throw new Error(data.error || "Export failed.");
+        }
+      } else {
+        if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          finishExport({ outcome: "cancelled" });
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(data.error || "Export failed.");
+        }
       }
       attempt.settle(true);
-      if (data.creation?.id) void openPreview(data.creation.id);
+      finishExport({ outcome: "success", creationId: data.creation?.id ?? null });
     } catch (err) {
       attempt.settle(false);
-      setExportError(err instanceof Error ? err.message : "Export failed.");
+      finishExport({ error: err instanceof Error ? err.message : "Export failed." });
     } finally {
       setExporting(false);
-      setExportPhase(null);
     }
   };
+
+  // Display polling (and the only outcome source after a reload). Never stops on a
+  // non-terminal response; backs off while the tab is hidden.
+  useEffect(() => {
+    if (!pollKey) return;
+    let stop = false;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/generations/status", {
+          headers: { "Idempotency-Key": pollKey },
+          cache: "no-store",
+        });
+        if (res.ok && !stop) applyExportStatus(await res.json());
+      } catch {
+        // transient; next tick retries
+      }
+      if (!stop) timer = window.setTimeout(tick, document.hidden ? 8000 : 1500);
+    };
+    timer = window.setTimeout(tick, 400);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+    // applyExportStatus only uses setters and refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollKey]);
+
+  function applyExportStatus(data: {
+    status?: string;
+    cancelAllowed?: boolean;
+    progress?: unknown;
+    result?: { creation?: { id?: string } } | null;
+    error?: { message?: string; code?: string } | null;
+  }) {
+    if (data.status === "started") {
+      const prog = parseExportProgress(data.progress);
+      setExportProgress((p) =>
+        p && p.outcome === "running"
+          ? {
+              ...p,
+              stage: prog?.stage ?? p.stage,
+              pct: prog ? monotonicPct({ stage: p.stage, pct: p.pct }, prog) : p.pct,
+              cancelAllowed: data.cancelAllowed !== false,
+            }
+          : p,
+      );
+      return;
+    }
+    if (!resumedExportRef.current) return; // the render fetch settles this attempt
+    const patch: Partial<ExportProgressState> | null =
+      data.status === "succeeded"
+        ? { outcome: "success", creationId: data.result?.creation?.id ?? null }
+        : data.status === "failed"
+          ? data.error?.code === "GENERATION_CANCELLED"
+            ? { outcome: "cancelled" }
+            : { outcome: "failed", error: data.error?.message ?? "Export failed." }
+          : null;
+    if (!patch) return;
+    if (data.status === "succeeded") {
+      try {
+        const attempt = readPersistedIdempotentAttempt(window.sessionStorage, "editor:export");
+        if (attempt) clearPersistedIdempotentAttempt(window.sessionStorage, "editor:export", attempt);
+      } catch {
+        // best effort
+      }
+    }
+    resumedExportRef.current = false;
+    setPollKey(null);
+    setExporting(false);
+    setExportProgress((p) => (p ? { ...p, cancelling: false, endedAt: Date.now(), ...patch } : p));
+    setExportProgressOpen(true);
+  }
+
+  // Reload during an export: resume the same persisted attempt (never start a second one).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let key: string | undefined;
+    try {
+      key = readPersistedIdempotentAttempt(window.sessionStorage, "editor:export")?.key;
+    } catch {
+      return;
+    }
+    if (!key) return;
+    let cancelled = false;
+    void fetch("/api/generations/status", { headers: { "Idempotency-Key": key }, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || (data.status !== "started" && data.status !== "succeeded")) return;
+        resumedExportRef.current = true;
+        setExporting(true);
+        setExportProgress({
+          outcome: "running",
+          stage: "preparing",
+          pct: null,
+          uploadDone: 0,
+          uploadTotal: 0,
+          startedAt: Date.now(),
+          endedAt: null,
+          error: null,
+          creationId: null,
+          cancelAllowed: data.cancelAllowed !== false,
+          cancelling: false,
+        });
+        setExportProgressOpen(true);
+        setPollKey(key!);
+        if (data.status === "succeeded") applyExportStatus(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
 
   // Upload phase: abort and delete this export's uploads here (no generation request exists
   // yet). Render phase: the generation cancel flow; the route deletes the uploads.
@@ -1912,13 +2215,146 @@ export default function EditorWorkspace() {
       deleteRefUploads(upload.paths.splice(0));
       return;
     }
-    void cancel();
+    const key = pollKey;
+    if (!key) return;
+    setExportProgress((p) => (p ? { ...p, cancelling: true } : p));
+    void fetch("/api/generations/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: key }),
+    })
+      .then(async (res) => {
+        if (res.ok) return; // the render settles with a cancelled outcome
+        const body = await res.json().catch(() => ({}));
+        const notAllowed = res.status === 409 && body?.code === "CANCEL_NOT_ALLOWED";
+        setExportProgress((p) =>
+          p ? { ...p, cancelling: false, cancelAllowed: notAllowed ? false : p.cancelAllowed } : p,
+        );
+      })
+      .catch(() => setExportProgress((p) => (p ? { ...p, cancelling: false } : p)));
   };
 
-  const pxPerSec = 64;
-  // Headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
-  const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, Math.max(DEFAULT_EDITOR_DURATION_SEC, duration + 4));
-  const timelineWidth = Math.max(320, Math.ceil(timelineSec * pxPerSec));
+  const retryExport = () => {
+    setExportProgressOpen(false);
+    const last = lastExportRef.current;
+    if (last) void handleExport(last.name, last.settings);
+    else setExportDialogOpen(true);
+  };
+
+  const applyScale = (next: number, anchorX: number) => {
+    const scroller = tracksScrollRef.current;
+    const clamped = clampScale(next);
+    const old = pxPerSecRef.current;
+    if (!scroller || clamped === old || activeTimelineDrags > 0) return;
+    const scrollLeft = pendingScrollRef.current ?? scroller.scrollLeft;
+    pendingScrollRef.current = anchoredScrollLeft(old, clamped, scrollLeft, anchorX);
+    pxPerSecRef.current = clamped;
+    preFitScaleRef.current = null;
+    setPxPerSec(clamped);
+  };
+  /** Button, slider and keyboard zoom keep the playhead fixed when visible, else the viewport center. */
+  const zoomTo = (next: number) => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    const scrollLeft = pendingScrollRef.current ?? scroller.scrollLeft;
+    const playheadX = playhead * pxPerSecRef.current + TIMELINE_PAD_PX - scrollLeft;
+    const visible = playheadX >= 0 && playheadX <= scroller.clientWidth;
+    applyScale(next, visible ? playheadX : scroller.clientWidth / 2);
+  };
+  const fitTimeline = () => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller || activeTimelineDrags > 0) return;
+    const current = pxPerSecRef.current;
+    const fitted = fitPxPerSec(duration, scroller.clientWidth - TIMELINE_PAD_PX * 2);
+    const previous = preFitScaleRef.current;
+    // Pressing Fit again at the fitted scale restores the previous zoom.
+    const target = previous !== null && Math.abs(current - fitted) < 0.01 ? previous : fitted;
+    if (Math.abs(target - current) < 0.01) return;
+    pendingScrollRef.current = 0;
+    pxPerSecRef.current = target;
+    setPxPerSec(target);
+    preFitScaleRef.current = target === previous ? null : current;
+  };
+  useLayoutEffect(() => {
+    zoomActionsRef.current = { zoomBy: (dir) => zoomTo(stepScale(pxPerSecRef.current, dir)), fit: fitTimeline };
+    applyScaleRef.current = applyScale;
+  });
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRef.current;
+    const scroller = tracksScrollRef.current;
+    if (pending === null || !scroller) return;
+    pendingScrollRef.current = null;
+    scroller.scrollLeft = pending;
+    if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = scroller.scrollLeft;
+  }, [pxPerSec]);
+
+  // Non-passive wheel listener: Ctrl/Cmd+wheel (and trackpad pinch) zooms around the pointer;
+  // plain and shift wheel keep scrolling natively. One zoom update per animation frame.
+  useEffect(() => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    let factor = 1;
+    let anchorX = 0;
+    let frame = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      factor *= Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.002));
+      anchorX = event.clientX - scroller.getBoundingClientRect().left;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const f = factor;
+        factor = 1;
+        applyScaleRef.current(pxPerSecRef.current * f, anchorX);
+      });
+    };
+    const ruler = rulerScrollRef.current;
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    ruler?.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      scroller.removeEventListener("wheel", onWheel);
+      ruler?.removeEventListener("wheel", onWheel);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // Visible width and coarse scroll bucket drive which ruler ticks are rendered.
+  useEffect(() => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    const measure = () =>
+      setRulerView((v) => {
+        const bucket = Math.floor(scroller.scrollLeft / RULER_BUCKET_PX);
+        return v.width === scroller.clientWidth && v.bucket === bucket
+          ? v
+          : { width: scroller.clientWidth, bucket };
+      });
+    measureViewportRef.current = measure;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
+
+  // Fit once per project load, after the document is applied and the scroller has a width.
+  // Never re-runs on edits or resizes: the flag is only set by loadProject.
+  useLayoutEffect(() => {
+    if (!fitOnOpenRef.current) return;
+    const scroller = tracksScrollRef.current;
+    if (!scroller || scroller.clientWidth <= 0) return;
+    fitOnOpenRef.current = false;
+    if (doc.sequence.length === 0 && doc.overlays.length === 0) {
+      setScaleAndRewind(DEFAULT_PX_PER_SEC);
+      return;
+    }
+    setScaleAndRewind(openFitPxPerSec(duration, scroller.clientWidth - TIMELINE_PAD_PX * 2));
+  }, [doc, duration, rulerView.width, setScaleAndRewind]);
+
+  // Small headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
+  const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, duration + FIT_MARGIN_SEC);
+  const timelineWidth = Math.max(rulerView.width - TIMELINE_PAD_PX * 2, 320, Math.ceil(timelineSec * pxPerSec));
   const laneWidth = duration * pxPerSec;
 
   return (
@@ -1929,7 +2365,13 @@ export default function EditorWorkspace() {
         saving={saving}
         exportReady={!exportCheck && duration > 0}
         exporting={exporting}
-        cancelling={cancelling}
+        exportChip={
+          exporting && exportProgress
+            ? exportProgress.pct == null
+              ? "Exporting…"
+              : `Exporting… ${exportProgress.pct}%`
+            : null
+        }
         onTitleChange={setTitle}
         onTitleCommit={(value) => void commitTitle(value)}
         onSave={() => void handleSave()}
@@ -1945,10 +2387,24 @@ export default function EditorWorkspace() {
             openSignInModal();
             return;
           }
-          setExportDialogOpen(true);
+          if (exporting) setExportProgressOpen(true);
+          else setExportDialogOpen(true);
         }}
-        onCancel={cancelExport}
       />
+
+      {exportProgress ? (
+        <EditorExportProgressDialog
+          open={exportProgressOpen}
+          state={exportProgress}
+          onClose={() => setExportProgressOpen(false)}
+          onCancel={cancelExport}
+          onRetry={retryExport}
+          onOpenLibrary={(id) => {
+            setExportProgressOpen(false);
+            void openPreview(id);
+          }}
+        />
+      ) : null}
 
       {exportDialogOpen ? (
         <EditorExportDialog
@@ -2116,7 +2572,7 @@ export default function EditorWorkspace() {
                         storagePath={overlay.storagePath}
                         localUrl={localUrlFor(overlay)}
                         missing={isMissingMedia(overlay)}
-                        currentTime={0}
+                        currentTime={overlay.inSec ?? 0}
                         playing={playing && visible}
                         muted={overlay.muted ?? false}
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
@@ -2201,7 +2657,7 @@ export default function EditorWorkspace() {
               }}
               className="h-1.5 shrink-0 cursor-row-resize bg-white/10 hover:bg-brand-primary/50 active:bg-brand-primary"
             />
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
+            <div className="grid grid-cols-1 items-center gap-2 border-b border-white/10 md:grid-cols-[1fr_auto_1fr] px-3 py-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <div ref={addMenuRef} className="relative">
                   <button
@@ -2433,6 +2889,48 @@ export default function EditorWorkspace() {
 
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => zoomActionsRef.current.zoomBy(-1)}
+                    disabled={pxPerSec <= MIN_PX_PER_SEC}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:hover:bg-transparent"
+                    aria-label="Zoom timeline out"
+                    title="Zoom timeline out (-)"
+                  >
+                    <ZoomOut className="h-3.5 w-3.5" />
+                  </button>
+                  <input
+                    type="range"
+                    min={Math.log(MIN_PX_PER_SEC)}
+                    max={Math.log(MAX_PX_PER_SEC)}
+                    step={Math.log(ZOOM_STEP) / 10}
+                    value={Math.log(pxPerSec)}
+                    onChange={(event) => zoomTo(Math.exp(Number(event.target.value)))}
+                    aria-label="Zoom timeline"
+                    aria-valuetext={`${Math.round(pxPerSec)} pixels per second`}
+                    className="hidden h-1 w-24 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary sm:block"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => zoomActionsRef.current.zoomBy(1)}
+                    disabled={pxPerSec >= MAX_PX_PER_SEC}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:hover:bg-transparent"
+                    aria-label="Zoom timeline in"
+                    title="Zoom timeline in (+)"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fitTimeline}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
+                    aria-label="Fit timeline"
+                    title="Fit timeline (Shift+Z)"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
                   {EDITOR_ASPECTS.map((value) => (
                     <button
                       key={value}
@@ -2478,16 +2976,32 @@ export default function EditorWorkspace() {
                   >
                     {formatTimecode(playhead)}
                   </div>
-                  {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
-                    <div
-                      key={i}
-                      className={`absolute top-0 flex flex-col items-start ${i > duration ? "opacity-40" : ""}`}
-                      style={{ left: i * pxPerSec }}
-                    >
-                      <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
-                      <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
-                    </div>
-                  ))}
+                  {(() => {
+                    const interval = rulerIntervalSec(pxPerSec);
+                    const [first, last] = visibleTickRange(
+                      rulerView.bucket * RULER_BUCKET_PX - RULER_BUCKET_PX,
+                      (rulerView.bucket + 1) * RULER_BUCKET_PX + rulerView.width + RULER_BUCKET_PX,
+                      pxPerSec,
+                      interval,
+                      timelineWidth
+                    );
+                    return Array.from({ length: last - first + 1 }, (_, n) => {
+                      const i = first + n;
+                      const t = i * interval;
+                      return (
+                        <div
+                          key={i}
+                          className={`absolute top-0 flex flex-col items-start ${t > duration ? "opacity-40" : ""}`}
+                          style={{ left: t * pxPerSec }}
+                        >
+                          <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
+                          <span className="mt-0.5 whitespace-nowrap text-[9px] tabular-nums text-text-secondary">
+                            {formatRulerLabel(t)}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </div>
@@ -2609,6 +3123,7 @@ export default function EditorWorkspace() {
                   if (rulerScrollRef.current) {
                     rulerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
                   }
+                  measureViewportRef.current();
                 }}
               >
                 <div
@@ -2646,14 +3161,15 @@ export default function EditorWorkspace() {
                           laneWidth={laneWidth}
                           maxEnd={EDITOR_MAX_DURATION_SEC}
                           maxSpan={maxOverlayLayerDurationSec(overlay)}
+                          inSec={overlay.kind === "video" ? overlay.inSec ?? 0 : undefined}
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
                           filmstrip={
                             overlay.kind === "video"
                               ? {
                                   storagePath: overlay.storagePath,
                                   localUrl: localUrlFor(overlay),
-                                  inSec: 0,
-                                  outSec: overlay.endSec - overlay.startSec,
+                                  inSec: overlay.inSec ?? 0,
+                                  outSec: (overlay.inSec ?? 0) + overlay.endSec - overlay.startSec,
                                 }
                               : undefined
                           }
@@ -2661,8 +3177,8 @@ export default function EditorWorkspace() {
                           onMove={(startSec, endSec) =>
                             updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
                           }
-                          onTrimStart={(startSec) =>
-                            updateOverlay(overlay.id, { startSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
+                          onTrimStart={(startSec, inSec) =>
+                            updateOverlay(overlay.id, inSec === undefined ? { startSec } : { startSec, inSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
                           }
                           onTrimEnd={(endSec) =>
                             updateOverlay(overlay.id, { endSec }, { coalesceKey: `tl-trim-e:${overlay.id}` })
@@ -2698,6 +3214,7 @@ export default function EditorWorkspace() {
                             laneWidth={laneWidth}
                             maxEnd={EDITOR_MAX_DURATION_SEC}
                             maxSpan={maxClipLayerDurationSec(clip)}
+                            inSec={clip.inSec}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
                             filmstrip={{
                               storagePath: clip.storagePath,
@@ -2709,8 +3226,8 @@ export default function EditorWorkspace() {
                             onMove={(startSec, endSec) =>
                               updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
                             }
-                            onTrimStart={(startSec) =>
-                              updateClip(clip.id, { startSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
+                            onTrimStart={(startSec, inSec) =>
+                              updateClip(clip.id, { startSec, inSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
                             }
                             onTrimEnd={(endSec) =>
                               updateClip(clip.id, { endSec }, { coalesceKey: `tl-trim-e:${clip.id}` })
@@ -2942,19 +3459,6 @@ export default function EditorWorkspace() {
           }
         }}
       />
-
-      {exportPhase === "uploading" ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-brand-primary/40 bg-N100/95 px-4 py-2.5 text-xs text-brand-primary shadow-2xl backdrop-blur-md transition-all duration-300"
-        >
-          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
-          <span className="font-medium text-text-primary">
-            Uploading media for export…
-          </span>
-        </div>
-      ) : null}
 
       {toast ? <EditorToast toast={toast} onDismiss={dismissToast} /> : null}
     </div>
