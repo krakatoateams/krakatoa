@@ -207,6 +207,7 @@ export async function POST(req: Request) {
         text: o.text,
         creationId: o.creationId,
         storagePath: o.storagePath,
+        inSec: o.inSec,
         muted: o.muted,
       })),
     });

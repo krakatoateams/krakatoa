@@ -69,6 +69,7 @@ import {
   isPlaceholderSpan,
   maxClipLayerDurationSec,
   maxOverlayLayerDurationSec,
+  trimStartBy,
   normalizeEditorTitle,
   normalizeLayerName,
   parseEditorDocument,
@@ -262,6 +263,7 @@ function TimelineLayerRow({
   laneWidth,
   maxEnd,
   maxSpan,
+  inSec,
   label,
   selectedClassName,
   onSelect,
@@ -282,11 +284,13 @@ function TimelineLayerRow({
   laneWidth: number;
   maxEnd: number;
   maxSpan: number;
+  /** Source in-point for video layers; undefined when the layer has no source. */
+  inSec?: number;
   label: ReactNode;
   selectedClassName: string;
   onSelect: () => void;
   onMove: (startSec: number, endSec: number) => void;
-  onTrimStart: (startSec: number) => void;
+  onTrimStart: (startSec: number, inSec?: number) => void;
   onTrimEnd: (endSec: number) => void;
   /** Video layers: source range to show as a frame strip behind the label. */
   filmstrip?: { storagePath: string | null; localUrl: string | null; inSec: number; outSec: number };
@@ -300,6 +304,18 @@ function TimelineLayerRow({
     filmstrip?.outSec ?? 0,
     width
   );
+  const nudgeKey = (edge: "start" | "end") => (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = (event.shiftKey ? 1 : 0.1) * (event.key === "ArrowLeft" ? -1 : 1);
+    if (edge === "start") {
+      const next = trimStartBy(startSec, endSec, inSec, step);
+      onTrimStart(next.startSec, next.inSec);
+    } else {
+      onTrimEnd(Math.max(startSec + 0.2, Math.min(Math.min(maxEnd, startSec + maxSpan), snapTenth(endSec + step))));
+    }
+  };
   return (
     <div className="relative h-8" style={{ width: trackWidth }}>
       <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
@@ -341,16 +357,24 @@ function TimelineLayerRow({
         {!locked ? (
           <span
             data-trim="start"
-            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md bg-white/50"
+            role="button"
+            tabIndex={0}
+            aria-label="Trim clip start"
+            className="absolute inset-y-0 -left-1 z-10 flex w-3 cursor-ew-resize touch-none justify-start outline-none focus-visible:ring-2 focus-visible:ring-white"
+            onKeyDown={nudgeKey("start")}
+            onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => {
               const origStart = startSec;
               const origEnd = endSec;
-              const minStart = Math.max(0, origEnd - maxSpan);
+              const origIn = inSec;
               startTimelineDrag(event, pxPerSec, (delta) => {
-                onTrimStart(Math.max(minStart, Math.min(origEnd - 0.2, origStart + delta)));
+                const next = trimStartBy(origStart, origEnd, origIn, delta);
+                onTrimStart(next.startSec, next.inSec);
               });
             }}
-          />
+          >
+            <span className="pointer-events-none ml-1 h-full w-1.5 rounded-l-md bg-white/50" />
+          </span>
         ) : null}
         <span
           className={`relative min-w-0 flex-1 truncate px-2 text-left text-[10px] leading-8 ${frames ? "text-white" : ""}`}
@@ -360,7 +384,12 @@ function TimelineLayerRow({
         {!locked ? (
           <span
             data-trim="end"
-            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize rounded-r-md bg-white/50"
+            role="button"
+            tabIndex={0}
+            aria-label="Trim clip end"
+            className="absolute inset-y-0 -right-1 z-10 flex w-3 cursor-ew-resize touch-none justify-end outline-none focus-visible:ring-2 focus-visible:ring-white"
+            onKeyDown={nudgeKey("end")}
+            onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => {
               const origStart = startSec;
               const origEnd = endSec;
@@ -369,7 +398,9 @@ function TimelineLayerRow({
                 onTrimEnd(Math.max(origStart + 0.2, Math.min(cap, origEnd + delta)));
               });
             }}
-          />
+          >
+            <span className="pointer-events-none mr-1 h-full w-1.5 rounded-r-md bg-white/50" />
+          </span>
         ) : null}
       </div>
     </div>
@@ -2116,7 +2147,7 @@ export default function EditorWorkspace() {
                         storagePath={overlay.storagePath}
                         localUrl={localUrlFor(overlay)}
                         missing={isMissingMedia(overlay)}
-                        currentTime={0}
+                        currentTime={overlay.inSec ?? 0}
                         playing={playing && visible}
                         muted={overlay.muted ?? false}
                         onNaturalSize={(naturalW, naturalH) => fitOverlayToNaturalSize(overlay.id, naturalW, naturalH)}
@@ -2646,14 +2677,15 @@ export default function EditorWorkspace() {
                           laneWidth={laneWidth}
                           maxEnd={EDITOR_MAX_DURATION_SEC}
                           maxSpan={maxOverlayLayerDurationSec(overlay)}
+                          inSec={overlay.kind === "video" ? overlay.inSec ?? 0 : undefined}
                           selectedClassName="bg-white/25 ring-1 ring-white/40"
                           filmstrip={
                             overlay.kind === "video"
                               ? {
                                   storagePath: overlay.storagePath,
                                   localUrl: localUrlFor(overlay),
-                                  inSec: 0,
-                                  outSec: overlay.endSec - overlay.startSec,
+                                  inSec: overlay.inSec ?? 0,
+                                  outSec: (overlay.inSec ?? 0) + overlay.endSec - overlay.startSec,
                                 }
                               : undefined
                           }
@@ -2661,8 +2693,8 @@ export default function EditorWorkspace() {
                           onMove={(startSec, endSec) =>
                             updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
                           }
-                          onTrimStart={(startSec) =>
-                            updateOverlay(overlay.id, { startSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
+                          onTrimStart={(startSec, inSec) =>
+                            updateOverlay(overlay.id, inSec === undefined ? { startSec } : { startSec, inSec }, { coalesceKey: `tl-trim-s:${overlay.id}` })
                           }
                           onTrimEnd={(endSec) =>
                             updateOverlay(overlay.id, { endSec }, { coalesceKey: `tl-trim-e:${overlay.id}` })
@@ -2698,6 +2730,7 @@ export default function EditorWorkspace() {
                             laneWidth={laneWidth}
                             maxEnd={EDITOR_MAX_DURATION_SEC}
                             maxSpan={maxClipLayerDurationSec(clip)}
+                            inSec={clip.inSec}
                             selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
                             filmstrip={{
                               storagePath: clip.storagePath,
@@ -2709,8 +2742,8 @@ export default function EditorWorkspace() {
                             onMove={(startSec, endSec) =>
                               updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
                             }
-                            onTrimStart={(startSec) =>
-                              updateClip(clip.id, { startSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
+                            onTrimStart={(startSec, inSec) =>
+                              updateClip(clip.id, { startSec, inSec }, { coalesceKey: `tl-trim-s:${clip.id}` })
                             }
                             onTrimEnd={(endSec) =>
                               updateClip(clip.id, { endSec }, { coalesceKey: `tl-trim-e:${clip.id}` })

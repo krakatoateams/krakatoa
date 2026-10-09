@@ -221,7 +221,7 @@ export function buildEditorFfmpegGraph(
     if (overlay.kind !== "video") continue;
     const url = mediaUrlFor(urls, overlay.creationId, overlay.storagePath, overlay.id);
     if (url) {
-      addAudio(overlay, url, `atrim=duration=${overlayDurationSec(overlay)}`);
+      addAudio(overlay, url, `atrim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + overlayDurationSec(overlay))}`);
     }
   }
 
@@ -265,7 +265,7 @@ export function buildEditorFfmpegGraph(
     const dur = overlayDurationSec(overlay);
     if (mapped.kind === "video") {
       filters.push(
-        `[${mapped.index}:v]trim=duration=${dur},setpts=PTS-STARTPTS,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
+        `[${mapped.index}:v]trim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + dur)},setpts=PTS-STARTPTS,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
       );
     } else {
       filters.push(
@@ -492,9 +492,13 @@ export function editorRenderSelfCheck(): void {
     "non-zero inSec and startSec: atrim from inSec, adelay to startSec"
   );
   assert(
-    av.includes(`[6:a]atrim=duration=2.5,asetpts=PTS-STARTPTS,${fmt},adelay=2000:all=1[a2]`),
+    av.includes(`[6:a]atrim=start=0:end=2.5,asetpts=PTS-STARTPTS,${fmt},adelay=2000:all=1[a2]`),
     "unmuted video overlay audio from source 0 for its window"
   );
+  const inDoc: EditorDocument = { ...avDoc, overlays: avDoc.overlays.map((o) => (o.id === "v1" ? { ...o, inSec: 1 } : o)) };
+  const inCmd = buildEditorFfmpegGraph(inDoc, avUrls, withAudio).command;
+  assert(inCmd.includes("atrim=start=1:end=3.5,asetpts"), "video overlay audio trimmed from its inSec");
+  assert(inCmd.includes("trim=start=1:end=3.5,setpts=PTS-STARTPTS,scale="), "video overlay video trimmed from its inSec");
   assert(!av.includes("[2:a]") && !av.includes("[3:a]"), "image overlay and video inputs never contribute audio");
   assert(
     av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=5[aout]"),
@@ -515,7 +519,7 @@ export function editorRenderSelfCheck(): void {
     avUrls,
     withAudio
   ).command;
-  assert(!mutedOverlay.includes("atrim=duration=2.5") && mutedOverlay.includes("amix=inputs=2"), "muted video overlay is silent");
+  assert(!mutedOverlay.includes("atrim=start=0:end=2.5") && mutedOverlay.includes("amix=inputs=2"), "muted video overlay is silent");
 
   const hidden = buildEditorFfmpegGraph(
     { ...avDoc, sequence: [doc.sequence[0], { ...doc.sequence[1], hidden: true }] },
