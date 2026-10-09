@@ -42,7 +42,7 @@ import {
   DEFAULT_PRODUCT_PHOTO_QUALITY,
   DEFAULT_PRODUCT_PHOTO_RESOLUTION,
   DEFAULT_PRODUCT_PHOTO_TIER,
-  clampAspectRatioForTier,
+  photoAspectRatioDisplayForTier,
   photoAspectRatioOptionsForTier,
   photoTierPriceHint,
   photoTierPricingKey,
@@ -719,8 +719,8 @@ function SkillOmniInner({
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
-                    value={clampAspectRatioForTier(tier, aspectRatio)}
-                    activeId={clampAspectRatioForTier(tier, aspectRatio)}
+                    value={photoAspectRatioDisplayForTier(tier, aspectRatio)}
+                    activeId={photoAspectRatioDisplayForTier(tier, aspectRatio)}
                     options={photoAspectRatioOptionsForTier(tier).map((a) => ({
                       id: a.id,
                       label: a.label,

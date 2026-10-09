@@ -5,7 +5,10 @@ import {
   PRODUCT_PHOTO_TIERS,
   buildPhotoProviderInput,
   getProductPhotoTier,
+  PHOTO_ASPECT_RATIOS,
   normalizeProductPhotoOptions,
+  photoAspectRatioDisplayForTier,
+  photoAspectRatioOptionsForTier,
   productPhotoPricingKey,
 } from "./product-photo";
 
@@ -45,4 +48,17 @@ assert.deepEqual(input, {
 assert.equal("input_images" in buildPhotoProviderInput({
   tier, prompt: "p", aspectRatio: "4:5", providerResolution: null, quality: "low",
 }), false);
+// Aspect-ratio picker: restricted for GPT Image 2 only; every other tier is unchanged.
+assert.deepEqual(
+  photoAspectRatioOptionsForTier(tier).map((a) => a.id),
+  ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9"],
+);
+assert.equal(photoAspectRatioDisplayForTier(tier, "4:5"), "3:4");
+assert.equal(photoAspectRatioDisplayForTier(tier, "21:9"), "16:9");
+for (const other of PRODUCT_PHOTO_TIERS.filter((t) => t.id !== "gpt_image_2")) {
+  assert.equal(photoAspectRatioOptionsForTier(other), PHOTO_ASPECT_RATIOS, `${other.id} keeps full picker`);
+  for (const a of PHOTO_ASPECT_RATIOS) {
+    assert.equal(photoAspectRatioDisplayForTier(other, a.id), a.id, `${other.id} shows selected ratio`);
+  }
+}
 console.log("product-photo gpt-image self-check passed");

@@ -23,7 +23,7 @@ import {
   DEFAULT_PHOTO_STYLE,
   DEFAULT_PRODUCT_PHOTO_QUALITY,
   PRODUCT_PHOTO_TIERS,
-  clampAspectRatioForTier,
+  photoAspectRatioDisplayForTier,
   getProductPhotoTier,
   photoAspectRatioOptionsForTier,
   photoTierPriceHint,
@@ -337,9 +337,9 @@ export default function ImageNode({
             />
             <ChipDropdown
               icon={<Crop className="h-3.5 w-3.5" />}
-              value={clampAspectRatioForTier(tier, data.aspectRatio)}
+              value={photoAspectRatioDisplayForTier(tier, data.aspectRatio)}
               options={photoAspectRatioOptionsForTier(tier).map((r) => ({ id: r.id, label: r.label }))}
-              activeId={clampAspectRatioForTier(tier, data.aspectRatio)}
+              activeId={photoAspectRatioDisplayForTier(tier, data.aspectRatio)}
               square
               onSelect={(next) => patch({ aspectRatio: next as PhotoAspectRatio })}
             />

@@ -192,6 +192,11 @@ export type ProductPhotoTier = {
   referenceParam?: "image_input" | "input_image" | "input_images";
   /** Subset of aspect ratios the provider accepts; undefined = all are supported. */
   supportedAspectRatios?: PhotoAspectRatio[];
+  /**
+   * When true the pickers offer only `supportedAspectRatios` and show the clamped
+   * value. Opt-in: older tiers keep the full picker and are clamped server-side only.
+   */
+  limitAspectRatioPicker?: boolean;
   /** Show this tier in the legacy /tools/photo "Photo backup" tier grid. */
   legacyPicker?: boolean;
 };
@@ -383,6 +388,7 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     referenceParam: "input_images",
     // Provider ratios (verbatim): 4:5 and 21:9 are not offered and clamp to 3:4 / 16:9.
     supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9"],
+    limitAspectRatioPicker: true,
   },
 ];
 
@@ -477,11 +483,19 @@ export function photoTierPriceHint(
   return `${imageCredits(pricingKey, 1)}${multi ? "+" : ""}`;
 }
 
-/** Aspect ratios the tier's provider accepts, in UI order (all when unrestricted). */
+/** Aspect ratio options for the picker: restricted only for tiers that opt in. */
 export function photoAspectRatioOptionsForTier(tier: ProductPhotoTier) {
-  return tier.supportedAspectRatios
+  return tier.limitAspectRatioPicker && tier.supportedAspectRatios
     ? PHOTO_ASPECT_RATIOS.filter((a) => tier.supportedAspectRatios!.includes(a.id))
     : PHOTO_ASPECT_RATIOS;
+}
+
+/** Ratio shown in the picker chip: clamped only for tiers that opt in. */
+export function photoAspectRatioDisplayForTier(
+  tier: ProductPhotoTier,
+  aspectRatio: PhotoAspectRatio
+): PhotoAspectRatio {
+  return tier.limitAspectRatioPicker ? clampAspectRatioForTier(tier, aspectRatio) : aspectRatio;
 }
 
 /**

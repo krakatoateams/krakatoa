@@ -54,7 +54,7 @@ import {
   PRODUCT_PHOTO_TIERS,
   CHARACTER_STYLES,
   DEFAULT_PRODUCT_PHOTO_QUALITY,
-  clampAspectRatioForTier,
+  photoAspectRatioDisplayForTier,
   photoAspectRatioOptionsForTier,
   photoTierPriceHint,
   photoTierPricingKey,
@@ -1118,8 +1118,8 @@ function PhotoOmniPage({
                     square
                     showChevron={false}
                     icon={<Crop className="h-3.5 w-3.5" />}
-                    value={clampAspectRatioForTier(tier, aspectRatio)}
-                    activeId={clampAspectRatioForTier(tier, aspectRatio)}
+                    value={photoAspectRatioDisplayForTier(tier, aspectRatio)}
+                    activeId={photoAspectRatioDisplayForTier(tier, aspectRatio)}
                     // Social posts are limited to the two ratios Instagram shows
                     // uncropped in the feed; other modes offer the full set.
                     options={
