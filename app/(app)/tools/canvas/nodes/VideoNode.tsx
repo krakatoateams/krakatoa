@@ -25,7 +25,6 @@ import {
 } from "@/lib/canvas-video-completion";
 import { pickGenerateStoragePath, useSignedMediaUrlState } from "@/lib/use-signed-media-url";
 import {
-  TEXT_TO_VIDEO_MODELS,
   getAllowedDurations,
   formatVideoModelCreditHint,
   getVideoModel,
@@ -33,6 +32,12 @@ import {
   type VideoModelId,
   type VideoResolution,
 } from "@/lib/video-models";
+import {
+  canvasVideoComposerKey,
+  canvasVideoModelFitsInput,
+  canvasVideoModelOptions,
+  snapCanvasVideoModel,
+} from "@/lib/canvas-model-options";
 import {
   CANVAS_KIND_LABELS,
   findUpstreamImages,
@@ -62,6 +67,7 @@ import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
 import type { VideoNodeData } from "../node-data";
+import { useCanvasVideoFeatures } from "../use-canvas-features";
 
 export type VideoFlowNode = Node<VideoNodeData, "video">;
 
@@ -75,6 +81,8 @@ export default function VideoNode({
   const openPreview = useCanvasPreview();
   const { openLibrary } = useCanvasLibrary();
   const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [modelNote, setModelNote] = useState<string | null>(null);
+  const features = useCanvasVideoFeatures();
   const nodes = useStore((s) => s.nodes) as unknown as CanvasGraphNode[];
   const edges = useStore((s) => s.edges) as unknown as CanvasGraphEdge[];
   const { status } = useCurrentUser();
@@ -117,7 +125,15 @@ export default function VideoNode({
   });
   const cost = videoCredits(videoPricingKey, data.duration);
   const limitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
-  const canGenerate = prompt.length > 0 && !limitError;
+  const hasRef = refImages.length > 0;
+  const modelOptions = useMemo(
+    () => canvasVideoModelOptions(hasRef, features.data),
+    [hasRef, features.data]
+  );
+  // Unknown enablement is "not ready", never "everything is enabled".
+  const modelsReady = features.data !== null;
+  const modelValid = modelOptions.some((m) => m.id === data.modelId);
+  const canGenerate = prompt.length > 0 && !limitError && modelValid;
 
   const patch = (next: Partial<VideoNodeData>) => updateNodeData(id, next);
 
@@ -146,14 +162,14 @@ export default function VideoNode({
     }
   };
 
-  const modelOptions = useMemo(
+  const modelChipOptions = useMemo(
     () =>
-      TEXT_TO_VIDEO_MODELS.map((m) => ({
+      modelOptions.map((m) => ({
         id: m.id,
         label: m.modelLabel,
         hint: formatVideoModelCreditHint(m, videoCredits, data.duration),
       })),
-    [videoCredits, data.duration]
+    [modelOptions, videoCredits, data.duration]
   );
 
   const handleGenerate = async () => {
@@ -200,7 +216,7 @@ export default function VideoNode({
     }
 
     const body = {
-      composerKey: refImages.length > 0 ? "image2video" : "text2video",
+      composerKey: canvasVideoComposerKey(data.modelId),
       modelId: data.modelId,
       prompt,
       duration: data.duration,
@@ -280,7 +296,8 @@ export default function VideoNode({
     }
   };
 
-  const selectModel = (nextId: string) => {
+  const selectModel = (nextId: string, note: string | null = null) => {
+    setModelNote(note);
     const next = getVideoModel(nextId);
     const nextDurations = getAllowedDurations(next, next.defaultResolution);
     patch({
@@ -291,6 +308,20 @@ export default function VideoNode({
       generateAudio: next.defaultGenerateAudio,
     });
   };
+
+  // Snap to a valid, admin-enabled model once enablement is known (never before).
+  const snapId = modelsReady && !modelValid ? snapCanvasVideoModel(data.modelId, modelOptions, features.data) : null;
+  useEffect(() => {
+    if (!snapId || snapId === data.modelId) return;
+    const next = getVideoModel(snapId);
+    const reason = canvasVideoModelFitsInput(getVideoModel(data.modelId), hasRef)
+      ? "isn't available right now"
+      : hasRef
+        ? "can't use reference images"
+        : "can't be used without a reference image";
+    selectModel(snapId, `${getVideoModel(data.modelId).modelLabel} ${reason}, so the model was switched to ${next.modelLabel}.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapId, data.modelId, hasRef]);
 
   return (
     <CanvasNodeFrame
@@ -392,14 +423,20 @@ export default function VideoNode({
             </p>
           )}
           <div className={`${STUDIO_CHIP_ROW_CLASS} mb-2`}>
-            <ChipDropdown
-              icon={<Cpu className="h-3.5 w-3.5" />}
-              value={model.modelLabel}
-              options={modelOptions}
-              activeId={data.modelId}
-              square
-              onSelect={selectModel}
-            />
+            {modelsReady ? (
+              modelOptions.length > 0 && (
+                <ChipDropdown
+                  icon={<Cpu className="h-3.5 w-3.5" />}
+                  value={model.modelLabel}
+                  options={modelChipOptions}
+                  activeId={data.modelId}
+                  square
+                  onSelect={(next) => selectModel(next)}
+                />
+              )
+            ) : (
+              <div className="h-8 w-28 animate-pulse rounded-lg bg-white/5" aria-hidden />
+            )}
             <ChipDropdown
               icon={<Clock className="h-3.5 w-3.5" />}
               value={`${data.duration}s`}
@@ -443,6 +480,21 @@ export default function VideoNode({
               </button>
             )}
           </div>
+          {modelNote && modelValid && (
+            <p role="status" className="mb-2 text-[11px] text-text-secondary">
+              {modelNote}
+            </p>
+          )}
+          {features.status === "error" && !modelsReady && (
+            <p role="alert" className="mb-2 text-[11px] text-error">
+              Couldn&apos;t load available models. Try again in a moment.
+            </p>
+          )}
+          {modelsReady && modelOptions.length === 0 && (
+            <p role="alert" className="mb-2 text-[11px] text-error">
+              No models are available for this tool right now.
+            </p>
+          )}
           {data.error && (
             <p className="mb-2 flex items-start gap-1.5 text-[11px] text-error">
               <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
