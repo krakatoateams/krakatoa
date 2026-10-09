@@ -16,33 +16,44 @@ export async function editorExportWorkflow(params: EditorExportParams): Promise<
 
   let stepId: string | null = null;
   let name: string | null = null;
+  // Uploaded object not yet recorded in the library; removed on any failure or cancel.
+  let orphanPath: string | null = null;
   try {
+    const startedAtMs = await nowStep();
     stepId = await beginStep(params, "editor_encode", "Encode timeline in-system (FFmpeg)");
     const start = await startEncodeStep(params);
     if (!start.ok) return await failStep(params, stepId, { cancelled: false, code: start.code });
     name = start.sandboxName;
 
-    const encoded = await waitFor(params, name, start.cmdId, "encode");
+    const encoded = await waitFor(params, name, start.cmdId, "encode", startedAtMs);
     if (encoded.state !== "done") return await settleNotDone(params, stepId, encoded);
     await endStep(params, stepId, { durationSec: start.durationSec });
 
     stepId = await beginStep(params, "storage_upload", "Save export to Supabase");
     const upload = await startUploadStep(params, name);
     if (!upload.ok) return await failStep(params, stepId, { cancelled: false, code: upload.code });
-    const uploaded = await waitFor(params, name, upload.cmdId, "upload");
+    orphanPath = upload.storagePath;
+    const uploaded = await waitFor(params, name, upload.cmdId, "upload", startedAtMs);
     if (uploaded.state !== "done") return await settleNotDone(params, stepId, uploaded);
 
-    await finalizeStep(params, stepId, name, upload.storagePath, start);
+    const finalized = await finalizeStep(params, stepId, name, upload.storagePath, start);
+    if (finalized) orphanPath = null;
+    else await failStep(params, stepId, { cancelled: false, code: "EDITOR_EXPORT_UPLOAD_FAILED" });
   } catch (error) {
     console.error("[editor-export workflow] unexpected failure", error instanceof Error ? error.name : "unknown");
     await failStep(params, stepId, { cancelled: false, code: "EDITOR_EXPORT_ENCODER_FAILED" });
   } finally {
-    await cleanupStep(params, name);
+    await cleanupStep(params, name, orphanPath);
   }
 }
 
-async function waitFor(params: EditorExportParams, name: string, cmdId: string, stage: CommandStage): Promise<PollResult> {
-  const startedAtMs = await nowStep();
+async function waitFor(
+  params: EditorExportParams,
+  name: string,
+  cmdId: string,
+  stage: CommandStage,
+  startedAtMs: number
+): Promise<PollResult> {
   for (let i = 0; i < MAX_POLLS; i++) {
     await sleep(POLL_MS);
     const r = await pollStep(params, name, cmdId, stage, startedAtMs);
@@ -101,8 +112,15 @@ async function finalizeStep(
 ) {
   "use step";
   const core = await import("@/lib/editor-export-core");
-  const fileSizeBytes = await core.encodedFileSizeCore(name);
-  await core.finalizeSuccessCore(params, stepId, { storagePath, fileSizeBytes, ...meta });
+  // Never throws: a Workflow retry after a partial write would duplicate the library row.
+  try {
+    const fileSizeBytes = await core.encodedFileSizeCore(name);
+    await core.finalizeSuccessCore(params, stepId, { storagePath, fileSizeBytes, ...meta });
+    return true;
+  } catch (e) {
+    console.error("[editor-export workflow] finalize failed", e instanceof Error ? e.name : "unknown");
+    return false;
+  }
 }
 
 async function failStep(
@@ -115,9 +133,9 @@ async function failStep(
   await core.finalizeFailureCore(params, stepId, outcome);
 }
 
-async function cleanupStep(params: EditorExportParams, name: string | null) {
+async function cleanupStep(params: EditorExportParams, name: string | null, orphanPath: string | null) {
   "use step";
   const core = await import("@/lib/editor-export-core");
   await core.stopSandboxCore(name);
-  await core.removeExportUploadsCore(params.exportUploadPaths);
+  await core.removeExportUploadsCore(orphanPath ? [...params.exportUploadPaths, orphanPath] : params.exportUploadPaths);
 }

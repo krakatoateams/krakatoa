@@ -1,7 +1,7 @@
 import "server-only";
 import { Sandbox } from "@vercel/sandbox";
 import { supabaseServer } from "@/lib/supabase-server";
-import { signStoragePathForPipeline, signStoragePathForUser } from "@/lib/storage-signed-url";
+import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import {
   MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
@@ -192,9 +192,11 @@ export async function pollCommandCore(
     const stderr = stage === "encode" ? await cmd.stderr().catch(() => "") : "";
     return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode: cmd.exitCode, stderr }) };
   } catch (e) {
-    // The sandbox vanishing past its lifetime is a timeout; anything else is a runner problem.
+    // Past the time budget the sandbox is gone: a timeout. Otherwise a transient API error must not
+    // kill a healthy encode, so rethrow and let Workflow retry this step.
     logSafe("poll failed", e);
-    return { state: "failed", code: classifyEditorExportFailure({ stage: "setup", timedOut }) };
+    if (timedOut) return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
+    throw e;
   }
 }
 
@@ -255,11 +257,10 @@ export async function finalizeSuccessCore(
       return null;
     }
   };
-  const { url: mediaUrl } = await signStoragePathForUser(r.storagePath, p.userId, "ui");
   await endStepCore(p, stepId, { storagePath: r.storagePath });
 
-  const historyItem = await safe("insertUserCreation", () =>
-    insertUserCreation({
+  // Not swallowed: without a library row the export would "succeed" yet be invisible.
+  const historyItem = await insertUserCreation({
       userId: p.userId,
       tool: "video_editor",
       mediaType: "video",
@@ -275,8 +276,7 @@ export async function finalizeSuccessCore(
         clipCount: p.document.sequence.length,
         overlayCount: p.document.overlays.length,
       },
-    })
-  );
+  });
   if (p.videoAssetId) {
     await safe("markAssetReady", () =>
       markAssetReady(p.profileId, p.videoAssetId!, {
@@ -316,7 +316,6 @@ export async function finalizeSuccessCore(
     responseJson: {
       ok: true,
       storagePath: r.storagePath,
-      mediaUrl,
       creation: historyItem,
       durationSec: r.durationSec,
       credits: 0,

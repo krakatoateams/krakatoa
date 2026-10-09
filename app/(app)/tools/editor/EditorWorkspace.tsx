@@ -798,19 +798,21 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
 type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
 
 const EXPORT_POLL_MS = 3000;
-const EXPORT_POLL_MAX_CONSECUTIVE_ERRORS = 10;
 
 /** Polls the generation status for an accepted (202) export until it succeeds or fails. */
 async function pollEditorExport(
   idempotencyKey: string
 ): Promise<{ ok: boolean; data: EditorExportPollData }> {
-  let errors = 0;
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
     try {
       const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
-      if (!res.ok) throw new Error("status");
-      errors = 0;
+      // A missing request or lost session can never recover; anything else is transient, so the
+      // attempt stays locked and polling continues until an explicit terminal status.
+      if (res.status === 401 || res.status === 404) {
+        return { ok: false, data: { error: "Couldn't confirm the export. Check My Library in a moment." } };
+      }
+      if (!res.ok) continue;
       const body = (await res.json()) as {
         status?: string;
         result?: EditorExportPollData | null;
@@ -821,9 +823,7 @@ async function pollEditorExport(
         return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
       }
     } catch {
-      if (++errors >= EXPORT_POLL_MAX_CONSECUTIVE_ERRORS) {
-        return { ok: false, data: { error: "Lost connection while exporting. Check My Library in a moment." } };
-      }
+      /* transient network error: keep polling */
     }
   }
 }
