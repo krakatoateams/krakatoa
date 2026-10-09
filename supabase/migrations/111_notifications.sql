@@ -1,4 +1,4 @@
--- 110_notifications.sql
+-- 111_notifications.sql
 -- In-app Notifications (see CONTEXT.md, docs/adr/0001-notifications-via-db-triggers.md).
 --
 -- Rows are written ONLY by the triggers below, at the moment the underlying

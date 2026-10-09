@@ -10,7 +10,7 @@ import {
 
 /**
  * Server-side access to in-app Notifications. Rows are only ever written by
- * the database triggers in migration 110 (see
+ * the database triggers in migration 111 (see
  * docs/adr/0001-notifications-via-db-triggers.md); this module reads them,
  * marks them read and prunes old ones. Service role — every query is scoped
  * to the caller's profile here in code.
