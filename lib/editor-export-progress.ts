@@ -18,9 +18,8 @@ export type ExportProgress = { stage: ExportStage; progressPct: number | null; u
 
 export function stageFromStepKey(stepKey: string | null | undefined): ExportStage {
   if (!stepKey) return "preparing";
-  if (stepKey === "storage_upload") return "saving";
-  if (/stitch|encode|ffmpeg|render/.test(stepKey)) return "encoding";
-  return "preparing";
+  // Until the runner reports real encode progress, the encode step is still booting the encoder.
+  return stepKey === "storage_upload" ? "saving" : "preparing";
 }
 
 /** FFmpeg `-progress` out_time_us over timeline duration, clamped to 0-99 until verified. */
@@ -32,18 +31,6 @@ export function encodePct(outTimeUs: number, totalSec: number): number | null {
 export function uploadPct(done: number, total: number): number | null {
   if (total <= 0) return null;
   return Math.min(99, Math.floor((Math.min(done, total) / total) * 100));
-}
-
-/** Throttle for runner writes: >= 1 s apart and >= 1 point change (or a stage change). */
-export function shouldWriteProgress(
-  last: { pct: number | null; at: number; stage: ExportStage } | null,
-  next: { pct: number | null; stage: ExportStage },
-  now: number,
-): boolean {
-  if (!last || last.stage !== next.stage) return true;
-  if (next.pct === last.pct) return false;
-  if (next.pct == null || last.pct == null) return true;
-  return now - last.at >= 1000 && Math.abs(next.pct - last.pct) >= 1;
 }
 
 /** Read the `progress` object from an untrusted status payload; null when malformed. */
@@ -79,7 +66,7 @@ function assert(cond: boolean, msg: string): void {
 }
 
 export function editorExportProgressSelfCheck(): void {
-  assert(stageFromStepKey("rendi_stitch") === "encoding", "stitch step is encoding");
+  assert(stageFromStepKey("editor_encode") === "preparing", "encode step is preparing until progress is reported");
   assert(stageFromStepKey("storage_upload") === "saving", "upload step is saving");
   assert(stageFromStepKey(null) === "preparing", "no step is preparing");
   assert(encodePct(5e6, 10) === 50, "half way");
@@ -87,11 +74,6 @@ export function editorExportProgressSelfCheck(): void {
   assert(encodePct(99e6, 10) === 99, "overshoot clamps");
   assert(encodePct(1, 0) === null && encodePct(NaN, 5) === null, "bad input is indeterminate");
   assert(uploadPct(2, 5) === 40 && uploadPct(5, 5) === 99 && uploadPct(0, 0) === null, "upload files fraction");
-  const t = { pct: 10, at: 0, stage: "encoding" as const };
-  assert(!shouldWriteProgress(t, { pct: 11, stage: "encoding" }, 500), "throttled under 1s");
-  assert(shouldWriteProgress(t, { pct: 11, stage: "encoding" }, 1000), "writes after 1s");
-  assert(!shouldWriteProgress(t, { pct: 10, stage: "encoding" }, 5000), "no write when unchanged");
-  assert(shouldWriteProgress(t, { pct: null, stage: "saving" }, 10), "stage change writes");
   assert(parseExportProgress({ stage: "bogus" }) === null, "unknown stage rejected");
   assert(parseExportProgress({ stage: "encoding", progressPct: 150, updatedAt: "x" })?.progressPct === 99, "pct clamped");
   assert(parseExportProgress({ stage: "preparing", progressPct: null })?.progressPct === null, "null stays indeterminate");

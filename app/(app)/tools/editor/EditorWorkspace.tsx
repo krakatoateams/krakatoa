@@ -803,6 +803,39 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
   );
 }
 
+type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
+
+const EXPORT_POLL_MS = 3000;
+const EXPORT_POLL_MAX_CONSECUTIVE_ERRORS = 10;
+
+/** Polls the generation status for an accepted (202) export until it succeeds or fails. */
+async function pollEditorExport(
+  idempotencyKey: string
+): Promise<{ ok: boolean; data: EditorExportPollData }> {
+  let errors = 0;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
+    try {
+      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
+      if (!res.ok) throw new Error("status");
+      errors = 0;
+      const body = (await res.json()) as {
+        status?: string;
+        result?: EditorExportPollData | null;
+        error?: { message?: string; code?: string } | null;
+      };
+      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "failed") {
+        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
+      }
+    } catch {
+      if (++errors >= EXPORT_POLL_MAX_CONSECUTIVE_ERRORS) {
+        return { ok: false, data: { error: "Lost connection while exporting. Check My Library in a moment." } };
+      }
+    }
+  }
+}
+
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1912,7 +1945,7 @@ export default function EditorWorkspace() {
         },
         body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
       });
-      const data = (await res.json().catch(() => ({}))) as {
+      let data = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
         ok?: boolean;
@@ -1924,13 +1957,27 @@ export default function EditorWorkspace() {
         finishExport({ error: "Sign in again to export." });
         return;
       }
-      if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
-        attempt.settle(false);
-        finishExport({ outcome: "cancelled" });
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(data.error || "Export failed.");
+      // 202 is non-terminal: stay locked on this attempt until the export reports a terminal status.
+      if (res.status === 202) {
+        const finished = await pollEditorExport(attempt.key);
+        data = finished.data;
+        if (!finished.ok) {
+          if (data.code === "GENERATION_CANCELLED") {
+            attempt.settle(false);
+            finishExport({ outcome: "cancelled" });
+            return;
+          }
+          throw new Error(data.error || "Export failed.");
+        }
+      } else {
+        if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          finishExport({ outcome: "cancelled" });
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(data.error || "Export failed.");
+        }
       }
       attempt.settle(true);
       finishExport({ outcome: "success", creationId: data.creation?.id ?? null });

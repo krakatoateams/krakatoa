@@ -105,3 +105,24 @@ Applied on Aug 21, 2026:
 
 The control and finalization RPCs were verified with rollback-only live database
 checks; no test jobs, creations, or credit changes were retained.
+
+## Video Editor export (in-system FFmpeg)
+
+The Editor never calls Rendi. `POST /api/render-editor` validates, creates the job/asset,
+starts `editorExportWorkflow` (`lib/editor-export-workflow.ts`) and returns `202`. The
+client keeps the attempt locked and polls `/api/generations/status` with the same
+Idempotency-Key until `succeeded` or `failed`. Cancel uses the normal idempotency cancel;
+the workflow sees `cancel_requested` on its next poll (about 10s) and stops the sandbox.
+
+Runner decision: Vercel Sandbox, driven by Workflow. A Workflow step is still bound by
+the function duration, so FFmpeg runs as a detached sandbox command and short steps poll
+it; no length, resolution or fps cap. The sandbox lifetime is the time budget
+(`EDITOR_EXPORT_TIMEOUT_MS`, default 3h; plan max 45 min Hobby, 5h Pro/Enterprise) and
+vCPUs scale with output resolution (`editorExportVcpus`). The sandbox downloads a static
+FFmpeg (`EDITOR_EXPORT_FFMPEG_URL`, default johnvansickle amd64 static) and asserts
+libx264, aac and drawtext before encoding. The encoded file is uploaded straight from the
+sandbox to a Supabase signed upload URL (`{userId}/` path, `MEDIA_CACHE_CONTROL`).
+Inputs are signed inside workflow steps, so no signed URL sits in the workflow payload.
+
+Failures store/show sanitized reasons (`EDITOR_EXPORT_*` codes in `lib/editor-export-pure.ts`).
+Local use needs Vercel credentials for `@vercel/sandbox` (`vercel link` + `vercel env pull`).
