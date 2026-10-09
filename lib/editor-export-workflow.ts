@@ -3,6 +3,8 @@ import type { EditorExportErrorCode } from "@/lib/editor-export-pure";
 import type { CommandStage, EditorExportParams, PollResult } from "@/lib/editor-export-core";
 
 const POLL_MS = 10_000;
+// Faster while encoding so the dialog percentage moves visibly.
+const ENCODE_POLL_MS = 3_000;
 // Upper bound on poll iterations (budget / interval); the sandbox lifetime enforces the real limit.
 const MAX_POLLS = 4000;
 
@@ -25,7 +27,7 @@ export async function editorExportWorkflow(params: EditorExportParams): Promise<
     if (!start.ok) return await failStep(params, stepId, { cancelled: false, code: start.code });
     name = start.sandboxName;
 
-    const encoded = await waitFor(params, name, start.cmdId, "encode", startedAtMs);
+    const encoded = await waitFor(params, name, start.cmdId, "encode", startedAtMs, stepId, start.durationSec);
     if (encoded.state !== "done") return await settleNotDone(params, stepId, encoded);
     await endStep(params, stepId, { durationSec: start.durationSec });
 
@@ -33,7 +35,7 @@ export async function editorExportWorkflow(params: EditorExportParams): Promise<
     const upload = await startUploadStep(params, name);
     if (!upload.ok) return await failStep(params, stepId, { cancelled: false, code: upload.code });
     orphanPath = upload.storagePath;
-    const uploaded = await waitFor(params, name, upload.cmdId, "upload", startedAtMs);
+    const uploaded = await waitFor(params, name, upload.cmdId, "upload", startedAtMs, stepId, 0);
     if (uploaded.state !== "done") return await settleNotDone(params, stepId, uploaded);
 
     const finalized = await finalizeStep(params, stepId, name, upload.storagePath, start);
@@ -52,11 +54,13 @@ async function waitFor(
   name: string,
   cmdId: string,
   stage: CommandStage,
-  startedAtMs: number
+  startedAtMs: number,
+  stepId: string | null,
+  durationSec: number
 ): Promise<PollResult> {
   for (let i = 0; i < MAX_POLLS; i++) {
-    await sleep(POLL_MS);
-    const r = await pollStep(params, name, cmdId, stage, startedAtMs);
+    await sleep(stage === "encode" ? ENCODE_POLL_MS : POLL_MS);
+    const r = await pollStep(params, name, cmdId, stage, startedAtMs, stepId, durationSec);
     if (r.state !== "running") return r;
   }
   return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
@@ -91,10 +95,18 @@ async function startEncodeStep(params: EditorExportParams) {
   return core.startEncodeCore(params);
 }
 
-async function pollStep(params: EditorExportParams, name: string, cmdId: string, stage: CommandStage, startedAtMs: number) {
+async function pollStep(
+  params: EditorExportParams,
+  name: string,
+  cmdId: string,
+  stage: CommandStage,
+  startedAtMs: number,
+  stepId: string | null,
+  durationSec: number
+) {
   "use step";
   const core = await import("@/lib/editor-export-core");
-  return core.pollCommandCore(params, name, cmdId, stage, startedAtMs);
+  return core.pollCommandCore(params, name, cmdId, stage, startedAtMs, stepId, durationSec);
 }
 
 async function startUploadStep(params: EditorExportParams, name: string) {

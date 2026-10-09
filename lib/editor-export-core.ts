@@ -7,7 +7,8 @@ import {
   STORAGE_BUCKET,
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { createJobStep, finishJobStep, failJobStep, reportJobStepProgress } from "@/lib/job-steps-db";
+import { encodePct, type ExportStage } from "@/lib/editor-export-progress";
 import { finishJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { insertUserCreation } from "@/lib/creations-db";
@@ -68,6 +69,7 @@ export const EDITOR_EXPORT_TIMEOUT_MS = Number(process.env.EDITOR_EXPORT_TIMEOUT
 
 const WORK = "export";
 const outFile = (p: EditorExportParams) => `${WORK}/${exportOutputFilename(p.settings.format)}`;
+const PROGRESS_FILE = `${WORK}/progress.txt`;
 const FONT_FILE = `${WORK}/Poppins.ttf`;
 const FFMPEG = `${WORK}/ff/ffmpeg`;
 // ponytail: third-party static build fetched per run; host it ourselves or bake a Sandbox snapshot if this becomes flaky.
@@ -148,7 +150,7 @@ export async function startEncodeCore(p: EditorExportParams): Promise<EncodeStar
     for (const [alias, url] of Object.entries(graph.inputFiles)) {
       if (alias !== "in_font") values[alias] = url;
     }
-    const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", ...localizeFfmpegArgs(graph.args, values)];
+    const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", PROGRESS_FILE, ...localizeFfmpegArgs(graph.args, values)];
     const cmd = await sandbox.runCommand({ cmd: FFMPEG, args, detached: true });
     return { ok: true, sandboxName: sandbox.name, cmdId: cmd.cmdId, durationSec: graph.durationSec, width: graph.width, height: graph.height };
   } catch (e) {
@@ -173,13 +175,23 @@ async function touchLiveness(p: EditorExportParams) {
   ]).catch((e) => logSafe("liveness touch failed", e));
 }
 
+/** Live status for the progress dialog: {stage, progressPct, updatedAt} on the running step output. */
+export async function reportProgressCore(p: EditorExportParams, stepId: string | null, stage: ExportStage, progressPct: number | null) {
+  if (!stepId) return;
+  await reportJobStepProgress(p.profileId, stepId, { stage, progressPct, updatedAt: new Date().toISOString() }).catch((e) =>
+    logSafe("progress report failed", e)
+  );
+}
+
 /** One non-blocking check of a detached sandbox command; honors Cancel by stopping the sandbox. */
 export async function pollCommandCore(
   p: EditorExportParams,
   name: string,
   cmdId: string,
   stage: CommandStage,
-  startedAtMs: number
+  startedAtMs: number,
+  stepId: string | null,
+  durationSec: number
 ): Promise<PollResult> {
   if (await isCancelRequested(p.profileId, p.generationRequestId)) {
     await stopSandboxCore(name);
@@ -191,6 +203,12 @@ export async function pollCommandCore(
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.getCommand(cmdId);
     if (cmd.exitCode === null) {
+      if (stage === "encode") {
+        // FFmpeg `-progress` appends blocks of key=value; the last out_time_us is the real encoded time.
+        const tail = await run(sandbox, "tail", ["-n", "40", PROGRESS_FILE]).catch(() => null);
+        const us = tail ? [...tail.stdout.matchAll(/^out_time_us=(\d+)$/gm)].at(-1)?.[1] : undefined;
+        await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
+      }
       return timedOut ? { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" } : { state: "running" };
     }
     if (cmd.exitCode === 0) return { state: "done" };
@@ -262,6 +280,7 @@ export async function finalizeSuccessCore(
       return null;
     }
   };
+  await reportProgressCore(p, stepId, "finalizing", null);
   await endStepCore(p, stepId, { storagePath: r.storagePath });
 
   // Not swallowed: without a library row the export would "succeed" yet be invisible.

@@ -6,7 +6,7 @@ import Image from "next/image";
 import { FolderKanban, Loader2, Pencil, Save } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
-import { GenerationCancelButton } from "@/components/studio/GenerationCancelButton";
+import { EXPORT_BUTTON_ID } from "./EditorExportProgressDialog";
 
 export default function EditorTopBar({
   title,
@@ -14,26 +14,24 @@ export default function EditorTopBar({
   saving,
   exportReady,
   exporting,
-  cancelling,
+  exportChip,
   onTitleChange,
   onTitleCommit,
   onSave,
   onOpen,
   onExport,
-  onCancel,
 }: {
   title: string;
   dirty: boolean;
   saving: boolean;
   exportReady: boolean;
   exporting: boolean;
-  cancelling: boolean;
+  exportChip: string | null;
   onTitleChange: (title: string) => void;
   onTitleCommit: (title: string) => void;
   onSave: () => void;
   onOpen: () => void;
   onExport: () => void;
-  onCancel: () => void;
 }) {
   const titleRef = useRef<HTMLInputElement>(null);
   const titleAtFocus = useRef(title);
@@ -130,20 +128,21 @@ export default function EditorTopBar({
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           {saving ? "Saving" : dirty ? "Save" : "Saved"}
         </button>
-        <GenerationCancelButton
-          visible={exporting}
-          cancelling={cancelling}
-          cancelAllowed
-          onCancel={onCancel}
-          ariaLabel="Cancel export"
-        />
         <button
           type="button"
+          id={EXPORT_BUTTON_ID}
           onClick={onExport}
-          disabled={!exportReady || exporting}
+          disabled={!exportReady && !exporting}
           className={`${GENERATE_BTN_CLASS} h-8 px-4 text-xs`}
         >
-          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Export"}
+          {exporting ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+              <span>{exportChip ?? "Exporting…"}</span>
+            </>
+          ) : (
+            "Export"
+          )}
         </button>
       </div>
     </header>
