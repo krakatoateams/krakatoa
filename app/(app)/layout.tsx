@@ -2,6 +2,7 @@ import AppChrome from "./AppChrome";
 import { CreditBalanceProvider } from "./credit-balance-context";
 import { PricingProvider } from "./pricing-context";
 import { ActiveGenerationsProvider } from "./active-generations-context";
+import { NotificationsProvider } from "./notifications-context";
 import { getCurrentProfile } from "@/lib/profiles-db";
 import {
   listToolConfigs,
@@ -30,7 +31,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <WelcomeVideoOfferProvider>
         <PricingProvider>
           <ActiveGenerationsProvider>
-            <AppChrome initialToolVisibility={initialToolVisibility}>{children}</AppChrome>
+            <NotificationsProvider>
+              <AppChrome initialToolVisibility={initialToolVisibility}>{children}</AppChrome>
+            </NotificationsProvider>
             {/* Mounted at the app-shell level (not just /dashboard) so a new
                 user lands on this "Claim" popup regardless of which tool
                 they signed up from — e.g. Schedule, not just the dashboard. */}
