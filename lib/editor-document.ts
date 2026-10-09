@@ -55,12 +55,13 @@ export type TextOverlayLayout = {
 
 export function textOverlayLayout(
   overlay: Pick<EditorOverlay, "x" | "y" | "w" | "h" | "fontSize">,
-  canvas: { w: number; h: number }
+  canvas: { w: number; h: number },
+  scale = 1
 ): TextOverlayLayout {
   const fontSize = Math.max(
     EDITOR_TEXT_MIN_FONT_SIZE,
     Math.min(EDITOR_TEXT_MAX_FONT_SIZE, Math.round(overlay.fontSize ?? EDITOR_TEXT_DEFAULT_FONT_SIZE))
-  );
+  ) * scale;
   const x = Math.round(overlay.x * canvas.w);
   const y = Math.round(overlay.y * canvas.h);
   const w = Math.max(2, Math.round(overlay.w * canvas.w));
@@ -79,8 +80,8 @@ export function textOverlayLayout(
     shadow: {
       color: "black@0.6",
       colorCss: "rgba(0, 0, 0, 0.6)",
-      x: 2,
-      y: 2,
+      x: Math.max(1, Math.round(2 * scale)),
+      y: Math.max(1, Math.round(2 * scale)),
     },
   };
 }
@@ -1419,6 +1420,9 @@ export function editorDocumentSelfCheck(): void {
   assert(clampedHigh.fontSize === EDITOR_TEXT_MAX_FONT_SIZE, "font size clamped to max 200");
   const defaultSize = textOverlayLayout({ ...sampleOverlay, fontSize: null }, EDITOR_CANVAS["9:16"]);
   assert(defaultSize.fontSize === EDITOR_TEXT_DEFAULT_FONT_SIZE, "null font size defaults to 48");
+  const scaled = textOverlayLayout({ ...sampleOverlay, fontSize: 500 }, { w: 2160, h: 3840 }, 3);
+  assert(scaled.fontSize === 600, "font clamp applies before export scaling");
+  assert(scaled.shadow.x === 6 && scaled.shadow.y === 6, "shadow scales with export height");
 }
 
 if (require.main === module) {

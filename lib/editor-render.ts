@@ -145,9 +145,11 @@ export function buildEditorFfmpegGraph(
   const invalid = validateEditorExport(doc);
   if (invalid) throw new Error(invalid.message);
 
-  // Compose on the fixed canvas (overlay coordinates live there), then scale to the export size.
-  const { w: width, h: height } = EDITOR_CANVAS[doc.aspect];
   const out = exportDimensions(doc.aspect, settings.resolution);
+  const canvas = EDITOR_CANVAS[doc.aspect];
+  // Overlay coordinates remain normalized to the preview canvas, but composition happens at the requested output size.
+  const { w: width, h: height } = out;
+  const textScale = out.h / canvas.h;
   const durationSec = round2(sequenceDurationSec(doc));
   const sequence = sortedSequence(doc).filter((clip) => !clip.hidden);
   const overlays = sortedOverlays(doc).filter((overlay) => !overlay.hidden);
@@ -244,7 +246,7 @@ export function buildEditorFfmpegGraph(
     const next = `t${step}`;
 
     if (overlay.kind === "text") {
-      const layout = textOverlayLayout(overlay, { w: width, h: height });
+      const layout = textOverlayLayout(overlay, { w: width, h: height }, textScale);
       const text = escapeDrawtext(overlay.text || "");
       const fontcolor = colorToFfmpeg(overlay.color || "#FFFFFF");
       const fontfile = inputFiles.in_font ? `:fontfile={{in_font}}` : "";
@@ -277,10 +279,7 @@ export function buildEditorFfmpegGraph(
     step += 1;
   }
 
-  const needsScale = out.w !== width || out.h !== height;
-  filters.push(
-    `[${current}]${needsScale ? `scale=${out.w}:${out.h}:flags=lanczos,` : ""}fps=${settings.fps},format=yuv420p[vfinal]`
-  );
+  filters.push(`[${current}]fps=${settings.fps},format=yuv420p[vfinal]`);
   current = "vfinal";
 
   let audioArgs = ["-an"];
@@ -482,8 +481,31 @@ export function editorRenderSelfCheck(): void {
     "webm = VP9 constant quality + Opus"
   );
   assert(webm.width === 2160 && webm.height === 3840, "4K 9:16 graph dimensions");
+  assert(webm.command.includes("color=c=black:s=2160x3840"), "4K composes on its output canvas");
+  assert(webm.command.includes("scale=2160:3840:force_original_aspect_ratio=decrease"), "4K clips scale from source directly to output");
+  assert(webm.command.includes("fontsize=120") && webm.command.includes("shadowx=6:shadowy=6"), "4K text scales from the preview coordinate space");
+  assert(!webm.command.includes("scale=720:1280:force_original_aspect_ratio=decrease"), "4K never routes clips through the 720p canvas");
   assert(webm.outputFiles.out_v === "editor_export.webm" && EXPORT_FORMAT_SPEC.webm.mime === "video/webm", "webm ext/mime from table");
   assert(buildEditorFfmpegGraph(doc, urls, new Set(), { ...DEFAULT_EXPORT_SETTINGS, format: "webm" }).command.includes("-an"), "webm without audio is -an");
+
+  // 720p 16:9 and 9:16 compose at their existing preview canvases, so their complete commands stay stable.
+  const golden720 = (aspect: "16:9" | "9:16") => {
+    const goldenDoc: EditorDocument = {
+      v: 1,
+      aspect,
+      sequence: [{ id: "c", creationId: "c", storagePath: null, startSec: 0, endSec: 1, inSec: 0, sourceDurationSec: 1, order: 0, locked: false, hidden: false }],
+      overlays: [],
+    };
+    return buildEditorFfmpegGraph(goldenDoc, { c: "https://example.com/c.mp4" }, new Set()).command;
+  };
+  assert(
+    golden720("16:9") === `-i {{in_s0}} -filter_complex "color=c=black:s=1280x720:d=1:r=30,format=yuv420p[base];[0:v]trim=start=0:end=1,setpts=PTS-STARTPTS+0/TB,fps=30,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v0];[base][v0]overlay=0:0:enable='between(t,0,1)'[c0];[c0]fps=30,format=yuv420p[vfinal]" -map "[vfinal]" -t 1 -c:v libx264 -crf 23 -pix_fmt yuv420p -an -movflags +faststart {{out_v}}`,
+    "16:9 720p command stays byte-identical"
+  );
+  assert(
+    golden720("9:16") === `-i {{in_s0}} -filter_complex "color=c=black:s=720x1280:d=1:r=30,format=yuv420p[base];[0:v]trim=start=0:end=1,setpts=PTS-STARTPTS+0/TB,fps=30,scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v0];[base][v0]overlay=0:0:enable='between(t,0,1)'[c0];[c0]fps=30,format=yuv420p[vfinal]" -map "[vfinal]" -t 1 -c:v libx264 -crf 23 -pix_fmt yuv420p -an -movflags +faststart {{out_v}}`,
+    "9:16 720p command stays byte-identical"
+  );
 
   // --- In-system run: placeholders resolve to argv entries (no shell) ---
   const local = localizeFfmpegArgs(graph.args, {
