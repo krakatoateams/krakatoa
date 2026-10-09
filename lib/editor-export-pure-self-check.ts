@@ -20,6 +20,7 @@ import {
 } from "./editor-export-pure";
 import {
   EDITOR_EXPORT_MAX_FILE_BYTES,
+  EXPORT_FORMAT_SPEC,
   EXPORT_FORMATS,
   EXPORT_RESOLUTIONS,
   exportDimensions,
@@ -78,7 +79,7 @@ async function editorExportPureSelfCheck(): Promise<void> {
     return exportVideoBitrateCapKbps({ format, width: w, height: h, durationSec, hasAudio, maxFileBytes });
   };
   for (const format of EXPORT_FORMATS) {
-    const audioKbps = format === "mp4" ? 192 : 128;
+    const audioKbps = Number.parseInt(EXPORT_FORMAT_SPEC[format].audioBitrate, 10);
     for (const resolution of EXPORT_RESOLUTIONS) {
       for (const sec of [0.1, 1, 5, 10, 20, 30, 45, 60]) {
         for (const hasAudio of [true, false]) {
@@ -95,6 +96,9 @@ async function editorExportPureSelfCheck(): Promise<void> {
   assert(cap("mp4", 2160, 1) === null, "short 4K never reaches the limit: uncapped");
   for (const resolution of [480, 720, 1080] as const) assert(cap("mp4", resolution, 20) === null, `${resolution}p 20 s unaffected`);
   assert(cap("mp4", 480, 60) === null, "480p never capped");
+  // Boundary: capped only where CRF on detailed footage could pass the limit.
+  assert(cap("mp4", 1080, 20) === null && cap("mp4", 1080, 30) !== null, "1080p capped from ~25 s");
+  assert(cap("mp4", 720, 45) === null && cap("mp4", 720, 60) !== null, "720p capped only near 60 s");
   assert(cap("mp4", 2160, 20, true, 1_000_000_000) === null, "a larger limit lifts the cap");
   assert(cap("mp4", 2160, 60, false)! > cap("mp4", 2160, 60, true)!, "audio bits come out of the video budget");
   const mp4Args = exportVideoArgs({ format: "mp4", quality: "high" }, 5000).join(" ");

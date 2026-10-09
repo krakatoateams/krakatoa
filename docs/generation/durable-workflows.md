@@ -132,6 +132,12 @@ Create-time limits map to `EDITOR_EXPORT_BUSY` (HTTP 429) and `EDITOR_EXPORT_CAP
 (HTTP 402); the real SDK error shape is unverified. Encode polling is 3 s for the first ~2 min,
 then 12 s, to stay inside the Hobby Workflow event allowance. The encoded file is uploaded straight from the
 sandbox to a Supabase signed upload URL (`{userId}/` path, `MEDIA_CACHE_CONTROL`).
+Storage rejects files over 50 MB (the bucket is "Unset", so the global limit applies; a signed upload
+answers HTTP 400 with `"statusCode":"413"` in the body), so when a long or 4K export could pass that,
+`exportVideoBitrateCapKbps` caps the video bitrate by duration to ~42 MB (x264 `-maxrate`/`-bufsize`,
+VP9 constrained-quality `-b:v`) and the export dialog says so. Override the limit with
+`EDITOR_EXPORT_MAX_FILE_BYTES` (server only; the dialog hint uses the 50 MB default). A file that still
+overshoots fails as `EDITOR_EXPORT_FILE_TOO_LARGE`; other upload errors stay `EDITOR_EXPORT_UPLOAD_FAILED`.
 Inputs are signed inside workflow steps, so no signed URL sits in the workflow payload.
 
 Failures store/show sanitized reasons (`EDITOR_EXPORT_*` codes in `lib/editor-export-pure.ts`).

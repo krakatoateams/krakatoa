@@ -15,7 +15,7 @@ export const EDITOR_EXPORT_ERRORS = {
   EDITOR_EXPORT_RUNNER_UNAVAILABLE: "The export service is unavailable. Please try again in a moment.",
   EDITOR_EXPORT_UPLOAD_FAILED: "The exported video could not be saved. Please try again.",
   EDITOR_EXPORT_FILE_TOO_LARGE:
-    "The exported video is too large to save. Try a lower resolution, 30 fps, Standard quality or a shorter timeline.",
+    "The exported video is too large to save. Try a lower resolution, Standard quality or a shorter timeline.",
   EDITOR_EXPORT_START_TIMEOUT: "The export took too long to start. Please try again.",
   EDITOR_EXPORT_STALLED: "The export stopped making progress. Please try again.",
 } as const;

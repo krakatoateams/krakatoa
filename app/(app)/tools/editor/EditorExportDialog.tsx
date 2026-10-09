@@ -48,6 +48,7 @@ export default function EditorExportDialog({
   const [name, setName] = useState(defaultName);
   const [settings, setSettings] = useState<EditorExportSettings>(DEFAULT_EXPORT_SETTINGS);
   // Same cap the server encodes with (audio assumed, so the hint errs on the side of showing).
+  // ponytail: uses the 50 MB default; a server EDITOR_EXPORT_MAX_FILE_BYTES override is not visible here.
   const { w, h } = exportDimensions(aspect, settings.resolution);
   const sizeCapped = exportVideoBitrateCapKbps({ format: settings.format, width: w, height: h, durationSec, hasAudio: true }) !== null;
 
