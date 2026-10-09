@@ -57,6 +57,7 @@
     "test:admin-config-validation": "tsx lib/admin-config-validation.ts",
     "test:admin-config-toggles": "tsx lib/video-composer-features.ts",
     "test:admin-config-tree": "tsx lib/admin-config-tree-self-check.ts",
+    "test:product-photo-gpt-image": "tsx lib/product-photo-gpt-image-self-check.ts",
     "test:admin-config-persistence": "tsx lib/admin-config-persistence-self-check.ts",
     "test:admin-platform-settings": "tsx lib/admin-platform-settings-self-check.ts",
     "test:dev-blank": "tsx lib/dev-blank-generation-self-check.ts",

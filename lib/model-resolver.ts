@@ -1,6 +1,7 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
+  GPT_IMAGE_2_MODEL,
   getProductPhotoTier,
   type ProductPhotoModelTier,
 } from "@/lib/product-photo";
@@ -143,7 +144,7 @@ const FALLBACKS = {
   },
   storyboard: {
     scene_llm: { provider: REPLICATE, model: "openai/gpt-5", parameters: {} },
-    image: { provider: REPLICATE, model: "openai/gpt-image-2", parameters: {} },
+    image: { provider: REPLICATE, model: GPT_IMAGE_2_MODEL, parameters: {} },
     video: { provider: REPLICATE, model: "bytedance/seedance-2.0-mini", parameters: {} },
   },
   photo: {

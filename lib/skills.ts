@@ -152,6 +152,7 @@ export type SkillPhotoAttemptSignatureInput = {
   styleId: string;
   modelTier: string;
   resolution: string | null;
+  quality?: string | null;
   aspectRatio: string;
   imageCount: number;
   devBlank: boolean;
@@ -183,6 +184,8 @@ export function skillPhotoAttemptSignature(
     skillFileIdentitySignature(input.productFile),
     skillFileIdentitySignature(input.characterFile),
     skillFileIdentitySignature(input.referenceFile),
+    // Appended only when set so existing models keep their exact signature.
+    ...(input.quality ? [input.quality] : []),
   ].join("|");
 }
 
