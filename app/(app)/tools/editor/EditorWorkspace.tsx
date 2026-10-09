@@ -2,7 +2,7 @@
 
 import EditorExportDialog from "./EditorExportDialog";
 import type { EditorExportSettings } from "@/lib/editor-export-settings";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -18,6 +18,7 @@ import {
   Pause,
   Play,
   Plus,
+  Maximize2,
   Repeat,
   Scissors,
   SkipBack,
@@ -32,6 +33,8 @@ import {
   Volume2,
   VolumeX,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
@@ -92,6 +95,20 @@ import {
 } from "@/lib/editor-document";
 import { Poppins } from "next/font/google";
 import { containSize } from "@/lib/editor-preview-size";
+import {
+  DEFAULT_PX_PER_SEC,
+  MAX_PX_PER_SEC,
+  MIN_PX_PER_SEC,
+  TIMELINE_PAD_PX,
+  ZOOM_STEP,
+  anchoredScrollLeft,
+  clampScale,
+  fitPxPerSec,
+  formatRulerLabel,
+  rulerIntervalSec,
+  stepScale,
+  visibleTickRange,
+} from "@/lib/editor-timeline-zoom";
 import { useClipFilmstrip } from "./useClipFilmstrip";
 import { useEditorViewport } from "./useEditorViewport";
 import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
@@ -136,8 +153,14 @@ const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
 // its own height is carved out of tracksHeight to keep the resizable split intact.
 const TIMELINE_RULER_HEIGHT = 36;
 
+/** Ruler ticks render for the visible range snapped to buckets of this width. */
+const RULER_BUCKET_PX = 400;
+
 const HISTORY_LIMIT = 50;
 const HISTORY_COALESCE_MS = 650;
+
+/** Zoom is frozen while a drag runs so the drag keeps the scale it started with. */
+let activeTimelineDrags = 0;
 
 function startTimelineDrag(
   event: ReactPointerEvent,
@@ -147,15 +170,19 @@ function startTimelineDrag(
   event.preventDefault();
   event.stopPropagation();
   const startX = event.clientX;
+  activeTimelineDrags += 1;
   const move = (ev: PointerEvent) => {
     onMove((ev.clientX - startX) / pxPerSec);
   };
   const up = () => {
+    activeTimelineDrags = Math.max(0, activeTimelineDrags - 1);
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
 }
 
 const LAYER_ROW_ATTR = "data-layer-row";
@@ -830,6 +857,16 @@ export default function EditorWorkspace() {
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
+  const pxPerSecRef = useRef(DEFAULT_PX_PER_SEC);
+  /** scrollLeft to apply once the new width is laid out (anchored zoom). */
+  const pendingScrollRef = useRef<number | null>(null);
+  const preFitScaleRef = useRef<number | null>(null);
+  /** Latest zoom actions for the long-lived keydown listener. */
+  const applyScaleRef = useRef<(next: number, anchorX: number) => void>(() => {});
+  const measureViewportRef = useRef(() => {});
+  const zoomActionsRef = useRef<{ zoomBy: (dir: 1 | -1) => void; fit: () => void }>({ zoomBy: () => {}, fit: () => {} });
+  const [rulerView, setRulerView] = useState({ width: 0, bucket: 0 });
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
@@ -1441,6 +1478,23 @@ export default function EditorWorkspace() {
         else undo();
         return;
       }
+      if (!editable && !meta && !event.altKey) {
+        if (event.key === "+" || event.key === "=") {
+          event.preventDefault();
+          zoomActionsRef.current.zoomBy(1);
+          return;
+        }
+        if (event.key === "-" || event.key === "_") {
+          event.preventDefault();
+          zoomActionsRef.current.zoomBy(-1);
+          return;
+        }
+        if (event.shiftKey && event.key.toLowerCase() === "z" && !event.repeat) {
+          event.preventDefault();
+          zoomActionsRef.current.fit();
+          return;
+        }
+      }
       if (!editable && (event.key === "Delete" || event.key === "Backspace")) {
         event.preventDefault();
         deleteSelected();
@@ -1915,7 +1969,103 @@ export default function EditorWorkspace() {
     void cancel();
   };
 
-  const pxPerSec = 64;
+  const applyScale = (next: number, anchorX: number) => {
+    const scroller = tracksScrollRef.current;
+    const clamped = clampScale(next);
+    const old = pxPerSecRef.current;
+    if (!scroller || clamped === old || activeTimelineDrags > 0) return;
+    const scrollLeft = pendingScrollRef.current ?? scroller.scrollLeft;
+    pendingScrollRef.current = anchoredScrollLeft(old, clamped, scrollLeft, anchorX);
+    pxPerSecRef.current = clamped;
+    preFitScaleRef.current = null;
+    setPxPerSec(clamped);
+  };
+  /** Button, slider and keyboard zoom keep the playhead fixed when visible, else the viewport center. */
+  const zoomTo = (next: number) => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    const scrollLeft = pendingScrollRef.current ?? scroller.scrollLeft;
+    const playheadX = playhead * pxPerSecRef.current + TIMELINE_PAD_PX - scrollLeft;
+    const visible = playheadX >= 0 && playheadX <= scroller.clientWidth;
+    applyScale(next, visible ? playheadX : scroller.clientWidth / 2);
+  };
+  const fitTimeline = () => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller || activeTimelineDrags > 0) return;
+    const current = pxPerSecRef.current;
+    const fitted = fitPxPerSec(duration, scroller.clientWidth - TIMELINE_PAD_PX * 2);
+    const previous = preFitScaleRef.current;
+    // Pressing Fit again at the fitted scale restores the previous zoom.
+    const target = previous !== null && Math.abs(current - fitted) < 0.01 ? previous : fitted;
+    if (Math.abs(target - current) < 0.01) return;
+    pendingScrollRef.current = 0;
+    pxPerSecRef.current = target;
+    setPxPerSec(target);
+    preFitScaleRef.current = target === previous ? null : current;
+  };
+  useLayoutEffect(() => {
+    zoomActionsRef.current = { zoomBy: (dir) => zoomTo(stepScale(pxPerSecRef.current, dir)), fit: fitTimeline };
+    applyScaleRef.current = applyScale;
+  });
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRef.current;
+    const scroller = tracksScrollRef.current;
+    if (pending === null || !scroller) return;
+    pendingScrollRef.current = null;
+    scroller.scrollLeft = pending;
+    if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = scroller.scrollLeft;
+  }, [pxPerSec]);
+
+  // Non-passive wheel listener: Ctrl/Cmd+wheel (and trackpad pinch) zooms around the pointer;
+  // plain and shift wheel keep scrolling natively. One zoom update per animation frame.
+  useEffect(() => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    let factor = 1;
+    let anchorX = 0;
+    let frame = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      factor *= Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.002));
+      anchorX = event.clientX - scroller.getBoundingClientRect().left;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const f = factor;
+        factor = 1;
+        applyScaleRef.current(pxPerSecRef.current * f, anchorX);
+      });
+    };
+    const ruler = rulerScrollRef.current;
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    ruler?.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      scroller.removeEventListener("wheel", onWheel);
+      ruler?.removeEventListener("wheel", onWheel);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // Visible width and coarse scroll bucket drive which ruler ticks are rendered.
+  useEffect(() => {
+    const scroller = tracksScrollRef.current;
+    if (!scroller) return;
+    const measure = () =>
+      setRulerView((v) => {
+        const bucket = Math.floor(scroller.scrollLeft / RULER_BUCKET_PX);
+        return v.width === scroller.clientWidth && v.bucket === bucket
+          ? v
+          : { width: scroller.clientWidth, bucket };
+      });
+    measureViewportRef.current = measure;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
+
   // Headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
   const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, Math.max(DEFAULT_EDITOR_DURATION_SEC, duration + 4));
   const timelineWidth = Math.max(320, Math.ceil(timelineSec * pxPerSec));
@@ -2201,7 +2351,7 @@ export default function EditorWorkspace() {
               }}
               className="h-1.5 shrink-0 cursor-row-resize bg-white/10 hover:bg-brand-primary/50 active:bg-brand-primary"
             />
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 px-3 py-2">
+            <div className="grid grid-cols-1 items-center gap-2 border-b border-white/10 md:grid-cols-[1fr_auto_1fr] px-3 py-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <div ref={addMenuRef} className="relative">
                   <button
@@ -2433,6 +2583,48 @@ export default function EditorWorkspace() {
 
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => zoomActionsRef.current.zoomBy(-1)}
+                    disabled={pxPerSec <= MIN_PX_PER_SEC}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:hover:bg-transparent"
+                    aria-label="Zoom timeline out"
+                    title="Zoom timeline out (-)"
+                  >
+                    <ZoomOut className="h-3.5 w-3.5" />
+                  </button>
+                  <input
+                    type="range"
+                    min={Math.log(MIN_PX_PER_SEC)}
+                    max={Math.log(MAX_PX_PER_SEC)}
+                    step={Math.log(ZOOM_STEP) / 10}
+                    value={Math.log(pxPerSec)}
+                    onChange={(event) => zoomTo(Math.exp(Number(event.target.value)))}
+                    aria-label="Zoom timeline"
+                    aria-valuetext={`${Math.round(pxPerSec)} pixels per second`}
+                    className="hidden h-1 w-24 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary sm:block"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => zoomActionsRef.current.zoomBy(1)}
+                    disabled={pxPerSec >= MAX_PX_PER_SEC}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:hover:bg-transparent"
+                    aria-label="Zoom timeline in"
+                    title="Zoom timeline in (+)"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fitTimeline}
+                    className="rounded-md p-1.5 text-text-secondary hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
+                    aria-label="Fit timeline"
+                    title="Fit timeline (Shift+Z)"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-0.5 rounded-lg bg-white/5 p-0.5">
                   {EDITOR_ASPECTS.map((value) => (
                     <button
                       key={value}
@@ -2478,16 +2670,32 @@ export default function EditorWorkspace() {
                   >
                     {formatTimecode(playhead)}
                   </div>
-                  {Array.from({ length: Math.floor(timelineWidth / pxPerSec) + 1 }, (_, i) => (
-                    <div
-                      key={i}
-                      className={`absolute top-0 flex flex-col items-start ${i > duration ? "opacity-40" : ""}`}
-                      style={{ left: i * pxPerSec }}
-                    >
-                      <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
-                      <span className="mt-0.5 text-[9px] tabular-nums text-text-secondary">{i}s</span>
-                    </div>
-                  ))}
+                  {(() => {
+                    const interval = rulerIntervalSec(pxPerSec);
+                    const [first, last] = visibleTickRange(
+                      rulerView.bucket * RULER_BUCKET_PX - RULER_BUCKET_PX,
+                      (rulerView.bucket + 1) * RULER_BUCKET_PX + rulerView.width + RULER_BUCKET_PX,
+                      pxPerSec,
+                      interval,
+                      timelineWidth
+                    );
+                    return Array.from({ length: last - first + 1 }, (_, n) => {
+                      const i = first + n;
+                      const t = i * interval;
+                      return (
+                        <div
+                          key={i}
+                          className={`absolute top-0 flex flex-col items-start ${t > duration ? "opacity-40" : ""}`}
+                          style={{ left: t * pxPerSec }}
+                        >
+                          <span className={`w-px bg-white/25 ${i % 5 === 0 ? "h-2.5" : "h-1.5"}`} />
+                          <span className="mt-0.5 whitespace-nowrap text-[9px] tabular-nums text-text-secondary">
+                            {formatRulerLabel(t)}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </div>
@@ -2609,6 +2817,7 @@ export default function EditorWorkspace() {
                   if (rulerScrollRef.current) {
                     rulerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
                   }
+                  measureViewportRef.current();
                 }}
               >
                 <div
