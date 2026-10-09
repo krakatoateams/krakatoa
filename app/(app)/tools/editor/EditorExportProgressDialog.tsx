@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import {
   EXPORT_STAGE_LABEL,
+  exportLooksSlow,
   formatElapsed,
   stageValueText,
   type ExportStage,
@@ -55,6 +56,12 @@ export function EditorExportProgressDialog({
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, [open, running]);
+
+  // When the visible stage/percent last changed (to the 1 s tick); drives the "taking longer" hint.
+  const shown = `${stage}|${pct}|${state.uploadDone}`;
+  const [changed, setChanged] = useState({ shown, at: now });
+  if (changed.shown !== shown) setChanged({ shown, at: now });
+  const slow = running && exportLooksSlow(changed.at, now);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -111,6 +118,7 @@ export function EditorExportProgressDialog({
             <p className="text-xs text-text-secondary">
               Elapsed <span className="tabular-nums">{elapsed}</span>
             </p>
+            {slow ? <p className="text-xs text-text-secondary">This is taking longer than usual.</p> : null}
             {!state.cancelAllowed ? (
               <p className="text-xs text-text-secondary">
                 Cancel is unavailable while the video is being saved.

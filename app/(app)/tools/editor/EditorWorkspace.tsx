@@ -908,11 +908,12 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
 type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
 
 const EXPORT_POLL_MS = 3000;
+const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
 
-/** Polls the generation status for an accepted (202) export until it succeeds or fails. */
+/** Polls the generation status for an accepted (202) export until it succeeds, fails, or the server calls it stale. */
 async function pollEditorExport(
   idempotencyKey: string
-): Promise<{ ok: boolean; data: EditorExportPollData }> {
+): Promise<{ ok: boolean; stale?: boolean; data: EditorExportPollData }> {
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
     try {
@@ -925,10 +926,12 @@ async function pollEditorExport(
       if (!res.ok) continue;
       const body = (await res.json()) as {
         status?: string;
+        isStale?: boolean;
         result?: EditorExportPollData | null;
         error?: { message?: string; code?: string } | null;
       };
       if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "started" && body.isStale) return { ok: false, stale: true, data: { error: EXPORT_STALE_ERROR } };
       if (body.status === "failed") {
         return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
       }
@@ -2108,6 +2111,12 @@ export default function EditorWorkspace() {
       if (res.status === 202) {
         const finished = await pollEditorExport(attempt.key);
         data = finished.data;
+        if (finished.stale) {
+          // The stale run's job still blocks takeover of this key; rotate it (0 credits, so no double charge).
+          attempt.settle(true);
+          finishExport({ error: EXPORT_STALE_ERROR });
+          return;
+        }
         if (!finished.ok) {
           if (data.code === "GENERATION_CANCELLED") {
             attempt.settle(false);
@@ -2165,12 +2174,14 @@ export default function EditorWorkspace() {
 
   function applyExportStatus(data: {
     status?: string;
+    isStale?: boolean;
     cancelAllowed?: boolean;
     progress?: unknown;
     result?: { creation?: { id?: string } } | null;
     error?: { message?: string; code?: string } | null;
   }) {
-    if (data.status === "started") {
+    const stale = data.status === "started" && data.isStale === true;
+    if (data.status === "started" && !stale) {
       const prog = parseExportProgress(data.progress);
       setExportProgress((p) =>
         p && p.outcome === "running"
@@ -2188,13 +2199,16 @@ export default function EditorWorkspace() {
     const patch: Partial<ExportProgressState> | null =
       data.status === "succeeded"
         ? { outcome: "success", creationId: data.result?.creation?.id ?? null }
-        : data.status === "failed"
-          ? data.error?.code === "GENERATION_CANCELLED"
-            ? { outcome: "cancelled" }
-            : { outcome: "failed", error: data.error?.message ?? "Export failed." }
-          : null;
+        : stale
+          ? { outcome: "failed", error: EXPORT_STALE_ERROR }
+          : data.status === "failed"
+            ? data.error?.code === "GENERATION_CANCELLED"
+              ? { outcome: "cancelled" }
+              : { outcome: "failed", error: data.error?.message ?? "Export failed." }
+            : null;
     if (!patch) return;
-    if (data.status === "succeeded") {
+    // Success and a stale run both retire the key so the next export starts a fresh attempt.
+    if (data.status === "succeeded" || stale) {
       try {
         const attempt = readPersistedIdempotentAttempt(window.sessionStorage, "editor:export");
         if (attempt) clearPersistedIdempotentAttempt(window.sessionStorage, "editor:export", attempt);
