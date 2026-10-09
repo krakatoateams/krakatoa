@@ -58,9 +58,10 @@ export function EditorExportProgressDialog({
   }, [open, running]);
 
   // When the visible stage/percent last changed (to the 1 s tick); drives the "taking longer" hint.
-  const shown = `${stage}|${pct}|${state.uploadDone}`;
-  const [changed, setChanged] = useState({ shown, at: now });
-  if (changed.shown !== shown) setChanged({ shown, at: now });
+  // startedAt keys a retry as a change and floors the frozen tick left over from the previous run.
+  const shown = `${state.startedAt}|${stage}|${pct}|${state.uploadDone}`;
+  const [changed, setChanged] = useState({ shown, at: Math.max(now, state.startedAt) });
+  if (changed.shown !== shown) setChanged({ shown, at: Math.max(now, state.startedAt) });
   const slow = running && exportLooksSlow(changed.at, now);
 
   useEffect(() => {

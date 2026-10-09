@@ -135,6 +135,8 @@ export async function endStepCore(p: EditorExportParams, stepId: string | null, 
  */
 export async function startEncodeCore(p: EditorExportParams, stepId: string | null): Promise<EncodeStart> {
   let sandbox: Sandbox | null = null;
+  // A job without a step means beginStep failed: the dialog cannot show progress for this export.
+  if (!stepId && p.jobId) logSafe("progress reporting disabled", new Error("no running step for this export"));
   try {
     await reportProgressCore(p, stepId, "preparing", null);
     const urls: Record<string, string> = {};
@@ -151,13 +153,14 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
     const hasFont = Boolean(graph.inputFiles.in_font);
 
     await reportProgressCore(p, stepId, "starting", null);
+    const creating = createSandbox(p);
     try {
-      sandbox = await withPhaseTimeout("create", createSandbox(p));
+      sandbox = await withPhaseTimeout("create", creating);
     } catch (e) {
       logSafe("sandbox create failed", e);
       if (e instanceof EditorExportPhaseTimeout) {
-        // The create may still land later under this name: stop it rather than leave it running to its timeout.
-        await stopSandboxCore(sandboxName(p));
+        // ponytail: best effort, only while this function instance lives; the sandbox timeout is the backstop.
+        void creating.then((late) => late.stop()).catch(() => undefined);
         return { ok: false, code: "EDITOR_EXPORT_START_TIMEOUT" };
       }
       return { ok: false, code: classifySandboxCreateError(e) };
@@ -199,11 +202,7 @@ async function touchLiveness(p: EditorExportParams) {
 
 /** Live status for the progress dialog: {stage, progressPct, updatedAt} on the running step output. */
 export async function reportProgressCore(p: EditorExportParams, stepId: string | null, stage: ExportStage, progressPct: number | null) {
-  if (!stepId) {
-    // A job without a step means beginStep failed: the dialog cannot show progress for this export.
-    if (p.jobId) logSafe("progress report skipped", new Error("no running step for this export"));
-    return;
-  }
+  if (!stepId) return;
   await reportJobStepProgress(p.profileId, stepId, { stage, progressPct, updatedAt: new Date().toISOString() }).catch((e) =>
     logSafe("progress report failed", e)
   );

@@ -91,13 +91,15 @@ export async function reportJobStepProgress(
   stepId: string,
   output: Record<string, unknown>
 ): Promise<void> {
-  const { error } = await supabaseServer
+  const { data, error } = await supabaseServer
     .from(JOB_STEPS_TABLE)
     .update({ output })
     .eq("id", stepId)
     .eq("profile_id", profileId)
-    .eq("status", "running");
+    .eq("status", "running")
+    .select("id");
   if (error) throw error;
+  if (!data?.length) throw new Error("progress update matched no running step");
 }
 
 /** Mark a step 'succeeded' with structured output (ownership-checked). */
