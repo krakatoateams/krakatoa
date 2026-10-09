@@ -294,6 +294,7 @@ export default function VideoStudioShell({
               refreshKey={historyRefreshKey}
               showActions
               showMeta={false}
+              openFromQuery
               limit={20}
             />
           </div>

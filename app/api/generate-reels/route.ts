@@ -439,6 +439,7 @@ export async function POST(req: Request) {
             prompt: reqv.theme,
             ...(devBlank ? devBlankJobTag() : {}),
           },
+          jobId,
         });
       } catch (historyErr) {
         console.warn(
@@ -628,6 +629,7 @@ export async function POST(req: Request) {
                 scenePrompts: result.scenePrompts,
                 narration: result.narration,
               },
+        jobId,
       });
     } catch (historyErr) {
       console.warn(

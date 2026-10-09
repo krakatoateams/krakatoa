@@ -17,7 +17,7 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
-import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
+import { pickGenerateStoragePath, useSignedMediaUrlState } from "@/lib/use-signed-media-url";
 import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_STYLE,
@@ -57,6 +57,7 @@ import CanvasOmniForm from "./CanvasOmniForm";
 import CanvasSourceRefs from "./CanvasSourceRefs";
 import CanvasMentionField from "./CanvasMentionField";
 import CanvasMediaBox, { isPngAsset } from "./CanvasMediaBox";
+import { useCanvasAssetOrigin } from "./CanvasAssetOrigin";
 import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
@@ -86,8 +87,12 @@ export default function ImageNode({
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
 
-  const signedUrl = useSignedMediaUrl(data.resultStoragePath, data.resultUrl);
+  const { url: signedUrl, failed: mediaFailed } = useSignedMediaUrlState(
+    data.resultStoragePath,
+    data.resultUrl
+  );
   const previewUrl = localPreview ?? signedUrl ?? data.resultUrl;
+  const origin = useCanvasAssetOrigin(data.resultStoragePath, data.creationId, "image");
 
   const connectedPromptSources = findUpstreamPrompts(nodes, edges, id);
   const connectedPrompts = findUpstreamPromptTexts(nodes, edges, id);
@@ -250,13 +255,19 @@ export default function ImageNode({
                     kind: "image",
                     url: previewUrl,
                     checkerboard: localPng || isPngAsset(previewUrl, data.resultStoragePath),
+                    createdBy: origin.createdBy,
+                    onShowInLibrary: origin.onShowInLibrary,
                   })
               : undefined
           }
           empty={
             <div className="flex h-full flex-col items-center justify-center gap-2 text-text-secondary">
               <ImageIcon className="h-8 w-8 text-icon-low-emphasis" />
-              <p className="text-xs">Output will appear here…</p>
+              <p className="px-3 text-center text-xs">
+                {mediaFailed && data.resultStoragePath
+                  ? "Couldn't open this file."
+                  : "Output will appear here…"}
+              </p>
             </div>
           }
           overlay={

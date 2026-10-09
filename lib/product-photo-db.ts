@@ -43,6 +43,7 @@ export async function insertProductPhotoGeneration(params: {
   modelTier?: string;
   modelLabel?: string;
   skillId?: string;
+  jobId?: string | null;
 }): Promise<ProductPhotoHistoryItem> {
   const pose = POSE_BY_ID[params.poseId];
   const style = STYLE_BY_ID[params.styleId];
@@ -66,6 +67,7 @@ export async function insertProductPhotoGeneration(params: {
       ...(params.characterName ? { characterName: params.characterName } : {}),
       ...(params.skillId ? { skillId: params.skillId } : {}),
     },
+    jobId: params.jobId,
   });
   return creationToProductPhotoItem(item);
 }

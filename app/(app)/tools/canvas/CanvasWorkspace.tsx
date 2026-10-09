@@ -64,6 +64,10 @@ const edgeTypes = {
 
 /** Debounce window before persisting graph edits. */
 const CANVAS_AUTOSAVE_MS = 2000;
+const CANVAS_NODE_WIDTH = 340;
+/** Nodes size to their media, so the drop uses a typical card height. */
+const CANVAS_NODE_HEIGHT_ESTIMATE = 280;
+const CANVAS_DROP_NUDGE = { x: 36, y: 28 };
 
 type CanvasNode = Node<CanvasNodeData, CanvasNodeKind>;
 
@@ -80,14 +84,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 function nodeFromLibrary(
   item: CreationHistoryItem,
-  offset: number,
+  position: { x: number; y: number },
   existingLabels: Array<string | undefined | null>
 ): CanvasNode {
   const kind: CanvasNodeKind = item.mediaType === "video" ? "video" : "image";
   return {
     id: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
     type: kind,
-    position: { x: 96 + offset * 48, y: 88 + offset * 40 },
+    position,
     data: dataFromLibraryItem(item, existingLabels),
     dragHandle: ".canvas-node-drag",
     selected: true,
@@ -119,7 +123,10 @@ function fingerprintOf(
 export default function CanvasWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getViewport, setViewport, deleteElements } = useReactFlow();
+  const { getViewport, setViewport, screenToFlowPosition, deleteElements } = useReactFlow();
+  const flowPaneRef = useRef<HTMLDivElement>(null);
+  const dropNudgeRef = useRef(0);
+  const lastDropCenterRef = useRef<{ x: number; y: number } | null>(null);
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
@@ -130,6 +137,8 @@ export default function CanvasWorkspace() {
   const [openList, setOpenList] = useState(false);
   const [openShare, setOpenShare] = useState(false);
   const [accessRole, setAccessRole] = useState<CanvasAccessRole>("owner");
+  const [conflict, setConflict] = useState<string | null>(null);
+  const [fileCreators, setFileCreators] = useState<Record<string, string>>({});
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const titleRef = useRef(title);
@@ -145,6 +154,8 @@ export default function CanvasWorkspace() {
   const persistedTitleRef = useRef(DEFAULT_CANVAS_TITLE);
   const savingRef = useRef(false);
   const skipAutosaveRef = useRef(false);
+  const baseUpdatedAtRef = useRef<string | null>(null);
+  const conflictRef = useRef<string | null>(null);
   const { openLibrary, pickerOpen } = useCanvasLibrary();
 
   const fingerprint = useMemo(
@@ -186,6 +197,10 @@ export default function CanvasWorkspace() {
     setEdges([]);
     historyRef.current = [];
     lastSavedRef.current = emptyFingerprint();
+    baseUpdatedAtRef.current = null;
+    conflictRef.current = null;
+    setConflict(null);
+    setFileCreators({});
     setViewport({ x: 0, y: 0, zoom: 1 });
     applyCanvasUrl(null);
     skipAutosaveRef.current = false;
@@ -200,9 +215,11 @@ export default function CanvasWorkspace() {
           canvas?: {
             id: string;
             title: string;
+            updatedAt?: string;
             graph: Parameters<typeof flowFromGraph>[0];
           };
           access?: { role: CanvasAccessRole };
+          creators?: Record<string, string>;
           error?: string;
         };
         if (res.status === 401) {
@@ -221,6 +238,10 @@ export default function CanvasWorkspace() {
         setEdges(flow.edges);
         historyRef.current = [];
         lastSavedRef.current = fingerprintOf(data.canvas.title, flow.nodes, flow.edges);
+        baseUpdatedAtRef.current = data.canvas.updatedAt ?? null;
+        conflictRef.current = null;
+        setConflict(null);
+        setFileCreators(data.creators ?? {});
         requestAnimationFrame(() => setViewport(flow.viewport));
         applyCanvasUrl(data.canvas.id);
       } finally {
@@ -230,20 +251,45 @@ export default function CanvasWorkspace() {
     [applyCanvasUrl, openSignInModal, setEdges, setNodes, setViewport]
   );
 
+  const nextDropPosition = useCallback(() => {
+    const rect = flowPaneRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 1 || rect.height < 1) {
+      const nudge = dropNudgeRef.current;
+      dropNudgeRef.current += 1;
+      lastDropCenterRef.current = null;
+      return { x: 96 + nudge * 48, y: 88 + nudge * 40 };
+    }
+    const center = screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    const last = lastDropCenterRef.current;
+    const sameView =
+      last != null && Math.hypot(center.x - last.x, center.y - last.y) < 12;
+    const nudge = sameView ? dropNudgeRef.current + 1 : 0;
+    dropNudgeRef.current = nudge;
+    lastDropCenterRef.current = center;
+    return {
+      x: center.x - CANVAS_NODE_WIDTH / 2 + nudge * CANVAS_DROP_NUDGE.x,
+      y: center.y - CANVAS_NODE_HEIGHT_ESTIMATE / 2 + nudge * CANVAS_DROP_NUDGE.y,
+    };
+  }, [screenToFlowPosition]);
+
   const addFromLibrary = useCallback(
     (item: CreationHistoryItem) => {
       if (!canDropOnCanvas(item)) return;
       pushHistory();
+      const position = nextDropPosition();
       setNodes((current) => {
         const next = nodeFromLibrary(
           item,
-          current.length,
+          position,
           current.map((node) => node.data.label)
         );
         return withExclusiveSelection([...current, next], next.id);
       });
     },
-    [pushHistory, setNodes]
+    [nextDropPosition, pushHistory, setNodes]
   );
 
   const attachLibraryRef = useCallback(
@@ -254,7 +300,7 @@ export default function CanvasWorkspace() {
       const next = {
         ...nodeFromLibrary(
           item,
-          nodesRef.current.length,
+          { x: 0, y: 0 },
           nodesRef.current.map((node) => node.data.label)
         ),
         selected: false,
@@ -311,7 +357,7 @@ export default function CanvasWorkspace() {
 
   const handleSave = useCallback(
     async (options?: { silent?: boolean }) => {
-      if (savingRef.current) return;
+      if (savingRef.current || conflictRef.current) return;
       if (!canEdit) return;
       if (status !== "authenticated") {
         if (!options?.silent) openSignInModal();
@@ -329,14 +375,25 @@ export default function CanvasWorkspace() {
         const res = await fetch(id ? `/api/canvas/${id}` : "/api/canvas", {
           method: id ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: nextTitle, graph }),
+          body: JSON.stringify({
+            title: nextTitle,
+            graph,
+            baseUpdatedAt: baseUpdatedAtRef.current,
+          }),
         });
         const data = (await res.json().catch(() => ({}))) as {
-          canvas?: { id: string; title: string };
+          canvas?: { id: string; title: string; updatedAt?: string };
           error?: string;
+          code?: string;
         };
         if (res.status === 401) {
           if (!options?.silent) openSignInModal();
+          return;
+        }
+        if (res.status === 409 || data.code === "CANVAS_CONFLICT") {
+          const message = data.error || "Someone else saved this canvas. Reload to see their version.";
+          conflictRef.current = message;
+          setConflict(message);
           return;
         }
         if (!res.ok || !data.canvas) {
@@ -345,6 +402,7 @@ export default function CanvasWorkspace() {
         setCanvasId(data.canvas.id);
         setTitle(data.canvas.title);
         persistedTitleRef.current = data.canvas.title;
+        baseUpdatedAtRef.current = data.canvas.updatedAt ?? baseUpdatedAtRef.current;
         lastSavedRef.current = fingerprintOf(data.canvas.title, nodesRef.current, edgesRef.current);
         applyCanvasUrl(data.canvas.id);
       } catch (err) {
@@ -362,7 +420,7 @@ export default function CanvasWorkspace() {
   );
 
   useEffect(() => {
-    if (!dirty || !canEdit || status !== "authenticated" || skipAutosaveRef.current) return;
+    if (!dirty || !canEdit || conflict || status !== "authenticated" || skipAutosaveRef.current) return;
 
     const timer = window.setTimeout(() => {
       if (skipAutosaveRef.current) return;
@@ -370,7 +428,7 @@ export default function CanvasWorkspace() {
     }, CANVAS_AUTOSAVE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [canEdit, dirty, fingerprint, handleSave, status]);
+  }, [canEdit, conflict, dirty, fingerprint, handleSave, status]);
 
   const commitTitle = useCallback(
     async (raw: string) => {
@@ -396,7 +454,7 @@ export default function CanvasWorkspace() {
           body: JSON.stringify({ title: nextTitle }),
         });
         const data = (await res.json().catch(() => ({}))) as {
-          canvas?: { id: string; title: string };
+          canvas?: { id: string; title: string; updatedAt?: string };
           error?: string;
         };
         if (res.status === 401) {
@@ -409,6 +467,7 @@ export default function CanvasWorkspace() {
         }
         setTitle(data.canvas.title);
         persistedTitleRef.current = data.canvas.title;
+        if (data.canvas.updatedAt) baseUpdatedAtRef.current = data.canvas.updatedAt;
         if (wasClean) {
           lastSavedRef.current = fingerprintOf(
             data.canvas.title,
@@ -461,13 +520,13 @@ export default function CanvasWorkspace() {
     (kind: CanvasNodeKind) => {
       if (!canEdit) return;
       pushHistory();
+      const position = nextDropPosition();
       setNodes((current) => {
         const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
-        const offset = current.length;
         const next: CanvasNode = {
           id,
           type: kind,
-          position: { x: 96 + offset * 48, y: 88 + offset * 40 },
+          position,
           data: labeledDataForKind(
             kind,
             current.map((node) => node.data.label)
@@ -478,7 +537,7 @@ export default function CanvasWorkspace() {
         return withExclusiveSelection([...current, next], id);
       });
     },
-    [canEdit, pushHistory, setNodes]
+    [canEdit, nextDropPosition, pushHistory, setNodes]
   );
 
   const spawnFrom = useCallback(
@@ -692,8 +751,26 @@ export default function CanvasWorkspace() {
           setOpenList(true);
         }}
       />
-      <div className="relative min-h-0 flex-1">
-        <CanvasActionsProvider value={{ spawnFrom, attachLibraryRef, pushHistory }}>
+      {conflict ? (
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-2">
+          <p className="text-sm text-text-primary">{conflict}</p>
+          <button
+            type="button"
+            onClick={() => {
+              const id = canvasIdRef.current;
+              if (!id) return;
+              void loadCanvas(id).catch((err) => {
+                window.alert(err instanceof Error ? err.message : "Couldn't reload this canvas.");
+              });
+            }}
+            className="shrink-0 rounded-lg bg-white/10 px-2.5 py-1 text-xs font-semibold text-text-primary hover:bg-white/15"
+          >
+            Reload
+          </button>
+        </div>
+      ) : null}
+      <div ref={flowPaneRef} className="relative min-h-0 flex-1">
+        <CanvasActionsProvider value={{ spawnFrom, attachLibraryRef, pushHistory, fileCreators }}>
         <ReactFlow
           className="kk-canvas"
           nodes={nodes}

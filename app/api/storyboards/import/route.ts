@@ -443,6 +443,7 @@ export async function POST(req: Request) {
           aspectRatio,
           language,
         },
+        jobId,
       });
     } catch (historyErr) {
       console.warn(

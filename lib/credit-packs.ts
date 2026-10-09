@@ -1,8 +1,8 @@
 /**
  * Predefined credit packs — the single source of truth for what users can buy.
  *
- * Each pack has an IDR price (charged by DOKU) and a USD price (display-only
- * until Polar checkout is connected). Dummy USD amounts match ~Rp18,000/USD.
+ * Each pack is charged in IDR by DOKU. Customer USD text is derived from the
+ * admin `usd_to_idr` rate, not from `priceUsdCents`.
  *
  * SERVER-AUTHORITATIVE: the checkout route resolves credits + amount from this
  * table by `id`. The client only ever sends a `packId` — never an amount or a
@@ -16,7 +16,7 @@ export type CreditPack = {
   bonusCredits?: number;
   /** Price charged via DOKU, in whole IDR (no decimals). */
   priceIdr: number;
-  /** Display price for USD checkout, in cents. Dummy until Polar is connected. */
+  /** Stored cents kept for the credit_packs column. Not shown to customers. */
   priceUsdCents: number;
   /** Short marketing label. */
   label: string;
@@ -77,13 +77,6 @@ export function packBonusValueIdr(pack: CreditPack): number {
   return Math.round(pack.bonusCredits * perCredit);
 }
 
-/** Cosmetic USD value of the bonus credits, in cents. */
-export function packBonusValueUsdCents(pack: CreditPack): number {
-  if (!pack.bonusCredits) return 0;
-  const perCredit = pack.priceUsdCents / pack.credits;
-  return Math.round(pack.bonusCredits * perCredit);
-}
-
 /** Format a whole-IDR amount as e.g. "Rp180.000". */
 export function formatIdr(amount: number): string {
   return new Intl.NumberFormat("id-ID", {
@@ -93,22 +86,33 @@ export function formatIdr(amount: number): string {
   }).format(amount);
 }
 
-/** Format integer cents as e.g. "$1.50". */
-export function formatUsd(cents: number): string {
+/**
+ * Snap a USD amount to $0.50 steps.
+ * Below .30 stays on the dollar; .30–.79 lands on .50; .80 and up goes to the next dollar.
+ * 1.78 → 1.5, 1.81 → 2.
+ */
+export function roundUsdDisplay(amount: number): number {
+  const whole = Math.floor(amount + 1e-9);
+  const frac = amount - whole;
+  if (frac < 0.3) return whole;
+  if (frac < 0.8) return whole + 0.5;
+  return whole + 1;
+}
+
+/**
+ * USD label for an IDR pack price using the admin billing rate (IDR per 1 USD).
+ * Returns null when the rate is missing or not positive so the UI can show IDR only.
+ */
+export function formatIdrAsUsd(
+  amountIdr: number,
+  usdToIdr: number | null | undefined
+): string | null {
+  if (usdToIdr == null || !Number.isFinite(usdToIdr) || usdToIdr <= 0) return null;
+  if (!Number.isFinite(amountIdr) || amountIdr <= 0) return null;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-  }).format(cents / 100);
-}
-
-export type PackCurrency = "USD" | "IDR";
-
-export function formatPackPrice(pack: CreditPack, currency: PackCurrency): string {
-  return currency === "USD" ? formatUsd(pack.priceUsdCents ?? 0) : formatIdr(pack.priceIdr);
-}
-
-export function formatPackBonus(pack: CreditPack, currency: PackCurrency): string {
-  return currency === "USD"
-    ? formatUsd(packBonusValueUsdCents(pack))
-    : formatIdr(packBonusValueIdr(pack));
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(roundUsdDisplay(amountIdr / usdToIdr));
 }

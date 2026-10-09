@@ -138,6 +138,7 @@ export async function finalizeMotionControlSuccess(
       storagePath,
       title,
       metadata: creationMetadata,
+      jobId: ctx.jobId,
     }),
   );
 

@@ -5,8 +5,8 @@ import {
   type SignTtlKind,
   requireSessionUserId,
   signAssetForUser,
-  signStoragePathForUser,
 } from "@/lib/storage-signed-url";
+import { signStoragePathIfReadable } from "@/lib/canvases-db";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
     const signed = assetId
       ? await signAssetForUser(assetId, userId, ttl)
-      : await signStoragePathForUser(path!, userId, ttl);
+      : await signStoragePathIfReadable(path!, userId, ttl);
 
     return NextResponse.json(signed);
   } catch (err: unknown) {

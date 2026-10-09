@@ -27,6 +27,7 @@ type TemplateRow = {
   product_thumb_url: string | null;
   skill_id: string | null;
   shot_count: number | null;
+  duration_sec: number | null;
   is_active: boolean;
   sort_order: number;
 };
@@ -44,7 +45,7 @@ let cache: TemplateCache = {
 };
 
 const SELECT =
-  "id, slug, kind, title, video_url, generation_video_url, prompt, character_thumb_url, reference_image_url, product_thumb_url, skill_id, shot_count, is_active, sort_order";
+  "id, slug, kind, title, video_url, generation_video_url, prompt, character_thumb_url, reference_image_url, product_thumb_url, skill_id, shot_count, duration_sec, is_active, sort_order";
 
 function fromTrendingTemplate(
   template: TrendingTemplate,
@@ -63,6 +64,7 @@ function fromTrendingTemplate(
     ...(template.productImageUrl ? { productThumbUrl: template.productImageUrl } : {}),
     ...(template.skillId ? { skillId: template.skillId } : {}),
     ...(template.shotCount ? { shotCount: template.shotCount } : {}),
+    ...(template.durationSec ? { durationSec: template.durationSec } : {}),
     isActive: true,
     sortOrder,
   };
@@ -88,6 +90,7 @@ function rowToAdmin(row: TemplateRow): AdminDashboardTemplate {
     ...(row.product_thumb_url ? { productThumbUrl: row.product_thumb_url } : {}),
     ...(row.skill_id ? { skillId: row.skill_id } : {}),
     ...(row.shot_count ? { shotCount: row.shot_count } : {}),
+    ...(row.duration_sec ? { durationSec: row.duration_sec } : {}),
     isActive: row.is_active,
     sortOrder: row.sort_order,
   };
@@ -154,6 +157,7 @@ function mapTemplateInsertRow(
     product_thumb_url: template.productThumbUrl ?? null,
     skill_id: template.skillId ?? null,
     shot_count: template.shotCount ?? null,
+    duration_sec: template.durationSec ?? null,
     is_active: template.isActive,
     sort_order: sortOrder,
   };
@@ -283,6 +287,7 @@ export async function saveAllDashboardTemplates(
       product_thumb_url: template.productThumbUrl ?? null,
       skill_id: template.skillId ?? null,
       shot_count: template.shotCount ?? null,
+      duration_sec: template.durationSec ?? null,
       is_active: template.isActive,
       sort_order: template.sortOrder,
     };

@@ -299,6 +299,7 @@ export async function finalizeSuccessCore(
         clipCount: p.document.sequence.length,
         overlayCount: p.document.overlays.length,
       },
+      jobId: p.jobId,
   });
   if (p.videoAssetId) {
     await safe("markAssetReady", () =>

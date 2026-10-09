@@ -208,6 +208,7 @@ export async function POST(req: Request) {
           storagePath: result.storagePath,
           title: String(job.input?.theme ?? "Resumed video").slice(0, 200),
           metadata: { resumed: true, jobId },
+          jobId,
         });
       } catch {
         // non-fatal
@@ -342,6 +343,7 @@ export async function POST(req: Request) {
             storagePath: uploadResult.storagePath,
             title: "Storyboard video",
             metadata: { resumed: true, jobId, storyboardId },
+            jobId,
           });
         } catch {
           // non-fatal
@@ -394,6 +396,7 @@ export async function POST(req: Request) {
           storagePath: uploadResult.storagePath,
           title: String(job.input?.modelId ?? "Resumed video").slice(0, 200),
           metadata: { resumed: true, jobId },
+          jobId,
         });
       } catch {
         // non-fatal

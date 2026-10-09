@@ -22,7 +22,7 @@ import {
   hasSavedVideo,
   pollCanvasVideoResult,
 } from "@/lib/canvas-video-completion";
-import { pickGenerateStoragePath, useSignedMediaUrl } from "@/lib/use-signed-media-url";
+import { pickGenerateStoragePath, useSignedMediaUrlState } from "@/lib/use-signed-media-url";
 import {
   TEXT_TO_VIDEO_MODELS,
   getAllowedDurations,
@@ -55,6 +55,7 @@ import CanvasOmniForm from "./CanvasOmniForm";
 import CanvasSourceRefs from "./CanvasSourceRefs";
 import CanvasMentionField from "./CanvasMentionField";
 import CanvasMediaBox from "./CanvasMediaBox";
+import { useCanvasAssetOrigin } from "./CanvasAssetOrigin";
 import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
@@ -82,8 +83,12 @@ export default function VideoNode({
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { videoCredits } = usePricing();
 
-  const signedUrl = useSignedMediaUrl(data.resultStoragePath, data.resultUrl);
+  const { url: signedUrl, failed: mediaFailed } = useSignedMediaUrlState(
+    data.resultStoragePath,
+    data.resultUrl
+  );
   const previewUrl = localPreview ?? signedUrl ?? data.resultUrl;
+  const origin = useCanvasAssetOrigin(data.resultStoragePath, data.creationId, "video");
 
   const connectedPromptSources = findUpstreamPrompts(nodes, edges, id);
   const connectedPrompts = findUpstreamPromptTexts(nodes, edges, id);
@@ -160,12 +165,6 @@ export default function VideoNode({
     if (refImages.length > 0) {
       try {
         const frames = await resolveCanvasRefFrames(refImages);
-        if (frames.some((frame) => frame.url.startsWith("blob:"))) {
-          patch({
-            error: "A connected image isn't ready to send. Wait for the upload to finish, then try again.",
-          });
-          return;
-        }
         const refCap = model.references.referenceImages;
         if (refCap > 0) {
           if (frames.length > refCap) {
@@ -292,13 +291,23 @@ export default function VideoNode({
           url={previewUrl}
           onOpen={
             previewUrl && !data.loading
-              ? () => openPreview({ kind: "video", url: previewUrl })
+              ? () =>
+                  openPreview({
+                    kind: "video",
+                    url: previewUrl,
+                    createdBy: origin.createdBy,
+                    onShowInLibrary: origin.onShowInLibrary,
+                  })
               : undefined
           }
           empty={
             <div className="flex h-full flex-col items-center justify-center gap-2 text-text-secondary">
               <Video className="h-8 w-8 text-icon-low-emphasis" />
-              <p className="text-xs">Output will appear here…</p>
+              <p className="px-3 text-center text-xs">
+                {mediaFailed && data.resultStoragePath
+                  ? "Couldn't open this file."
+                  : "Output will appear here…"}
+              </p>
             </div>
           }
           overlay={

@@ -912,6 +912,7 @@ export async function POST(req: Request) {
         modelTier,
         modelLabel: devBlank ? "Dev blank" : tier.modelLabel,
         skillId,
+        jobId,
       });
       console.log("[Product Photo] Saved output.");
       return { saved, mimeType };

@@ -5,6 +5,8 @@ import {
   parseCanvasGraph,
 } from "@/lib/canvas-document";
 import {
+  canvasFileCreators,
+  canvasSaveErrorStatus,
   deleteCanvas,
   getCanvasForProfile,
   updateCanvasForProfile,
@@ -29,9 +31,11 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
     if (!id) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
     const loaded = await getCanvasForProfile(profile, id);
     if (!loaded) return NextResponse.json({ error: "Canvas not found." }, { status: 404 });
+    const creators = await canvasFileCreators(loaded.record.graph);
     return NextResponse.json({
       canvas: loaded.record,
       access: loaded.access,
+      creators,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -65,6 +69,7 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
       canvasId: id,
       title: typeof body.title === "string" ? body.title : "",
       graph,
+      baseUpdatedAt: typeof body.baseUpdatedAt === "string" ? body.baseUpdatedAt : null,
     });
     if (!canvas) {
       return NextResponse.json({ error: "You don't have permission to edit this canvas." }, { status: 403 });
@@ -74,6 +79,13 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
     const message = error instanceof Error ? error.message : String(error);
     if (message === "Not authenticated.") {
       return NextResponse.json({ error: message }, { status: 401 });
+    }
+    const status = canvasSaveErrorStatus(error);
+    if (status) {
+      return NextResponse.json(
+        { error: message, code: status === 409 ? "CANVAS_CONFLICT" : "CANVAS_PATH" },
+        { status }
+      );
     }
     console.error("[api/canvas] update failed:", error);
     return NextResponse.json({ error: "Failed to save canvas." }, { status: 500 });

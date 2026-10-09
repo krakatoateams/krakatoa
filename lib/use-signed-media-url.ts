@@ -34,11 +34,12 @@ export function pickGenerateStoragePath(data: {
  * Re-signs before expiry so previews/downloads stay valid.
  * `seedUrl` — optional signed URL from the generate response for instant first paint.
  */
-export function useSignedMediaUrl(
+export function useSignedMediaUrlState(
   storagePath: string | null | undefined,
   seedUrl?: string | null,
-): string | null {
+): { url: string | null; failed: boolean } {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearTimer = useCallback(() => {
@@ -52,9 +53,11 @@ export function useSignedMediaUrl(
     const path = storagePath?.trim();
     if (!path) {
       setSignedUrl(null);
+      setFailed(false);
       clearTimer();
       return;
     }
+    setFailed(false);
 
     let cancelled = false;
 
@@ -63,12 +66,16 @@ export function useSignedMediaUrl(
         const signed = await fetchSignedUrl({ path });
         if (cancelled) return;
         setSignedUrl(signed.url);
+        setFailed(false);
         clearTimer();
         const ms = new Date(signed.expiresAt).getTime() - Date.now() - REFRESH_BUFFER_MS;
         const delay = Math.min(Math.max(ms, MIN_REFRESH_MS), MAX_REFRESH_MS);
         timerRef.current = setTimeout(() => void load(), delay);
       } catch {
-        if (!cancelled) setSignedUrl(null);
+        if (!cancelled) {
+          setSignedUrl(null);
+          setFailed(true);
+        }
       }
     };
 
@@ -80,6 +87,16 @@ export function useSignedMediaUrl(
   }, [storagePath, clearTimer]);
 
   const path = storagePath?.trim();
-  if (!path) return seedUrl ?? null;
-  return signedUrl ?? seedUrl ?? null;
+  if (!path) return { url: seedUrl ?? null, failed: false };
+  return {
+    url: signedUrl ?? seedUrl ?? null,
+    failed: failed && !signedUrl && !seedUrl,
+  };
+}
+
+export function useSignedMediaUrl(
+  storagePath: string | null | undefined,
+  seedUrl?: string | null,
+): string | null {
+  return useSignedMediaUrlState(storagePath, seedUrl).url;
 }
