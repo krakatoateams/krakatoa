@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Sparkles } from "lucide-react";
 import {
@@ -22,7 +22,6 @@ import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_STYLE,
   DEFAULT_PRODUCT_PHOTO_QUALITY,
-  PRODUCT_PHOTO_TIERS,
   photoAspectRatioDisplayForTier,
   getProductPhotoTier,
   photoAspectRatioOptionsForTier,
@@ -54,6 +53,7 @@ import {
   resolveCanvasRefFrames,
 } from "../canvas-api";
 import { canvasImageAttemptSignature } from "@/lib/canvas-image-signature";
+import { canvasImageTierOptions, snapCanvasImageTier } from "@/lib/canvas-model-options";
 import CanvasNodeFrame from "./CanvasNodeFrame";
 import CanvasOmniForm from "./CanvasOmniForm";
 import CanvasSourceRefs from "./CanvasSourceRefs";
@@ -64,6 +64,7 @@ import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
 import type { ImageNodeData } from "../node-data";
+import { useCanvasImageFeatures } from "../use-canvas-features";
 import { describeGenerateHttpError } from "@/lib/canvas-generation-error";
 import { photoPromptLimitError } from "@/lib/skills";
 
@@ -107,21 +108,32 @@ export default function ImageNode({
   const hasImageRefs = refImages.some((image) => image.resultStoragePath || image.resultUrl);
   const prompt =
     resolveCanvasMentionPrompt(data.prompt.trim(), nodes) || connectedPrompt || "";
+  const features = useCanvasImageFeatures();
   const photoTiers = useMemo(
-    () =>
-      hasImageRefs
-        ? PRODUCT_PHOTO_TIERS.filter((t) => t.supportsReference)
-        : PRODUCT_PHOTO_TIERS,
-    [hasImageRefs]
+    () => canvasImageTierOptions(hasImageRefs, features.data),
+    [hasImageRefs, features.data]
   );
+  const tiersReady = features.data !== null;
+  const tierValid = photoTiers.some((t) => t.id === data.modelTier);
   const tier = getProductPhotoTier(data.modelTier);
   const quality = data.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
   const photoPricingKey = photoTierPricingKey(tier, data.resolution, quality);
   const cost = imageCredits(photoPricingKey, 1);
   const limitError = photoPromptLimitError(prompt);
-  const canGenerate = prompt.length > 0 && !limitError && !data.uploading && photoTiers.length > 0;
+  const canGenerate = prompt.length > 0 && !limitError && !data.uploading && tierValid;
 
   const patch = (next: Partial<ImageNodeData>) => updateNodeData(id, next);
+
+  // Snap to an enabled tier once enablement is known (never before).
+  const snapTier =
+    tiersReady && !tierValid
+      ? snapCanvasImageTier(data.modelTier, photoTiers, features.data)
+      : null;
+  useEffect(() => {
+    if (snapTier && snapTier !== data.modelTier) {
+      updateNodeData(id, { modelTier: snapTier as ProductPhotoModelTier });
+    }
+  }, [snapTier, data.modelTier, id, updateNodeData]);
 
   const handleUpload = async (file: File) => {
     if (localPreview) URL.revokeObjectURL(localPreview);
@@ -343,18 +355,24 @@ export default function ImageNode({
             disabled={data.loading || data.uploading}
           />
           <div className={`${STUDIO_CHIP_ROW_CLASS} mb-2`}>
-            <ChipDropdown
-              icon={<Cpu className="h-3.5 w-3.5" />}
-              value={tier.modelLabel}
-              options={photoTiers.map((t) => ({
-                id: t.id,
-                label: t.modelLabel,
-                hint: photoTierPriceHint(t, imageCredits),
-              }))}
-              activeId={data.modelTier}
-              square
-              onSelect={(next) => patch({ modelTier: next as ProductPhotoModelTier })}
-            />
+            {tiersReady ? (
+              photoTiers.length > 0 && (
+                <ChipDropdown
+                  icon={<Cpu className="h-3.5 w-3.5" />}
+                  value={tier.modelLabel}
+                  options={photoTiers.map((t) => ({
+                    id: t.id,
+                    label: t.modelLabel,
+                    hint: photoTierPriceHint(t, imageCredits),
+                  }))}
+                  activeId={data.modelTier}
+                  square
+                  onSelect={(next) => patch({ modelTier: next as ProductPhotoModelTier })}
+                />
+              )
+            ) : (
+              <div className="h-8 w-28 animate-pulse rounded-lg bg-white/5" aria-hidden />
+            )}
             <ChipDropdown
               icon={<Crop className="h-3.5 w-3.5" />}
               value={photoAspectRatioDisplayForTier(tier, data.aspectRatio)}
@@ -396,6 +414,16 @@ export default function ImageNode({
             <p role="alert" className="mb-2 flex items-start gap-1.5 text-[11px] text-error">
               <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
               {limitError}
+            </p>
+          )}
+          {features.status === "error" && !tiersReady && (
+            <p role="alert" className="mb-2 text-[11px] text-error">
+              Couldn&apos;t load available models. Try again in a moment.
+            </p>
+          )}
+          {tiersReady && photoTiers.length === 0 && (
+            <p role="alert" className="mb-2 text-[11px] text-error">
+              No models are available for this tool right now.
             </p>
           )}
           {data.error && (
