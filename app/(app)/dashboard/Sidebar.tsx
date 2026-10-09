@@ -22,6 +22,7 @@ import {
   Coins,
 } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
+import { NotificationBell } from "@/components/NotificationBell";
 import { Button } from "@/components/ui/Button";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
@@ -218,11 +219,12 @@ export default function Sidebar({
       <aside
         className="hidden w-60 shrink-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-N50 md:sticky md:top-2 md:flex md:h-[calc(100vh-1rem)]"
       >
+      <div className="flex items-center justify-between gap-2 pr-3">
       {/* Logo — doubles as the way back out to the landing page */}
       <Link
         href="/"
         aria-label="Kelolako home"
-        className="flex items-center gap-2.5 px-5 py-5 transition-opacity hover:opacity-80"
+        className="flex min-w-0 items-center gap-2.5 px-5 py-5 transition-opacity hover:opacity-80"
       >
         <Image
           src="/Logo White transparent.svg"
@@ -235,6 +237,8 @@ export default function Sidebar({
           KELOLAKO
         </span>
       </Link>
+      {status === "authenticated" ? <NotificationBell variant="sidebar" /> : null}
+      </div>
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-3 py-5">

@@ -23,3 +23,11 @@ _Avoid_: Using "coming soon" alone to mean either concept — they behave differ
 **Admin preview**:
 The bypass that lets an admin use a platform marked coming-soon (per Platform availability) exactly as if it were live — full access to connect and schedule with it — while everyone else sees it disabled with a "Preview"-style badge instead of the normal locked "Soon" look. Scoped only to Platform availability; Tool availability has no equivalent bypass because its "coming soon" never blocks anyone in the first place.
 _Avoid_: Admin bypass (as the primary term — "preview" is what the badge says, keep the glossary term matching the UI)
+
+**Notification**:
+A lasting, per-user record that something finished or happened *for* them while they may not be watching — a generation succeeded or failed, a scheduled post published or failed to publish, or they were invited to a canvas. Shown in the bell; stays until it ages out. One post publishes to one platform, so a post scheduled to three platforms yields three Notifications.
+_Avoid_: Alert, toast, banner (as synonyms) — a toast is a momentary on-page message, and the active-generation banner shows live in-progress work; neither is a Notification
+
+**Canvas invitation**:
+An owner granting another person (by email) viewer or editor access to a canvas. It takes effect automatically — there is no accept or decline step — so the invitee's Notification is purely informational and links straight to the canvas.
+_Avoid_: Share request, collaboration request (both imply the invitee must accept)
