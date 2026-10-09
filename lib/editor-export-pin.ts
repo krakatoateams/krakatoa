@@ -6,16 +6,19 @@
 import { createHash } from "node:crypto";
 import { EDITOR_FONT_URL } from "@/lib/editor-font";
 
-export const FFMPEG_VERSION = "7.0.2";
-/** Exact-version file (not the moving "release" URL). */
-export const FFMPEG_URL = `https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz`;
-/** SHA-256 computed from the downloaded file; its MD5 matched the publisher's .md5 for this release (2026-10-09). */
-export const FFMPEG_SHA256 = "abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67";
+export const FFMPEG_VERSION = "n8.1.3-14-g330caae0c1";
+/**
+ * Exact, dated BtbN autobuild asset (GPL, static). johnvansickle 7.0.2 was rejected: it has libfreetype but no
+ * `drawtext` filter ("No such filter: 'drawtext'", verified in a real sandbox 2026-10-09).
+ */
+export const FFMPEG_URL = `https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-08-13-05/ffmpeg-${FFMPEG_VERSION}-linux64-gpl-8.1.tar.xz`;
+/** SHA-256 computed from our own download; equals the digest GitHub publishes for the asset. */
+export const FFMPEG_SHA256 = "bae96c47089a2552db3430ca2766ec0f69ed34f4eb232c36a71707280179df29";
 /** SHA-256 of Poppins-ExtraBold.ttf at the pinned google/fonts revision in `lib/editor-font.ts`. */
 export const FONT_SHA256 = "f2ab17c1a63a0ecc12c2461848fc8a469395e3cd2d641803e889c643d9f958e1";
 
 export const WORK = "export";
-export const FFMPEG_BIN = `${WORK}/ff/ffmpeg`;
+export const FFMPEG_BIN = `${WORK}/ff/bin/ffmpeg`;
 export const FONT_FILE = `${WORK}/Poppins.ttf`;
 
 export type SandboxRun = (cmd: string, args: string[]) => Promise<{ ok: boolean; stdout: string }>;
@@ -55,6 +58,15 @@ export async function ffmpegHasCapabilities(run: SandboxRun, encoders: string[],
   return !needsFont || (await run("test", ["-f", FONT_FILE])).ok;
 }
 
+/** Real tiny drawtext (pinned font) + MP4 (x264/aac) and WebM (vp9/opus) encodes: proves the graph's features run. */
+export async function ffmpegSmokeEncodes(run: SandboxRun): Promise<boolean> {
+  const base = ["-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=1:r=30", "-f", "lavfi", "-i", "sine=d=1"];
+  const vf = ["-vf", `drawtext=fontfile=${FONT_FILE}:text=Hi:fontcolor=white:fontsize=40`];
+  const mp4 = await run(FFMPEG_BIN, [...base, ...vf, "-c:v", "libx264", "-c:a", "aac", `${WORK}/smoke.mp4`]);
+  const webm = await run(FFMPEG_BIN, [...base, ...vf, "-c:v", "libvpx-vp9", "-c:a", "libopus", `${WORK}/smoke.webm`]);
+  return mp4.ok && webm.ok;
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export-pin self-check: ${msg}`);
 }
@@ -64,7 +76,7 @@ export async function editorExportPinSelfCheck(): Promise<void> {
   assert(sha256Hex("abc") === abc, "known test vector");
   assert(sha256SumMatches(`${abc}  export/ff.tar.xz\n`, abc), "sum matches");
   assert(!sha256SumMatches(`${abc.replace(/^./, "0")}  x`, abc) && !sha256SumMatches("", abc), "sum mismatch fails");
-  assert(/^[0-9a-f]{64}$/.test(FFMPEG_SHA256) && /^[0-9a-f]{64}$/.test(FONT_SHA256) && !FFMPEG_URL.includes("release-amd64"), "pins are exact");
+  assert(/^[0-9a-f]{64}$/.test(FFMPEG_SHA256) && /^[0-9a-f]{64}$/.test(FONT_SHA256) && FFMPEG_URL.includes(FFMPEG_VERSION), "pins are exact");
 
   // Fail closed: a wrong tarball digest must stop before extraction and before anything is executed.
   const calls: string[] = [];
