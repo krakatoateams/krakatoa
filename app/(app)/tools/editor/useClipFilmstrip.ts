@@ -2,37 +2,64 @@
 
 import { useEffect, useState } from "react";
 import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
-import { FILMSTRIP_ROW_PX, filmstripCount, filmstripTimes } from "@/lib/editor-filmstrip";
+import {
+  FILMSTRIP_ROW_PX,
+  filmstripCount,
+  filmstripGridIndex,
+  filmstripTileTime,
+  filmstripTileWidth,
+  FILMSTRIP_GRID_FPS,
+} from "@/lib/editor-filmstrip";
 
-// Frames are keyed by source (storage path or device object URL) + 0.1 s source time,
-// so moves never re-extract and trims only capture the times they have not seen.
-// Session memory only; data URLs at 2x row height are a few KB each.
-const FRAME_CACHE_LIMIT = 600;
-const frameCache = new Map<string, string>();
+// Frames are keyed by source (storage path or device object URL) + capture DPR bucket +
+// 1/30 s source-time slot, so moves never re-extract and trims only capture times not yet seen.
+// Session memory only; a tile frame is a few KB of data URL.
+const FRAME_CACHE_LIMIT = 1500;
+const frameCache = new Map<string, Map<number, string>>();
+let frameCacheSize = 0;
 const aspectCache = new Map<string, number>();
 /** Sources that could not be captured (decode error, tainted canvas): plain block, no retries. */
 const failedPaths = new Set<string>();
 
-const THUMB_HEIGHT_PX = FILMSTRIP_ROW_PX * 2;
 const IDLE_MS = 300;
 const WAIT_TIMEOUT_MS = 15_000;
+const JPEG_QUALITY = 0.85;
 
-function frameKey(path: string, sec: number): string {
-  return `${path}@${sec.toFixed(1)}`;
+function dprBucket(): number {
+  return Math.min(3, Math.max(1, Math.round(globalThis.devicePixelRatio || 1)));
 }
 
-function cacheFrame(key: string, dataUrl: string) {
-  frameCache.set(key, dataUrl);
-  while (frameCache.size > FRAME_CACHE_LIMIT) {
-    const oldest = frameCache.keys().next().value;
-    if (oldest === undefined) break;
-    frameCache.delete(oldest);
+function cacheFrame(sourceKey: string, slot: number, dataUrl: string) {
+  let frames = frameCache.get(sourceKey);
+  if (!frames) frameCache.set(sourceKey, (frames = new Map()));
+  if (!frames.has(slot)) frameCacheSize++;
+  frames.set(slot, dataUrl);
+  while (frameCacheSize > FRAME_CACHE_LIMIT) {
+    const oldestSource = frameCache.keys().next().value;
+    if (oldestSource === undefined) break;
+    const bucket = frameCache.get(oldestSource)!;
+    const oldestSlot = bucket.keys().next().value;
+    if (oldestSlot !== undefined && bucket.delete(oldestSlot)) frameCacheSize--;
+    if (bucket.size === 0) frameCache.delete(oldestSource);
   }
 }
 
-function cachedFrames(path: string, times: number[]): string[] | null {
-  const frames = times.map((t) => frameCache.get(frameKey(path, t)));
-  return frames.every((f): f is string => f !== undefined) ? frames : null;
+/** Exact frame for the slot, else the nearest cached frame of the same source, else null. */
+function frameFor(sourceKey: string, slot: number): string | null {
+  const frames = frameCache.get(sourceKey);
+  if (!frames) return null;
+  const exact = frames.get(slot);
+  if (exact) return exact;
+  let best: string | null = null;
+  let bestDist = Infinity;
+  for (const [s, src] of frames) {
+    const dist = Math.abs(s - slot);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = src;
+    }
+  }
+  return best;
 }
 
 function waitFor(video: HTMLVideoElement, event: "loadedmetadata" | "seeked"): Promise<void> {
@@ -51,34 +78,55 @@ function waitFor(video: HTMLVideoElement, event: "loadedmetadata" | "seeked"): P
   });
 }
 
+export type FilmstripTile = { index: number; left: number; src: string | null };
+
+/** Tile indices covering the viewport [viewLeft, viewRight] (block-local px). */
+function visibleRange(count: number, tileWidth: number, viewLeft: number, viewRight: number): [number, number] {
+  const first = Math.min(count - 1, Math.max(0, Math.floor(viewLeft / tileWidth)));
+  const last = Math.min(count - 1, Math.max(first, Math.floor(viewRight / tileWidth)));
+  return [first, last];
+}
+
 /**
- * Filmstrip frames for a timeline clip over its trimmed source range. Loads one hidden
- * video from the device file's object URL (no network) or else the stable signed URL,
- * seeks through the missing times, and releases it.
- * Returns null while loading or when the source cannot be captured (plain block).
+ * Filmstrip tiles for a timeline clip: fixed-width, aspect-correct tiles over the trimmed
+ * source range, one frame per tile, only near the scroll viewport. A tile without its exact
+ * frame shows the nearest cached frame of the same source, else `src: null` (placeholder).
+ * Loads one hidden video (device object URL, else the stable signed URL), seeks through the
+ * missing times, and releases it. Returns null when there is no source or it cannot be captured.
  */
 export function useClipFilmstrip(
   storagePath: string | null | undefined,
   localUrl: string | null | undefined,
   inSec: number,
   outSec: number,
-  blockWidthPx: number
-): string[] | null {
+  blockWidthPx: number,
+  /** Visible scroll range in block-local px (already padded by the caller). */
+  viewLeft: number,
+  viewRight: number
+): { tileWidth: number; tiles: FilmstripTile[] } | null {
   const storage = storagePath?.trim() || null;
   const url = useSignedMediaUrl(localUrl ? null : storage, localUrl);
   const path = localUrl || storage;
-  const [frames, setFrames] = useState<string[] | null>(null);
+  const [, setVersion] = useState(0);
+  const dpr = dprBucket();
+
+  const aspect = (path && aspectCache.get(path)) || 16 / 9;
+  const tileWidth = filmstripTileWidth(aspect);
+  const count = filmstripCount(blockWidthPx, aspect);
+  const [first, last] = visibleRange(count, tileWidth, viewLeft, viewRight);
 
   useEffect(() => {
     if (!path || !url || failedPaths.has(path)) return;
+    const sourceKey = `${path}|${dpr}`;
+    const slotsFor = (a: number) => {
+      const tw = filmstripTileWidth(a);
+      const [f, l] = visibleRange(filmstripCount(blockWidthPx, a), tw, viewLeft, viewRight);
+      const slots: number[] = [];
+      for (let i = f; i <= l; i++) slots.push(filmstripGridIndex(filmstripTileTime(i, inSec, outSec, blockWidthPx, tw)));
+      return slots;
+    };
     const knownAspect = aspectCache.get(path);
-    if (knownAspect) {
-      const hit = cachedFrames(path, filmstripTimes(inSec, outSec, filmstripCount(blockWidthPx, knownAspect)));
-      if (hit) {
-        setFrames(hit);
-        return;
-      }
-    }
+    if (knownAspect && slotsFor(knownAspect).every((slot) => frameCache.get(sourceKey)?.has(slot))) return;
 
     let cancelled = false;
     let video: HTMLVideoElement | null = null;
@@ -89,7 +137,7 @@ export function useClipFilmstrip(
       video = null;
     };
 
-    // Debounced so a trim drag extracts once it settles, not on every pointermove.
+    // Debounced so a trim drag or scroll extracts once it settles, not on every pointermove.
     const timer = setTimeout(async () => {
       const el = document.createElement("video");
       video = el;
@@ -102,29 +150,31 @@ export function useClipFilmstrip(
       try {
         await waitFor(el, "loadedmetadata");
         if (cancelled) return;
-        const aspect = el.videoWidth > 0 && el.videoHeight > 0 ? el.videoWidth / el.videoHeight : 16 / 9;
-        aspectCache.set(path, aspect);
-        const times = filmstripTimes(inSec, outSec, filmstripCount(blockWidthPx, aspect));
+        const realAspect = el.videoWidth > 0 && el.videoHeight > 0 ? el.videoWidth / el.videoHeight : 16 / 9;
+        const aspectChanged = aspectCache.get(path) !== realAspect;
+        aspectCache.set(path, realAspect);
+        if (aspectChanged) setVersion((v) => v + 1);
         const canvas = document.createElement("canvas");
-        canvas.height = THUMB_HEIGHT_PX;
-        canvas.width = Math.max(1, Math.round(THUMB_HEIGHT_PX * aspect));
+        canvas.height = FILMSTRIP_ROW_PX * dpr;
+        canvas.width = filmstripTileWidth(realAspect) * dpr;
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("no 2d context");
         const lastSec = Number.isFinite(el.duration) ? Math.max(0, el.duration - 0.05) : Infinity;
-        for (const t of times) {
-          const key = frameKey(path, t);
-          if (frameCache.has(key)) continue;
-          el.currentTime = Math.min(t, lastSec);
+        for (const slot of slotsFor(realAspect)) {
+          if (frameCache.get(sourceKey)?.has(slot)) continue;
+          el.currentTime = Math.min(slot / FILMSTRIP_GRID_FPS, lastSec);
           await waitFor(el, "seeked");
           if (cancelled) return;
           ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
-          cacheFrame(key, canvas.toDataURL("image/jpeg", 0.6));
+          cacheFrame(sourceKey, slot, canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+          setVersion((v) => v + 1);
         }
-        const next = cachedFrames(path, times);
-        if (next) setFrames(next);
       } catch (error) {
         // A timeout (busy tab, slow network) retries on the next change; real failures stay plain.
-        if (!cancelled && !(error instanceof Error && error.message === "timeout")) failedPaths.add(path);
+        if (!cancelled && !(error instanceof Error && error.message === "timeout")) {
+          failedPaths.add(path);
+          setVersion((v) => v + 1);
+        }
       } finally {
         if (video === el) release();
       }
@@ -135,7 +185,16 @@ export function useClipFilmstrip(
       clearTimeout(timer);
       release();
     };
-  }, [path, url, inSec, outSec, blockWidthPx]);
+    // first/last stand in for viewLeft/viewRight so sub-tile scrolling does not restart extraction.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, url, inSec, outSec, blockWidthPx, first, last, dpr]);
 
-  return frames;
+  if (!path || failedPaths.has(path)) return null;
+  const sourceKey = `${path}|${dpr}`;
+  const tiles: FilmstripTile[] = [];
+  for (let index = first; index <= last; index++) {
+    const slot = filmstripGridIndex(filmstripTileTime(index, inSec, outSec, blockWidthPx, tileWidth));
+    tiles.push({ index, left: index * tileWidth, src: frameFor(sourceKey, slot) });
+  }
+  return { tileWidth, tiles };
 }

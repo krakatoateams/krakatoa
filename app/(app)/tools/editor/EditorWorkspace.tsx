@@ -311,6 +311,8 @@ function TimelineLayerRow({
   onTrimStart,
   onTrimEnd,
   filmstrip,
+  viewLeft,
+  viewRight,
 }: {
   selected: boolean;
   locked: boolean;
@@ -336,6 +338,9 @@ function TimelineLayerRow({
   onTrimEnd: (endSec: number) => void;
   /** Video layers: source range to show as a frame strip behind the label. */
   filmstrip?: { storagePath: string | null; localUrl: string | null; inSec: number; outSec: number };
+  /** Visible scroll range in track px; only tiles near it are extracted and rendered. */
+  viewLeft: number;
+  viewRight: number;
 }) {
   const span = Math.max(0.2, endSec - startSec);
   const width = Math.max(28, span * pxPerSec);
@@ -344,7 +349,9 @@ function TimelineLayerRow({
     filmstrip?.localUrl,
     filmstrip?.inSec ?? 0,
     filmstrip?.outSec ?? 0,
-    width
+    width,
+    viewLeft - startSec * pxPerSec,
+    viewRight - startSec * pxPerSec
   );
   const nudgeKey = (edge: "start" | "end") => (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -389,12 +396,27 @@ function TimelineLayerRow({
         {frames ? (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 flex overflow-hidden rounded-md"
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-md"
           >
-            {frames.map((src, i) => (
-              // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL frames
-              <img key={i} src={src} alt="" draggable={false} className="h-full min-w-0 flex-1 object-cover" />
-            ))}
+            {frames.tiles.map((tile) =>
+              tile.src ? (
+                // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL frames
+                <img
+                  key={tile.index}
+                  src={tile.src}
+                  alt=""
+                  draggable={false}
+                  className="absolute top-0 h-full"
+                  style={{ left: tile.left, width: frames.tileWidth }}
+                />
+              ) : (
+                <span
+                  key={tile.index}
+                  className="absolute top-0 h-full bg-white/[0.06] shadow-[inset_-1px_0_0_rgba(0,0,0,0.25)]"
+                  style={{ left: tile.left, width: frames.tileWidth }}
+                />
+              )
+            )}
           </span>
         ) : null}
         <span
@@ -3179,6 +3201,8 @@ export default function EditorWorkspace() {
                           startSec={overlay.startSec}
                           endSec={overlay.endSec}
                           pxPerSec={pxPerSec}
+                          viewLeft={rulerView.bucket * RULER_BUCKET_PX - RULER_BUCKET_PX}
+                          viewRight={(rulerView.bucket + 1) * RULER_BUCKET_PX + rulerView.width + RULER_BUCKET_PX}
                           trackWidth={timelineWidth}
                           laneWidth={laneWidth}
                           maxEnd={EDITOR_MAX_DURATION_SEC}
@@ -3226,6 +3250,8 @@ export default function EditorWorkspace() {
                             startSec={clip.startSec}
                             endSec={clip.endSec}
                             pxPerSec={pxPerSec}
+                            viewLeft={rulerView.bucket * RULER_BUCKET_PX - RULER_BUCKET_PX}
+                            viewRight={(rulerView.bucket + 1) * RULER_BUCKET_PX + rulerView.width + RULER_BUCKET_PX}
                             trackWidth={timelineWidth}
                             laneWidth={laneWidth}
                             maxEnd={EDITOR_MAX_DURATION_SEC}
