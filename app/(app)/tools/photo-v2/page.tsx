@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { CreationHistoryItem } from "@/lib/creations";
 import MentionTextarea from "@/components/MentionTextarea";
+import { photoPromptLimitError } from "@/lib/skills";
 import {
   parseMentionAssetsFromHistory,
   type MentionAsset,
@@ -725,6 +726,7 @@ function PhotoOmniPage({
     creationSupported &&
     availableTiers.length > 0 &&
     (requiresProduct ? !!product.file : true) &&
+    !photoPromptLimitError(prompt) &&
     (isImageMode || isSocialMode ? prompt.trim().length > 0 : true) &&
     // Character: need a description OR a usable reference image.
     (isCharacterMode
@@ -1108,6 +1110,11 @@ function PhotoOmniPage({
                 </div>
               )}
             </div>
+            {photoPromptLimitError(prompt) && (
+              <p role="alert" className="mt-2 text-[11px] text-error">
+                {photoPromptLimitError(prompt)}
+              </p>
+            )}
 
             {/* Controls row */}
             <div className="mt-4 flex flex-col gap-3 lg:mt-3 lg:flex-row lg:items-center lg:justify-between">

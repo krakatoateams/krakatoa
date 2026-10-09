@@ -80,6 +80,7 @@ import {
   skillDefaultTitle,
   skillPinMismatch,
   skillPhotoMode,
+  photoPromptLimitError,
 } from "@/lib/skills";
 
 export const maxDuration = 300;
@@ -87,9 +88,6 @@ export const dynamic = "force-dynamic";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-// Optional free-text creative direction (omni-form at /tools/photo-v2). Capped so a
-// runaway client value can't bloat the provider prompt; empty when not supplied.
-const PROMPT_MAX_CHARS = 1500;
 // Max @-mentioned assets (saved characters / storyboards) used as references.
 const MAX_MENTIONS = 8;
 // Social media post can generate a batch of alternatives in one request. Every
@@ -291,10 +289,13 @@ export async function POST(req: Request) {
     const modelTierRaw = String(formData.get("modelTier") || "").trim() || DEFAULT_PRODUCT_PHOTO_TIER;
     const resolutionRaw = String(formData.get("resolution") || "").trim();
     const qualityRaw = String(formData.get("quality") || "").trim();
-    // Optional user prompt from the omni-form. Trim + hard-cap; "" means none.
-    const userPrompt = String(formData.get("prompt") || "")
-      .trim()
-      .slice(0, PROMPT_MAX_CHARS);
+    // Optional user prompt from the omni-form. Trimmed only, never cut; over the
+    // shared limit is refused before any spend or provider work. "" means none.
+    const userPrompt = String(formData.get("prompt") || "").trim();
+    const promptLimitError = photoPromptLimitError(userPrompt);
+    if (promptLimitError) {
+      return NextResponse.json({ error: promptLimitError }, { status: 400 });
+    }
     // Generation mode (omni-form /tools/photo-v2):
     //   - "product"   (default): requires a product reference image; the prompt is
     //                  wrapped in product-photography scaffolding.

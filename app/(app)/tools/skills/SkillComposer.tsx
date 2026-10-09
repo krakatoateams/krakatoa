@@ -77,7 +77,7 @@ import {
 import {
   isAgentSkill,
   normalizeSkillUserPrompt,
-  SKILL_PHOTO_PROMPT_MAX_CHARS,
+  photoPromptLimitError,
   SKILL_VIDEO_PROMPT_MAX_CHARS,
   skillHref,
   skillPhotoAttemptSignature,
@@ -463,6 +463,7 @@ function SkillOmniInner({
     (!needsSubject || !!subject.file) &&
     (photoMode !== "product" || !!scene.file) &&
     (!needsCharacter || !!character.file) &&
+    !photoPromptLimitError(prompt) &&
     photoTiers.length > 0;
   const canGenerateVideo =
     !!skill &&
@@ -512,10 +513,7 @@ function SkillOmniInner({
       return;
     }
 
-    const normalizedPrompt = normalizeSkillUserPrompt(
-      prompt,
-      SKILL_PHOTO_PROMPT_MAX_CHARS,
-    );
+    const normalizedPrompt = prompt.trim();
     const resolvedPhotoMode = photoMode ?? "image";
     const signature = skillPhotoAttemptSignature({
       skillId: skill.id,
@@ -712,6 +710,11 @@ function SkillOmniInner({
               </div>
             )}
           </div>
+          {!isVideo && photoPromptLimitError(prompt) && (
+            <p role="alert" className="mt-2 text-[11px] text-error">
+              {photoPromptLimitError(prompt)}
+            </p>
+          )}
 
           <div className="mt-4 flex flex-col gap-3 lg:mt-3 lg:flex-row lg:items-center lg:justify-between">
             <div className={STUDIO_CHIP_ROW_CLASS}>
