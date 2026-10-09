@@ -175,6 +175,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: true,
+    // Verified 2026-10-10: Replicate schema maxLength 4000.
     promptMaxChars: 4000,
     references: {
       firstFrame: true,
@@ -236,6 +237,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: true,
+    // Verified 2026-10-10: Replicate schema maxLength 4000 ("Maximum 4000 characters").
+    promptMaxChars: 4000,
     references: {
       firstFrame: true,
       lastFrame: true,
@@ -371,6 +374,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: true,
+    // Decided 2026-10-10: Google documents 1,024 TOKENS for Veo 3.1 (ai.google.dev/gemini-api/docs/veo); 3,000 chars is a conservative ~750-token cap. Not a provider-published char limit.
+    promptMaxChars: 3000,
     references: {
       // First/last frame only — no reference image/video/audio arrays.
       firstFrame: true,
@@ -400,6 +405,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     // Veo 3.1 Lite has no audio generation.
     supportsAudio: false,
     defaultGenerateAudio: false,
+    // Decided 2026-10-10: Google documents 1,024 TOKENS for Veo 3.1 (ai.google.dev/gemini-api/docs/veo); 3,000 chars is a conservative ~750-token cap. Not a provider-published char limit.
+    promptMaxChars: 3000,
     references: {
       // First/last frame only — no reference image/video/audio arrays.
       firstFrame: true,
@@ -426,7 +433,9 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     // Native audio is always synthesized — no generate_audio toggle on Replicate.
     supportsAudio: false,
     defaultGenerateAudio: false,
-    promptMaxChars: 4096,
+    // User-observed provider message (2026-10-10): prompts over 2,500 chars are truncated. Not in
+    // Replicate/xAI docs.
+    promptMaxChars: 2500,
     subtools: ["text2video", "image2video"],
     references: {
       // Single `image` input — no separate reference-image arrays or last frame.
@@ -456,6 +465,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: false,
+    // Verified 2026-10-10: Replicate schema "Max 2500 characters."
     promptMaxChars: 2500,
     references: {
       // start_image / end_image only — no reference arrays.
@@ -487,6 +497,7 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: false,
+    // Verified 2026-10-10: Replicate schema "Max 2500 characters."
     promptMaxChars: 2500,
     references: {
       firstFrame: true,
@@ -567,6 +578,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "16:9",
     supportsAudio: false,
     defaultGenerateAudio: false,
+    // Decided 2026-10-10: unverified on Replicate; third-party Kling wrappers cite 2,500 for the Kling API.
+    promptMaxChars: 2500,
     requiresFirstFrame: true,
     subtools: ["image2video"],
     references: {
@@ -593,6 +606,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: false,
     defaultGenerateAudio: false,
+    // Decided 2026-10-10: unverified on Replicate; third-party Kling wrappers cite 2,500 for the Kling API.
+    promptMaxChars: 2500,
     references: {
       firstFrame: true,
       lastFrame: true,
@@ -617,6 +632,8 @@ export const VIDEO_MODEL_REGISTRY: VideoModel[] = [
     defaultAspectRatio: "9:16",
     supportsAudio: true,
     defaultGenerateAudio: true,
+    // Decided 2026-10-10: unverified on Replicate; third-party Kling wrappers cite 2,500 for the Kling API.
+    promptMaxChars: 2500,
     references: {
       firstFrame: true,
       lastFrame: false,
