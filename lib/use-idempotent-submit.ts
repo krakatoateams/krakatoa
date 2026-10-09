@@ -57,8 +57,11 @@ export type IdempotentAttempt = {
    *   succeeded=false -> keeps the key so an immediate identical retry dedupes
    *                      server-side (replay a finished run / block an in-flight
    *                      one / take over a failed one) instead of double-charging.
+   *   { rotate: true } -> the server rejected the key (409 IDEMPOTENCY_CONFLICT:
+   *                      bound to a different request). Drop it so the next
+   *                      click mints a fresh key instead of being stuck forever.
    */
-  settle: (succeeded: boolean) => void;
+  settle: (succeeded: boolean, options?: { rotate?: boolean }) => void;
 };
 
 export function useIdempotentSubmit(scope: string) {
@@ -103,7 +106,7 @@ export function useIdempotentSubmit(scope: string) {
     setCancelling(false);
     emitGenerationChanged();
     let settled = false;
-    const settle = (succeeded: boolean) => {
+    const settle = (succeeded: boolean, options?: { rotate?: boolean }) => {
       if (settled) return;
       settled = true;
       inFlightRef.current = false;
@@ -112,7 +115,7 @@ export function useIdempotentSubmit(scope: string) {
         setCancelling(false);
       }
       emitGenerationChanged();
-      if (succeeded) {
+      if (succeeded || options?.rotate) {
         clearPersistedIdempotentAttempt(storage, scope, attemptState);
         if (attemptStateRef.current?.leaseId === attemptState.leaseId) {
           attemptStateRef.current = null;

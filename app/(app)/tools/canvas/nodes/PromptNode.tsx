@@ -29,7 +29,7 @@ import {
   type CanvasGraphEdge,
   type CanvasGraphNode,
 } from "@/lib/canvas-graph";
-import { describeCanvasIdempotencyError } from "../canvas-api";
+import { describeCanvasIdempotencyError, isIdempotencyConflict } from "../canvas-api";
 import {
   CANVAS_TEXT_MODELS,
   getCanvasTextModel,
@@ -112,6 +112,7 @@ export default function PromptNode({
     if (!attempt) return;
 
     pushHistory();
+    let rotateKey = false;
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-canvas-text", {
@@ -151,6 +152,7 @@ export default function PromptNode({
             `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
         throw new Error(result.error || "Generation failed");
@@ -161,7 +163,7 @@ export default function PromptNode({
       refetchCredits();
       patch({ loading: false, error: null, text: nextText });
     } catch (err) {
-      attempt.settle(false);
+      attempt.settle(false, { rotate: rotateKey });
       patch({
         loading: false,
         error: err instanceof Error ? err.message : "Generation failed",

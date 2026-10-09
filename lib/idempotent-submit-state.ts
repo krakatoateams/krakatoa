@@ -4,6 +4,10 @@ export type IdempotentAttemptState = {
   leaseId: string;
 };
 
+/** Shown when the server rejects a reused key; the next submit mints a fresh one. */
+export const IDEMPOTENCY_CONFLICT_MESSAGE =
+  "Your settings changed since the last attempt. Press Generate again to continue.";
+
 export type IdempotentSubmitStorage = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem"
