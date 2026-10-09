@@ -1,5 +1,6 @@
 "use client";
 
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import { useEffect, useRef, useState } from "react";
 
 import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Layers, Loader2, Maximize2 } from "lucide-react";
@@ -271,7 +272,9 @@ export default function ImageToVideoComposer({
     (imageSource === "upload" && startImage.uploading) ||
     (model.references.lastFrame && endImageSource === "upload" && endImage.uploading) ||
     refImages.uploading;
-  const canGenerate = !loading && !anyUploading && frameReady && prompt.trim().length > 0;
+  const promptLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
+  const canGenerate =
+    !loading && !anyUploading && frameReady && prompt.trim().length > 0 && !promptLimitError;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -432,12 +435,16 @@ export default function ImageToVideoComposer({
                 mentions={mentions}
                 onMentionsChange={setMentions}
                 assets={mentionAssets}
-                maxLength={model.promptMaxChars}
                 placeholder="Describe how the scene should move. Type @ to reference a saved image."
                 rows={4}
                 disabled={loading}
                 className="min-h-[80px] text-sm"
               />
+              {promptLimitError && (
+                <p role="alert" className="mt-2 text-[11px] text-error">
+                  {promptLimitError}
+                </p>
+              )}
             </div>
           </div>
 

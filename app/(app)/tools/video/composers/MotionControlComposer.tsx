@@ -1,5 +1,6 @@
 "use client";
 
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import { useEffect, useMemo, useState } from "react";
 
 import { AlertCircle, ChevronDown, Clock, Cpu, Film, Layers, Loader2, Maximize2, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
@@ -263,8 +264,15 @@ export default function MotionControlComposer({
   const durationError = motionControlRefVideoDurationError(videoDurationSec);
   const durationReady =
     !durationMeasuring && (videoDurationSec != null || durationProbeFailed);
+  const promptLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
   const canGenerate =
-    !loading && !anyUploading && imageReady && videoReady && durationReady && !durationError;
+    !loading &&
+    !anyUploading &&
+    imageReady &&
+    videoReady &&
+    durationReady &&
+    !durationError &&
+    !promptLimitError;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -453,11 +461,15 @@ export default function MotionControlComposer({
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  maxLength={model.promptMaxChars}
                   placeholder={MOTION_CONTROL_PROMPT_PLACEHOLDER}
                   rows={3}
                   className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
                 />
+                {promptLimitError && (
+                  <p role="alert" className="mt-2 text-[11px] text-error">
+                    {promptLimitError}
+                  </p>
+                )}
               </div>
             )}
           </div>

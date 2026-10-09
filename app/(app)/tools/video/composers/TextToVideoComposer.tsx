@@ -1,5 +1,6 @@
 "use client";
 
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import { useEffect, useState } from "react";
 import type { MentionAsset } from "@/lib/mention-assets";
 import {
@@ -281,8 +282,13 @@ export default function TextToVideoComposer({
     generateAudio,
   });
 
+  const promptLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
   const canGenerate =
-    !loading && !anyUploading && prompt.trim().length > 0 && refCheck.ok;
+    !loading &&
+    !anyUploading &&
+    prompt.trim().length > 0 &&
+    !promptLimitError &&
+    refCheck.ok;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -429,7 +435,6 @@ export default function TextToVideoComposer({
                     mentions={mentions}
                     onMentionsChange={setMentions}
                     assets={mentionAssets}
-                    maxLength={model.promptMaxChars}
                     placeholder='Describe the scene — camera moves, subject, mood. Type @ to tag a saved image from your library, or attach references below.'
                     rows={3}
                     disabled={loading}
@@ -439,11 +444,15 @@ export default function TextToVideoComposer({
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    maxLength={model.promptMaxChars}
                     placeholder="Describe the scene — camera moves, subject, mood."
                     rows={3}
                     className="min-h-[64px] w-full resize-none bg-transparent text-base text-text-primary placeholder:text-text-disabled focus:outline-none"
                   />
+                )}
+                {promptLimitError && (
+                  <p role="alert" className="mt-2 text-[11px] text-error">
+                    {promptLimitError}
+                  </p>
                 )}
               </div>
             </div>
