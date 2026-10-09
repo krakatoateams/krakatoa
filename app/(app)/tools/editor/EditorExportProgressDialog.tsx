@@ -11,6 +11,9 @@ import {
   stageValueText,
   type ExportStage,
 } from "@/lib/editor-export-progress";
+import { exportDownloadTarget } from "@/lib/editor-export-download";
+import { saveMediaUrl } from "@/lib/use-creation-item-actions";
+import { useSignedMediaUrlState } from "@/lib/use-signed-media-url";
 
 export type ExportProgressState = {
   outcome: "running" | "success" | "failed" | "cancelled";
@@ -23,6 +26,9 @@ export type ExportProgressState = {
   endedAt: number | null;
   error: string | null;
   creationId: string | null;
+  /** Finished file (set on success only); drives the Download button. */
+  storagePath: string | null;
+  title: string | null;
   cancelAllowed: boolean;
   cancelling: boolean;
   /** Inline cancel status ("Still stopping...", "Couldn't cancel..."), or null. */
@@ -51,6 +57,10 @@ export function EditorExportProgressDialog({
   const titleId = useId();
   const { outcome, stage, pct } = state;
   const running = outcome === "running";
+  const download = exportDownloadTarget(state);
+  // Hooks run unconditionally; null path = no sign request until the export succeeded.
+  const signed = useSignedMediaUrlState(download?.storagePath ?? null);
+  const [downloading, setDownloading] = useState(false);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -136,6 +146,11 @@ export function EditorExportProgressDialog({
             Your video is ready (took <span className="tabular-nums">{elapsed}</span>).
           </p>
         ) : null}
+        {download && signed.failed ? (
+          <p className="mt-2 text-xs text-text-secondary">
+            Couldn&apos;t prepare the download. Try again from your library.
+          </p>
+        ) : null}
         {outcome === "failed" ? (
           <p className="mt-3 text-sm text-text-secondary">{state.error ?? "Export failed."}</p>
         ) : null}
@@ -171,6 +186,25 @@ export function EditorExportProgressDialog({
               {outcome === "failed" || outcome === "cancelled" ? (
                 <Button variant="primary" size="sm" onClick={onRetry}>
                   Try again
+                </Button>
+              ) : null}
+              {download && !signed.failed ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!signed.url}
+                  loading={downloading}
+                  onClick={async () => {
+                    if (!signed.url) return;
+                    setDownloading(true);
+                    try {
+                      await saveMediaUrl(signed.url, (mime) => exportDownloadTarget(state, mime)!.filename);
+                    } finally {
+                      setDownloading(false);
+                    }
+                  }}
+                >
+                  Download
                 </Button>
               ) : null}
               {outcome === "success" && state.creationId ? (

@@ -51,12 +51,14 @@ import {
   CANCEL_FAILED_NOTE,
   CANCEL_STILL_STOPPING_NOTE,
   EXPORT_STALE_ERROR,
+  type EditorExportPollData,
   pollEditorExport,
   cancelReply,
   cancelWaitPhase,
   monotonicPct,
   parseExportProgress,
 } from "@/lib/editor-export-progress";
+import { exportSuccessFields } from "@/lib/editor-export-download";
 import {
   EditorExportProgressDialog,
   type ExportProgressState,
@@ -2018,6 +2020,8 @@ export default function EditorWorkspace() {
       endedAt: null,
       error: null,
       creationId: null,
+      storagePath: null,
+      title: null,
       cancelAllowed: true,
       cancelling: false,
       cancelNote: null,
@@ -2080,12 +2084,7 @@ export default function EditorWorkspace() {
         body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
         // A dropped connection is not a terminal answer: treat it like 202 and poll the attempt's status.
       }).catch(() => new Response(null, { status: 202 }));
-      let data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        code?: string;
-        ok?: boolean;
-        creation?: { id?: string };
-      };
+      let data = (await res.json().catch(() => ({}))) as EditorExportPollData;
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
@@ -2126,7 +2125,7 @@ export default function EditorWorkspace() {
         }
       }
       attempt.settle(true);
-      finishExport({ outcome: "success", creationId: data.creation?.id ?? null });
+      finishExport({ outcome: "success", ...exportSuccessFields(data) });
     } catch (err) {
       attempt.settle(false);
       finishExport({ error: err instanceof Error ? err.message : "Export failed." });
@@ -2193,7 +2192,7 @@ export default function EditorWorkspace() {
     if (!resumedExportRef.current && !run?.accepted) return;
     const patch: Partial<ExportProgressState> | null =
       data.status === "succeeded"
-        ? { outcome: "success", creationId: data.result?.creation?.id ?? null }
+        ? { outcome: "success", ...exportSuccessFields(data.result) }
         : stale
           ? { outcome: "failed", error: EXPORT_STALE_ERROR }
           : data.status === "failed"
@@ -2249,6 +2248,8 @@ export default function EditorWorkspace() {
           endedAt: null,
           error: null,
           creationId: null,
+          storagePath: null,
+          title: null,
           cancelAllowed: data.cancelAllowed !== false,
           cancelling: false,
           cancelNote: null,

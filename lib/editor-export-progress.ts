@@ -102,7 +102,13 @@ export function cancelReply(httpStatus: number | null, body: unknown): CancelRep
   return "error";
 }
 
-export type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
+export type EditorExportPollData = {
+  error?: string;
+  code?: string;
+  ok?: boolean;
+  storagePath?: string | null;
+  creation?: { id?: string; storagePath?: string; title?: string };
+};
 
 const EXPORT_POLL_MS = 3000;
 export const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
