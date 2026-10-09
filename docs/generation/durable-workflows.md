@@ -105,3 +105,31 @@ Applied on Aug 21, 2026:
 
 The control and finalization RPCs were verified with rollback-only live database
 checks; no test jobs, creations, or credit changes were retained.
+
+## Video Editor export (in-system FFmpeg)
+
+The Editor never calls Rendi. `POST /api/render-editor` validates, creates the job/asset,
+starts `editorExportWorkflow` (`lib/editor-export-workflow.ts`) and returns `202`. The
+client keeps the attempt locked and polls `/api/generations/status` with the same
+Idempotency-Key until `succeeded` or `failed`. Cancel uses the normal idempotency cancel;
+the workflow sees `cancel_requested` on its next poll (about 10s) and stops the sandbox.
+
+Runner decision: Vercel Sandbox, driven by Workflow. A Workflow step is still bound by
+the function duration, so FFmpeg runs as a detached sandbox command and short steps poll
+it; no length, resolution or fps cap. The sandbox lifetime is the time budget
+(`editorExportTimeoutMs`: default 40 min, clamped to the plan max, 45 min on Hobby;
+override via `EDITOR_EXPORT_TIMEOUT_MS`, raise the ceiling with `EDITOR_EXPORT_PLAN_MAX_MS`).
+vCPUs scale with resolution and are clamped to `EDITOR_EXPORT_MAX_VCPUS` (default 4, Hobby max).
+FFmpeg is never run unverified: `npm run editor:bake-ffmpeg` bakes a Sandbox snapshot from a
+pinned, SHA-256-verified static build (`lib/editor-export-pin.ts`) and Poppins; set its id as
+`EDITOR_EXPORT_SNAPSHOT_ID`. Without it (local dev, previews) the same pinned download and
+checksum run per export. Both paths then assert libx264/libvpx-vp9/libopus/aac as needed,
+drawtext and libfreetype. Any failure ends as `EDITOR_EXPORT_RUNNER_UNAVAILABLE`.
+Create-time limits map to `EDITOR_EXPORT_BUSY` (HTTP 429) and `EDITOR_EXPORT_CAPACITY_REACHED`
+(HTTP 402); the real SDK error shape is unverified. Encode polling is 3 s for the first ~2 min,
+then 12 s, to stay inside the Hobby Workflow event allowance. The encoded file is uploaded straight from the
+sandbox to a Supabase signed upload URL (`{userId}/` path, `MEDIA_CACHE_CONTROL`).
+Inputs are signed inside workflow steps, so no signed URL sits in the workflow payload.
+
+Failures store/show sanitized reasons (`EDITOR_EXPORT_*` codes in `lib/editor-export-pure.ts`).
+Local use needs Vercel credentials for `@vercel/sandbox` (`vercel link` + `vercel env pull`).

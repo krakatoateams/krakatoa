@@ -17,6 +17,7 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { getSupabaseAuthBrowser } from "@/lib/supabase-browser-auth";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import CreditBadge from "@/components/CreditBadge";
+import { NotificationBell } from "@/components/NotificationBell";
 import { Button } from "@/components/ui/Button";
 
 const PRIMARY_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
@@ -83,6 +84,7 @@ export default function MobileAppHeader() {
       <div className="flex shrink-0 items-center gap-2">
         {status === "authenticated" ? (
           <>
+            <NotificationBell variant="mobile" />
             <CreditBadge variant="topup" />
             <div ref={menuRef} className="relative">
               <button

@@ -20,6 +20,7 @@ import { getBillingSettings } from "@/lib/billing-settings-db";
 import {
   productPhotoPricingKey,
   type ProductPhotoModelTier,
+  type ProductPhotoQuality,
   type ProductPhotoResolution,
 } from "@/lib/product-photo";
 import { V2_PRICING_DEFAULTS } from "@/lib/pricing-defaults";
@@ -371,10 +372,12 @@ export async function getCanvasTextCredits(): Promise<number> {
 export async function getProductPhotoCredits(params: {
   modelTier: ProductPhotoModelTier;
   resolution: ProductPhotoResolution | null;
+  quality?: ProductPhotoQuality | null;
 }): Promise<number> {
   const key = productPhotoPricingKey({
     modelTier: params.modelTier,
     resolution: params.resolution,
+    quality: params.quality,
   });
   return computeImageCreditsV2(key, 1);
 }

@@ -9,6 +9,7 @@ const CRON_ROUTES = [
   "app/api/cron/cleanup-failed-posts/route.ts",
   "app/api/cron/generation-reconcile/route.ts",
   "app/api/cron/instagram-token-refresh/route.ts",
+  "app/api/cron/notifications-prune/route.ts",
 ] as const;
 
 function assert(condition: boolean, message: string): void {

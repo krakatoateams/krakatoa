@@ -76,8 +76,11 @@ export type ProductPhotoModelTier =
   | "imagen4"
   | "ideogram3"
   | "seedream3"
-  | "flux_schnell";
+  | "flux_schnell"
+  | "gpt_image_2";
 export type ProductPhotoResolution = "1k" | "2k" | "4k";
+/** GPT Image 2 quality (the only input that changes Replicate's price). "auto" is not offered. */
+export type ProductPhotoQuality = "low" | "medium" | "high";
 
 /**
  * Provider input "family" — describes how to build the Replicate input for a
@@ -92,10 +95,15 @@ export type PhotoProviderFamily =
   | "flux_kontext"
   | "flux_t2i"
   | "imagen"
-  | "ideogram";
+  | "ideogram"
+  | "gpt_image";
+
+/** Shared Replicate slug for GPT Image 2 (Product Photo, Canvas and Storyboard fallbacks). */
+export const GPT_IMAGE_2_MODEL = "openai/gpt-image-2";
 
 export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";
 export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
+export const DEFAULT_PRODUCT_PHOTO_QUALITY: ProductPhotoQuality = "medium";
 
 /**
  * Aspect ratios offered by the omni-form (/tools/photo-v2). These map 1:1 to the
@@ -145,6 +153,13 @@ export type ProductPhotoResolutionOption = {
   fallbackCredits: number;
 };
 
+export type ProductPhotoQualityOption = {
+  id: ProductPhotoQuality;
+  label: string;
+  pricingKey: string;
+  fallbackCredits: number;
+};
+
 export type ProductPhotoTier = {
   id: ProductPhotoModelTier;
   label: string;
@@ -167,14 +182,21 @@ export type ProductPhotoTier = {
   basicFallbackCredits?: number;
   /** Per-resolution pricing keys (balanced/pro). */
   resolutions: ProductPhotoResolutionOption[];
+  /** Per-quality pricing keys + picker options (GPT Image 2). Mirrors `resolutions`. */
+  qualities?: ProductPhotoQualityOption[];
   /** Provider input family — how to build the Replicate input for this model. */
   providerFamily: PhotoProviderFamily;
   /** Whether the model accepts a product reference image (usable in Product Try-on). */
   supportsReference: boolean;
   /** Replicate input param for the reference image (only when supportsReference). */
-  referenceParam?: "image_input" | "input_image";
+  referenceParam?: "image_input" | "input_image" | "input_images";
   /** Subset of aspect ratios the provider accepts; undefined = all are supported. */
   supportedAspectRatios?: PhotoAspectRatio[];
+  /**
+   * When true the pickers offer only `supportedAspectRatios` and show the clamped
+   * value. Opt-in: older tiers keep the full picker and are clamped server-side only.
+   */
+  limitAspectRatioPicker?: boolean;
   /** Show this tier in the legacy /tools/photo "Photo backup" tier grid. */
   legacyPicker?: boolean;
 };
@@ -346,6 +368,28 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     providerFamily: "flux_t2i",
     supportsReference: false,
   },
+  {
+    id: "gpt_image_2",
+    label: "GPT Image 2",
+    subtitle: "Reference + text-to-image",
+    modelLabel: "GPT Image 2",
+    modelRole: "image_gpt_image_2",
+    providerModel: GPT_IMAGE_2_MODEL,
+    hasResolution: false,
+    // No resolution input on the provider and no fixed-size claim: no read-only chip.
+    resolutions: [],
+    qualities: [
+      { id: "low", label: "Low", pricingKey: "product_photo_gpt_image_2_low_per_image", fallbackCredits: 2 },
+      { id: "medium", label: "Medium", pricingKey: "product_photo_gpt_image_2_medium_per_image", fallbackCredits: 5 },
+      { id: "high", label: "High", pricingKey: "product_photo_gpt_image_2_high_per_image", fallbackCredits: 12 },
+    ],
+    providerFamily: "gpt_image",
+    supportsReference: true,
+    referenceParam: "input_images",
+    // Provider ratios (verbatim): 4:5 and 21:9 are not offered and clamp to 3:4 / 16:9.
+    supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9"],
+    limitAspectRatioPicker: true,
+  },
 ];
 
 const TIER_BY_ID = Object.fromEntries(
@@ -393,14 +437,65 @@ export function productPhotoProviderResolution(
 export function productPhotoPricingKey(opts: {
   modelTier: ProductPhotoModelTier;
   resolution: ProductPhotoResolution | null;
+  quality?: ProductPhotoQuality | null;
 }): string {
-  const tier = getProductPhotoTier(opts.modelTier);
+  return photoTierPricingKey(
+    getProductPhotoTier(opts.modelTier),
+    opts.resolution,
+    opts.quality ?? null
+  );
+}
+
+/**
+ * Pricing key for a tier + selected resolution/quality. Shared by the route, the
+ * resolver and the Canvas / photo-v2 cost displays so they can never disagree.
+ */
+export function photoTierPricingKey(
+  tier: ProductPhotoTier,
+  resolutionId: ProductPhotoResolution | null,
+  qualityId: ProductPhotoQuality | null
+): string {
+  if (tier.qualities?.length) {
+    const q = qualityId ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
+    return (tier.qualities.find((o) => o.id === q) ?? tier.qualities[0]).pricingKey;
+  }
   if (!tier.hasResolution) {
     return tier.basicPricingKey ?? "product_photo_nano_banana_per_image";
   }
-  const res = opts.resolution ?? DEFAULT_PRODUCT_PHOTO_RESOLUTION;
+  const res = resolutionId ?? DEFAULT_PRODUCT_PHOTO_RESOLUTION;
   const found = tier.resolutions.find((r) => r.id === res);
   return found?.pricingKey ?? tier.resolutions[0].pricingKey;
+}
+
+/** Lowest-priced key for a tier (model-list "from" hint). `multi` = has a picker, so show "+". */
+export function photoTierEntryPricing(tier: ProductPhotoTier): { pricingKey: string; multi: boolean } {
+  if (tier.qualities?.length) return { pricingKey: tier.qualities[0].pricingKey, multi: true };
+  if (tier.hasResolution) return { pricingKey: tier.resolutions[0].pricingKey, multi: true };
+  return { pricingKey: tier.basicPricingKey!, multi: false };
+}
+
+/** Model-list price hint, e.g. "5" or "7+" when the tier has a picker. */
+export function photoTierPriceHint(
+  tier: ProductPhotoTier,
+  imageCredits: (pricingKey: string, count: number) => number
+): string {
+  const { pricingKey, multi } = photoTierEntryPricing(tier);
+  return `${imageCredits(pricingKey, 1)}${multi ? "+" : ""}`;
+}
+
+/** Aspect ratio options for the picker: restricted only for tiers that opt in. */
+export function photoAspectRatioOptionsForTier(tier: ProductPhotoTier) {
+  return tier.limitAspectRatioPicker && tier.supportedAspectRatios
+    ? PHOTO_ASPECT_RATIOS.filter((a) => tier.supportedAspectRatios!.includes(a.id))
+    : PHOTO_ASPECT_RATIOS;
+}
+
+/** Ratio shown in the picker chip: clamped only for tiers that opt in. */
+export function photoAspectRatioDisplayForTier(
+  tier: ProductPhotoTier,
+  aspectRatio: PhotoAspectRatio
+): PhotoAspectRatio {
+  return tier.limitAspectRatioPicker ? clampAspectRatioForTier(tier, aspectRatio) : aspectRatio;
 }
 
 /**
@@ -412,15 +507,34 @@ export function productPhotoPricingKey(opts: {
 export function normalizeProductPhotoOptions(input: {
   modelTier: string;
   resolution?: string | null;
+  quality?: string | null;
 }):
-  | { ok: true; modelTier: ProductPhotoModelTier; resolution: ProductPhotoResolution | null }
+  | {
+      ok: true;
+      modelTier: ProductPhotoModelTier;
+      resolution: ProductPhotoResolution | null;
+      quality: ProductPhotoQuality | null;
+    }
   | { ok: false; error: string } {
   if (!isValidProductPhotoTier(input.modelTier)) {
-    return { ok: false, error: "Invalid model tier. Use basic, balanced, or pro." };
+    return { ok: false, error: "Invalid model tier." };
   }
   const tier = input.modelTier;
+  const qualities = getProductPhotoTier(tier).qualities;
+  if (qualities?.length) {
+    // Quality is the price axis for this tier: required and exact (no "auto").
+    const q = (input.quality ?? "").toString().trim().toLowerCase();
+    const found = qualities.find((o) => o.id === q);
+    if (!found) {
+      return {
+        ok: false,
+        error: `A valid quality is required for this model (${qualities.map((o) => o.id).join(", ")}).`,
+      };
+    }
+    return { ok: true, modelTier: tier, resolution: null, quality: found.id };
+  }
   if (!productPhotoTierHasResolution(tier)) {
-    return { ok: true, modelTier: tier, resolution: null };
+    return { ok: true, modelTier: tier, resolution: null, quality: null };
   }
   const raw = (input.resolution ?? "").toString().trim().toLowerCase();
   if (raw === "") {
@@ -429,7 +543,7 @@ export function normalizeProductPhotoOptions(input: {
   if (!isValidProductPhotoResolution(raw)) {
     return { ok: false, error: "Invalid resolution. Use 1k, 2k, or 4k." };
   }
-  return { ok: true, modelTier: tier, resolution: raw };
+  return { ok: true, modelTier: tier, resolution: raw, quality: null };
 }
 
 export type ProductPhotoHistoryItem = {
@@ -690,6 +804,7 @@ export function buildPhotoProviderInput(params: {
   aspectRatio: PhotoAspectRatio;
   imageInput?: string[] | null;
   providerResolution: string | null;
+  quality?: ProductPhotoQuality | null;
 }): Record<string, unknown> {
   const { tier, prompt, providerResolution } = params;
   const aspectRatio = clampAspectRatioForTier(tier, params.aspectRatio);
@@ -741,6 +856,19 @@ export function buildPhotoProviderInput(params: {
         prompt,
         aspect_ratio: aspectRatio,
         output_format: "png",
+      };
+    case "gpt_image":
+      return {
+        prompt,
+        aspect_ratio: aspectRatio,
+        quality: params.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY,
+        output_format: "png",
+        // One provider call per image (batches stay one call each).
+        number_of_images: 1,
+        background: "opaque",
+        moderation: "auto",
+        // Array of URLs, order preserved. The 8-image cap is repo-chosen; the provider documents none.
+        ...(useRef ? { input_images: ref } : {}),
       };
     case "imagen":
     case "ideogram":

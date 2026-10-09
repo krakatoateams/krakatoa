@@ -36,6 +36,11 @@ assert.deepEqual(
   "every registry model role must support admin reset"
 );
 assert.equal(
+  getModelDefault("photo", "image_gpt_image_2")?.model,
+  "openai/gpt-image-2",
+  "GPT Image 2 role must support admin reset"
+);
+assert.equal(
   getModelDefault("schedule", "llm")?.model,
   "openai/gpt-5",
   "Scheduler reset must match the runtime caption model"
