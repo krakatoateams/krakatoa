@@ -265,7 +265,7 @@ export function buildEditorFfmpegGraph(
     const dur = overlayDurationSec(overlay);
     if (mapped.kind === "video") {
       filters.push(
-        `[${mapped.index}:v]trim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + dur)},setpts=PTS-STARTPTS,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
+        `[${mapped.index}:v]trim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + dur)},setpts=PTS-STARTPTS+${round2(overlay.startSec)}/TB,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
       );
     } else {
       filters.push(
@@ -550,7 +550,8 @@ export function editorRenderSelfCheck(): void {
   const inDoc: EditorDocument = { ...avDoc, overlays: avDoc.overlays.map((o) => (o.id === "v1" ? { ...o, inSec: 1 } : o)) };
   const inCmd = buildEditorFfmpegGraph(inDoc, avUrls, withAudio).command;
   assert(inCmd.includes("atrim=start=1:end=3.5,asetpts"), "video overlay audio trimmed from its inSec");
-  assert(inCmd.includes("trim=start=1:end=3.5,setpts=PTS-STARTPTS,scale="), "video overlay video trimmed from its inSec");
+  assert(inCmd.includes("trim=start=1:end=3.5,setpts=PTS-STARTPTS+2/TB,scale="), "video overlay video trimmed from its inSec and shifted to its startSec");
+  assert(av.includes("trim=start=0:end=2.5,setpts=PTS-STARTPTS+2/TB,scale="), "video overlay video PTS shifted to startSec so it plays instead of freezing");
   assert(!av.includes("[2:a]") && !av.includes("[3:a]"), "image overlay and video inputs never contribute audio");
   assert(
     av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=5[aout]"),
