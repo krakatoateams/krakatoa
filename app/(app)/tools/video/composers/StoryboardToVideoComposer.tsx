@@ -61,6 +61,7 @@ import {
   type StoryboardVideoPendingDraft,
 } from "@/lib/video-composer-attempt-contracts";
 
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import {
   STORYBOARD_VIDEO_MODEL_IDS,
   DEFAULT_STORYBOARD_VIDEO_MODEL_ID,
@@ -83,7 +84,7 @@ import {
   STORYBOARD_STYLE_LABELS,
   DEFAULT_STORYBOARD_STYLE,
   type StoryboardStyleKey,
-  SEEDANCE_PROMPT_BODY_BUDGET_CHARS,
+  assembleStoryboardVideoPrompt,
 } from "@/lib/storyboard-style";
 import {
   filterEnabledCatalog,
@@ -603,6 +604,8 @@ export default function StoryboardToVideoComposer({
                 : null,
             seedancePrompt:
               typeof s.seedance_prompt === "string" ? s.seedance_prompt : "",
+            storyboardStyle:
+              typeof s.storyboard_style === "string" ? s.storyboard_style : null,
             source: typeof s.source === "string" ? s.source : null,
           }));
         setItems(list);
@@ -628,9 +631,19 @@ export default function StoryboardToVideoComposer({
   const cost = devBlank ? 0 : videoCredits(pricingKey, STORYBOARD_VIDEO_DURATION_SEC);
   const selected = items.find((s) => s.id === selectedId) ?? null;
   const selectedLoaded = selected !== null;
-  const canGenerate = isStoryboardVideoReady({ loading, selectedLoaded });
-  const selectedLanguage = selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE;
   const storedPrompt = selected?.seedancePrompt ?? "";
+  const promptDirty = !!selectedId && promptDraft.trim() !== storedPrompt.trim() && promptDraft.trim().length > 0;
+  // Same assembled prompt (directives + [Image1] + body) and limit the server checks.
+  const promptMaxChars = videoPromptMaxChars(storyboardVideoModel);
+  const assembledPrompt = assembleStoryboardVideoPrompt({
+    body: (promptDirty ? promptDraft : storedPrompt).trim(),
+    style: selected?.storyboardStyle,
+    aspectRatio: aspect,
+    language,
+  });
+  const promptLimitError = selected ? videoPromptLimitError(assembledPrompt, promptMaxChars) : null;
+  const canGenerate = isStoryboardVideoReady({ loading, selectedLoaded }) && !promptLimitError;
+  const selectedLanguage = selected?.language ?? DEFAULT_STORYBOARD_LANGUAGE;
   // When the selected storyboard carries an orientation, the video MUST match it
   // (lock the chip). Legacy boards without one let the user choose.
   const aspectLocked = !!selected?.aspectRatio;
@@ -671,8 +684,6 @@ export default function StoryboardToVideoComposer({
     }
     setPromptDraft(resolved.value);
   }, [listState, selectedId, selectedLoaded, storedPrompt]);
-
-  const promptDirty = !!selectedId && promptDraft.trim() !== storedPrompt.trim() && promptDraft.trim().length > 0;
 
   // Splice a freshly imported storyboard into the list and select it.
   const handleImported = (item: StoryboardListItem) => {
@@ -997,13 +1008,13 @@ export default function StoryboardToVideoComposer({
                     <div className="flex shrink-0 items-center gap-2">
                       <span
                         className={
-                          promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS
-                            ? "font-semibold text-warning"
+                          promptLimitError
+                            ? "font-semibold text-error"
                             : "text-text-disabled"
                         }
-                        title={`Keep the prompt under ~${SEEDANCE_PROMPT_BODY_BUDGET_CHARS} characters so style, orientation & language can be added without the video model truncating it.`}
+                        title={`The final prompt, including style, orientation & language directives, must be ${promptMaxChars.toLocaleString("en-US")} characters or fewer for ${storyboardVideoModel.modelLabel}.`}
                       >
-                        {promptDraft.length}/{SEEDANCE_PROMPT_BODY_BUDGET_CHARS}
+                        {assembledPrompt.length.toLocaleString("en-US")}/{promptMaxChars.toLocaleString("en-US")}
                       </span>
                       {promptDirty && (
                         <button
@@ -1016,10 +1027,8 @@ export default function StoryboardToVideoComposer({
                       )}
                     </div>
                   </div>
-                  {promptDraft.length > SEEDANCE_PROMPT_BODY_BUDGET_CHARS && (
-                    <p className="mt-1 text-sm text-warning/80">
-                      This prompt is long — it may be trimmed at a sentence boundary on render so the style, orientation &amp; language directives still fit. Shorten it for full fidelity.
-                    </p>
+                  {promptLimitError && (
+                    <p className="mt-1 text-sm text-error">{promptLimitError}</p>
                   )}
                 </div>
               )}
