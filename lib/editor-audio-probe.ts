@@ -8,9 +8,10 @@
  * - WebM / Matroska: the Tracks element sits in the file head; look for an
  *   audio CodecID (`A_…`).
  *
- * Safe default: anything undeterminable (unknown container, no Range support,
- * timeout, oversized moov) counts as silent, so a missing audio stream can
- * never fail the FFmpeg export. Runnable as `npx tsx lib/editor-audio-probe.ts`.
+ * Structurally undeterminable sources (unknown container, no Range support,
+ * oversized moov) count as silent with a warning, so a missing audio stream can
+ * never fail FFmpeg. A failed check (timeout, network, non-2xx) is retried once,
+ * then throws EditorExportProbeError instead of silently dropping audio. Runnable as `npx tsx lib/editor-audio-probe.ts`.
  */
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -20,7 +21,8 @@ type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 const HEAD_BYTES = 256 * 1024;
 const MAX_MOOV_BYTES = 32 * 1024 * 1024;
 const MAX_TOP_LEVEL_BOXES = 64;
-const PROBE_TIMEOUT_MS = 10_000;
+// Per-attempt budgets: first stays 10 s for healthy exports; retry 25 s. 35 s total < 45 s outer cap.
+const PROBE_BUDGETS_MS = [10_000, 25_000];
 
 const ascii = (bytes: Uint8Array, start: number, len: number) =>
   String.fromCharCode(...bytes.subarray(start, start + len));
@@ -103,6 +105,7 @@ async function fetchRange(
     headers: { Range: `bytes=${start}-${endInclusive}` },
     signal,
   });
+  if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
   // A 200 would stream the whole file; only trust partial responses.
   if (res.status !== 206) {
     await res.body?.cancel().catch(() => {});
@@ -111,9 +114,9 @@ async function fetchRange(
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function probe(url: string, fetchImpl: FetchLike, signal: AbortSignal): Promise<boolean> {
+async function probe(url: string, fetchImpl: FetchLike, signal: AbortSignal): Promise<boolean | null> {
   const head = await fetchRange(fetchImpl, url, 0, HEAD_BYTES - 1, signal);
-  if (!head || head.length < 8) return false;
+  if (!head || head.length < 8) return null;
   if (indexOfBytes(head.subarray(0, 4), EBML_MAGIC) === 0) return webmHeadHasAudio(head);
 
   let offset = 0;
@@ -123,39 +126,59 @@ async function probe(url: string, fetchImpl: FetchLike, signal: AbortSignal): Pr
       ? head.subarray(offset, offset + 16)
       : await fetchRange(fetchImpl, url, offset, offset + 15, signal);
     const box = header ? readBoxHeader(header) : null;
-    if (!box || !/^[\x20-\x7e]{4}$/.test(box.type)) return false;
+    if (!box || !/^[\x20-\x7e]{4}$/.test(box.type)) return null;
     if (box.type === "moov") {
-      if (box.size === 0 || box.size > MAX_MOOV_BYTES) return false;
+      if (box.size === 0 || box.size > MAX_MOOV_BYTES) return null;
       const moov =
         offset + box.size <= head.length
           ? head.subarray(offset, offset + box.size)
           : await fetchRange(fetchImpl, url, offset, offset + box.size - 1, signal);
-      return moov ? moovHasAudio(moov) : false;
+      return moov ? moovHasAudio(moov) : null;
     }
-    if (box.size < box.headerSize) return false; // size 0 (to EOF) or corrupt, no moov after it
+    if (box.size < box.headerSize) return null; // size 0 (to EOF) or corrupt, no moov after it
     offset += box.size;
   }
-  return false;
+  return null;
 }
 
-/** True only when the source verifiably has an audio stream; never throws. */
-export async function sourceHasAudio(url: string, fetchImpl: FetchLike = fetch): Promise<boolean> {
-  try {
-    return await probe(url, fetchImpl, AbortSignal.timeout(PROBE_TIMEOUT_MS));
-  } catch (e) {
-    // Never log the URL: it carries a signed token.
-    console.warn("[editor audio probe] failed, treating source as silent:", e instanceof Error ? e.name : "unknown");
-    return false;
+/** Thrown when a source's audio check failed (not "no audio"); the export must not silently drop its sound. */
+export class EditorExportProbeError extends Error {
+  constructor() {
+    super("editor audio probe failed");
+    this.name = "EditorExportProbeError";
   }
+}
+
+/**
+ * True when the source has an audio stream, false when it verifiably (or structurally,
+ * with a warning) has none. A failed check is retried once with a longer budget, then throws.
+ */
+export async function sourceHasAudio(
+  url: string,
+  fetchImpl: FetchLike = fetch,
+  budgetsMs: number[] = PROBE_BUDGETS_MS
+): Promise<boolean> {
+  for (const [i, ms] of budgetsMs.entries()) {
+    try {
+      const result = await probe(url, fetchImpl, AbortSignal.timeout(ms));
+      if (result === null) console.warn("[editor audio probe] could not determine audio, treating source as silent");
+      return result === true;
+    } catch (e) {
+      // Never log the URL: it carries a signed token.
+      console.warn("[editor audio probe] attempt failed:", i + 1, e instanceof Error ? e.name : "unknown");
+    }
+  }
+  throw new EditorExportProbeError();
 }
 
 /** Probe each distinct URL in parallel; returns the set that has audio. */
 export async function probeAudioSources(
   urls: Iterable<string>,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = fetch,
+  budgetsMs?: number[]
 ): Promise<Set<string>> {
   const unique = [...new Set(urls)];
-  const results = await Promise.all(unique.map((url) => sourceHasAudio(url, fetchImpl)));
+  const results = await Promise.all(unique.map((url) => sourceHasAudio(url, fetchImpl, budgetsMs)));
   return new Set(unique.filter((_, i) => results[i]));
 }
 
@@ -249,12 +272,21 @@ export async function editorAudioProbeSelfCheck(): Promise<void> {
 
   assert(!(await sourceHasAudio("x", fakeFetch(faststart, false))), "no Range support → silent default");
   assert(!(await sourceHasAudio("x", fakeFetch(bytesOf("garbage-bytes-here")))), "unknown container → silent");
-  assert(
-    !(await sourceHasAudio("x", async () => {
-      throw new Error("network down");
-    })),
-    "network error → silent, never throws"
-  );
+  const rejects = async (p: Promise<unknown>) => p.then(() => false, (e) => e instanceof EditorExportProbeError);
+  const fast = [50, 50];
+  let calls = 0;
+  const flaky: FetchLike = async (u, i) => {
+    if (calls++ === 0) throw new DOMException("t", "TimeoutError");
+    return fakeFetch(faststart)(u, i);
+  };
+  assert(await sourceHasAudio("x", flaky, fast), "timeout then success keeps audio");
+  const down: FetchLike = async () => {
+    throw new Error("network down");
+  };
+  assert(await rejects(sourceHasAudio("x", down, fast)), "double failure throws");
+  assert(await rejects(probeAudioSources(["x"], down, fast)), "probeAudioSources rejects, not empty set");
+  const c503: FetchLike = async () => new Response(null, { status: 503 });
+  assert(await rejects(sourceHasAudio("x", c503, fast)), "503 twice throws");
 
   const set = await probeAudioSources(["a", "b", "a"], async (url, init) =>
     fakeFetch(url === "a" ? faststart : concat(ftyp, videoOnlyMoov))(url, init)
