@@ -5,7 +5,10 @@
 import type { EditorExportSettings } from "@/lib/editor-export-settings";
 
 export const EDITOR_EXPORT_ERRORS = {
-  EDITOR_EXPORT_TIMEOUT: "Export timed out.",
+  EDITOR_EXPORT_TIMEOUT: "Export timed out. Try a lower resolution, 30 fps or MP4, or a shorter timeline.",
+  EDITOR_EXPORT_CAPACITY_REACHED:
+    "Video export is paused because this month's export capacity has been used. It will be available again later.",
+  EDITOR_EXPORT_BUSY: "Too many exports are running right now. Please try again in a few minutes.",
   EDITOR_EXPORT_ENCODER_FAILED: "The video encoder failed. Please try again.",
   EDITOR_EXPORT_INPUT_UNAVAILABLE: "One of your clips could not be read for export. Please try again.",
   EDITOR_EXPORT_OUT_OF_MEMORY: "The export ran out of memory. Try a lower resolution.",
@@ -49,9 +52,45 @@ export function editorExportErrorJson(code: EditorExportErrorCode): { message: s
   return { message: EDITOR_EXPORT_ERRORS[code], code };
 }
 
-/** vCPUs for the encode: 4K is memory hungry; no length/fps cap, only bigger machines. */
-export function editorExportVcpus(settings: Pick<EditorExportSettings, "resolution">): number {
-  return settings.resolution >= 1080 ? (settings.resolution >= 2160 ? 8 : 4) : 2;
+/** Hobby plan limits (https://vercel.com/docs/sandbox/pricing): 45 min session, 4 vCPU. */
+export const HOBBY_MAX_SESSION_MS = 45 * 60 * 1000;
+export const HOBBY_MAX_VCPUS = 4;
+/** 5 minute margin under the plan max: the session also covers setup, input reads and the upload. */
+export const DEFAULT_EXPORT_TIMEOUT_MS = 40 * 60 * 1000;
+
+type EnvLike = Record<string, string | undefined>;
+const positiveInt = (v: string | undefined): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+};
+
+/** Sandbox lifetime and poll budget: default 40 min, clamped to the plan max (`EDITOR_EXPORT_PLAN_MAX_MS`). */
+export function editorExportTimeoutMs(env: EnvLike): number {
+  const ceiling = positiveInt(env.EDITOR_EXPORT_PLAN_MAX_MS) ?? HOBBY_MAX_SESSION_MS;
+  return Math.min(positiveInt(env.EDITOR_EXPORT_TIMEOUT_MS) ?? DEFAULT_EXPORT_TIMEOUT_MS, ceiling);
+}
+
+/** vCPUs for the encode, never above the plan max (`EDITOR_EXPORT_MAX_VCPUS`, default 4). No length/fps cap. */
+export function editorExportVcpus(settings: Pick<EditorExportSettings, "resolution">, env: EnvLike = {}): number {
+  const want = settings.resolution >= 2160 ? 8 : settings.resolution >= 1080 ? 4 : 2;
+  return Math.min(want, positiveInt(env.EDITOR_EXPORT_MAX_VCPUS) ?? HOBBY_MAX_VCPUS);
+}
+
+/** Encode poll interval by poll index (workflow code must stay deterministic): 3 s for ~2 min, then 12 s to save Workflow events. */
+export function editorExportEncodePollMs(pollIndex: number): number {
+  return pollIndex < 40 ? 3_000 : 12_000;
+}
+
+/**
+ * Maps a failed `Sandbox.create` to a sanitized code from the SDK's APIError HTTP status.
+ * ponytail: statuses are the conventional ones (429 rate limit, 402 quota); the real shape of a paused/limited
+ * create is unverified without live Sandbox credentials. Anything else stays RUNNER_UNAVAILABLE.
+ */
+export function classifySandboxCreateError(e: unknown): EditorExportErrorCode {
+  const status = (e as { response?: { status?: number } } | null)?.response?.status;
+  if (status === 429) return "EDITOR_EXPORT_BUSY";
+  if (status === 402) return "EDITOR_EXPORT_CAPACITY_REACHED";
+  return "EDITOR_EXPORT_RUNNER_UNAVAILABLE";
 }
 
 /** `curl` argv that PUTs the file to a Supabase signed upload URL (mirrors storage-js raw-body upload). */
@@ -83,6 +122,20 @@ export function editorExportPureSelfCheck(): void {
     assert(!/[\u0080-￿]/.test(EDITOR_EXPORT_ERRORS[code]) && !/https?:|token/i.test(EDITOR_EXPORT_ERRORS[code]), `${code} message is plain English`);
   }
   assert(editorExportVcpus({ resolution: 720 }) === 2 && editorExportVcpus({ resolution: 1080 }) === 4, "runner sizing");
+  assert(editorExportVcpus({ resolution: 480 }) === 2 && editorExportVcpus({ resolution: 2160 }) === 4, "4K clamped to Hobby");
+  assert(editorExportVcpus({ resolution: 2160 }, { EDITOR_EXPORT_MAX_VCPUS: "8" }) === 8, "vcpu ceiling env");
+  assert(editorExportVcpus({ resolution: 2160 }, { EDITOR_EXPORT_MAX_VCPUS: "junk" }) === 4, "invalid vcpu env");
+  const t = editorExportTimeoutMs;
+  assert(t({}) === 40 * 60_000, "default timeout 40 min");
+  assert(t({ EDITOR_EXPORT_TIMEOUT_MS: "999999999" }) === 45 * 60_000, "timeout clamped to plan max");
+  assert(t({ EDITOR_EXPORT_TIMEOUT_MS: "60000" }) === 60_000, "timeout override below ceiling");
+  assert(t({ EDITOR_EXPORT_TIMEOUT_MS: "abc" }) === 40 * 60_000 && t({ EDITOR_EXPORT_TIMEOUT_MS: "-5" }) === 40 * 60_000, "invalid timeout env");
+  assert(t({ EDITOR_EXPORT_TIMEOUT_MS: "999999999", EDITOR_EXPORT_PLAN_MAX_MS: "7200000" }) === 7_200_000, "plan max env");
+  assert(editorExportEncodePollMs(0) === 3_000 && editorExportEncodePollMs(40) === 12_000, "adaptive poll");
+  const apiErr = (status: number) => ({ response: { status } });
+  assert(classifySandboxCreateError(apiErr(429)) === "EDITOR_EXPORT_BUSY", "429 busy");
+  assert(classifySandboxCreateError(apiErr(402)) === "EDITOR_EXPORT_CAPACITY_REACHED", "402 capacity");
+  assert(classifySandboxCreateError(apiErr(500)) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE" && classifySandboxCreateError(null) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE", "other create errors");
   const args = signedUploadArgs({ url: "https://x/y", file: "export/o.mp4", contentType: "video/mp4", cacheControl: "31536000, immutable" });
   assert(args.includes("cache-control: max-age=31536000, immutable") && args.at(-1) === "https://x/y", "signed upload argv");
 }

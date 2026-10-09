@@ -1,10 +1,9 @@
 import { sleep } from "workflow";
-import type { EditorExportErrorCode } from "@/lib/editor-export-pure";
+import { editorExportEncodePollMs, type EditorExportErrorCode } from "@/lib/editor-export-pure";
 import type { CommandStage, EditorExportParams, PollResult } from "@/lib/editor-export-core";
 
 const POLL_MS = 10_000;
-// Faster while encoding so the dialog percentage moves visibly.
-const ENCODE_POLL_MS = 3_000;
+// Encoding polls adaptively (`editorExportEncodePollMs`: fast first, slower later) to stay within Hobby Workflow events.
 // Upper bound on poll iterations (budget / interval); the sandbox lifetime enforces the real limit.
 const MAX_POLLS = 4000;
 
@@ -59,7 +58,7 @@ async function waitFor(
   durationSec: number
 ): Promise<PollResult> {
   for (let i = 0; i < MAX_POLLS; i++) {
-    await sleep(stage === "encode" ? ENCODE_POLL_MS : POLL_MS);
+    await sleep(stage === "encode" ? editorExportEncodePollMs(i) : POLL_MS);
     const r = await pollStep(params, name, cmdId, stage, startedAtMs, stepId, durationSec);
     if (r.state !== "running") return r;
   }

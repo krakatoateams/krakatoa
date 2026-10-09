@@ -2080,7 +2080,7 @@ export default function EditorWorkspace() {
           return;
         }
         if (!res.ok) {
-          throw new Error(data.error || "Export failed.");
+          throw new Error(data.error || (res.status === 413 ? "This project is too large to export. Try a shorter timeline." : "Export failed."));
         }
       }
       attempt.settle(true);
