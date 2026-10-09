@@ -123,7 +123,8 @@ vCPUs scale with resolution and are clamped to `EDITOR_EXPORT_MAX_VCPUS` (defaul
 FFmpeg is never run unverified: `npm run editor:bake-ffmpeg` bakes a Sandbox snapshot from a
 pinned, SHA-256-verified static build (`lib/editor-export-pin.ts`) and Poppins; set its id as
 `EDITOR_EXPORT_SNAPSHOT_ID`. Without it (local dev, previews) the same pinned download and
-checksum run per export. Both paths then assert libx264/libvpx-vp9/libopus/aac as needed,
+checksum run per export, so that path gets a longer prepare limit (`EDITOR_EXPORT_PREPARE_NO_SNAPSHOT_MS`);
+every start phase is clamped to the remaining 285 s start budget. Both paths then assert libx264/libvpx-vp9/libopus/aac as needed,
 drawtext and libfreetype. Any failure ends as `EDITOR_EXPORT_RUNNER_UNAVAILABLE`.
 Create-time limits map to `EDITOR_EXPORT_BUSY` (HTTP 429) and `EDITOR_EXPORT_CAPACITY_REACHED`
 (HTTP 402); the real SDK error shape is unverified. Encode polling is 3 s for the first ~2 min,

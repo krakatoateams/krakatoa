@@ -34,12 +34,14 @@ import {
   classifySandboxCreateError,
   EditorExportPhaseTimeout,
   editorExportErrorJson,
+  editorExportPhaseLimitMs,
   editorExportTimeoutMs,
   editorExportVcpus,
   nextEncodeStall,
   signedUploadArgs,
   withPhaseTimeout,
   type EditorExportErrorCode,
+  type EditorExportPhase,
   type EncodeStall,
 } from "@/lib/editor-export-pure";
 
@@ -156,6 +158,9 @@ export async function endStepCore(p: EditorExportParams, stepId: string | null, 
  */
 export async function startEncodeCore(p: EditorExportParams, stepId: string | null): Promise<EncodeStart> {
   let sandbox: Sandbox | null = null;
+  const startedAtMs = Date.now();
+  const limit = (phase: EditorExportPhase) =>
+    editorExportPhaseLimitMs(phase, Date.now() - startedAtMs, Boolean(process.env.EDITOR_EXPORT_SNAPSHOT_ID));
   // A job without a step means beginStep failed: the dialog cannot show progress for this export.
   if (!stepId && p.jobId) logSafe("progress reporting disabled", new Error("no running step for this export"));
   try {
@@ -167,9 +172,10 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
         for (const [key, path] of Object.entries(p.mediaPaths)) {
           urls[key] = await signStoragePathForPipeline(path, p.userId);
         }
-      })()
+      })(),
+      limit("sign")
     );
-    const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)));
+    const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)), limit("probe"));
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
     const hasFont = Boolean(graph.inputFiles.in_font);
 
@@ -178,7 +184,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
     await reportProgressCore(p, stepId, "starting", null);
     const creating = createSandbox(p);
     try {
-      sandbox = await withPhaseTimeout("create", creating);
+      sandbox = await withPhaseTimeout("create", creating, limit("create"));
     } catch (e) {
       logSafe("sandbox create failed", e);
       if (e instanceof EditorExportPhaseTimeout) {
@@ -188,7 +194,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       }
       return { ok: false, code: classifySandboxCreateError(e) };
     }
-    if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings))))) {
+    if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings)), limit("prepare")))) {
       throw new Error("sandbox preparation failed");
     }
     if ((await attemptState(p)) !== "live") {
@@ -201,7 +207,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       if (alias !== "in_font") values[alias] = url;
     }
     const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", PROGRESS_FILE, ...localizeFfmpegArgs(graph.args, values)];
-    const cmd = await withPhaseTimeout("ffmpegStart", sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true }));
+    const cmd = await withPhaseTimeout("ffmpegStart", sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true }), limit("ffmpegStart"));
     // FFmpeg is running; the percentage stays indeterminate until `out_time_us` is readable.
     await reportProgressCore(p, stepId, "encoding", null);
     return { ok: true, sandboxName: sandbox.name, cmdId: cmd.cmdId, durationSec: graph.durationSec, width: graph.width, height: graph.height };
