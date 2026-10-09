@@ -76,9 +76,9 @@ import {
 } from "@/lib/video-composer-features";
 import {
   isAgentSkill,
-  normalizeSkillUserPrompt,
   photoPromptLimitError,
-  SKILL_VIDEO_PROMPT_MAX_CHARS,
+  videoPromptLimitError,
+  videoPromptMaxChars,
   skillHref,
   skillPhotoAttemptSignature,
   skillPhotoMode,
@@ -465,8 +465,10 @@ function SkillOmniInner({
     (!needsCharacter || !!character.file) &&
     !photoPromptLimitError(prompt) &&
     photoTiers.length > 0;
+  const videoLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(videoModel));
   const canGenerateVideo =
     !!skill &&
+    !videoLimitError &&
     (!skill.promptRequired || prompt.trim().length > 0) &&
     startFrameReady &&
     !startFrame.uploading &&
@@ -482,10 +484,7 @@ function SkillOmniInner({
     }
 
     if (isVideo) {
-      const normalizedPrompt = normalizeSkillUserPrompt(
-        prompt,
-        videoModel.promptMaxChars ?? SKILL_VIDEO_PROMPT_MAX_CHARS,
-      );
+      const normalizedPrompt = prompt.trim();
       const body = {
         skillId: skill.id,
         composerKey: videoComposerKey,
@@ -710,9 +709,9 @@ function SkillOmniInner({
               </div>
             )}
           </div>
-          {!isVideo && photoPromptLimitError(prompt) && (
+          {(isVideo ? videoLimitError : photoPromptLimitError(prompt)) && (
             <p role="alert" className="mt-2 text-[11px] text-error">
-              {photoPromptLimitError(prompt)}
+              {isVideo ? videoLimitError : photoPromptLimitError(prompt)}
             </p>
           )}
 

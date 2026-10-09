@@ -136,8 +136,17 @@ export type SkillPhotoMode = "image" | "product" | "character";
 export const SKILL_PHOTO_PROMPT_MAX_CHARS = 8_000;
 export const SKILL_VIDEO_PROMPT_MAX_CHARS = 4_000;
 
-export function normalizeSkillUserPrompt(prompt: string, maxChars: number): string {
-  return prompt.trim().slice(0, maxChars);
+/** Per-model video prompt limit; models without a published limit use our 4,000 cap. */
+export function videoPromptMaxChars(model: { promptMaxChars?: number }): number {
+  return model.promptMaxChars ?? SKILL_VIDEO_PROMPT_MAX_CHARS;
+}
+
+/** Inline/400 message for a video prompt over the model limit; null when it fits. */
+export function videoPromptLimitError(prompt: string, maxChars: number): string | null {
+  const length = prompt.trim().length;
+  return length > maxChars
+    ? `Your prompt is too long (${length.toLocaleString("en-US")} characters). The limit is ${maxChars.toLocaleString("en-US")}.`
+    : null;
 }
 
 /** Inline/400 message for a photo prompt over the limit; null when it fits. */
@@ -901,6 +910,16 @@ export function skillsSelfCheck(): void {
   assert(isPhotoSkillId("comic-panels") && isPhotoSkillId("headshot"), "new photo skills");
   assert(skillPhotoMode("headshot") === "image", "headshot uses image mode");
   assert(getSkill("hook-ads")?.badge === "new", "hook-ads is marked New");
+  assert(videoPromptMaxChars({}) === 4_000, "video limit defaults to 4000");
+  assert(videoPromptMaxChars({ promptMaxChars: 2_500 }) === 2_500, "per-model video limit wins");
+  assert(videoPromptLimitError("a".repeat(2_500), 2_500) === null, "at-limit video prompt passes");
+  assert(
+    videoPromptLimitError("a".repeat(2_501), 2_500) ===
+      "Your prompt is too long (2,501 characters). The limit is 2,500.",
+    "limit+1 video prompt is refused"
+  );
+  assert(videoPromptLimitError(`  ${"a".repeat(4_000)}  `, 4_000) === null, "whitespace trimmed before counting");
+  assert(videoPromptLimitError("a".repeat(2_501), 4_000) === null, "higher limit clears the message");
   for (const id of FEATURED_SKILL_IDS) {
     assert(isAgentSkillId(id), `featured skill must run on the agent form: ${id}`);
   }

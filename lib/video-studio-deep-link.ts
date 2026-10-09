@@ -29,7 +29,6 @@ export type VideoStudioDeepLink = {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const PROMPT_MAX_CHARS = 4_000;
 
 function uuidParam(value: string | null): string | null {
   const trimmed = value?.trim() ?? "";
@@ -38,7 +37,7 @@ function uuidParam(value: string | null): string | null {
 
 function promptParam(value: string | null): string | null {
   const trimmed = value?.trim() ?? "";
-  return trimmed ? trimmed.slice(0, PROMPT_MAX_CHARS) : null;
+  return trimmed ? trimmed : null;
 }
 
 function videoCreationTypeParam(value: string | null): VideoCreationType | null {
@@ -214,8 +213,8 @@ export function videoStudioDeepLinkSelfCheck(): void {
   assert(
     parseVideoStudioDeepLink(
       params({ type: "text2video", prompt: "x".repeat(4_100) })
-    ).initialPrompt?.length === 4_000,
-    "prompt is bounded"
+    ).initialPrompt?.length === 4_100,
+    "long prompt is not truncated"
   );
   assert(
     parseVideoStudioDeepLink(

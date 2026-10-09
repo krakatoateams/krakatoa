@@ -65,6 +65,7 @@ import {
   resolveMotionControlRouteFailureHttp,
   settleMotionControlRouteFailure,
 } from "@/lib/generation-workflows/motion-control-route-failure";
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 // this above 300 makes the deployment fail outright on Hobby. Bump to 600 only
 // after upgrading to Pro (see CLAUDE.md).
@@ -206,7 +207,11 @@ export async function POST(req: Request) {
     if (!videoComposerModelEnabled(composerEnablement, "motion_control", modelId)) {
       return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
     }
-    const prompt = promptRaw.slice(0, model.promptMaxChars);
+    const prompt = promptRaw;
+    const promptLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
+    if (promptLimitError) {
+      return NextResponse.json({ error: promptLimitError }, { status: 400 });
+    }
 
     if (!isValidMotionControlMode(model, mode)) {
       return NextResponse.json(

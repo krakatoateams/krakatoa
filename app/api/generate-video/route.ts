@@ -82,6 +82,8 @@ import {
   assembleSkillPrompt,
   skillDefaultTitle,
   skillPinMismatch,
+  videoPromptLimitError,
+  videoPromptMaxChars,
   WELCOME_VIDEO_SKILL_ID,
 } from "@/lib/skills";
 import {
@@ -99,7 +101,6 @@ import { generationErrorLogSafe } from "@/lib/error-log-safe";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-const PROMPT_MAX_CHARS = 4000;
 
 /** A reference attachment as sent by the client: a public URL + its temp storage path. */
 type RefAttachment = { url: string; path: string };
@@ -396,8 +397,12 @@ export async function POST(req: Request) {
     jobKind = composerKey === "image2video" ? "video_image2video" : "video_text2video";
     jobLabel = jobKind === "video_image2video" ? "Image to Video" : "Text to Video";
 
-    // Cap the prompt to the selected model's limit (e.g. Kling v3 = 2500 chars).
-    const prompt = promptRaw.slice(0, model.promptMaxChars ?? PROMPT_MAX_CHARS);
+    // Refuse (never truncate) a prompt over the selected model's limit.
+    const prompt = promptRaw;
+    const promptLimitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
+    if (promptLimitError) {
+      return NextResponse.json({ error: promptLimitError }, { status: 400 });
+    }
 
     if (!prompt && (!liveSkill || liveSkill.promptRequired)) {
       return NextResponse.json(

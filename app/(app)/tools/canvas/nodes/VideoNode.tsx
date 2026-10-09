@@ -14,6 +14,7 @@ import {
 import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import { usePricing } from "@/app/(app)/pricing-context";
 import { useCurrentUser } from "@/lib/auth-context";
+import { videoPromptLimitError, videoPromptMaxChars } from "@/lib/skills";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
@@ -114,7 +115,8 @@ export default function VideoNode({
     generateAudio,
   });
   const cost = videoCredits(videoPricingKey, data.duration);
-  const canGenerate = prompt.length > 0;
+  const limitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
+  const canGenerate = prompt.length > 0 && !limitError;
 
   const patch = (next: Partial<VideoNodeData>) => updateNodeData(id, next);
 
@@ -372,6 +374,11 @@ export default function VideoNode({
             placeholder="Describe the video…  Type @ to mention a node"
             disabled={data.loading}
           />
+          {limitError && (
+            <p role="alert" className="mb-2 text-[11px] text-error">
+              {limitError}
+            </p>
+          )}
           <div className={`${STUDIO_CHIP_ROW_CLASS} mb-2`}>
             <ChipDropdown
               icon={<Cpu className="h-3.5 w-3.5" />}
