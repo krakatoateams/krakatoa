@@ -33,6 +33,7 @@ import {
   VIRAL_TEMPLATE_MODELS,
   getVideoModel,
   getAllowedDurations,
+  snapDurationToAllowed,
   formatVideoModelCreditHint,
   supportsViralTemplateGeneration,
   viralTemplateUsesCharacterImageOnly,
@@ -91,6 +92,7 @@ export default function ViralTemplateComposer({
   const template = initialTemplate ?? null;
   const lockedPrompt = template?.prompt?.trim() ?? "";
   const templateStartFramePath = template?.referenceImageUrl ?? null;
+  const templateDurationSec = template?.durationSec ?? null;
 
   useEffect(() => {
     if (viralTemplateModels.length === 0) return;
@@ -151,9 +153,23 @@ export default function ViralTemplateComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const allowedDurations = getAllowedDurations(model, resolution);
+  const lockedDuration =
+    templateDurationSec != null
+      ? snapDurationToAllowed(allowedDurations, templateDurationSec)
+      : undefined;
+
   useEffect(() => {
     const m = getVideoModel(modelId);
     const allowed = getAllowedDurations(m, resolution);
+    const pinned =
+      templateDurationSec != null
+        ? snapDurationToAllowed(allowed, templateDurationSec)
+        : undefined;
+    if (pinned) {
+      setDuration(pinned);
+      return;
+    }
     setDuration((d) =>
       allowed.includes(d)
         ? d
@@ -161,7 +177,7 @@ export default function ViralTemplateComposer({
           ? m.defaultDuration
           : allowed[allowed.length - 1]
     );
-  }, [modelId, resolution]);
+  }, [modelId, resolution, templateDurationSec]);
 
   const { videoCredits } = usePricing();
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -316,6 +332,11 @@ export default function ViralTemplateComposer({
                       {template.shotCount} shots
                     </span>
                   ) : null}
+                  {lockedDuration ? (
+                    <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium normal-case text-text-primary">
+                      {lockedDuration}s
+                    </span>
+                  ) : null}
                   <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-N700">
                     locked
                   </span>
@@ -363,14 +384,18 @@ export default function ViralTemplateComposer({
                 icon={<Clock className="h-3.5 w-3.5" />}
                 value={`${duration}s`}
                 activeId={String(duration)}
-                tooltip="Clip length in seconds."
-                options={getAllowedDurations(model, resolution).map((d) => ({
+                tooltip={
+                  lockedDuration
+                    ? "Clip length is fixed by the showcase template."
+                    : "Clip length in seconds."
+                }
+                options={allowedDurations.map((d) => ({
                   id: String(d),
                   label: `${d} seconds`,
                   hint: `${videoCredits(pricingKey, d)}`,
                 }))}
                 onSelect={(id) => setDuration(Number(id))}
-                disabled={loading || !template}
+                disabled={loading || !template || Boolean(lockedDuration)}
               />
               {model.resolutions.length > 1 && (
                 <ChipDropdown

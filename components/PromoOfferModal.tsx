@@ -4,9 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Check, Loader2, X } from "lucide-react";
 import { useCreditPacks } from "@/lib/use-credit-packs";
-import { formatPackPrice, type CreditPack } from "@/lib/credit-packs";
-import { PackCurrencyToggle } from "@/components/PackCurrencyToggle";
-import { usePackCurrency } from "@/lib/use-pack-currency";
+import { PackIdrPrice } from "@/components/PackIdrPrice";
+import type { CreditPack } from "@/lib/credit-packs";
 import {
   PROMO_COPY,
   PROMO_HERO_IMAGE,
@@ -34,7 +33,6 @@ export default function PromoOfferModal({
   onClose: () => void;
 }) {
   const packs = useCreditPacks();
-  const { currency, setCurrency } = usePackCurrency();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [purchasing, setPurchasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +85,7 @@ export default function PromoOfferModal({
       const res = await fetch("/api/credits/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId: selected.pack.id, currency }),
+        body: JSON.stringify({ packId: selected.pack.id }),
       });
       const data = (await res.json().catch(() => null)) as
         | { paymentUrl?: string; error?: string }
@@ -157,12 +155,7 @@ export default function PromoOfferModal({
             .
           </p>
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-text-disabled">
-              {currency === "USD" ? "Pay in US dollars with Polar." : "Pay in rupiah with DOKU."}
-            </p>
-            <PackCurrencyToggle currency={currency} onChange={setCurrency} />
-          </div>
+          <p className="mt-4 text-xs text-text-disabled">Pay in rupiah with DOKU.</p>
 
           {/* Tiers */}
           <div className="mt-5 flex flex-col gap-2.5">
@@ -209,14 +202,15 @@ export default function PromoOfferModal({
                   </div>
 
                   <div className="flex shrink-0 flex-col items-end leading-tight">
-                    {currency === "IDR" && tier.originalPriceIdr > pack.priceIdr && (
+                    {tier.originalPriceIdr > pack.priceIdr && (
                       <span className="text-[11px] text-text-disabled line-through">
                         {formatIdr(tier.originalPriceIdr)}
                       </span>
                     )}
-                    <span className="text-base font-bold text-N900">
-                      {formatPackPrice(pack, currency)}
-                    </span>
+                    <PackIdrPrice
+                      amountIdr={pack.priceIdr}
+                      className="text-lg font-bold text-N900"
+                    />
                   </div>
                 </button>
               );

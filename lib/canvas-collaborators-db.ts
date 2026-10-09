@@ -183,6 +183,35 @@ export async function inviteCanvasCollaborator(params: {
   return toCollaborator(data as CollaboratorRow);
 }
 
+export async function updateCanvasCollaboratorRole(params: {
+  canvasId: string;
+  ownerProfileId: string;
+  collaboratorId: string;
+  role: CanvasCollaboratorRole;
+}): Promise<CanvasCollaborator | null> {
+  const { data: owned, error: ownedError } = await supabaseServer
+    .from("canvases")
+    .select("id")
+    .eq("id", params.canvasId)
+    .eq("profile_id", params.ownerProfileId)
+    .maybeSingle();
+
+  handleError(ownedError, "Failed to verify canvas owner.");
+  if (!owned) return null;
+
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .update({ role: params.role })
+    .eq("id", params.collaboratorId)
+    .eq("canvas_id", params.canvasId)
+    .select("*")
+    .maybeSingle();
+
+  handleError(error, "Failed to update collaborator.");
+  if (!data) return null;
+  return toCollaborator(data as CollaboratorRow);
+}
+
 export async function removeCanvasCollaborator(params: {
   canvasId: string;
   ownerProfileId: string;

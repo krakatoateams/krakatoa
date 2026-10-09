@@ -906,6 +906,7 @@ export async function POST(req: Request) {
           storagePath,
           title,
           metadata: creationMetadata,
+          jobId,
         })
       );
     }

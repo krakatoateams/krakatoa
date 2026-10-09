@@ -79,7 +79,12 @@ export async function resolveCanvasRefFrames(
       frames.push({ url: signedUrl, path });
       continue;
     }
-    if (image.resultUrl?.startsWith("http") || image.resultUrl?.startsWith("blob:")) {
+    if (image.resultUrl?.startsWith("blob:")) {
+      throw new Error(
+        "A connected image isn't ready to send. Wait for the upload to finish, then try again."
+      );
+    }
+    if (image.resultUrl?.startsWith("http")) {
       frames.push({ url: image.resultUrl, path });
       continue;
     }

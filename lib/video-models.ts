@@ -892,6 +892,16 @@ export function getAllowedDurations(
   return model.durationsFor ? model.durationsFor(resolution) : model.durations;
 }
 
+/** Pick the closest model-supported duration to a measured clip length. */
+export function snapDurationToAllowed(allowed: number[], rawSec: number): number | undefined {
+  if (!allowed.length || !Number.isFinite(rawSec) || rawSec <= 0) return undefined;
+  const target = Math.round(rawSec);
+  if (allowed.includes(target)) return target;
+  return allowed.reduce((best, value) =>
+    Math.abs(value - target) < Math.abs(best - target) ? value : best
+  );
+}
+
 /** Reference inputs as resolved (public) URLs, ready for the provider. */
 export type VideoReferenceInputs = {
   firstFrame?: string | null;

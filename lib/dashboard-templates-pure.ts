@@ -14,6 +14,8 @@ export type AdminDashboardTemplate = {
   productThumbUrl?: string;
   skillId?: string;
   shotCount?: number;
+  /** Rounded seconds from the showcase preview clip; locks composer duration. */
+  durationSec?: number;
   isActive: boolean;
   sortOrder: number;
 };
@@ -70,6 +72,9 @@ export function toTrendingTemplate(row: AdminDashboardTemplate): TrendingTemplat
     ...(row.skillId?.trim() ? { skillId: row.skillId.trim() } : {}),
     ...(typeof row.shotCount === "number" && row.shotCount > 0
       ? { shotCount: row.shotCount }
+      : {}),
+    ...(typeof row.durationSec === "number" && row.durationSec > 0
+      ? { durationSec: row.durationSec }
       : {}),
   };
 }
@@ -154,6 +159,18 @@ export function parseAdminDashboardTemplate(
     shotCount = n;
   }
 
+  const durationSecRaw = row.durationSec;
+  let durationSec: number | undefined;
+  if (durationSecRaw !== undefined && durationSecRaw !== null && durationSecRaw !== "") {
+    const n = typeof durationSecRaw === "number" ? durationSecRaw : Number(durationSecRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 120) {
+      throw new DashboardTemplateValidationError(
+        `Row "${slug}": duration must be an integer between 1 and 120 seconds.`
+      );
+    }
+    durationSec = n;
+  }
+
   return {
     slug,
     kind,
@@ -166,6 +183,7 @@ export function parseAdminDashboardTemplate(
     productThumbUrl: optionalUrl(row.productThumbUrl, "product thumb URL"),
     ...(skillId ? { skillId } : {}),
     ...(shotCount ? { shotCount } : {}),
+    ...(durationSec ? { durationSec } : {}),
     isActive: row.isActive !== false,
     sortOrder: index,
   };

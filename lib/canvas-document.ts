@@ -162,6 +162,30 @@ function clampZoom(zoom: number): number {
   return Math.min(2, Math.max(0.25, zoom));
 }
 
+export function canvasStoragePaths(graph: {
+  nodes: Array<{ data: { kind: string; resultStoragePath?: string | null } }>;
+}): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.data.kind === "prompt") continue;
+    const path = node.data.resultStoragePath?.trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+  return paths;
+}
+
+/** Paths in `next` that were not already on `previous`. */
+export function addedCanvasStoragePaths(
+  previous: { nodes: Array<{ data: { kind: string; resultStoragePath?: string | null } }> } | null,
+  next: { nodes: Array<{ data: { kind: string; resultStoragePath?: string | null } }> }
+): string[] {
+  const had = new Set(previous ? canvasStoragePaths(previous) : []);
+  return canvasStoragePaths(next).filter((path) => !had.has(path));
+}
+
 export function normalizeCanvasTitle(raw: unknown): string {
   const title = typeof raw === "string" ? raw.trim().slice(0, CANVAS_TITLE_MAX) : "";
   return title || DEFAULT_CANVAS_TITLE;
@@ -430,6 +454,14 @@ export function canvasDocumentSelfCheck(): void {
   const parsed = parseCanvasGraph(saved);
   assert(parsed !== null && parsed.nodes[0]?.data.kind === "prompt", "a saved graph round-trips");
   assert(parseCanvasGraph({ v: 2, nodes: [], edges: [] }) === null, "unknown versions are rejected");
+  assert(
+    canvasStoragePaths(saved).join() === "u/photos/a.jpg",
+    "storage paths are collected once per file"
+  );
+  assert(
+    addedCanvasStoragePaths(saved, importedGraph).join() === "u/photos/b.jpg",
+    "only newly placed files need an ownership check"
+  );
   assert(CANVAS_NODE_KINDS.length === 4, "saved kinds stay aligned with the live graph");
 }
 

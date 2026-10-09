@@ -5,7 +5,7 @@ import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
 import { Volume2 } from "lucide-react";
 import { uploadRefFile } from "@/components/studio";
 import { CANVAS_KIND_LABELS } from "@/lib/canvas-graph";
-import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
+import { useSignedMediaUrlState } from "@/lib/use-signed-media-url";
 import CanvasNodeFrame from "./CanvasNodeFrame";
 import CanvasAssetActions from "./CanvasAssetActions";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
@@ -22,7 +22,10 @@ export default function SoundNode({
   const { updateNodeData, deleteElements } = useReactFlow();
   const { openLibrary } = useCanvasLibrary();
   const [localPreview, setLocalPreview] = useState<string | null>(null);
-  const signedUrl = useSignedMediaUrl(data.resultStoragePath, data.resultUrl);
+  const { url: signedUrl, failed: mediaFailed } = useSignedMediaUrlState(
+    data.resultStoragePath,
+    data.resultUrl
+  );
   const previewUrl = localPreview ?? signedUrl ?? data.resultUrl;
 
   const patch = (next: Partial<SoundNodeData>) => updateNodeData(id, next);
@@ -72,7 +75,11 @@ export default function SoundNode({
           ) : (
             <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 text-text-secondary">
               <Volume2 className="h-7 w-7 text-icon-low-emphasis" />
-              <p className="text-xs">Output will appear here…</p>
+              <p className="px-3 text-center text-xs">
+                {mediaFailed && data.resultStoragePath
+                  ? "Couldn't open this file."
+                  : "Output will appear here…"}
+              </p>
             </div>
           )}
           {data.uploading && <div className="absolute inset-0 animate-pulse bg-white/10" />}

@@ -4,7 +4,7 @@ import {
   canvasGraphJsonTooLarge,
   parseCanvasGraph,
 } from "@/lib/canvas-document";
-import { createCanvas, listCanvases } from "@/lib/canvases-db";
+import { canvasSaveErrorStatus, createCanvas, listCanvases } from "@/lib/canvases-db";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This canvas is too large to save." }, { status: 400 });
     }
     const canvas = await createCanvas({
-      profileId: profile.id,
+      profile,
       title: typeof body.title === "string" ? body.title : "",
       graph,
     });
@@ -48,6 +48,8 @@ export async function POST(req: NextRequest) {
     if (message === "Not authenticated.") {
       return NextResponse.json({ error: message }, { status: 401 });
     }
+    const status = canvasSaveErrorStatus(error);
+    if (status) return NextResponse.json({ error: message }, { status });
     console.error("[api/canvas] create failed:", error);
     return NextResponse.json({ error: "Failed to save canvas." }, { status: 500 });
   }

@@ -4,12 +4,15 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { X } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { isPngAsset } from "./nodes/CanvasMediaBox";
 
 export type CanvasPreviewMedia = {
   kind: "image" | "video";
   url: string;
   checkerboard?: boolean;
+  createdBy?: string;
+  onShowInLibrary?: () => void;
 };
 
 const CanvasPreviewContext = createContext<(media: CanvasPreviewMedia) => void>(() => {});
@@ -50,7 +53,7 @@ export function CanvasPreviewProvider({ children }: { children: React.ReactNode 
                 <X className="h-4 w-4" />
               </button>
               <div
-                className={`relative overflow-hidden rounded-2xl border border-white/10 shadow-2xl ${
+                className={`relative flex max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl ${
                   media.kind === "image" && (media.checkerboard || isPngAsset(media.url))
                     ? "kk-canvas-png-board"
                     : "bg-N50"
@@ -61,7 +64,7 @@ export function CanvasPreviewProvider({ children }: { children: React.ReactNode 
                   <video
                     key={media.url}
                     src={media.url}
-                    className="max-h-[88vh] max-w-[min(92vw,1100px)] bg-black"
+                    className={`${media.createdBy || media.onShowInLibrary ? "max-h-[calc(88vh-4rem)]" : "max-h-[88vh]"} max-w-[min(92vw,1100px)] bg-black`}
                     controls
                     autoPlay
                     playsInline
@@ -72,11 +75,39 @@ export function CanvasPreviewProvider({ children }: { children: React.ReactNode 
                   <img
                     src={media.url}
                     alt=""
-                    className="max-h-[88vh] max-w-[min(92vw,1100px)] object-contain"
+                    className={`${media.createdBy || media.onShowInLibrary ? "max-h-[calc(88vh-4rem)]" : "max-h-[88vh]"} max-w-[min(92vw,1100px)] object-contain`}
                   />
                 ) : (
-                  <PreviewSignedImage url={media.url} />
+                  <PreviewSignedImage
+                    url={media.url}
+                    capped={Boolean(media.createdBy || media.onShowInLibrary)}
+                  />
                 )}
+                {media.createdBy || media.onShowInLibrary ? (
+                  <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-N50 px-4 py-3">
+                    {media.createdBy ? (
+                      <p className="min-w-0 truncate text-sm text-text-secondary">
+                        Created by {media.createdBy}
+                      </p>
+                    ) : (
+                      <span />
+                    )}
+                    {media.onShowInLibrary ? (
+                      <Button
+                        variant="tertiary"
+                        size="sm"
+                        aria-label="Show in library"
+                        onClick={() => {
+                          const openLibrary = media.onShowInLibrary;
+                          close();
+                          openLibrary?.();
+                        }}
+                      >
+                        Show in library
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>,
             document.body
@@ -86,7 +117,7 @@ export function CanvasPreviewProvider({ children }: { children: React.ReactNode 
   );
 }
 
-function PreviewSignedImage({ url }: { url: string }) {
+function PreviewSignedImage({ url, capped }: { url: string; capped?: boolean }) {
   const [ratio, setRatio] = useState<number | null>(null);
 
   useEffect(() => {
@@ -94,13 +125,15 @@ function PreviewSignedImage({ url }: { url: string }) {
   }, [url]);
 
   const aspect = ratio ?? 1;
+  const height = capped ? "(88vh - 4rem)" : "88vh";
 
   return (
     <div
-      className="relative max-h-[88vh]"
+      className="relative max-h-full"
       style={{
         aspectRatio: String(aspect),
-        width: `min(92vw, 1100px, calc(88vh * ${aspect}))`,
+        width: `min(92vw, 1100px, calc(${height} * ${aspect}))`,
+        maxHeight: capped ? "calc(88vh - 4rem)" : "88vh",
       }}
     >
       <Image

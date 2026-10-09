@@ -458,6 +458,7 @@ function StoryboardComposer({
             refreshKey={historyRefreshKey}
             showActions
             showMeta={false}
+            openFromQuery
             limit={20}
           />
         </div>
@@ -1385,6 +1386,7 @@ function PhotoOmniPage({
               refreshKey={historyRefreshKey}
               showActions
               showMeta={false}
+              openFromQuery
               limit={20}
             />
           </div>

@@ -1,12 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { classifyCreationMutationError } from "@/lib/creation-ownership-pure";
+import { isTrashedItem } from "@/lib/creations";
+import { creationIsExpired } from "@/lib/notification-links-pure";
+import { getExpirySettings } from "@/lib/expiry-settings-db";
 import {
+  getUserCreationForUser,
   permanentlyDeleteUserCreation,
   restoreUserCreation,
+  signCreationItemsMedia,
   softDeleteUserCreation,
   updateUserCreation,
 } from "@/lib/creations-db";
+
+const CREATION_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One creation for a deep link. Missing, another user's, trashed, or expired
+ * rows all look the same: not found. Never an error page.
+ */
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    }
+    const id = params.id?.trim() ?? "";
+    if (!CREATION_ID_RE.test(id)) {
+      return NextResponse.json({ item: null }, { status: 404 });
+    }
+    const item = await getUserCreationForUser(userId, id);
+    if (!item || isTrashedItem(item)) {
+      return NextResponse.json({ item: null }, { status: 404 });
+    }
+    const expiry = await getExpirySettings();
+    if (
+      creationIsExpired(
+        item.mediaType,
+        item.createdAt,
+        {
+          photoDays: expiry.photoCreationDays,
+          videoDays: expiry.videoCreationDays,
+        },
+        Date.now()
+      )
+    ) {
+      return NextResponse.json({ item: null }, { status: 404 });
+    }
+    const [signed] = await signCreationItemsMedia(userId, [item]);
+    return NextResponse.json({ item: signed ?? item });
+  } catch (error: unknown) {
+    console.error("[Creations GET]", error);
+    return NextResponse.json({ item: null }, { status: 404 });
+  }
+}
 
 export const dynamic = "force-dynamic";
 

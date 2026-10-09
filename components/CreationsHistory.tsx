@@ -101,6 +101,11 @@ type Props = {
    * Scheduler's asset pickers), as opposed to a tool's own history section
    * where the generation form is already right there on the same page. */
   showCreateCta?: boolean;
+  /**
+   * When the page URL has ?creation=<id>, open that item's preview after load.
+   * Pickers leave this off so a deep link does not also select a file.
+   */
+  openFromQuery?: boolean;
 };
 
 /** Windowed page numbers with ellipses, e.g. [1, "…", 4, 5, 6, "…", 12]. */
@@ -403,6 +408,7 @@ export default function CreationsHistory({
   showCreateCta = false,
   skillId,
   itemFilter,
+  openFromQuery = false,
 }: Props) {
   // Library-grade cards + preview (hover actions, rich preview modal) ride on the
   // tab bar today; `showActions` lets a tab-less surface (e.g. the Photo tool
@@ -428,6 +434,7 @@ export default function CreationsHistory({
   );
   const [page, setPage] = useState(1);
   const [previewItem, setPreviewItem] = useState<CreationHistoryItem | null>(null);
+  const [missingCreation, setMissingCreation] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const { items: activeJobs } = useActiveGenerations();
@@ -450,6 +457,35 @@ export default function CreationsHistory({
 
   // Stable so the preview's key handler doesn't resubscribe on every render.
   const closePreview = useCallback(() => setPreviewItem(null), []);
+
+  // ?creation=<id> opens this preview. A miss (deleted, trashed, expired,
+  // someone else's id) stays on the tool page with a short note.
+  useEffect(() => {
+    if (!openFromQuery) return;
+    const id = new URLSearchParams(window.location.search).get("creation")?.trim() ?? "";
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/creations/${encodeURIComponent(id)}`);
+        const data = (await res.json().catch(() => ({}))) as {
+          item?: CreationHistoryItem | null;
+        };
+        if (cancelled) return;
+        if (!res.ok || !data.item) {
+          setMissingCreation(true);
+          return;
+        }
+        setMissingCreation(false);
+        setPreviewItem(data.item);
+      } catch {
+        if (!cancelled) setMissingCreation(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openFromQuery]);
 
   // Navigate the preview across the currently loaded page of items.
   const previewIndex = previewItem
@@ -797,6 +833,10 @@ export default function CreationsHistory({
           </div>
           {showRefresh && enableTabs && refreshButton}
         </div>
+      )}
+
+      {missingCreation && (
+        <p className="mb-6 text-sm text-text-secondary">This creation is no longer available.</p>
       )}
 
       {error && (

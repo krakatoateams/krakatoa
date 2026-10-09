@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Trash2, UserPlus, X } from "lucide-react";
 import type { CanvasCollaborator, CanvasCollaboratorRole } from "@/lib/canvas-document";
+import { useCurrentUser } from "@/lib/auth-context";
 
 export default function CanvasShareModal({
   open,
@@ -16,12 +17,14 @@ export default function CanvasShareModal({
   canvasTitle: string;
   onClose: () => void;
 }) {
+  const { email: ownerEmail } = useCurrentUser();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<CanvasCollaboratorRole>("editor");
   const [collaborators, setCollaborators] = useState<CanvasCollaborator[]>([]);
   const [loading, setLoading] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [roleId, setRoleId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -88,6 +91,32 @@ export default function CanvasShareModal({
       setError(err instanceof Error ? err.message : "Failed to send invite.");
     } finally {
       setInviting(false);
+    }
+  };
+
+  const handleRole = async (collaboratorId: string, nextRole: CanvasCollaboratorRole) => {
+    setRoleId(collaboratorId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/canvas/${canvasId}/collaborators/${collaboratorId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: nextRole }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        collaborator?: CanvasCollaborator;
+        error?: string;
+      };
+      if (!res.ok || !data.collaborator) {
+        throw new Error(data.error || "Failed to update access.");
+      }
+      setCollaborators((current) =>
+        current.map((item) => (item.id === collaboratorId ? data.collaborator! : item))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update access.");
+    } finally {
+      setRoleId(null);
     }
   };
 
@@ -188,26 +217,45 @@ export default function CanvasShareModal({
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
             People with access
           </p>
-          {loading ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-text-secondary">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading…
-            </div>
-          ) : collaborators.length === 0 ? (
-            <p className="text-sm text-text-secondary">No collaborators yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {collaborators.map((item) => (
+          <ul className="space-y-2">
+            <li className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-text-primary">
+                  {ownerEmail || "Owner"}
+                </p>
+                <p className="text-xs text-text-secondary">Owner</p>
+              </div>
+            </li>
+            {loading ? (
+              <li className="flex items-center gap-2 py-2 text-sm text-text-secondary">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading…
+              </li>
+            ) : (
+              collaborators.map((item) => (
                 <li
                   key={item.id}
                   className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-text-primary">{item.invitedEmail}</p>
-                    <p className="text-xs text-text-secondary">
-                      {item.role === "editor" ? "Can edit" : "Can view"}
-                      {item.status === "pending" ? " · Pending" : ""}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <select
+                        value={item.role}
+                        aria-label={`Access for ${item.invitedEmail}`}
+                        disabled={roleId === item.id || removingId === item.id}
+                        onChange={(event) =>
+                          void handleRole(item.id, event.target.value as CanvasCollaboratorRole)
+                        }
+                        className="rounded-lg border border-white/10 bg-transparent px-1.5 py-0.5 text-xs text-text-secondary outline-none focus:border-white/25 disabled:opacity-50"
+                      >
+                        <option value="editor">Can edit</option>
+                        <option value="viewer">Can view</option>
+                      </select>
+                      {item.status === "pending" ? (
+                        <span className="text-xs text-text-secondary">Pending</span>
+                      ) : null}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -223,9 +271,9 @@ export default function CanvasShareModal({
                     )}
                   </button>
                 </li>
-              ))}
-            </ul>
-          )}
+              ))
+            )}
+          </ul>
         </div>
       </div>
     </div>,

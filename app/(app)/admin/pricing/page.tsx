@@ -24,7 +24,6 @@ type Row = {
   credits: string;
   bonusCredits: string;
   priceIdr: string;
-  priceUsd: string;
   label: string;
   popular: boolean;
   isActive: boolean;
@@ -37,7 +36,6 @@ function toRow(p: AdminCreditPack): Row {
     credits: String(p.credits),
     bonusCredits: p.bonusCredits ? String(p.bonusCredits) : "",
     priceIdr: String(p.priceIdr),
-    priceUsd: (p.priceUsdCents / 100).toFixed(2),
     label: p.label,
     popular: !!p.popular,
     isActive: p.isActive,
@@ -57,14 +55,13 @@ function costUsdLabel(credits: string, bonusCredits: string): string {
 
 /**
  * Informational economics. Cost basis is 100 tokens = US$1.
- * Sell USD / Margin USD use the USD price. Sell IDR / Margin IDR use the IDR
- * price, with cost converted at the admin kurs (IDR per US$1).
+ * Sell USD is the IDR price converted at the admin kurs. Sell IDR is the
+ * amount DOKU charges. Cost is converted at the same kurs.
  */
 function economicsFor(
   credits: string,
   bonusCredits: string,
   priceIdr: string,
-  priceUsd: string,
   kurs: string
 ): {
   sellUsd: string;
@@ -84,8 +81,8 @@ function economicsFor(
   };
   const total = (Number(credits) || 0) + (Number(bonusCredits) || 0);
   const idr = Number(priceIdr) || 0;
-  const usd = Number(priceUsd) || 0;
   const rate = Number(kurs) || 0;
+  const usd = idr > 0 && rate > 0 ? idr / rate : 0;
   if (total <= 0) return empty;
   const costUsd = total / TOKENS_PER_USD;
   const marginPct = (sell: number, cost: number) => ((sell - cost) / cost) * 100;
@@ -118,9 +115,6 @@ export default function AdminPricingPage() {
   const [offerEnabled, setOfferEnabled] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [offerMsg, setOfferMsg] = useState<string | null>(null);
-  const [usdCheckoutEnabled, setUsdCheckoutEnabled] = useState(false);
-  const [usdCheckoutBusy, setUsdCheckoutBusy] = useState(false);
-  const [usdCheckoutMsg, setUsdCheckoutMsg] = useState<string | null>(null);
   const [offerPreview, setOfferPreview] = useState(false);
 
   useEffect(() => {
@@ -151,41 +145,6 @@ export default function AdminPricingPage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/admin/usd-checkout", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { settings?: { enabled: boolean } } | null) => {
-        if (cancelled || !d?.settings) return;
-        setUsdCheckoutEnabled(d.settings.enabled);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const saveUsdCheckout = async (enabled: boolean) => {
-    setUsdCheckoutBusy(true);
-    setUsdCheckoutMsg(null);
-    setUsdCheckoutEnabled(enabled);
-    try {
-      const res = await fetch("/api/admin/usd-checkout", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error ?? "Could not save.");
-      setUsdCheckoutMsg(enabled ? "USD checkout is visible." : "USD checkout is hidden.");
-    } catch (e) {
-      setUsdCheckoutEnabled(!enabled);
-      setUsdCheckoutMsg(e instanceof Error ? e.message : "Could not save.");
-    } finally {
-      setUsdCheckoutBusy(false);
-    }
-  };
 
   const saveOffer = async () => {
     setOfferBusy(true);
@@ -283,7 +242,6 @@ export default function AdminPricingPage() {
         credits: "",
         bonusCredits: "",
         priceIdr: "",
-        priceUsd: "",
         label: "",
         popular: false,
         isActive: true,
@@ -303,7 +261,10 @@ export default function AdminPricingPage() {
         credits: Number(r.credits),
         bonusCredits: r.bonusCredits === "" ? 0 : Number(r.bonusCredits),
         priceIdr: Number(r.priceIdr),
-        priceUsdCents: Math.round(Number(r.priceUsd || 0) * 100),
+        priceUsdCents:
+          Number(kurs) > 0
+            ? Math.round((Number(r.priceIdr) / Number(kurs)) * 100)
+            : 0,
         label: r.label.trim(),
         popular: r.popular,
         isActive: r.isActive,
@@ -331,37 +292,12 @@ export default function AdminPricingPage() {
     <div className="space-y-6">
       <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
         Manage the credit purchase tiers shown on the Buy credits panel and the
-        landing page. Price (IDR) is charged via DOKU. Price (USD) is the dummy
-        amount customers see when they pick USD; Polar does not charge it yet.
+        landing page. DOKU charges Price (IDR). Customers also see a smaller USD
+        amount converted with the kurs below.
         The tier <span className="text-gray-200">id</span> is referenced by past orders, so
         it can&apos;t be changed once a tier exists — add a new tier instead.
         Inactive tiers are hidden from customers but kept for history.
       </div>
-
-      <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-white">USD checkout</h3>
-            <p className="mt-1 max-w-xl text-xs text-gray-500">
-              Hides the USD price toggle and blocks USD purchases. IDR checkout
-              through DOKU stays available. Turn this on when a USD processor is ready.
-            </p>
-            {usdCheckoutMsg ? (
-              <p className="mt-2 text-xs text-gray-300">{usdCheckoutMsg}</p>
-            ) : null}
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
-            <input
-              type="checkbox"
-              checked={usdCheckoutEnabled}
-              disabled={usdCheckoutBusy}
-              onChange={(e) => void saveUsdCheckout(e.target.checked)}
-              className="h-4 w-4 accent-emerald-500"
-            />
-            Show USD
-          </label>
-        </div>
-      </section>
 
       {/* Welcome offer — the promo popup shown once per session on the dashboard. */}
       <section className="rounded-xl border border-white/10 bg-white/[0.04] p-5">
@@ -519,7 +455,7 @@ export default function AdminPricingPage() {
       <div className="overflow-x-auto">
         <div className="min-w-[1480px] space-y-1.5">
           {/* Column headers (shown once). */}
-          <div className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_112px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+          <div className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
             <span>Order</span>
             <span>Id</span>
             <span>Label</span>
@@ -529,8 +465,7 @@ export default function AdminPricingPage() {
               Cost (USD)
             </span>
             <span className="text-right">Price (IDR)</span>
-            <span className="text-right">Price (USD)</span>
-            <span className="text-right" title="The USD price charged for this pack">
+            <span className="text-right" title="IDR price converted at the admin kurs">
               Sell (USD)
             </span>
             <span className="text-right" title="The IDR price charged for this pack">
@@ -550,7 +485,7 @@ export default function AdminPricingPage() {
           {rows.map((row, i) => (
             <div
               key={`${row.id}-${i}`}
-              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_112px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5"
+              className="grid grid-cols-[64px_96px_1fr_84px_84px_84px_128px_84px_120px_80px_80px_64px_64px_32px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5"
             >
               <div className="flex items-center gap-0.5">
                 <button
@@ -621,20 +556,11 @@ export default function AdminPricingPage() {
                 onChange={(e) => patch(i, { priceIdr: e.target.value.replace(/[^\d]/g, "") })}
                 className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
               />
-              <input
-                inputMode="decimal"
-                value={row.priceUsd}
-                placeholder="0.00"
-                title="Customer-facing USD price"
-                onChange={(e) => patch(i, { priceUsd: e.target.value.replace(/[^\d.]/g, "") })}
-                className="w-full rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-right text-sm text-white outline-none focus:border-white/30"
-              />
               {(() => {
                 const eco = economicsFor(
                   row.credits,
                   row.bonusCredits,
                   row.priceIdr,
-                  row.priceUsd,
                   kurs
                 );
                 const usdTone = eco.usdNegative ? "text-red-400" : "text-gray-400";

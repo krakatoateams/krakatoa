@@ -13,11 +13,9 @@ import { useCreditBalance } from "@/app/(app)/credit-balance-context";
 import {
   DEFAULT_CREDIT_PACKS,
   creditPacksFromApiPayload,
-  formatPackPrice,
   type CreditPack,
 } from "@/lib/credit-packs";
-import { PackCurrencyToggle } from "@/components/PackCurrencyToggle";
-import { usePackCurrency } from "@/lib/use-pack-currency";
+import { PackIdrPrice } from "@/components/PackIdrPrice";
 
 type BalanceResponse = {
   balance: number;
@@ -116,8 +114,6 @@ export default function CreditsTab() {
   // Admin-managed tiers; seeded with the static defaults so the panel renders
   // instantly, then refreshed from the DB-backed API.
   const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_CREDIT_PACKS);
-  const { currency, setCurrency } = usePackCurrency();
-
   useEffect(() => {
     let cancelled = false;
     const loadPacks = () => {
@@ -252,14 +248,13 @@ export default function CreditsTab() {
   }, [loadCredits, refetchBalance]);
 
   const handleBuy = useCallback(async (packId: string) => {
-    if (currency !== "IDR" && currency !== "USD") return;
     setPurchasingId(packId);
     setBuyError(null);
     try {
       const res = await fetch("/api/credits/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId, currency }),
+        body: JSON.stringify({ packId }),
       });
       const data = (await res.json().catch(() => null)) as
         | { paymentUrl?: string; error?: string }
@@ -272,7 +267,7 @@ export default function CreditsTab() {
       setBuyError(e instanceof Error ? e.message : "Could not start checkout.");
       setPurchasingId(null);
     }
-  }, [currency]);
+  }, []);
 
   const currentBalance = stats?.balance ?? balance;
 
@@ -370,13 +365,10 @@ export default function CreditsTab() {
           <div>
             <p className="text-sm font-medium text-N900">Buy credits</p>
             <p className="text-xs text-text-disabled">
-              {currency === "IDR"
-                ? "Top up your balance to keep generating. Pay securely with DOKU."
-                : "Pay in US dollars with Polar."}
+              Top up your balance to keep generating. Pay securely with DOKU.
             </p>
           </div>
           </div>
-          <PackCurrencyToggle currency={currency} onChange={setCurrency} />
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -409,9 +401,10 @@ export default function CreditsTab() {
                   credits · {pack.label}
                 </p>
                 <div className="mt-auto pt-3">
-                  <p className="text-sm font-semibold text-N700">
-                    {formatPackPrice(pack, currency)}
-                  </p>
+                  <PackIdrPrice
+                    amountIdr={pack.priceIdr}
+                    className="text-base font-semibold text-N700"
+                  />
                   <button
                     type="button"
                     onClick={() => handleBuy(pack.id)}

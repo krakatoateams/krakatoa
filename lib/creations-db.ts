@@ -67,6 +67,8 @@ export async function insertUserCreation(params: {
   storagePath?: string;
   title?: string;
   metadata?: Record<string, unknown>;
+  /** Generation job that produced this file. Null for uploads and older rows. */
+  jobId?: string | null;
 }): Promise<CreationHistoryItem> {
   const { data, error } = await supabaseServer
     .from(USER_CREATIONS_TABLE)
@@ -78,6 +80,7 @@ export async function insertUserCreation(params: {
       storage_path: params.storagePath ?? "",
       title: params.title ?? "",
       metadata: params.metadata ?? {},
+      ...(params.jobId ? { job_id: params.jobId } : {}),
     })
     .select("*")
     .single();
@@ -173,6 +176,24 @@ export async function getUserCreationForUser(
 
   if (error || !data) return null;
   return rowToCreationItem(data as UserCreationRow);
+}
+
+/** Newest non-trashed creation saved for this job, or null. Owner-scoped. */
+export async function getUserCreationIdForJob(
+  userId: string,
+  jobId: string
+): Promise<string | null> {
+  const { data, error } = await supabaseServer
+    .from(USER_CREATIONS_TABLE)
+    .select("id")
+    .eq("user_id", userId)
+    .eq("job_id", jobId)
+    .is("metadata->>deletedAt", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return typeof data.id === "string" ? data.id : null;
 }
 
 /**

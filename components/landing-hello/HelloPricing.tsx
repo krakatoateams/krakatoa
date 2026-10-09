@@ -4,14 +4,9 @@ import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import {
-  formatPackBonus,
-  formatPackPrice,
-  type CreditPack,
-} from "@/lib/credit-packs";
+import { formatIdr, packBonusValueIdr, type CreditPack } from "@/lib/credit-packs";
+import { PackIdrPrice } from "@/components/PackIdrPrice";
 import { useCreditPacks } from "@/lib/use-credit-packs";
-import { usePackCurrency } from "@/lib/use-pack-currency";
-import { PackCurrencyToggle } from "@/components/PackCurrencyToggle";
 import {
   CREDIT_CTA_HREF_AUTHED,
   CREDIT_POLICY,
@@ -44,15 +39,13 @@ function CreditRow({
   pack,
   authed,
   onGuestClick,
-  currency,
 }: {
   pack: CreditPack;
   authed: boolean;
   onGuestClick: () => void;
-  currency: "USD" | "IDR";
 }) {
-  const label = `Purchase ${pack.credits.toLocaleString()} credits (${pack.label}) for ${formatPackPrice(pack, currency)}`;
-  const content = <CreditRowContent pack={pack} currency={currency} />;
+  const label = `Purchase ${pack.credits.toLocaleString()} credits (${pack.label}) for ${formatIdr(pack.priceIdr)}`;
+  const content = <CreditRowContent pack={pack} />;
 
   // Guests never leave the page — clicking "Purchase" opens the sign-in
   // modal instead of navigating to /login, same as the nav CTA.
@@ -71,7 +64,7 @@ function CreditRow({
   );
 }
 
-function CreditRowContent({ pack, currency }: { pack: CreditPack; currency: "USD" | "IDR" }) {
+function CreditRowContent({ pack }: { pack: CreditPack }) {
   return (
     <>
       <div className="min-w-0 flex-1">
@@ -98,12 +91,13 @@ function CreditRowContent({ pack, currency }: { pack: CreditPack; currency: "USD
 
       <div className="flex shrink-0 items-center gap-3 sm:gap-5">
         <div className="flex flex-col items-end leading-tight">
-          <span className="text-base font-medium text-N900 sm:text-lg">
-            {formatPackPrice(pack, currency)}
-          </span>
+          <PackIdrPrice
+            amountIdr={pack.priceIdr}
+            className="text-lg font-medium text-N900 sm:text-xl"
+          />
           {pack.bonusCredits ? (
             <span className="text-[11px] font-medium text-text-disabled">
-              Saved {formatPackBonus(pack, currency)}
+              Saved {formatIdr(packBonusValueIdr(pack))}
             </span>
           ) : null}
         </div>
@@ -197,7 +191,6 @@ export function HelloPricing() {
   const [mode, setMode] = useState<Mode>(SHOW_PLANS ? "plans" : "credits");
   const [policyOpen, setPolicyOpen] = useState(false);
   const packs = useCreditPacks();
-  const { currency, setCurrency } = usePackCurrency();
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
   const isAuthed = status === "authenticated";
@@ -276,15 +269,11 @@ export function HelloPricing() {
               <div
                 className={`divide-y divide-white/10 overflow-hidden lg:col-span-3 ${panel}`}
               >
-                <div className="flex items-center justify-end px-5 py-3 sm:px-6">
-                  <PackCurrencyToggle currency={currency} onChange={setCurrency} />
-                </div>
                 {packs.map((pack) => (
                   <CreditRow
                     key={pack.id}
                     pack={pack}
                     authed={isAuthed}
-                    currency={currency}
                     // Landing-page exception: land signed-in visitors on the
                     // dashboard, not back on the landing page they came from.
                     onGuestClick={() => openSignInModal("/dashboard")}

@@ -8,6 +8,8 @@ export type CanvasActions = {
   spawnFrom: (sourceId: string, kind: CanvasNodeKind) => void;
   attachLibraryRef: (targetId: string, item: CreationHistoryItem) => void;
   pushHistory: () => void;
+  /** user id → display name for files already saved on this canvas. */
+  fileCreators: Record<string, string>;
 };
 
 const CanvasActionsContext = createContext<CanvasActions | null>(null);
@@ -28,6 +30,7 @@ export function useCanvasActions(): CanvasActions {
       spawnFrom: () => {},
       attachLibraryRef: () => {},
       pushHistory: () => {},
+      fileCreators: {},
     }
   );
 }

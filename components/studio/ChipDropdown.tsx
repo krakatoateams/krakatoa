@@ -100,14 +100,28 @@ export function ChipDropdown({
     };
   }, [open, isMobile]);
 
-  // Anchor the portal menu under the trigger using viewport (fixed) coordinates
-  // and keep it in place while scrolling/resizing.
+  // Anchor the portal menu to the trigger. Canvas pan/zoom moves nodes with a
+  // CSS transform, which does not emit scroll, so callers re-measure every frame.
   const positionMenu = useCallback(() => {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - MENU_MAX_WIDTH - 8));
-    setCoords({ top: r.bottom + 8, left });
+    const menu = menuRef.current;
+    const menuWidth = menu?.offsetWidth ?? MENU_MAX_WIDTH;
+    const menuHeight = menu?.offsetHeight ?? 0;
+    let top = r.bottom + 8;
+    if (menuHeight > 0 && top + menuHeight > window.innerHeight - 8) {
+      top = Math.max(8, r.top - 8 - menuHeight);
+    }
+    let left = r.left;
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = r.right - menuWidth;
+    }
+    left = Math.max(8, left);
+    setCoords((prev) => {
+      if (prev && Math.abs(prev.top - top) < 0.5 && Math.abs(prev.left - left) < 0.5) return prev;
+      return { top, left };
+    });
   }, []);
 
   const toggle = () => {
@@ -135,17 +149,24 @@ export function ChipDropdown({
       if (e.key === "Escape") setOpen(false);
     };
     const reposition = () => positionMenu();
+    let raf = 0;
+    const tick = () => {
+      positionMenu();
+      raf = requestAnimationFrame(tick);
+    };
+    if (!isMobile) raf = requestAnimationFrame(tick);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
     return () => {
+      cancelAnimationFrame(raf);
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", reposition, true);
       window.removeEventListener("resize", reposition);
     };
-  }, [open, positionMenu]);
+  }, [open, isMobile, positionMenu]);
 
   // One option row, shared by the desktop dropdown and the mobile sheet.
   const renderOption = (opt: ChipOption, big: boolean) => {

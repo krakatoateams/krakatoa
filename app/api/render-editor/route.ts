@@ -377,6 +377,7 @@ export async function POST(req: Request) {
           clipCount: document.sequence.length,
           overlayCount: document.overlays.length,
         },
+        jobId,
       })
     );
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { AdminToast, useAdminToast } from "../admin-ui";
 import type { DashboardTemplateKind } from "@/lib/dashboard-templates-pure";
+import { useVideoDurationSec } from "@/lib/use-video-duration";
 
 type TemplateRow = {
   slug: string;
@@ -15,6 +16,7 @@ type TemplateRow = {
   characterThumbUrl: string;
   useSkill: boolean;
   skillId: string;
+  durationSec: number | null;
   isActive: boolean;
   isNew?: boolean;
 };
@@ -28,6 +30,7 @@ type ApiTemplate = {
   prompt?: string;
   characterThumbUrl?: string;
   skillId?: string;
+  durationSec?: number;
   isActive: boolean;
 };
 
@@ -51,8 +54,49 @@ function toRow(template: ApiTemplate): TemplateRow {
     characterThumbUrl: template.characterThumbUrl ?? "",
     useSkill: Boolean(template.skillId?.trim()),
     skillId: template.skillId ?? "",
+    durationSec: template.durationSec ?? null,
     isActive: template.isActive,
   };
+}
+
+function TemplateDurationStandard({
+  videoUrl,
+  durationSec,
+  onDurationSec,
+}: {
+  videoUrl: string;
+  durationSec: number | null;
+  onDurationSec: (next: number | null) => void;
+}) {
+  const { durationSec: measuredSec, measuring, failed } = useVideoDurationSec(videoUrl);
+
+  useEffect(() => {
+    if (measuredSec == null) return;
+    const rounded = Math.max(1, Math.round(measuredSec));
+    if (durationSec !== rounded) onDurationSec(rounded);
+  }, [durationSec, measuredSec, onDurationSec]);
+
+  useEffect(() => {
+    if (!videoUrl.trim()) onDurationSec(null);
+  }, [videoUrl, onDurationSec]);
+
+  let message = "Paste a preview URL to measure duration.";
+  if (videoUrl.trim()) {
+    if (measuring) message = "Measuring from preview video…";
+    else if (failed) message = "Could not read duration from this preview URL.";
+    else if (durationSec) message = `${durationSec}s standard — users cannot change clip length.`;
+  }
+
+  return (
+    <div className="space-y-1 md:col-span-2">
+      <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+        Duration standard
+      </span>
+      <p className="rounded-md border border-white/10 bg-white/[0.02] px-2 py-1.5 text-sm text-gray-300">
+        {message}
+      </p>
+    </div>
+  );
 }
 
 function slugFromUrl(url: string): string {
@@ -164,6 +208,7 @@ function CarouselEditor({
       characterThumbUrl: "",
       useSkill: false,
       skillId: "",
+      durationSec: null,
       isActive: true,
       isNew: true,
     };
@@ -211,6 +256,7 @@ function CarouselEditor({
             prompt: row.useSkill ? undefined : row.prompt || undefined,
             characterThumbUrl: row.characterThumbUrl || undefined,
             skillId: row.useSkill ? row.skillId.trim() || undefined : undefined,
+            durationSec: row.durationSec ?? undefined,
             isActive: row.isActive,
             sortOrder: index,
           })),
@@ -400,6 +446,7 @@ function CarouselEditor({
                         const videoUrl = e.target.value;
                         patch(index, {
                           videoUrl,
+                          durationSec: null,
                           ...(row.isNew ? { slug: slugFromUrl(videoUrl) } : {}),
                         });
                       }}
@@ -407,6 +454,13 @@ function CarouselEditor({
                       className={INPUT}
                     />
                   </label>
+                  {kind === "viral" ? (
+                    <TemplateDurationStandard
+                      videoUrl={row.videoUrl}
+                      durationSec={row.durationSec}
+                      onDurationSec={(next) => patch(index, { durationSec: next })}
+                    />
+                  ) : null}
                   {kind === "motion_control" ? (
                     <label className="space-y-1 md:col-span-2">
                       <span className="text-xs font-medium uppercase tracking-wider text-gray-500">

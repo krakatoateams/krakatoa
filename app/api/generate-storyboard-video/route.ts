@@ -723,6 +723,7 @@ export async function POST(req: Request) {
             ? { prompt: String(row.theme), userPrompt: String(row.theme) }
             : {}),
         },
+        jobId,
       });
     } catch (historyErr) {
       console.warn(

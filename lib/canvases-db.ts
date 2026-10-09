@@ -6,6 +6,8 @@ import {
   type CanvasCollaboratorRole,
 } from "@/lib/canvas-collaborators-db";
 import {
+  addedCanvasStoragePaths,
+  canvasStoragePaths,
   normalizeCanvasTitle,
   parseCanvasGraph,
   type CanvasAccessRole,
@@ -13,6 +15,13 @@ import {
   type SavedCanvasGraph,
 } from "@/lib/canvas-document";
 import type { Profile } from "@/lib/profiles-db";
+import { isStorageRelativePath, storagePathOwnerUserId } from "@/lib/storage-buckets";
+import {
+  assertPathOwnedByUser,
+  createSignedStorageUrl,
+  signStoragePathForUser,
+  type SignTtlKind,
+} from "@/lib/storage-signed-url";
 
 const TABLE = "canvases";
 
@@ -197,15 +206,171 @@ export async function getCanvas(
   return toRecord(data as CanvasRow);
 }
 
+/** Display names for the people who own files already on this canvas. */
+export async function canvasFileCreators(
+  graph: SavedCanvasGraph
+): Promise<Record<string, string>> {
+  const ids = [
+    ...new Set(
+      canvasStoragePaths(graph)
+        .map((path) => storagePathOwnerUserId(path))
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  if (!ids.length) return {};
+  const { data, error } = await supabaseServer
+    .from("profiles")
+    .select("user_id, email, display_name")
+    .in("user_id", ids);
+  if (error || !data) return {};
+  const creators: Record<string, string> = {};
+  for (const row of data as Array<{
+    user_id: string;
+    email: string | null;
+    display_name: string | null;
+  }>) {
+    const label = row.display_name?.trim() || row.email?.trim();
+    if (label) creators[row.user_id] = label;
+  }
+  return creators;
+}
+
+export function canvasSaveErrorStatus(error: unknown): number | null {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: string }).code
+      : "";
+  if (code === "CANVAS_CONFLICT") return 409;
+  if (code === "CANVAS_PATH") return 400;
+  return null;
+}
+
+async function assertAddedCanvasPaths(
+  profile: Profile,
+  previous: SavedCanvasGraph | null,
+  next: SavedCanvasGraph
+): Promise<void> {
+  for (const path of addedCanvasStoragePaths(previous, next)) {
+    try {
+      await assertPathOwnedByUser(path, profile.user_id);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/forbidden|invalid storage/i.test(message)) {
+        throw Object.assign(
+          new Error("You can only place files from your own library on this canvas."),
+          { code: "CANVAS_PATH" }
+        );
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * A canvas reader may sign a file when the path is on a canvas they can open
+ * and the file belongs to the owner or an accepted collaborator.
+ * ponytail: one containment query, not a shared media bucket.
+ */
+export async function readerCanOpenCanvasPath(
+  userId: string,
+  storagePath: string
+): Promise<boolean> {
+  const fileOwnerUserId = storagePathOwnerUserId(storagePath);
+  if (!fileOwnerUserId || !isStorageRelativePath(storagePath)) return false;
+
+  const { data: reader, error: readerError } = await supabaseServer
+    .from("profiles")
+    .select("id, email")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readerError || !reader?.id) return false;
+
+  const { data: canvases, error: canvasError } = await supabaseServer
+    .from(TABLE)
+    .select("id, profile_id")
+    .contains("graph", { nodes: [{ data: { resultStoragePath: storagePath } }] })
+    .limit(50);
+  if (canvasError || !canvases?.length) return false;
+
+  const canvasIds = canvases.map((row) => (row as { id: string }).id);
+  const { data: collabs, error: collabError } = await supabaseServer
+    .from("canvas_collaborators")
+    .select("canvas_id, invitee_profile_id, invited_email")
+    .in("canvas_id", canvasIds)
+    .eq("status", "accepted");
+  if (collabError) return false;
+
+  const profileIds = new Set<string>();
+  for (const canvas of canvases) profileIds.add((canvas as { profile_id: string }).profile_id);
+  for (const collab of collabs ?? []) {
+    const inviteeId = (collab as { invitee_profile_id: string | null }).invitee_profile_id;
+    if (inviteeId) profileIds.add(inviteeId);
+  }
+
+  const { data: profiles, error: profileError } = await supabaseServer
+    .from("profiles")
+    .select("id, user_id")
+    .in("id", [...profileIds]);
+  if (profileError || !profiles?.length) return false;
+  const userIdByProfile = new Map(
+    (profiles as Array<{ id: string; user_id: string }>).map((row) => [row.id, row.user_id])
+  );
+  const readerEmail =
+    typeof (reader as { email?: string | null }).email === "string"
+      ? (reader as { email: string }).email.trim().toLowerCase()
+      : "";
+
+  for (const canvas of canvases as Array<{ id: string; profile_id: string }>) {
+    const members = (collabs ?? []).filter(
+      (row) => (row as { canvas_id: string }).canvas_id === canvas.id
+    ) as Array<{ invitee_profile_id: string | null; invited_email: string }>;
+    const readerIsOwner = canvas.profile_id === (reader as { id: string }).id;
+    const readerIsCollab = members.some(
+      (row) =>
+        row.invitee_profile_id === (reader as { id: string }).id ||
+        (readerEmail !== "" && row.invited_email === readerEmail)
+    );
+    if (!readerIsOwner && !readerIsCollab) continue;
+
+    const memberUserIds = new Set<string>();
+    const ownerUserId = userIdByProfile.get(canvas.profile_id);
+    if (ownerUserId) memberUserIds.add(ownerUserId);
+    for (const member of members) {
+      const memberUserId = member.invitee_profile_id
+        ? userIdByProfile.get(member.invitee_profile_id)
+        : undefined;
+      if (memberUserId) memberUserIds.add(memberUserId);
+    }
+    if (memberUserIds.has(fileOwnerUserId)) return true;
+  }
+  return false;
+}
+
+export async function signStoragePathIfReadable(
+  storagePath: string,
+  userId: string,
+  ttl: SignTtlKind | number = "ui"
+) {
+  try {
+    return await signStoragePathForUser(storagePath, userId, ttl);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/forbidden/i.test(message)) throw err;
+    if (!(await readerCanOpenCanvasPath(userId, storagePath))) throw err;
+    return createSignedStorageUrl(storagePath, ttl);
+  }
+}
+
 export async function createCanvas(params: {
-  profileId: string;
+  profile: Profile;
   title: string;
   graph: SavedCanvasGraph;
 }): Promise<CanvasRecord> {
+  await assertAddedCanvasPaths(params.profile, null, params.graph);
   const { data, error } = await supabaseServer
     .from(TABLE)
     .insert({
-      profile_id: params.profileId,
+      profile_id: params.profile.id,
       title: normalizeCanvasTitle(params.title),
       graph: params.graph,
     })
@@ -263,22 +428,48 @@ export async function updateCanvasForProfile(params: {
   canvasId: string;
   title: string;
   graph: SavedCanvasGraph;
+  baseUpdatedAt?: string | null;
 }): Promise<CanvasRecord | null> {
   const access = await resolveCanvasAccess(params.profile, params.canvasId);
   if (!access?.canEdit) return null;
 
-  const { data, error } = await supabaseServer
+  const { data: current, error: readError } = await supabaseServer
+    .from(TABLE)
+    .select("*")
+    .eq("id", params.canvasId)
+    .maybeSingle();
+  handleError(readError, "Failed to update canvas.");
+  if (!current) return null;
+  const existing = toRecord(current as CanvasRow);
+  if (!existing) return null;
+  if (params.baseUpdatedAt && params.baseUpdatedAt !== existing.updatedAt) {
+    throw Object.assign(
+      new Error("Someone else saved this canvas. Reload to see their version."),
+      { code: "CANVAS_CONFLICT" }
+    );
+  }
+  await assertAddedCanvasPaths(params.profile, existing.graph, params.graph);
+
+  let update = supabaseServer
     .from(TABLE)
     .update({
       title: normalizeCanvasTitle(params.title),
       graph: params.graph,
     })
-    .eq("id", params.canvasId)
-    .select("*")
-    .maybeSingle();
+    .eq("id", params.canvasId);
+  if (params.baseUpdatedAt) update = update.eq("updated_at", params.baseUpdatedAt);
+  const { data, error } = await update.select("*").maybeSingle();
 
   handleError(error, "Failed to update canvas.");
-  if (!data) return null;
+  if (!data) {
+    if (params.baseUpdatedAt) {
+      throw Object.assign(
+        new Error("Someone else saved this canvas. Reload to see their version."),
+        { code: "CANVAS_CONFLICT" }
+      );
+    }
+    return null;
+  }
   return toRecord(data as CanvasRow);
 }
 

@@ -54,6 +54,8 @@ export type TrendingTemplate = {
   title?: string;
   /** Viral templates: number of sequential shots/beats in the clip. */
   shotCount?: number;
+  /** Showcase clip length in seconds; locks composer duration when set. */
+  durationSec?: number;
   /**
    * When set, Use Template opens this skill on the Agent form instead of the
    * Viral Template composer.
@@ -78,11 +80,24 @@ export function tryOnTemplateHref(videoUrl: string): string {
  * clip locked and the generation prompt baked in — user only supplies a character.
  * Skill-linked cards open the Agent form for that skill instead.
  */
+export const TEMPLATE_DURATION_QUERY = "templateDuration";
+
+function appendTemplateDurationHref(href: string, durationSec?: number): string {
+  if (!durationSec || durationSec <= 0) return href;
+  const [path, query = ""] = href.split("?", 2);
+  const params = new URLSearchParams(query);
+  params.set(TEMPLATE_DURATION_QUERY, String(durationSec));
+  const next = params.toString();
+  return next ? `${path}?${next}` : path;
+}
+
 export function viralTemplateCardHref(
-  template: Pick<TrendingTemplate, "id" | "skillId">
+  template: Pick<TrendingTemplate, "id" | "skillId" | "durationSec">
 ): string {
   const skillId = template.skillId?.trim();
-  if (skillId) return skillHref(skillId);
+  if (skillId) {
+    return appendTemplateDurationHref(skillHref(skillId), template.durationSec);
+  }
   return `/tools/video?type=viral_template&viralTemplate=${encodeURIComponent(template.id)}`;
 }
 

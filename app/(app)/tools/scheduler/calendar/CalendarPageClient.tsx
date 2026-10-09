@@ -793,6 +793,22 @@ export default function SchedulerCalendarPage() {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
+  const openedPostRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || fetchError) return;
+    const id = new URLSearchParams(window.location.search).get("post")?.trim() ?? "";
+    if (!id || openedPostRef.current === id) return;
+    openedPostRef.current = id;
+    const post = posts.find((item) => item.id === id);
+    if (!post) {
+      setToast({ type: "error", message: "This post is no longer available." });
+      return;
+    }
+    setSelectedPost(post);
+    const when = new Date(post.scheduled_time);
+    if (!Number.isNaN(when.getTime())) setAnchor(when);
+  }, [fetchError, loading, posts]);
+
   // Steps a week at a time in the mobile view, a month at a time on desktop.
   const shiftPeriod = (dir: -1 | 1) =>
     setAnchor((a) => {

@@ -6,8 +6,8 @@ import {
   type SignedStorageUrl,
   requireSessionUserId,
   signAssetForUser,
-  signStoragePathForUser,
 } from "@/lib/storage-signed-url";
+import { signStoragePathIfReadable } from "@/lib/canvases-db";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         if (item.assetId) {
           results.push(await signAssetForUser(item.assetId.trim(), userId, ttl));
         } else if (item.path) {
-          results.push(await signStoragePathForUser(item.path.trim(), userId, ttl));
+          results.push(await signStoragePathIfReadable(item.path.trim(), userId, ttl));
         } else {
           results.push({ error: "assetId or path required" });
         }

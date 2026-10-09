@@ -844,6 +844,7 @@ export async function handlePhotoStoryboardGeneration(
           modelLabel: devBlank ? "Dev blank" : labelForProviderModel(imageModel.model),
           ...(devBlank ? devBlankJobTag() : {}),
         },
+        jobId,
       });
     } catch (historyErr) {
       console.warn(

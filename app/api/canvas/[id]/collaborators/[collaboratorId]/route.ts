@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { removeCanvasCollaborator } from "@/lib/canvas-collaborators-db";
+import {
+  removeCanvasCollaborator,
+  updateCanvasCollaboratorRole,
+  type CanvasCollaboratorRole,
+} from "@/lib/canvas-collaborators-db";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +14,44 @@ const UUID_RE =
 function uuidOf(value: string | undefined): string | null {
   const id = value?.trim() ?? "";
   return UUID_RE.test(id) ? id : null;
+}
+
+export async function PATCH(
+  req: NextRequest,
+  props: { params: Promise<{ id: string; collaboratorId: string }> }
+) {
+  const params = await props.params;
+  try {
+    const profile = await requireCurrentProfile();
+    const canvasId = uuidOf(params.id);
+    const collaboratorId = uuidOf(params.collaboratorId);
+    if (!canvasId || !collaboratorId) {
+      return NextResponse.json({ error: "Collaborator not found." }, { status: 404 });
+    }
+    const body = (await req.json().catch(() => null)) as { role?: unknown } | null;
+    const role: CanvasCollaboratorRole | null =
+      body?.role === "viewer" || body?.role === "editor" ? body.role : null;
+    if (!role) {
+      return NextResponse.json({ error: "Choose Can edit or Can view." }, { status: 400 });
+    }
+    const collaborator = await updateCanvasCollaboratorRole({
+      canvasId,
+      ownerProfileId: profile.id,
+      collaboratorId,
+      role,
+    });
+    if (!collaborator) {
+      return NextResponse.json({ error: "Collaborator not found." }, { status: 404 });
+    }
+    return NextResponse.json({ collaborator });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "Not authenticated.") {
+      return NextResponse.json({ error: message }, { status: 401 });
+    }
+    console.error("[api/canvas/collaborators] role update failed:", error);
+    return NextResponse.json({ error: "Failed to update access." }, { status: 500 });
+  }
 }
 
 export async function DELETE(

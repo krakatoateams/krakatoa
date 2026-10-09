@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Sparkles, X } from "lucide-react";
 import { useCreditPacks } from "@/lib/use-credit-packs";
-import { formatPackPrice, type CreditPack } from "@/lib/credit-packs";
-import { PackCurrencyToggle } from "@/components/PackCurrencyToggle";
-import { usePackCurrency } from "@/lib/use-pack-currency";
+import type { CreditPack } from "@/lib/credit-packs";
+import { PackIdrPrice } from "@/components/PackIdrPrice";
 
 export default function AddCreditsModal({
   open,
@@ -16,7 +15,6 @@ export default function AddCreditsModal({
   onClose: () => void;
 }) {
   const packs = useCreditPacks();
-  const { currency, setCurrency } = usePackCurrency();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +39,7 @@ export default function AddCreditsModal({
       const res = await fetch("/api/credits/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId: pack.id, currency }),
+        body: JSON.stringify({ packId: pack.id }),
       });
       const data = (await res.json().catch(() => null)) as
         | { paymentUrl?: string; error?: string }
@@ -83,14 +81,10 @@ export default function AddCreditsModal({
                 Add credits
               </h2>
               <p className="mt-0.5 text-sm text-text-secondary">
-                {currency === "IDR"
-                  ? "Top up your balance. Pay securely with DOKU."
-                  : "Pay in US dollars with Polar."}
+                Top up your balance. Pay securely with DOKU.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <PackCurrencyToggle currency={currency} onChange={setCurrency} />
           <button
             type="button"
             onClick={onClose}
@@ -100,7 +94,6 @@ export default function AddCreditsModal({
           >
             <X className="h-4 w-4" />
           </button>
-          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -135,7 +128,10 @@ export default function AddCreditsModal({
                 <p className="text-[11px] font-medium uppercase tracking-wider text-text-disabled">
                   {pack.label}
                 </p>
-                <p className="mt-2 text-sm font-semibold text-N700">{formatPackPrice(pack, currency)}</p>
+                <PackIdrPrice
+                  amountIdr={pack.priceIdr}
+                  className="mt-2 text-base font-semibold text-N700"
+                />
                 <span className="mt-3 inline-flex h-8 items-center justify-center rounded-lg bg-white/10 text-xs font-semibold text-N900">
                   {busy ? (
                     <>

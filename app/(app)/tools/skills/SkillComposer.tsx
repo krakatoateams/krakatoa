@@ -52,6 +52,7 @@ import {
 import {
   DEFAULT_VIDEO_MODEL_ID,
   getAllowedDurations,
+  snapDurationToAllowed,
   getVideoModel,
   IMAGE_TO_VIDEO_MODELS,
   TEXT_TO_VIDEO_MODELS,
@@ -78,6 +79,7 @@ import {
   WELCOME_VIDEO_SKILL_ID,
   type SkillId,
 } from "@/lib/skills";
+import { TEMPLATE_DURATION_QUERY } from "@/lib/trending-templates";
 import FeaturedSkillsRow from "./FeaturedSkillsRow";
 import SkillPicker from "./SkillPicker";
 import { SkillsCatalogProvider, useSkillsCatalog } from "./SkillsCatalogProvider";
@@ -360,13 +362,21 @@ function SkillOmniInner({
   const [videoAspect, setVideoAspect] = useState<VideoAspectRatio>(videoModel.defaultAspectRatio);
 
   const allowedDurations = getAllowedDurations(videoModel, videoResolution);
+  const templateDurationRaw = searchParams.get(TEMPLATE_DURATION_QUERY);
+  const templateDurationSec =
+    templateDurationRaw && Number.isFinite(Number(templateDurationRaw))
+      ? Number(templateDurationRaw)
+      : undefined;
+  const lockedTemplateDuration = templateDurationSec
+    ? snapDurationToAllowed(allowedDurations, templateDurationSec)
+    : undefined;
   // Welcome offer keeps a hard lock so the advertised credit cost stays true.
   // Other skills (e.g. Sailor Moon) only seed defaults — users can still change them.
   const lockVideoParams = skill?.id === WELCOME_VIDEO_SKILL_ID;
   const lockedVideoDuration =
-    lockVideoParams && skill?.duration && allowedDurations.includes(skill.duration)
+    (lockVideoParams && skill?.duration && allowedDurations.includes(skill.duration)
       ? skill.duration
-      : undefined;
+      : undefined) ?? lockedTemplateDuration;
   const lockedVideoResolution =
     lockVideoParams && skill?.resolution && videoModel.resolutions.includes(skill.resolution)
       ? skill.resolution
