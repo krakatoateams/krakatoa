@@ -1,5 +1,5 @@
 import "server-only";
-import { Sandbox, Snapshot } from "@vercel/sandbox";
+import { Sandbox, Snapshot, type Command } from "@vercel/sandbox";
 import { supabaseServer } from "@/lib/supabase-server";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import {
@@ -165,6 +165,8 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
   if (!stepId && p.jobId) logSafe("progress reporting disabled", new Error("no running step for this export"));
   try {
     await reportProgressCore(p, stepId, "preparing", null);
+    // Start phases write liveness too, so a healthy start never reads stale (5 min) before the first poll.
+    await touchLiveness(p);
     const urls: Record<string, string> = {};
     await withPhaseTimeout(
       "sign",
@@ -182,6 +184,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
     // Cancel is honored between phases, so it never waits for a full sandbox boot.
     if ((await attemptState(p)) !== "live") return { ok: false, cancelled: true };
     await reportProgressCore(p, stepId, "starting", null);
+    await touchLiveness(p);
     const creating = createSandbox(p);
     try {
       sandbox = await withPhaseTimeout("create", creating, limit("create"));
@@ -241,6 +244,24 @@ export async function reportProgressCore(p: EditorExportParams, stepId: string |
   );
 }
 
+/** How long one poll waits for a detached command's exit before reporting it still running. */
+const EXIT_PROBE_MS = 2_000;
+
+/**
+ * Exit code of a detached command, or null while it runs. The plain `getCommand` read never reports the exit
+ * (only the wait endpoint does), so a finished encode looked running until the stall check failed it (#335).
+ */
+async function commandExitCode(cmd: Command): Promise<number | null> {
+  if (cmd.exitCode !== null) return cmd.exitCode;
+  const signal = AbortSignal.timeout(EXIT_PROBE_MS);
+  try {
+    return (await cmd.wait({ signal })).exitCode;
+  } catch (e) {
+    if (signal.aborted) return null;
+    throw e;
+  }
+}
+
 /**
  * One non-blocking check of a detached sandbox command; honors Cancel by stopping the sandbox.
  * Encode: `stall` carries the last `out_time_us` between polls; no advance for `EDITOR_EXPORT_STALL_MS` fails it.
@@ -264,7 +285,8 @@ export async function pollCommandCore(
   try {
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.getCommand(cmdId);
-    if (cmd.exitCode === null) {
+    const exitCode = await commandExitCode(cmd);
+    if (exitCode === null) {
       if (timedOut) return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
       if (stage !== "encode") return { state: "running", stall: null };
       // FFmpeg `-progress` appends blocks of key=value; the last out_time_us is the real encoded time.
@@ -278,9 +300,9 @@ export async function pollCommandCore(
       await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
       return { state: "running", stall: next.stall };
     }
-    if (cmd.exitCode === 0) return { state: "done" };
+    if (exitCode === 0) return { state: "done" };
     const stderr = stage === "encode" ? await cmd.stderr().catch(() => "") : "";
-    return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode: cmd.exitCode, stderr }) };
+    return { state: "failed", code: classifyEditorExportFailure({ stage, exitCode, stderr }) };
   } catch (e) {
     // Past the time budget the sandbox is gone: a timeout. Otherwise a transient API error must not
     // kill a healthy encode, so rethrow and let Workflow retry this step.

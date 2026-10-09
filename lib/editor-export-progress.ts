@@ -1,5 +1,6 @@
 // Pure stage/percentage model for the Video Editor export progress dialog (#300).
 // Percentages come only from real signals; no signal means null (indeterminate).
+// Also holds the accepted-export status poller (pollEditorExport), the one fetching piece.
 
 // Encode step order: preparing (sign + probe media) -> starting (boot runner, verify FFmpeg) -> encoding.
 export type ExportStage = "uploading" | "preparing" | "starting" | "encoding" | "saving" | "finalizing";
@@ -101,6 +102,51 @@ export function cancelReply(httpStatus: number | null, body: unknown): CancelRep
   return "error";
 }
 
+export type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
+
+const EXPORT_POLL_MS = 3000;
+export const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
+const EXPORT_UNCONFIRMED_ERROR = "Couldn't confirm the export. Check My Library in a moment.";
+
+/**
+ * Polls the generation status for an accepted (202) export until it succeeds, fails, the server calls it
+ * stale, or `EXPORT_POLL_CAP_MS` passes. An aborted `signal` (export abandoned locally) ends it at once.
+ */
+export async function pollEditorExport(
+  idempotencyKey: string,
+  signal: AbortSignal,
+  pollMs = EXPORT_POLL_MS
+): Promise<{ ok: boolean; stale?: boolean; data: EditorExportPollData }> {
+  const startedAt = Date.now();
+  while (!signal.aborted && Date.now() - startedAt < EXPORT_POLL_CAP_MS) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    if (signal.aborted) break;
+    try {
+      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
+      // A missing request or lost session can never recover; anything else is transient, so the
+      // attempt stays locked and polling continues until an explicit terminal status.
+      if (res.status === 401 || res.status === 404) {
+        return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
+      }
+      if (!res.ok) continue;
+      const body = (await res.json()) as {
+        status?: string;
+        isStale?: boolean;
+        result?: EditorExportPollData | null;
+        error?: { message?: string; code?: string } | null;
+      };
+      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "started" && body.isStale) return { ok: false, stale: true, data: { error: EXPORT_STALE_ERROR } };
+      if (body.status === "failed") {
+        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
+      }
+    } catch {
+      /* transient network error: keep polling */
+    }
+  }
+  return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export-progress self-check: ${msg}`);
 }
@@ -135,7 +181,32 @@ export function editorExportProgressSelfCheck(): void {
   assert(cancelReply(500, null) === "error" && cancelReply(null, null) === "error", "5xx and network errors clear the spinner");
 }
 
+/** An abort during the poll sleep must end polling without another status fetch (#332). */
+export async function editorExportPollSelfCheck(): Promise<void> {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ status: "started" }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5);
+    const finished = await pollEditorExport("k", controller.signal, 20);
+    assert(calls === 0, `aborted poll fetched status ${calls} time(s)`);
+    assert(!finished.ok, "aborted poll is not ok");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 if (require.main === module) {
   editorExportProgressSelfCheck();
-  console.log("editorExportProgressSelfCheck: ok");
+  void editorExportPollSelfCheck().then(
+    () => console.log("editorExportProgressSelfCheck + editorExportPollSelfCheck: ok"),
+    (err: unknown) => {
+      console.error(err);
+      process.exit(1);
+    }
+  );
 }

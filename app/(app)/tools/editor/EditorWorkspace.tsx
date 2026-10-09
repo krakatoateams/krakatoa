@@ -50,7 +50,8 @@ import {
   CANCEL_ABANDONED_MESSAGE,
   CANCEL_FAILED_NOTE,
   CANCEL_STILL_STOPPING_NOTE,
-  EXPORT_POLL_CAP_MS,
+  EXPORT_STALE_ERROR,
+  pollEditorExport,
   cancelReply,
   cancelWaitPhase,
   monotonicPct,
@@ -914,51 +915,8 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
   );
 }
 
-type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
-
-const EXPORT_POLL_MS = 3000;
-const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
-const EXPORT_UNCONFIRMED_ERROR = "Couldn't confirm the export. Check My Library in a moment.";
-
 /** A render-phase export this tab started. accepted: the render route answered 202 (the attempt row is this run's). */
 type ExportRun = { attempt: IdempotentAttempt; controller: AbortController; accepted: boolean; cancelRequested: boolean };
-
-/**
- * Polls the generation status for an accepted (202) export until it succeeds, fails, the server calls it
- * stale, or `EXPORT_POLL_CAP_MS` passes. An aborted `signal` (export abandoned locally) ends it at once.
- */
-async function pollEditorExport(
-  idempotencyKey: string,
-  signal: AbortSignal
-): Promise<{ ok: boolean; stale?: boolean; data: EditorExportPollData }> {
-  const startedAt = Date.now();
-  while (!signal.aborted && Date.now() - startedAt < EXPORT_POLL_CAP_MS) {
-    await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
-    try {
-      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
-      // A missing request or lost session can never recover; anything else is transient, so the
-      // attempt stays locked and polling continues until an explicit terminal status.
-      if (res.status === 401 || res.status === 404) {
-        return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
-      }
-      if (!res.ok) continue;
-      const body = (await res.json()) as {
-        status?: string;
-        isStale?: boolean;
-        result?: EditorExportPollData | null;
-        error?: { message?: string; code?: string } | null;
-      };
-      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
-      if (body.status === "started" && body.isStale) return { ok: false, stale: true, data: { error: EXPORT_STALE_ERROR } };
-      if (body.status === "failed") {
-        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
-      }
-    } catch {
-      /* transient network error: keep polling */
-    }
-  }
-  return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
-}
 
 export default function EditorWorkspace() {
   const router = useRouter();
@@ -2137,8 +2095,10 @@ export default function EditorWorkspace() {
       // 202 is non-terminal: stay locked on this attempt until the export reports a terminal status.
       if (res.status === 202) {
         run.accepted = true;
-        // Cancel pressed before the attempt existed: send it now that it does.
-        if (run.cancelRequested && !abandoned()) sendExportCancel(attempt.key, run);
+        // Cancel pressed before the attempt existed: send it now that it does, even when the cancel wait
+        // already released the dialog (the reply is ignored for a released run), so the export still stops.
+        if (run.cancelRequested) sendExportCancel(attempt.key, run);
+        if (abandoned()) return;
         const finished = await pollEditorExport(attempt.key, run.controller.signal);
         data = finished.data;
         if (finished.stale) {
