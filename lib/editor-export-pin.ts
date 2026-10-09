@@ -91,6 +91,7 @@ export async function editorExportPinSelfCheck(): Promise<void> {
   const caps = { "-encoders": encOut, "-filters": " T drawtext ", "-version": "--enable-libfreetype" };
   assert(await ffmpegHasCapabilities(good(caps), ["libx264", "aac"], false), "capable build passes");
   assert(!(await ffmpegHasCapabilities(good({ ...caps, "-version": "" }), ["libx264"], false)), "missing libfreetype fails");
+  assert(!(await ffmpegHasCapabilities(good({ ...caps, "-filters": " T scale " }), ["libx264"], false)), "missing drawtext fails");
   assert(!(await ffmpegHasCapabilities(good({ ...caps, "-encoders": " V libvpx " }), ["libvpx-vp9"], false)), "missing encoder fails");
 }
 
