@@ -5,15 +5,17 @@ import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import {
   FILMSTRIP_ROW_PX,
   filmstripCount,
-  filmstripGridIndex,
-  filmstripTileTime,
+  filmstripTileSlot,
   filmstripTileWidth,
+  filmstripVisibleRange,
   FILMSTRIP_GRID_FPS,
 } from "@/lib/editor-filmstrip";
 
 // Frames are keyed by source (storage path or device object URL) + capture DPR bucket +
 // 1/30 s source-time slot, so moves never re-extract and trims only capture times not yet seen.
-// Session memory only; a tile frame is a few KB of data URL.
+// Tile slots come from a nested zoom ladder (filmstripTileSlot), so zooming reuses these frames.
+// Session memory only; a tile frame is a few KB of data URL. The limit is unchanged: only
+// visible tiles are captured, and the ladder makes zoom levels share slots instead of adding new ones.
 const FRAME_CACHE_LIMIT = 1500;
 const frameCache = new Map<string, Map<number, string>>();
 let frameCacheSize = 0;
@@ -80,16 +82,10 @@ function waitFor(video: HTMLVideoElement, event: "loadedmetadata" | "seeked"): P
 
 export type FilmstripTile = { index: number; left: number; src: string | null };
 
-/** Tile indices covering the viewport [viewLeft, viewRight] (block-local px). */
-function visibleRange(count: number, tileWidth: number, viewLeft: number, viewRight: number): [number, number] {
-  const first = Math.min(count - 1, Math.max(0, Math.floor(viewLeft / tileWidth)));
-  const last = Math.min(count - 1, Math.max(first, Math.floor(viewRight / tileWidth)));
-  return [first, last];
-}
-
 /**
  * Filmstrip tiles for a timeline clip: fixed-width, aspect-correct tiles over the trimmed
- * source range, one frame per tile, only near the scroll viewport. A tile without its exact
+ * source range, one frame per tile, only near the scroll viewport. Tile count follows the
+ * block width; each tile's frame follows the zoom (`pxPerSec`) on a stable grid. A tile without its exact
  * frame shows the nearest cached frame of the same source, else `src: null` (placeholder).
  * Loads one hidden video (device object URL, else the stable signed URL), seeks through the
  * missing times, and releases it. Returns null when there is no source or it cannot be captured.
@@ -100,6 +96,7 @@ export function useClipFilmstrip(
   inSec: number,
   outSec: number,
   blockWidthPx: number,
+  pxPerSec: number,
   /** Visible scroll range in block-local px (already padded by the caller). */
   viewLeft: number,
   viewRight: number
@@ -113,16 +110,16 @@ export function useClipFilmstrip(
   const aspect = (path && aspectCache.get(path)) || 16 / 9;
   const tileWidth = filmstripTileWidth(aspect);
   const count = filmstripCount(blockWidthPx, aspect);
-  const [first, last] = visibleRange(count, tileWidth, viewLeft, viewRight);
+  const [first, last] = filmstripVisibleRange(count, tileWidth, viewLeft, viewRight);
 
   useEffect(() => {
     if (!path || !url || failedPaths.has(path)) return;
     const sourceKey = `${path}|${dpr}`;
     const slotsFor = (a: number) => {
       const tw = filmstripTileWidth(a);
-      const [f, l] = visibleRange(filmstripCount(blockWidthPx, a), tw, viewLeft, viewRight);
+      const [f, l] = filmstripVisibleRange(filmstripCount(blockWidthPx, a), tw, viewLeft, viewRight);
       const slots: number[] = [];
-      for (let i = f; i <= l; i++) slots.push(filmstripGridIndex(filmstripTileTime(i, inSec, outSec, blockWidthPx, tw)));
+      for (let i = f; i <= l; i++) slots.push(filmstripTileSlot(i, inSec, outSec, pxPerSec, tw));
       return slots;
     };
     const knownAspect = aspectCache.get(path);
@@ -187,13 +184,13 @@ export function useClipFilmstrip(
     };
     // first/last stand in for viewLeft/viewRight so sub-tile scrolling does not restart extraction.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, url, inSec, outSec, blockWidthPx, first, last, dpr]);
+  }, [path, url, inSec, outSec, blockWidthPx, pxPerSec, first, last, dpr]);
 
   if (!path || failedPaths.has(path)) return null;
   const sourceKey = `${path}|${dpr}`;
   const tiles: FilmstripTile[] = [];
   for (let index = first; index <= last; index++) {
-    const slot = filmstripGridIndex(filmstripTileTime(index, inSec, outSec, blockWidthPx, tileWidth));
+    const slot = filmstripTileSlot(index, inSec, outSec, pxPerSec, tileWidth);
     tiles.push({ index, left: index * tileWidth, src: frameFor(sourceKey, slot) });
   }
   return { tileWidth, tiles };
