@@ -59,6 +59,27 @@ async function cancelRecordedPredictions(
   return { predictions: ids.length, cancelled };
 }
 
+/**
+ * Editor export (0 credits): settle the cancelled attempt here, best effort, so Cancel never waits on a
+ * workflow that may be stuck booting. The workflow tolerates the settled row.
+ */
+async function settleEditorExportCancel(
+  profileId: string,
+  existing: { id: string; tool_key?: string | null; job_id?: string | null },
+): Promise<void> {
+  if (existing.tool_key !== "editor") return;
+  try {
+    const core = await import("@/lib/editor-export-core");
+    await core.settleCancelledExportCore({
+      profileId,
+      generationRequestId: existing.id,
+      jobId: existing.job_id ?? null,
+    });
+  } catch (e) {
+    console.warn("[generations/cancel] editor export settle failed:", generationErrorLogSafe(e));
+  }
+}
+
 async function startStopSettlement(params: StopSettlementParams): Promise<void> {
   await start(generationStopSettlementWorkflow, [params]);
 }
@@ -301,6 +322,8 @@ export async function POST(req: Request) {
     }
 
     if (existing.cancel_requested) {
+      // Retry path: a previous settle may have failed.
+      await settleEditorExportCancel(profileId, existing);
       return NextResponse.json({ status: "already_cancelling" });
     }
 
@@ -341,6 +364,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Generation not found." }, { status: 404 });
     }
 
+    await settleEditorExportCancel(profileId, existing);
     const predictionResult = await cancelRecordedPredictions(profileId, existing.id);
 
     return NextResponse.json({

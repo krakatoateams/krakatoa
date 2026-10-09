@@ -136,9 +136,28 @@ export async function GET(req: Request) {
       );
     }
 
-    const generationRequest = await getExistingGenerationRequest(profileId, idemKey);
+    let generationRequest = await getExistingGenerationRequest(profileId, idemKey);
     if (!generationRequest) {
       return NextResponse.json({ error: "Generation not found." }, { status: 404 });
+    }
+    // Editor export cancel the cancel route could not settle (its settle failed): settle it here, so a
+    // silent workflow never keeps the attempt running. Idempotent; 0 credits.
+    if (
+      generationRequest.tool_key === "editor" &&
+      generationRequest.status === "started" &&
+      generationRequest.cancel_requested
+    ) {
+      try {
+        const core = await import("@/lib/editor-export-core");
+        await core.settleCancelledExportCore({
+          profileId,
+          generationRequestId: generationRequest.id,
+          jobId: generationRequest.job_id ?? null,
+        });
+        generationRequest = (await getExistingGenerationRequest(profileId, idemKey)) ?? generationRequest;
+      } catch (e) {
+        console.warn("[generations/status] editor export cancel settle failed:", generationErrorLogSafe(e));
+      }
     }
 
     const cancelAllowed = await readGenerationCancelAllowed(profileId, generationRequest.id);

@@ -14,7 +14,6 @@ import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { insertUserCreation } from "@/lib/creations-db";
 import { CREATION_TOOLS } from "@/lib/creations";
 import { recordUsageEvent } from "@/lib/usage-events-db";
-import { isCancelRequested } from "@/lib/generation-cancel";
 import {
   finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
@@ -68,7 +67,8 @@ export type PollResult =
 
 export type EncodeStart =
   | { ok: true; sandboxName: string; cmdId: string; durationSec: number; width: number; height: number }
-  | { ok: false; code: EditorExportErrorCode };
+  | { ok: false; code: EditorExportErrorCode }
+  | { ok: false; cancelled: true };
 
 /** Sandbox lifetime = the export's time budget: 40 min default, clamped to the plan max (45 min Hobby). */
 export const EDITOR_EXPORT_TIMEOUT_MS = editorExportTimeoutMs(process.env);
@@ -81,11 +81,32 @@ const requiredEncoders = (s: EditorExportSettings) => {
   return [f.videoCodec, f.audioCodec];
 };
 
-const sandboxName = (p: EditorExportParams) =>
+const sandboxName = (p: Pick<EditorExportParams, "jobId" | "generationRequestId">) =>
   `editor-export-${(p.jobId ?? p.generationRequestId).replace(/[^a-zA-Z0-9-]/g, "")}`;
 
 const logSafe = (label: string, e: unknown) =>
   console.warn(`[editor-export] ${label}:`, generationErrorLogSafe(e));
+
+type AttemptState = "live" | "cancelled" | "settled" | "superseded";
+
+/**
+ * Whether this run still owns its attempt. cancelled: Cancel was requested (the cancel route may already have
+ * settled the row). settled: the row was closed elsewhere. superseded: a retry took the key over (new job).
+ * Anything but live stops the run; only live and cancelled runs write the idempotency row.
+ */
+async function attemptState(p: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId">): Promise<AttemptState> {
+  const { data, error } = await supabaseServer
+    .from("generation_requests")
+    .select("status, cancel_requested, job_id")
+    .eq("id", p.generationRequestId)
+    .eq("profile_id", p.profileId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = data as { status?: string; cancel_requested?: boolean; job_id?: string | null } | null;
+  if (!row || (p.jobId && row.job_id !== p.jobId)) return "superseded";
+  if (row.cancel_requested) return "cancelled";
+  return row.status === "started" ? "live" : "settled";
+}
 
 async function run(sandbox: Sandbox, cmd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
   const r = await sandbox.runCommand(cmd, args);
@@ -152,6 +173,8 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
     const hasFont = Boolean(graph.inputFiles.in_font);
 
+    // Cancel is honored between phases, so it never waits for a full sandbox boot.
+    if ((await attemptState(p)) !== "live") return { ok: false, cancelled: true };
     await reportProgressCore(p, stepId, "starting", null);
     const creating = createSandbox(p);
     try {
@@ -167,6 +190,10 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
     }
     if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings))))) {
       throw new Error("sandbox preparation failed");
+    }
+    if ((await attemptState(p)) !== "live") {
+      await sandbox.stop().catch(() => undefined);
+      return { ok: false, cancelled: true };
     }
 
     const values: Record<string, string> = { out_v: outFile(p), in_font: FONT_FILE };
@@ -222,7 +249,7 @@ export async function pollCommandCore(
   durationSec: number,
   stall: EncodeStall | null = null
 ): Promise<PollResult> {
-  if (await isCancelRequested(p.profileId, p.generationRequestId)) {
+  if ((await attemptState(p)) !== "live") {
     await stopSandboxCore(name);
     return { state: "cancelled" };
   }
@@ -314,6 +341,18 @@ export async function finalizeSuccessCore(
       return null;
     }
   };
+  // Commit fence: lock Cancel (requestCancel needs cancel_allowed=true) while this run still owns a live row.
+  // A cancel or retry that won makes this throw, so the workflow settles as cancelled and removes the upload.
+  let lock = supabaseServer
+    .from("generation_requests")
+    .update({ cancel_allowed: false })
+    .eq("id", p.generationRequestId)
+    .eq("profile_id", p.profileId)
+    .eq("status", "started")
+    .eq("cancel_requested", false);
+  if (p.jobId) lock = lock.eq("job_id", p.jobId);
+  const { data: locked, error: lockError } = await lock.select("id").maybeSingle();
+  if (lockError || !locked) throw new Error("export cancelled or cancel lock failed");
   await reportProgressCore(p, stepId, "finalizing", null);
   await endStepCore(p, stepId, { storagePath: r.storagePath });
 
@@ -384,12 +423,18 @@ export async function finalizeSuccessCore(
   });
 }
 
-/** Failure or cancel: close step, asset, job, and the idempotency row with a sanitized reason. */
+/**
+ * Failure or cancel: close step, asset, job, and the idempotency row with a sanitized reason.
+ * Once Cancel was requested the attempt always settles as cancelled, so the workflow never overwrites the
+ * row the cancel route already settled; a superseded run leaves the retry's row alone.
+ */
 export async function finalizeFailureCore(
-  p: EditorExportParams,
+  p: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId" | "videoAssetId">,
   stepId: string | null,
-  outcome: { cancelled: true } | { cancelled: false; code: EditorExportErrorCode }
+  requested: { cancelled: true } | { cancelled: false; code: EditorExportErrorCode }
 ): Promise<void> {
+  const state = await attemptState(p).catch(() => "live" as const);
+  const outcome = state === "cancelled" ? ({ cancelled: true } as const) : requested;
   const errJson = outcome.cancelled
     ? { message: "Export cancelled.", code: "GENERATION_CANCELLED" }
     : editorExportErrorJson(outcome.code);
@@ -400,7 +445,45 @@ export async function finalizeFailureCore(
   if (p.jobId) {
     await safe("failJob", () => (outcome.cancelled ? cancelJob(p.profileId, p.jobId!, errJson) : failJob(p.profileId, p.jobId!, errJson)));
   }
+  if (state === "superseded" || state === "settled") return;
   await safe("idemFailure", () =>
     finishGenerationRequestFailure({ id: p.generationRequestId, profileId: p.profileId, jobId: p.jobId, errorJson: errJson })
   );
+}
+
+/**
+ * Cancel accepted by `/api/generations/cancel`: settle the attempt now instead of waiting for the workflow to
+ * observe the flag (it may be stuck booting the runner), then stop the sandbox by its deterministic name.
+ * Idempotent and owner-scoped; 0 credits, so nothing to refund.
+ */
+export async function settleCancelledExportCore(
+  t: Pick<EditorExportParams, "profileId" | "generationRequestId" | "jobId">
+): Promise<void> {
+  let stepId: string | null = null;
+  let videoAssetId: string | null = null;
+  if (t.jobId) {
+    const [step, asset] = await Promise.all([
+      supabaseServer
+        .from("job_steps")
+        .select("id")
+        .eq("job_id", t.jobId)
+        .eq("profile_id", t.profileId)
+        .eq("status", "running")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabaseServer
+        .from("assets")
+        .select("id")
+        .eq("job_id", t.jobId)
+        .eq("profile_id", t.profileId)
+        .eq("status", "processing")
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    stepId = (step.data as { id?: string } | null)?.id ?? null;
+    videoAssetId = (asset.data as { id?: string } | null)?.id ?? null;
+  }
+  await finalizeFailureCore({ ...t, videoAssetId }, stepId, { cancelled: true });
+  await stopSandboxCore(sandboxName(t));
 }

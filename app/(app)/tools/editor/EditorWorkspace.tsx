@@ -41,12 +41,21 @@ import {
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
-import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import { useIdempotentSubmit, type IdempotentAttempt } from "@/lib/use-idempotent-submit";
 import {
   clearPersistedIdempotentAttempt,
   readPersistedIdempotentAttempt,
 } from "@/lib/idempotent-submit-state";
-import { monotonicPct, parseExportProgress } from "@/lib/editor-export-progress";
+import {
+  CANCEL_ABANDONED_MESSAGE,
+  CANCEL_FAILED_NOTE,
+  CANCEL_STILL_STOPPING_NOTE,
+  EXPORT_POLL_CAP_MS,
+  cancelReply,
+  cancelWaitPhase,
+  monotonicPct,
+  parseExportProgress,
+} from "@/lib/editor-export-progress";
 import {
   EditorExportProgressDialog,
   type ExportProgressState,
@@ -909,19 +918,28 @@ type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creat
 
 const EXPORT_POLL_MS = 3000;
 const EXPORT_STALE_ERROR = "The export stopped responding. Please try again.";
+const EXPORT_UNCONFIRMED_ERROR = "Couldn't confirm the export. Check My Library in a moment.";
 
-/** Polls the generation status for an accepted (202) export until it succeeds, fails, or the server calls it stale. */
+/** A render-phase export this tab started. accepted: the render route answered 202 (the attempt row is this run's). */
+type ExportRun = { attempt: IdempotentAttempt; controller: AbortController; accepted: boolean; cancelRequested: boolean };
+
+/**
+ * Polls the generation status for an accepted (202) export until it succeeds, fails, the server calls it
+ * stale, or `EXPORT_POLL_CAP_MS` passes. An aborted `signal` (export abandoned locally) ends it at once.
+ */
 async function pollEditorExport(
-  idempotencyKey: string
+  idempotencyKey: string,
+  signal: AbortSignal
 ): Promise<{ ok: boolean; stale?: boolean; data: EditorExportPollData }> {
-  for (;;) {
+  const startedAt = Date.now();
+  while (!signal.aborted && Date.now() - startedAt < EXPORT_POLL_CAP_MS) {
     await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
     try {
       const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
       // A missing request or lost session can never recover; anything else is transient, so the
       // attempt stays locked and polling continues until an explicit terminal status.
       if (res.status === 401 || res.status === 404) {
-        return { ok: false, data: { error: "Couldn't confirm the export. Check My Library in a moment." } };
+        return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
       }
       if (!res.ok) continue;
       const body = (await res.json()) as {
@@ -939,6 +957,7 @@ async function pollEditorExport(
       /* transient network error: keep polling */
     }
   }
+  return { ok: false, data: { error: EXPORT_UNCONFIRMED_ERROR } };
 }
 
 export default function EditorWorkspace() {
@@ -1045,6 +1064,8 @@ export default function EditorWorkspace() {
   localUrlsRef.current = localUrls;
   // The export's upload phase; null once the render request is sent.
   const exportUploadRef = useRef<{ controller: AbortController; paths: string[] } | null>(null);
+  // The render-phase export this tab started; aborted when a cancel that never settles is abandoned locally.
+  const exportRunRef = useRef<ExportRun | null>(null);
   const dragLayerIdRef = useRef<string | null>(null);
   const lastActiveClipRef = useRef<EditorClip | null>(null);
   const lastActiveLocalSecRef = useRef(0);
@@ -2014,10 +2035,15 @@ export default function EditorWorkspace() {
     if (!attempt) return;
     lastExportRef.current = { name: exportName, settings: exportSettings };
     resumedExportRef.current = false;
+    const run: ExportRun = { attempt, controller: new AbortController(), accepted: false, cancelRequested: false };
+    exportRunRef.current = run;
+    // Once abandoned, this run must not touch state that may already belong to the next export.
+    const abandoned = () => run.controller.signal.aborted;
     setExporting(true);
     setExportError(null);
     const startedAt = Date.now();
     const finishExport = (patch: Partial<ExportProgressState>) => {
+      if (abandoned()) return;
       setPollKey(null);
       setExportProgress((p) =>
         p ? { ...p, outcome: "failed", cancelling: false, endedAt: Date.now(), ...patch } : p,
@@ -2036,6 +2062,7 @@ export default function EditorWorkspace() {
       creationId: null,
       cancelAllowed: true,
       cancelling: false,
+      cancelNote: null,
     });
     setExportProgressOpen(true);
     // Device files upload only now, to temp paths the export route deletes when it finishes.
@@ -2109,7 +2136,10 @@ export default function EditorWorkspace() {
       }
       // 202 is non-terminal: stay locked on this attempt until the export reports a terminal status.
       if (res.status === 202) {
-        const finished = await pollEditorExport(attempt.key);
+        run.accepted = true;
+        // Cancel pressed before the attempt existed: send it now that it does.
+        if (run.cancelRequested && !abandoned()) sendExportCancel(attempt.key, run);
+        const finished = await pollEditorExport(attempt.key, run.controller.signal);
         data = finished.data;
         if (finished.stale) {
           // The stale run's job still blocks takeover of this key; rotate it (0 credits, so no double charge).
@@ -2141,7 +2171,10 @@ export default function EditorWorkspace() {
       attempt.settle(false);
       finishExport({ error: err instanceof Error ? err.message : "Export failed." });
     } finally {
-      setExporting(false);
+      if (!abandoned()) {
+        setExporting(false);
+        exportRunRef.current = null;
+      }
     }
   };
 
@@ -2195,7 +2228,9 @@ export default function EditorWorkspace() {
       );
       return;
     }
-    if (!resumedExportRef.current) return; // the render fetch settles this attempt
+    // Before the render route accepts, the key may still show the previous attempt's terminal row.
+    const run = exportRunRef.current;
+    if (!resumedExportRef.current && !run?.accepted) return;
     const patch: Partial<ExportProgressState> | null =
       data.status === "succeeded"
         ? { outcome: "success", creationId: data.result?.creation?.id ?? null }
@@ -2216,10 +2251,14 @@ export default function EditorWorkspace() {
         // best effort
       }
     }
+    // Whichever poll sees the terminal status first settles the run; the other one stands down.
+    exportRunRef.current = null;
+    run?.controller.abort();
+    run?.attempt.settle(data.status === "succeeded" || stale);
     resumedExportRef.current = false;
     setPollKey(null);
     setExporting(false);
-    setExportProgress((p) => (p ? { ...p, cancelling: false, endedAt: Date.now(), ...patch } : p));
+    setExportProgress((p) => (p ? { ...p, cancelling: false, cancelNote: null, endedAt: Date.now(), ...patch } : p));
     setExportProgressOpen(true);
   }
 
@@ -2252,6 +2291,7 @@ export default function EditorWorkspace() {
           creationId: null,
           cancelAllowed: data.cancelAllowed !== false,
           cancelling: false,
+          cancelNote: null,
         });
         setExportProgressOpen(true);
         setPollKey(key!);
@@ -2274,22 +2314,76 @@ export default function EditorWorkspace() {
     }
     const key = pollKey;
     if (!key) return;
-    setExportProgress((p) => (p ? { ...p, cancelling: true } : p));
+    const run = exportRunRef.current;
+    if (run) run.cancelRequested = true;
+    setExportProgress((p) => (p ? { ...p, cancelling: true, cancelNote: null } : p));
+    // Until the render route accepts there is no attempt to cancel; the 202 handler sends it.
+    if (!run || run.accepted) sendExportCancel(key, run);
+  };
+
+  function sendExportCancel(key: string, run: ExportRun | null) {
     void fetch("/api/generations/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ idempotencyKey: key }),
     })
-      .then(async (res) => {
-        if (res.ok) return; // the render settles with a cancelled outcome
-        const body = await res.json().catch(() => ({}));
-        const notAllowed = res.status === 409 && body?.code === "CANCEL_NOT_ALLOWED";
+      .then(
+        async (res) => cancelReply(res.status, await res.json().catch(() => null)),
+        () => cancelReply(null, null),
+      )
+      .then((reply) => {
+        if (exportRunRef.current !== run) return; // a later export owns the dialog now
+        // wait/settled: the status poll delivers the terminal outcome; wait is bounded by the timer below.
+        if (reply === "wait") return;
+        if (reply === "gone") return abandonExport(null);
         setExportProgress((p) =>
-          p ? { ...p, cancelling: false, cancelAllowed: notAllowed ? false : p.cancelAllowed } : p,
+          p
+            ? {
+                ...p,
+                cancelling: false,
+                cancelNote: reply === "error" ? CANCEL_FAILED_NOTE : null,
+                cancelAllowed: reply === "not_allowed" ? false : p.cancelAllowed,
+              }
+            : p,
         );
-      })
-      .catch(() => setExportProgress((p) => (p ? { ...p, cancelling: false } : p)));
-  };
+      });
+  }
+
+  // A cancel nothing confirmed: release the attempt locally so Close and Export work again.
+  function abandonExport(message: string | null) {
+    const run = exportRunRef.current;
+    exportRunRef.current = null;
+    run?.controller.abort();
+    run?.attempt.settle(false);
+    resumedExportRef.current = false;
+    setPollKey(null);
+    setExporting(false);
+    setExportProgress((p) =>
+      p && p.outcome === "running"
+        ? { ...p, outcome: "cancelled", cancelling: false, cancelNote: null, error: message, endedAt: Date.now() }
+        : p,
+    );
+    setExportProgressOpen(true);
+  }
+
+  // Cancel wait: never leave `cancelling` true without a timer.
+  const cancelWaiting = exportProgress?.outcome === "running" && exportProgress.cancelling;
+  useEffect(() => {
+    if (!cancelWaiting) return;
+    const since = Date.now();
+    const t = window.setInterval(() => {
+      const phase = cancelWaitPhase(Date.now() - since);
+      if (phase === "give_up") abandonExport(CANCEL_ABANDONED_MESSAGE);
+      else if (phase === "still_stopping") {
+        setExportProgress((p) =>
+          p && p.cancelling && p.cancelNote !== CANCEL_STILL_STOPPING_NOTE ? { ...p, cancelNote: CANCEL_STILL_STOPPING_NOTE } : p,
+        );
+      }
+    }, 1000);
+    return () => window.clearInterval(t);
+    // abandonExport only uses setters and refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cancelWaiting]);
 
   const retryExport = () => {
     setExportProgressOpen(false);

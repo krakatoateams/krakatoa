@@ -23,7 +23,7 @@ export async function editorExportWorkflow(params: EditorExportParams): Promise<
     const startedAtMs = await nowStep();
     stepId = await beginStep(params, "editor_encode", "Encode timeline in-system (FFmpeg)");
     const start = await startEncodeStep(params, stepId);
-    if (!start.ok) return await failStep(params, stepId, { cancelled: false, code: start.code });
+    if (!start.ok) return await failStep(params, stepId, "code" in start ? { cancelled: false, code: start.code } : { cancelled: true });
     name = start.sandboxName;
 
     const encoded = await waitFor(params, name, start.cmdId, "encode", startedAtMs, stepId, start.durationSec);
