@@ -28,7 +28,7 @@ import {
   localizeFfmpegArgs,
 } from "@/lib/editor-render";
 import type { EditorDocument } from "@/lib/editor-document";
-import { sanitizeExportTitle, type EditorExportSettings } from "@/lib/editor-export-settings";
+import { EXPORT_FORMAT_SPEC, exportOutputFilename, sanitizeExportTitle, type EditorExportSettings } from "@/lib/editor-export-settings";
 import {
   classifyEditorExportFailure,
   editorExportErrorJson,
@@ -67,13 +67,18 @@ export type EncodeStart =
 export const EDITOR_EXPORT_TIMEOUT_MS = Number(process.env.EDITOR_EXPORT_TIMEOUT_MS) || 3 * 60 * 60 * 1000;
 
 const WORK = "export";
-const OUT_FILE = `${WORK}/editor_export.mp4`;
+const outFile = (p: EditorExportParams) => `${WORK}/${exportOutputFilename(p.settings.format)}`;
 const FONT_FILE = `${WORK}/Poppins.ttf`;
 const FFMPEG = `${WORK}/ff/ffmpeg`;
 // ponytail: third-party static build fetched per run; host it ourselves or bake a Sandbox snapshot if this becomes flaky.
 const FFMPEG_URL =
   process.env.EDITOR_EXPORT_FFMPEG_URL ||
   "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
+
+const requiredEncoders = (s: EditorExportSettings) => {
+  const f = EXPORT_FORMAT_SPEC[s.format];
+  return [f.videoCodec, f.audioCodec];
+};
 
 const sandboxName = (p: EditorExportParams) =>
   `editor-export-${(p.jobId ?? p.generationRequestId).replace(/[^a-zA-Z0-9-]/g, "")}`;
@@ -87,16 +92,16 @@ async function run(sandbox: Sandbox, cmd: string, args: string[]): Promise<{ ok:
 }
 
 /** Download FFmpeg + font into the sandbox and assert the build has what the graph needs. */
-async function prepareSandbox(sandbox: Sandbox, needsFont: boolean): Promise<boolean> {
+async function prepareSandbox(sandbox: Sandbox, needsFont: boolean, encoders: string[]): Promise<boolean> {
   await sandbox.mkDir(WORK);
   await sandbox.mkDir(`${WORK}/ff`);
   if (!(await run(sandbox, "curl", ["-fsSL", "--retry", "3", "-o", `${WORK}/ff.tar.xz`, FFMPEG_URL])).ok) return false;
   if (!(await run(sandbox, "tar", ["-xJf", `${WORK}/ff.tar.xz`, "-C", `${WORK}/ff`, "--strip-components=1"])).ok) return false;
   const enc = await run(sandbox, FFMPEG, ["-hide_banner", "-encoders"]);
   const filt = await run(sandbox, FFMPEG, ["-hide_banner", "-filters"]);
-  if (!enc.ok || !filt.ok || !/libx264/.test(enc.stdout) || !/\baac\b/.test(enc.stdout) || !/\bdrawtext\b/.test(filt.stdout)) {
-    return false;
-  }
+  if (!enc.ok || !filt.ok || !/\bdrawtext\b/.test(filt.stdout)) return false;
+  // Whole-word match so e.g. "libvpx-vp9" is not satisfied by "libvpx".
+  if (!encoders.every((e) => new RegExp(`\\s${e}\\s`).test(enc.stdout))) return false;
   if (needsFont && !(await run(sandbox, "curl", ["-fsSL", "--retry", "3", "-o", FONT_FILE, EDITOR_FONT_URL])).ok) {
     return false;
   }
@@ -137,9 +142,9 @@ export async function startEncodeCore(p: EditorExportParams): Promise<EncodeStar
       resources: { vcpus: editorExportVcpus(p.settings) },
       persistent: false,
     });
-    if (!(await prepareSandbox(sandbox, hasFont))) throw new Error("sandbox preparation failed");
+    if (!(await prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings)))) throw new Error("sandbox preparation failed");
 
-    const values: Record<string, string> = { out_v: OUT_FILE, in_font: FONT_FILE };
+    const values: Record<string, string> = { out_v: outFile(p), in_font: FONT_FILE };
     for (const [alias, url] of Object.entries(graph.inputFiles)) {
       if (alias !== "in_font") values[alias] = url;
     }
@@ -206,13 +211,13 @@ export async function startUploadCore(
   name: string
 ): Promise<{ ok: true; cmdId: string; storagePath: string } | { ok: false; code: EditorExportErrorCode }> {
   try {
-    const storagePath = videosGeneratedVideoPath(p.userId, "editor", `video_${Date.now()}.mp4`);
+    const storagePath = videosGeneratedVideoPath(p.userId, "editor", `video_${Date.now()}.${EXPORT_FORMAT_SPEC[p.settings.format].ext}`);
     const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).createSignedUploadUrl(storagePath);
     if (error || !data) throw new Error("signed upload url failed");
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.runCommand({
       cmd: "curl",
-      args: signedUploadArgs({ url: data.signedUrl, file: OUT_FILE, contentType: "video/mp4", cacheControl: MEDIA_CACHE_CONTROL }),
+      args: signedUploadArgs({ url: data.signedUrl, file: outFile(p), contentType: EXPORT_FORMAT_SPEC[p.settings.format].mime, cacheControl: MEDIA_CACHE_CONTROL }),
       detached: true,
     });
     return { ok: true, cmdId: cmd.cmdId, storagePath };
@@ -222,9 +227,9 @@ export async function startUploadCore(
   }
 }
 
-export async function encodedFileSizeCore(name: string): Promise<number> {
+export async function encodedFileSizeCore(p: EditorExportParams, name: string): Promise<number> {
   const sandbox = await Sandbox.get({ name });
-  const out = await run(sandbox, "stat", ["-c", "%s", OUT_FILE]);
+  const out = await run(sandbox, "stat", ["-c", "%s", outFile(p)]);
   return Number.parseInt(out.stdout.trim(), 10) || 0;
 }
 
@@ -272,6 +277,7 @@ export async function finalizeSuccessCore(
         resolution: p.settings.resolution,
         quality: p.settings.quality,
         fps: p.settings.fps,
+        format: p.settings.format,
         durationSec: r.durationSec,
         clipCount: p.document.sequence.length,
         overlayCount: p.document.overlays.length,
@@ -281,7 +287,7 @@ export async function finalizeSuccessCore(
     await safe("markAssetReady", () =>
       markAssetReady(p.profileId, p.videoAssetId!, {
         storagePath: r.storagePath,
-        mimeType: "video/mp4",
+        mimeType: EXPORT_FORMAT_SPEC[p.settings.format].mime,
         durationSec: r.durationSec,
         width: r.width,
         height: r.height,
