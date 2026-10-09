@@ -1,11 +1,13 @@
 // Pure stage/percentage model for the Video Editor export progress dialog (#300).
 // Percentages come only from real signals; no signal means null (indeterminate).
 
-export type ExportStage = "uploading" | "preparing" | "encoding" | "saving" | "finalizing";
+// Encode step order: preparing (sign + probe media) -> starting (boot runner, verify FFmpeg) -> encoding.
+export type ExportStage = "uploading" | "preparing" | "starting" | "encoding" | "saving" | "finalizing";
 
 export const EXPORT_STAGE_LABEL: Record<ExportStage, string> = {
   uploading: "Uploading media",
   preparing: "Preparing media",
+  starting: "Starting the encoder",
   encoding: "Encoding video",
   saving: "Saving to your library",
   finalizing: "Finalizing",
@@ -47,6 +49,13 @@ export function monotonicPct(prev: { stage: ExportStage; pct: number | null } | 
   return prev && prev.stage === next.stage && prev.pct != null ? Math.max(prev.pct, next.progressPct) : next.progressPct;
 }
 
+/** No visible change (stage, percent, upload count) for this long shows the "taking longer" hint. */
+export const EXPORT_SLOW_HINT_MS = 60_000;
+
+export function exportLooksSlow(changedAtMs: number, nowMs: number): boolean {
+  return nowMs - changedAtMs >= EXPORT_SLOW_HINT_MS;
+}
+
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -72,6 +81,8 @@ export function editorExportProgressSelfCheck(): void {
   assert(parseExportProgress({ stage: "encoding", progressPct: 150, updatedAt: "x" })?.progressPct === 99, "pct clamped");
   assert(parseExportProgress({ stage: "preparing", progressPct: null })?.progressPct === null, "null stays indeterminate");
   assert(monotonicPct({ stage: "encoding", pct: 40 }, { stage: "encoding", progressPct: 30, updatedAt: "" }) === 40, "monotonic");
+  assert(parseExportProgress({ stage: "starting", progressPct: null })?.stage === "starting", "starting stage accepted");
+  assert(!exportLooksSlow(0, 59_999) && exportLooksSlow(0, 60_000), "slow hint after 60 s unchanged");
   assert(formatElapsed(65_000) === "1:05" && formatElapsed(-5) === "0:00", "elapsed m:ss");
   assert(stageValueText("encoding", 42) === "Encoding video, 42 percent", "valuetext");
   assert(stageValueText("preparing", null) === "Preparing media", "valuetext indeterminate");

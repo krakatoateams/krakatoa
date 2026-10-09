@@ -1,5 +1,5 @@
 import { sleep } from "workflow";
-import { editorExportEncodePollMs, type EditorExportErrorCode } from "@/lib/editor-export-pure";
+import { editorExportEncodePollMs, type EditorExportErrorCode, type EncodeStall } from "@/lib/editor-export-pure";
 import type { CommandStage, EditorExportParams, PollResult } from "@/lib/editor-export-core";
 
 const POLL_MS = 10_000;
@@ -22,7 +22,7 @@ export async function editorExportWorkflow(params: EditorExportParams): Promise<
   try {
     const startedAtMs = await nowStep();
     stepId = await beginStep(params, "editor_encode", "Encode timeline in-system (FFmpeg)");
-    const start = await startEncodeStep(params);
+    const start = await startEncodeStep(params, stepId);
     if (!start.ok) return await failStep(params, stepId, { cancelled: false, code: start.code });
     name = start.sandboxName;
 
@@ -57,10 +57,13 @@ async function waitFor(
   stepId: string | null,
   durationSec: number
 ): Promise<PollResult> {
+  // Encode stall tracker, threaded through step results so the workflow stays deterministic.
+  let stall: EncodeStall | null = null;
   for (let i = 0; i < MAX_POLLS; i++) {
     await sleep(stage === "encode" ? editorExportEncodePollMs(i) : POLL_MS);
-    const r = await pollStep(params, name, cmdId, stage, startedAtMs, stepId, durationSec);
+    const r = await pollStep(params, name, cmdId, stage, startedAtMs, stepId, durationSec, stall);
     if (r.state !== "running") return r;
+    stall = r.stall;
   }
   return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
 }
@@ -88,10 +91,10 @@ async function endStep(params: EditorExportParams, stepId: string | null, output
   await core.endStepCore(params, stepId, output);
 }
 
-async function startEncodeStep(params: EditorExportParams) {
+async function startEncodeStep(params: EditorExportParams, stepId: string | null) {
   "use step";
   const core = await import("@/lib/editor-export-core");
-  return core.startEncodeCore(params);
+  return core.startEncodeCore(params, stepId);
 }
 
 async function pollStep(
@@ -101,11 +104,12 @@ async function pollStep(
   stage: CommandStage,
   startedAtMs: number,
   stepId: string | null,
-  durationSec: number
+  durationSec: number,
+  stall: EncodeStall | null
 ) {
   "use step";
   const core = await import("@/lib/editor-export-core");
-  return core.pollCommandCore(params, name, cmdId, stage, startedAtMs, stepId, durationSec);
+  return core.pollCommandCore(params, name, cmdId, stage, startedAtMs, stepId, durationSec, stall);
 }
 
 async function startUploadStep(params: EditorExportParams, name: string) {

@@ -33,11 +33,15 @@ import { EXPORT_FORMAT_SPEC, exportOutputFilename, sanitizeExportTitle, type Edi
 import {
   classifyEditorExportFailure,
   classifySandboxCreateError,
+  EditorExportPhaseTimeout,
   editorExportErrorJson,
   editorExportTimeoutMs,
   editorExportVcpus,
+  nextEncodeStall,
   signedUploadArgs,
+  withPhaseTimeout,
   type EditorExportErrorCode,
+  type EncodeStall,
 } from "@/lib/editor-export-pure";
 
 /** Serializable workflow input. Storage paths only: signed URLs are minted inside the steps. */
@@ -57,7 +61,7 @@ export type EditorExportParams = {
 
 export type CommandStage = "encode" | "upload";
 export type PollResult =
-  | { state: "running" }
+  | { state: "running"; stall: EncodeStall | null }
   | { state: "done" }
   | { state: "cancelled" }
   | { state: "failed"; code: EditorExportErrorCode };
@@ -124,37 +128,60 @@ export async function endStepCore(p: EditorExportParams, stepId: string | null, 
   await finishJobStep(p.profileId, stepId, output).catch((e) => logSafe("finishStep failed", e));
 }
 
-/** Sign inputs, build the graph, boot the sandbox, and start FFmpeg detached. */
-export async function startEncodeCore(p: EditorExportParams): Promise<EncodeStart> {
+/**
+ * Sign inputs, build the graph, boot the sandbox, and start FFmpeg detached. Each phase reports its stage and has
+ * its own limit (`EDITOR_EXPORT_PHASE_TIMEOUT_MS`), so a hung phase ends the export instead of sitting on
+ * "Preparing media".
+ */
+export async function startEncodeCore(p: EditorExportParams, stepId: string | null): Promise<EncodeStart> {
   let sandbox: Sandbox | null = null;
+  // A job without a step means beginStep failed: the dialog cannot show progress for this export.
+  if (!stepId && p.jobId) logSafe("progress reporting disabled", new Error("no running step for this export"));
   try {
+    await reportProgressCore(p, stepId, "preparing", null);
     const urls: Record<string, string> = {};
-    for (const [key, path] of Object.entries(p.mediaPaths)) {
-      urls[key] = await signStoragePathForPipeline(path, p.userId);
-    }
-    const audioUrls = await probeAudioSources(audibleLayerUrls(p.document, urls));
+    await withPhaseTimeout(
+      "sign",
+      (async () => {
+        for (const [key, path] of Object.entries(p.mediaPaths)) {
+          urls[key] = await signStoragePathForPipeline(path, p.userId);
+        }
+      })()
+    );
+    const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)));
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
     const hasFont = Boolean(graph.inputFiles.in_font);
 
+    await reportProgressCore(p, stepId, "starting", null);
+    const creating = createSandbox(p);
     try {
-      sandbox = await createSandbox(p);
+      sandbox = await withPhaseTimeout("create", creating);
     } catch (e) {
       logSafe("sandbox create failed", e);
+      if (e instanceof EditorExportPhaseTimeout) {
+        // ponytail: best effort, only while this function instance lives; the sandbox timeout is the backstop.
+        void creating.then((late) => late.stop()).catch(() => undefined);
+        return { ok: false, code: "EDITOR_EXPORT_START_TIMEOUT" };
+      }
       return { ok: false, code: classifySandboxCreateError(e) };
     }
-    if (!(await prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings)))) throw new Error("sandbox preparation failed");
+    if (!(await withPhaseTimeout("prepare", prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings))))) {
+      throw new Error("sandbox preparation failed");
+    }
 
     const values: Record<string, string> = { out_v: outFile(p), in_font: FONT_FILE };
     for (const [alias, url] of Object.entries(graph.inputFiles)) {
       if (alias !== "in_font") values[alias] = url;
     }
     const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", PROGRESS_FILE, ...localizeFfmpegArgs(graph.args, values)];
-    const cmd = await sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true });
+    const cmd = await withPhaseTimeout("ffmpegStart", sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true }));
+    // FFmpeg is running; the percentage stays indeterminate until `out_time_us` is readable.
+    await reportProgressCore(p, stepId, "encoding", null);
     return { ok: true, sandboxName: sandbox.name, cmdId: cmd.cmdId, durationSec: graph.durationSec, width: graph.width, height: graph.height };
   } catch (e) {
     logSafe("encode start failed", e);
     await sandbox?.stop().catch(() => undefined);
-    return { ok: false, code: classifyEditorExportFailure({ stage: "setup" }) };
+    return { ok: false, code: e instanceof EditorExportPhaseTimeout ? "EDITOR_EXPORT_START_TIMEOUT" : classifyEditorExportFailure({ stage: "setup" }) };
   }
 }
 
@@ -181,7 +208,10 @@ export async function reportProgressCore(p: EditorExportParams, stepId: string |
   );
 }
 
-/** One non-blocking check of a detached sandbox command; honors Cancel by stopping the sandbox. */
+/**
+ * One non-blocking check of a detached sandbox command; honors Cancel by stopping the sandbox.
+ * Encode: `stall` carries the last `out_time_us` between polls; no advance for `EDITOR_EXPORT_STALL_MS` fails it.
+ */
 export async function pollCommandCore(
   p: EditorExportParams,
   name: string,
@@ -189,7 +219,8 @@ export async function pollCommandCore(
   stage: CommandStage,
   startedAtMs: number,
   stepId: string | null,
-  durationSec: number
+  durationSec: number,
+  stall: EncodeStall | null = null
 ): Promise<PollResult> {
   if (await isCancelRequested(p.profileId, p.generationRequestId)) {
     await stopSandboxCore(name);
@@ -201,13 +232,18 @@ export async function pollCommandCore(
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.getCommand(cmdId);
     if (cmd.exitCode === null) {
-      if (stage === "encode") {
-        // FFmpeg `-progress` appends blocks of key=value; the last out_time_us is the real encoded time.
-        const tail = await run(sandbox, "tail", ["-n", "40", PROGRESS_FILE]).catch(() => null);
-        const us = tail ? [...tail.stdout.matchAll(/^out_time_us=(\d+)$/gm)].at(-1)?.[1] : undefined;
-        await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
+      if (timedOut) return { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" };
+      if (stage !== "encode") return { state: "running", stall: null };
+      // FFmpeg `-progress` appends blocks of key=value; the last out_time_us is the real encoded time.
+      const tail = await run(sandbox, "tail", ["-n", "40", PROGRESS_FILE]).catch(() => null);
+      const us = tail ? [...tail.stdout.matchAll(/^out_time_us=(\d+)$/gm)].at(-1)?.[1] : undefined;
+      const next = nextEncodeStall(stall, us ? Number(us) : null, Date.now());
+      if (next.stalled) {
+        await stopSandboxCore(name);
+        return { state: "failed", code: "EDITOR_EXPORT_STALLED" };
       }
-      return timedOut ? { state: "failed", code: "EDITOR_EXPORT_TIMEOUT" } : { state: "running" };
+      await reportProgressCore(p, stepId, "encoding", us ? encodePct(Number(us), durationSec) : null);
+      return { state: "running", stall: next.stall };
     }
     if (cmd.exitCode === 0) return { state: "done" };
     const stderr = stage === "encode" ? await cmd.stderr().catch(() => "") : "";

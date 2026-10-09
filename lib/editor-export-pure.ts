@@ -14,6 +14,8 @@ export const EDITOR_EXPORT_ERRORS = {
   EDITOR_EXPORT_OUT_OF_MEMORY: "The export ran out of memory. Try a lower resolution.",
   EDITOR_EXPORT_RUNNER_UNAVAILABLE: "The export service is unavailable. Please try again in a moment.",
   EDITOR_EXPORT_UPLOAD_FAILED: "The exported video could not be saved. Please try again.",
+  EDITOR_EXPORT_START_TIMEOUT: "The export took too long to start. Please try again.",
+  EDITOR_EXPORT_STALLED: "The export stopped making progress. Please try again.",
 } as const;
 export type EditorExportErrorCode = keyof typeof EDITOR_EXPORT_ERRORS;
 
@@ -82,6 +84,53 @@ export function editorExportEncodePollMs(pollIndex: number): number {
 }
 
 /**
+ * Per-phase limits for the encode start step. Their sum (255 s) stays under the 300 s function limit, so a hung
+ * phase fails the export instead of the step being killed and retried. Constants, not env knobs.
+ */
+export const EDITOR_EXPORT_PHASE_TIMEOUT_MS = {
+  /** Signing every media path. */
+  sign: 30_000,
+  /** Audio stream probe (10 s per source inside). */
+  probe: 45_000,
+  /** `Sandbox.create` (snapshot boot). */
+  create: 60_000,
+  /** Pinned-tool install fallback + capability check. */
+  prepare: 90_000,
+  /** Launching FFmpeg detached. */
+  ffmpegStart: 30_000,
+} as const;
+export type EditorExportPhase = keyof typeof EDITOR_EXPORT_PHASE_TIMEOUT_MS;
+
+/** Encode fails when FFmpeg's `out_time_us` has not advanced for this long. The 40 min budget still applies. */
+export const EDITOR_EXPORT_STALL_MS = 5 * 60 * 1000;
+
+export class EditorExportPhaseTimeout extends Error {
+  constructor(readonly phase: EditorExportPhase) {
+    super(`editor export phase timed out: ${phase}`);
+    this.name = "EditorExportPhaseTimeout";
+  }
+}
+
+/** Races `work` against the phase limit; the loser is not cancelled, so callers stop the sandbox on timeout. */
+export function withPhaseTimeout<T>(phase: EditorExportPhase, work: Promise<T>, ms: number = EDITOR_EXPORT_PHASE_TIMEOUT_MS[phase]): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new EditorExportPhaseTimeout(phase)), ms);
+  });
+  return Promise.race([work, limit]).finally(() => clearTimeout(timer));
+}
+
+/** Encode stall tracker carried between polls: the furthest `out_time_us` seen and when it last advanced. */
+export type EncodeStall = { outUs: number | null; sinceMs: number };
+
+/** Advances the tracker with this poll's reading; `stalled` once nothing advanced for `EDITOR_EXPORT_STALL_MS`. */
+export function nextEncodeStall(prev: EncodeStall | null, outUs: number | null, nowMs: number): { stall: EncodeStall; stalled: boolean } {
+  const advanced = outUs != null && (prev?.outUs == null || outUs > prev.outUs);
+  const stall = !prev || advanced ? { outUs: advanced ? outUs : null, sinceMs: nowMs } : prev;
+  return { stall, stalled: nowMs - stall.sinceMs >= EDITOR_EXPORT_STALL_MS };
+}
+
+/**
  * Maps a failed `Sandbox.create` to a sanitized code from the SDK's APIError HTTP status.
  * ponytail: statuses are the conventional ones (429 rate limit, 402 quota); the real shape of a paused/limited
  * create is unverified without live Sandbox credentials. Anything else stays RUNNER_UNAVAILABLE.
@@ -110,7 +159,7 @@ function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`editor-export self-check: ${msg}`);
 }
 
-export function editorExportPureSelfCheck(): void {
+export async function editorExportPureSelfCheck(): Promise<void> {
   const c = classifyEditorExportFailure;
   assert(c({ stage: "encode", timedOut: true }) === "EDITOR_EXPORT_TIMEOUT", "timeout");
   assert(c({ stage: "setup" }) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE", "setup failure");
@@ -138,9 +187,30 @@ export function editorExportPureSelfCheck(): void {
   assert(classifySandboxCreateError(apiErr(500)) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE" && classifySandboxCreateError(null) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE", "other create errors");
   const args = signedUploadArgs({ url: "https://x/y", file: "export/o.mp4", contentType: "video/mp4", cacheControl: "31536000, immutable" });
   assert(args.includes("cache-control: max-age=31536000, immutable") && args.at(-1) === "https://x/y", "signed upload argv");
+
+  const phases = Object.values(EDITOR_EXPORT_PHASE_TIMEOUT_MS).reduce((a, b) => a + b, 0);
+  assert(phases < 300_000, "start phases fit the 300 s step limit");
+  const hung = await withPhaseTimeout("create", new Promise(() => {}), 5).catch((e: unknown) => e);
+  assert(hung instanceof EditorExportPhaseTimeout && hung.phase === "create", "hung phase times out");
+  assert((await withPhaseTimeout("sign", Promise.resolve(7), 50)) === 7, "fast phase resolves");
+
+  const M = 60_000;
+  let s = nextEncodeStall(null, null, 0);
+  assert(!s.stalled && s.stall.sinceMs === 0, "first poll starts the clock");
+  assert(nextEncodeStall(s.stall, null, 5 * M).stalled, "no out_time_us for 5 min stalls");
+  s = nextEncodeStall(s.stall, 1_000, 4 * M);
+  assert(!s.stalled && s.stall.sinceMs === 4 * M, "first reading resets the clock");
+  assert(nextEncodeStall(s.stall, 1_000, 9 * M).stalled, "frozen out_time_us stalls");
+  assert(!nextEncodeStall(s.stall, 1_000, 8 * M).stalled, "under the window is fine");
+  let slow = s.stall;
+  for (let t = 5 * M; t <= 30 * M; t += M) {
+    const n = nextEncodeStall(slow, slow.outUs! + 1, t);
+    assert(!n.stalled, "slow but advancing encode never stalls");
+    slow = n.stall;
+  }
+  assert(nextEncodeStall(slow, null, slow.sinceMs + 5 * M).stalled, "unreadable progress keeps the old clock");
 }
 
 if (require.main === module) {
-  editorExportPureSelfCheck();
-  console.log("editorExportPureSelfCheck: ok");
+  editorExportPureSelfCheck().then(() => console.log("editorExportPureSelfCheck: ok"));
 }
