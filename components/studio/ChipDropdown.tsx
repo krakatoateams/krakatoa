@@ -48,6 +48,7 @@ export function ChipDropdown({
   tooltip,
   sheetTitle,
   dimValue = false,
+  field = false,
 }: {
   icon: React.ReactNode;
   value: string;
@@ -67,6 +68,8 @@ export function ChipDropdown({
   tooltip?: string;
   /** Title shown at the top of the mobile bottom sheet (e.g. "Select video ratio"). */
   sheetTitle?: string;
+  /** Form-field presentation: full-width, input-height trigger with the value left and chevron right. */
+  field?: boolean;
 }) {
   const showTriggerChevron = showChevron ?? !square;
   const [open, setOpen] = useState(false);
@@ -119,6 +122,44 @@ export function ChipDropdown({
     }
   };
 
+  const closeAndFocusTrigger = () => {
+    setOpen(false);
+    btnRef.current?.focus();
+  };
+
+  // Move focus into the menu (selected option, else first) once it is open.
+  useEffect(() => {
+    if (!open) return;
+    const raf = requestAnimationFrame(() => {
+      const opts = menuRef.current?.querySelectorAll<HTMLElement>('[role="option"]');
+      const target = menuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]') ?? opts?.[0];
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, isMobile, coords]);
+
+  // Arrow/Home/End navigation inside the menu. Escape and Tab close only the
+  // menu; stopPropagation keeps a parent dialog's Escape handler from firing
+  // (React events bubble through portals).
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const opts = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? []
+    );
+    const i = opts.indexOf(document.activeElement as HTMLElement);
+    const go = (n: number) => {
+      e.preventDefault();
+      opts[(n + opts.length) % opts.length]?.focus();
+    };
+    if (e.key === "ArrowDown") go(i + 1);
+    else if (e.key === "ArrowUp") go(i < 0 ? opts.length - 1 : i - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(opts.length - 1);
+    else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeAndFocusTrigger();
+    } else if (e.key === "Tab") setOpen(false);
+  };
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -154,11 +195,14 @@ export function ChipDropdown({
       <button
         key={opt.id}
         type="button"
+        role="option"
+        aria-selected={active}
+        tabIndex={-1}
         onClick={() => {
           onSelect(opt.id);
-          setOpen(false);
+          closeAndFocusTrigger();
         }}
-        className={`flex w-full items-center justify-between gap-3 rounded-xl text-left text-sm transition-colors ${
+        className={`flex w-full items-center justify-between gap-3 rounded-xl text-left text-sm outline-none transition-colors focus-visible:bg-white/10 ${
           big ? "px-4 py-3" : "px-3 py-2"
         } ${active ? "bg-white/15 text-text-primary" : "text-text-secondary hover:bg-white/5"}`}
       >
@@ -180,7 +224,7 @@ export function ChipDropdown({
   return (
     <div
       ref={ref}
-      className={`relative shrink-0 ${fluid ? "w-full sm:w-auto" : ""}`}
+      className={`relative shrink-0 ${field ? "w-full" : fluid ? "w-full sm:w-auto" : ""}`}
       {...tooltipBind}
     >
       {tooltip && !isMobile && (
@@ -191,8 +235,24 @@ export function ChipDropdown({
         type="button"
         disabled={disabled}
         onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && open) {
+            e.stopPropagation();
+            setOpen(false);
+          } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !open) {
+            e.preventDefault();
+            positionMenu();
+            setOpen(true);
+          }
+        }}
         className={
-          bare
+          field
+            ? `flex h-9 w-full items-center justify-between gap-2 rounded-lg bg-white/10 px-3 text-sm text-text-primary outline-none transition-colors hover:bg-white/15 focus-visible:ring-1 focus-visible:ring-brand-primary disabled:cursor-not-allowed disabled:opacity-40 ${
+                open ? "bg-white/15" : ""
+              }`
+            : bare
             ? `flex items-center gap-1.5 text-sm font-semibold transition-colors disabled:opacity-40 ${
                 open ? "text-N900" : "text-text-primary hover:text-N900"
               }`
@@ -211,7 +271,7 @@ export function ChipDropdown({
               }`
         }
       >
-        {!bare && <span className="text-text-secondary">{icon}</span>}
+        {!bare && !field && <span className="text-text-secondary">{icon}</span>}
         <span className={`font-semibold ${dimValue ? "text-text-disabled" : ""}`}>
           {withMinorWordCase(value)}
         </span>
@@ -230,6 +290,8 @@ export function ChipDropdown({
         createPortal(
           <div
             ref={menuRef}
+            role="listbox"
+            onKeyDown={onMenuKeyDown}
             style={{ position: "fixed", top: coords.top, left: coords.left }}
             className="z-[80] max-h-[60vh] w-max min-w-[14rem] max-w-[18rem] overflow-y-auto overflow-x-hidden rounded-2xl border border-white/10 bg-N50 p-1.5 shadow-2xl shadow-N0/50"
           >
@@ -255,6 +317,7 @@ export function ChipDropdown({
               ref={menuRef}
               role="dialog"
               aria-modal="true"
+              onKeyDown={onMenuKeyDown}
               className={`fixed inset-x-0 bottom-0 z-[90] rounded-t-2xl border-t border-white/10 bg-N50 p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-2xl shadow-N0/60 transition-transform duration-200 ease-out ${
                 sheetShown ? "translate-y-0" : "translate-y-full"
               }`}
@@ -263,7 +326,7 @@ export function ChipDropdown({
               <p className="mb-2 px-3 text-lg font-semibold text-N900">
                 {sheetTitle ?? "Select an option"}
               </p>
-              <div className="max-h-[70vh] overflow-y-auto">
+              <div role="listbox" className="max-h-[70vh] overflow-y-auto">
                 {options.map((opt) => renderOption(opt, true))}
               </div>
             </div>
