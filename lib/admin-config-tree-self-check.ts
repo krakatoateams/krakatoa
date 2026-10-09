@@ -102,6 +102,15 @@ assert.ok(
   "code-only pricing defaults must keep extended models visible"
 );
 
+const gptImage = tree
+  .find((tool) => tool.toolKey === "photo")
+  ?.models.find((model) => model.id === "gpt_image_2");
+assert.deepEqual(
+  gptImage?.variants.map((variant) => variant.label),
+  ["Low", "Medium", "High"],
+  "GPT Image 2 quality variants must show in the admin tree"
+);
+
 async function main(): Promise<void> {
   assert.throws(
     () => requireAdminConfigRows({}, "tools", "tool configs"),

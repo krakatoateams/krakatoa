@@ -56,7 +56,7 @@ import {
   DEFAULT_PRODUCT_PHOTO_QUALITY,
   clampAspectRatioForTier,
   photoAspectRatioOptionsForTier,
-  photoTierEntryPricing,
+  photoTierPriceHint,
   photoTierPricingKey,
   CHARACTER_GENDERS,
   CHARACTER_AGES,
@@ -1022,7 +1022,7 @@ function PhotoOmniPage({
                 options={availableTiers.map((t) => ({
                   id: t.id,
                   label: t.modelLabel,
-                  hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
+                  hint: photoTierPriceHint(t, imageCredits),
                 }))}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
                 disabled={loading}
@@ -1324,7 +1324,7 @@ function PhotoOmniPage({
                 options={availableTiers.map((t) => ({
                   id: t.id,
                   label: t.modelLabel,
-                  hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
+                  hint: photoTierPriceHint(t, imageCredits),
                 }))}
                 onSelect={(id) => setModelTier(id as ProductPhotoModelTier)}
                 disabled={loading}

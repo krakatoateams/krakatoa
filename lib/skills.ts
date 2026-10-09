@@ -178,13 +178,14 @@ export function skillPhotoAttemptSignature(
     input.styleId,
     input.modelTier,
     input.resolution ?? "",
-    input.quality ?? "",
     input.aspectRatio,
     String(input.imageCount),
     input.devBlank ? "blank" : "live",
     skillFileIdentitySignature(input.productFile),
     skillFileIdentitySignature(input.characterFile),
     skillFileIdentitySignature(input.referenceFile),
+    // Appended only when set so existing models keep their exact signature.
+    ...(input.quality ? [input.quality] : []),
   ].join("|");
 }
 

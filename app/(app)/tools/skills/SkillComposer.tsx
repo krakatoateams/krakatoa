@@ -44,7 +44,7 @@ import {
   DEFAULT_PRODUCT_PHOTO_TIER,
   clampAspectRatioForTier,
   photoAspectRatioOptionsForTier,
-  photoTierEntryPricing,
+  photoTierPriceHint,
   photoTierPricingKey,
   PRODUCT_PHOTO_TIERS,
   getProductPhotoTier,
@@ -568,7 +568,7 @@ function SkillOmniInner({
   const photoModelOptions = photoTiers.map((t) => ({
     id: t.id,
     label: t.modelLabel,
-    hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
+    hint: photoTierPriceHint(t, imageCredits),
   }));
   const showUploads = showSubjectTile || showScene || showCharacter || showStartFrame;
 

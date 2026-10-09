@@ -26,7 +26,7 @@ import {
   clampAspectRatioForTier,
   getProductPhotoTier,
   photoAspectRatioOptionsForTier,
-  photoTierEntryPricing,
+  photoTierPriceHint,
   photoTierPricingKey,
   type PhotoAspectRatio,
   type ProductPhotoModelTier,
@@ -329,7 +329,7 @@ export default function ImageNode({
               options={photoTiers.map((t) => ({
                 id: t.id,
                 label: t.modelLabel,
-                hint: `${imageCredits(photoTierEntryPricing(t).pricingKey, 1)}${photoTierEntryPricing(t).multi ? "+" : ""}`,
+                hint: photoTierPriceHint(t, imageCredits),
               }))}
               activeId={data.modelTier}
               square

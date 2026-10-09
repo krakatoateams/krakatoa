@@ -468,6 +468,15 @@ export function photoTierEntryPricing(tier: ProductPhotoTier): { pricingKey: str
   return { pricingKey: tier.basicPricingKey!, multi: false };
 }
 
+/** Model-list price hint, e.g. "5" or "7+" when the tier has a picker. */
+export function photoTierPriceHint(
+  tier: ProductPhotoTier,
+  imageCredits: (pricingKey: string, count: number) => number
+): string {
+  const { pricingKey, multi } = photoTierEntryPricing(tier);
+  return `${imageCredits(pricingKey, 1)}${multi ? "+" : ""}`;
+}
+
 /** Aspect ratios the tier's provider accepts, in UI order (all when unrestricted). */
 export function photoAspectRatioOptionsForTier(tier: ProductPhotoTier) {
   return tier.supportedAspectRatios
@@ -494,7 +503,7 @@ export function normalizeProductPhotoOptions(input: {
     }
   | { ok: false; error: string } {
   if (!isValidProductPhotoTier(input.modelTier)) {
-    return { ok: false, error: "Invalid model tier. Use basic, balanced, or pro." };
+    return { ok: false, error: "Invalid model tier." };
   }
   const tier = input.modelTier;
   const qualities = getProductPhotoTier(tier).qualities;
@@ -505,7 +514,7 @@ export function normalizeProductPhotoOptions(input: {
     if (!found) {
       return {
         ok: false,
-        error: `quality is required for this model (${qualities.map((o) => o.id).join(", ")}).`,
+        error: `A valid quality is required for this model (${qualities.map((o) => o.id).join(", ")}).`,
       };
     }
     return { ok: true, modelTier: tier, resolution: null, quality: found.id };
