@@ -9,7 +9,7 @@ import path from "node:path";
 
 const ROOT = path.resolve(__dirname, "../..");
 const FORBIDDEN = /\brequire\.main\b|\bmodule\.exports\b|\b__dirname\b|\b__filename\b|\bprocess\.binding\b/;
-const IMPORT = /^\s*(import|export)\s+([\s\S]*?)\s*from\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+const IMPORT = /^\s*(import|export)\s+([^;=]*?)\s*from\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
 
 type Fs = { read(file: string): string | null };
 
@@ -27,7 +27,7 @@ function isValueImport(clause: string): boolean {
 function resolve(fs: Fs, from: string, spec: string): string | null {
   const base = spec.startsWith("@/") ? path.join(ROOT, spec.slice(2)) : spec.startsWith(".") ? path.resolve(path.dirname(from), spec) : null;
   if (!base) return null; // package import
-  for (const f of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) if (fs.read(f) !== null) return f;
+  for (const f of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts"), path.join(base, "index.tsx")]) if (fs.read(f) !== null) return f;
   return null;
 }
 
@@ -41,7 +41,7 @@ export function workflowBundleViolations(fs: Fs, entry: string): string[] {
     const src = fs.read(file) ?? "";
     const label = [...chain, path.relative(ROOT, file)].join(" -> ");
     const code = src.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, "$1");
-    const hit = chain.length > 0 && code.match(FORBIDDEN);
+    const hit = code.match(FORBIDDEN);
     if (hit) out.push(`${label}: ${hit[0]}`);
     for (const m of code.matchAll(IMPORT)) {
       const spec = m[3] ?? m[4];
@@ -66,14 +66,18 @@ function workflowBundleGuardSelfCheck(): void {
   const mem = (files: Record<string, string>): Fs => ({ read: (f) => files[path.relative(ROOT, f)] ?? null });
   const fixture = {
     "wf.ts": 'import { a } from "./pure";\nimport type { T } from "./typed";\nimport { type U } from "./typed";\nexport async function w() { "use workflow"; const c = await import("./typed"); }',
-    "pure.ts": 'export * from "./deep";\nexport const a = 1;',
+    "pure.ts": 'export const a = 1;\nimport "./side";\nexport * from "./deep";',
+    "side.ts": "export const dir = __dirname;",
     "deep.ts": "export const b = 2;\nif (require.main === module) console.log(b);",
     "typed.ts": "export type T = 1; export type U = 2;\nmodule.exports = {};",
   };
   const bad = workflowBundleViolations(mem(fixture), path.join(ROOT, "wf.ts"));
-  assert(bad.length === 1 && bad[0] === "wf.ts -> pure.ts -> deep.ts: require.main", `fixture flags only the value chain: ${bad.join("; ")}`);
-  const clean = { ...fixture, "deep.ts": "export const b = 2; // require.main is only mentioned here" };
+  const want = ["wf.ts -> pure.ts -> side.ts: __dirname", "wf.ts -> pure.ts -> deep.ts: require.main"];
+  assert(bad.join("|") === want.join("|"), `fixture flags only the value chains: ${bad.join("; ")}`);
+  const clean = { ...fixture, "side.ts": "export {};", "deep.ts": "export const b = 2; // require.main is only mentioned here" };
   assert(workflowBundleViolations(mem(clean), path.join(ROOT, "wf.ts")).length === 0, "comments and type imports pass");
+  const entryHit = workflowBundleViolations(mem({ ...clean, "wf.ts": `${clean["wf.ts"]}\nif (require.main === module) w();` }), path.join(ROOT, "wf.ts"));
+  assert(entryHit.join() === "wf.ts: require.main", `the workflow file itself is checked: ${entryHit.join("; ")}`);
 
   const disk: Fs = { read: (f) => (existsSync(f) && statSync(f).isFile() ? readFileSync(f, "utf8") : null) };
   const entries = ["lib", "app"].flatMap((d) => sourceFiles(path.join(ROOT, d))).filter((f) => f !== __filename && /["']use workflow["']/.test(readFileSync(f, "utf8")));
