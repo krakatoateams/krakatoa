@@ -1,11 +1,11 @@
 /**
- * Build the Rendi FFmpeg graph for an Editor export: black composition of
+ * Build the FFmpeg graph for an Editor export: black composition of
  * the derived `durationSec` (latest layer end), overlay each clip full-frame in its time window, then
  * overlay / drawtext with enable='between(t,…)'.
  *
  * Pure graph builder — runnable as `npx tsx --conditions=react-server lib/editor-render.ts`
- * (the condition resolves `server-only` from `@/lib/rendi` to its empty export).
- * The route calls `runEditorRender` which talks to Rendi.
+ * The export runs in-system (Vercel Sandbox, see `lib/editor-export-sandbox.ts`);
+ * the editor never calls Rendi or any third-party renderer.
  */
 
 import {
@@ -15,13 +15,7 @@ import {
   parseExportSettings,
   type EditorExportSettings,
 } from "@/lib/editor-export-settings";
-import {
-  runRendiCommandWithRetry,
-  getRendiOutputUrl,
-  type RunRendiOptions,
-} from "@/lib/rendi";
-import { getFontUrl } from "@/lib/reels-pipeline/rendi-stitch";
-import { probeAudioSources } from "@/lib/editor-audio-probe";
+import { EDITOR_FONT_URL } from "@/lib/editor-font";
 import {
   EDITOR_CANVAS,
   clipLayerDurationSec,
@@ -39,7 +33,10 @@ import {
 export type EditorMediaUrls = Record<string, string>;
 
 export type EditorFfmpegGraph = {
+  /** Human-readable form of `args` (placeholders unresolved). Never run through a shell. */
   command: string;
+  /** Argument vector with `{{alias}}` placeholders; resolve with `localizeFfmpegArgs`. */
+  args: string[];
   inputFiles: Record<string, string>;
   outputFiles: Record<string, string>;
   durationSec: number;
@@ -59,7 +56,8 @@ export function escapeDrawtext(text: string): string {
     .replace(/\\/g, "\\\\")
     .replace(/'/g, "\u2019")
     .replace(/:/g, "\\:")
-    .replace(/%/g, "\\%");
+    // argv (no shell) reaches FFmpeg unmodified: a literal % needs three backslashes to survive option parsing.
+    .replace(/%/g, "\\\\\\%");
 }
 
 function colorToFfmpeg(color: string): string {
@@ -153,6 +151,7 @@ export function buildEditorFfmpegGraph(
   const inputFiles: Record<string, string> = {};
   const inputArgs: string[] = [];
   let inputIndex = 0;
+  const addInput = (alias: string) => inputArgs.push("-i", `{{${alias}}}`);
 
   const filters: string[] = [
     `color=c=black:s=${width}x${height}:d=${durationSec}:r=30,format=yuv420p[base]`,
@@ -164,7 +163,7 @@ export function buildEditorFfmpegGraph(
     if (!url) throw new Error(`Missing media URL for clip ${clip.id}.`);
     const alias = `in_s${inputIndex}`;
     inputFiles[alias] = url;
-    inputArgs.push(`-i {{${alias}}}`);
+    addInput(alias);
     const label = `v${clipOverlays.length}`;
     filters.push(placeClipFilter(inputIndex, clip, width, height, label));
     clipOverlays.push({ clip, index: inputIndex, label });
@@ -191,7 +190,7 @@ export function buildEditorFfmpegGraph(
     if (!url) throw new Error(`Missing media URL for overlay ${overlay.id}.`);
     const alias = overlay.kind === "image" ? `in_oi${inputIndex}` : `in_ov${inputIndex}`;
     inputFiles[alias] = url;
-    inputArgs.push(`-i {{${alias}}}`);
+    addInput(alias);
     overlayInputs.push({ overlay, index: inputIndex, kind: overlay.kind });
     inputIndex += 1;
   }
@@ -202,7 +201,7 @@ export function buildEditorFfmpegGraph(
     if (!isAudibleLayer(layer) || !audioUrls.has(url)) return;
     const alias = `in_a${audioLabels.length}`;
     inputFiles[alias] = url;
-    inputArgs.push(`-i {{${alias}}}`);
+    addInput(alias);
     const audioInputIndex = inputIndex;
     inputIndex += 1;
     const label = `a${audioLabels.length}`;
@@ -227,10 +226,7 @@ export function buildEditorFfmpegGraph(
 
   const hasText = overlays.some((o) => o.kind === "text");
   if (hasText) {
-    const fontUrl = getFontUrl("Poppins");
-    if (fontUrl) {
-      inputFiles.in_font = fontUrl;
-    }
+    inputFiles.in_font = EDITOR_FONT_URL;
   }
 
   for (const overlay of overlays) {
@@ -283,21 +279,29 @@ export function buildEditorFfmpegGraph(
   );
   current = "vfinal";
 
-  let audioArgs = "-an";
+  let audioArgs = ["-an"];
   if (audioLabels.length > 0) {
     filters.push(
       `${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,` +
         `apad,atrim=duration=${durationSec}[aout]`
     );
-    audioArgs = `-map "[aout]" -c:a aac -b:a 192k`;
+    audioArgs = ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"];
   }
 
-  const command =
-    `${inputArgs.join(" ")} -filter_complex "${filters.join(";")}" ` +
-    `-map "[${current}]" -t ${durationSec} -c:v libx264 -crf ${exportCrf(settings.quality)} -pix_fmt yuv420p ${audioArgs} {{out_v}}`;
+  const args = [
+    ...inputArgs,
+    "-filter_complex", filters.join(";"),
+    "-map", `[${current}]`,
+    "-t", String(durationSec),
+    "-c:v", "libx264", "-crf", String(exportCrf(settings.quality)), "-pix_fmt", "yuv420p",
+    ...audioArgs,
+    "{{out_v}}",
+  ];
+  const command = args.map((a) => (/[\s[\]";]/.test(a) ? `"${a}"` : a)).join(" ");
 
   return {
     command,
+    args,
     inputFiles,
     outputFiles: { out_v: "editor_export.mp4" },
     durationSec,
@@ -306,33 +310,22 @@ export function buildEditorFfmpegGraph(
   };
 }
 
-export async function runEditorRender(
-  doc: EditorDocument,
-  urls: EditorMediaUrls,
-  rendiOptions?: RunRendiOptions,
-  settings: EditorExportSettings = DEFAULT_EXPORT_SETTINGS
-): Promise<{ url: string; durationSec: number; width: number; height: number }> {
-  // Probe failures resolve to "silent" so a source without audio never fails the export.
-  const audioUrls = await probeAudioSources(audibleLayerUrls(doc, urls));
-  const graph = buildEditorFfmpegGraph(doc, urls, audioUrls, settings);
-  const options: RunRendiOptions = {
-    pollIntervalMs: 2500,
-    maxAttempts: 80, // 80 * 2.5s = 200s, fits well inside maxDuration = 300 with headroom for upload
-    retryOnCommandFailure: false,
-    ...rendiOptions,
-  };
-  const result = await runRendiCommandWithRetry(
-    graph.command,
-    graph.inputFiles,
-    graph.outputFiles,
-    options
+/**
+ * Resolve `{{alias}}` placeholders for a local run: inputs become their URL,
+ * `{{out_v}}` the local output path, `{{in_font}}` a local font file. Returned
+ * as an argv (no shell), so user text can never be interpreted as a command.
+ */
+export function localizeFfmpegArgs(
+  args: readonly string[],
+  values: Record<string, string>
+): string[] {
+  return args.map((arg) =>
+    arg.replace(/\{\{([a-z0-9_]+)\}\}/gi, (_m, key: string) => {
+      const v = values[key];
+      if (v === undefined) throw new Error(`Unresolved FFmpeg placeholder: ${key}`);
+      return v;
+    })
   );
-  return {
-    url: getRendiOutputUrl(result, "out_v"),
-    durationSec: graph.durationSec,
-    width: graph.width,
-    height: graph.height,
-  };
 }
 
 function assert(cond: boolean, msg: string): void {
@@ -450,7 +443,7 @@ export function editorRenderSelfCheck(): void {
 
   const escapedText = escapeDrawtext("It's 100%: perfect\nSecond line");
   assert(
-    escapedText === "It\u2019s 100\\%\\: perfect\nSecond line",
+    escapedText === "It\u2019s 100\\\\\\%\\: perfect\nSecond line",
     "escapeDrawtext handles colon, apostrophe, percent, and explicit newline"
   );
 
@@ -459,6 +452,33 @@ export function editorRenderSelfCheck(): void {
   assert(graph.command.includes("-an"), "no source with audio → picture-only");
   assert(!graph.command.includes("[0:a]") && !graph.command.includes("amix"), "no audio chains without audio sources");
   assert(clipLayerDurationSec(doc.sequence[0]) === 2, "clip layer span");
+
+  // --- In-system run: placeholders resolve to argv entries (no shell) ---
+  const local = localizeFfmpegArgs(graph.args, {
+    in_s0: "https://example.com/a.mp4",
+    in_s1: "https://example.com/b.mp4",
+    in_oi2: "https://example.com/logo.png",
+    in_font: "export/Poppins.ttf",
+    out_v: "export/editor_export.mp4",
+  });
+  assert(local.at(-1) === "export/editor_export.mp4", "output is the local file");
+  assert(local.includes("https://example.com/a.mp4") && !local.some((a) => /\{\{in_s/.test(a)), "inputs substituted");
+  assert(local.join(" ").includes("fontfile=export/Poppins.ttf") && !local.join(" ").includes("{{"), "font substituted, no placeholders left");
+  assert(local.includes("libx264") && local.includes("-filter_complex"), "argv carries the encode and filter graph");
+  let unresolved = false;
+  try {
+    localizeFfmpegArgs(graph.args, { out_v: "x" });
+  } catch {
+    unresolved = true;
+  }
+  assert(unresolved, "unresolved placeholder throws");
+  const quoteDoc: EditorDocument = {
+    ...doc,
+    overlays: [{ ...doc.overlays[0], text: 'a"b $(x) `y`' }],
+  };
+  const quoted = buildEditorFfmpegGraph(quoteDoc, urls, new Set()).args.find((a) => a.includes("drawtext="));
+  assert(Boolean(quoted?.includes('a"b $(x) `y`')), "user text stays one literal argv entry");
+  assert(!JSON.stringify(graph).includes("rendi"), "graph is renderer-neutral");
 
   let threw = false;
   try {

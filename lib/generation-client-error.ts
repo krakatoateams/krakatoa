@@ -1,3 +1,5 @@
+import { EDITOR_EXPORT_ERRORS } from "@/lib/editor-export-pure";
+
 export const CANCELLED_GENERATION_CLIENT_ERROR = "Generation cancelled.";
 export const GENERIC_GENERATION_CLIENT_ERROR = "Generation failed.";
 export const RECOVERABLE_GENERATION_CLIENT_ERROR =
@@ -10,6 +12,8 @@ const CLIENT_ERROR_BY_CODE: Record<string, string> = {
   PIPELINE_RECOVERABLE: RECOVERABLE_GENERATION_CLIENT_ERROR,
   PRICING_CONFIG_MISSING: PRICING_GENERATION_CLIENT_ERROR,
   INSUFFICIENT_CREDITS: "Insufficient credits.",
+  // Editor export failure reasons are sanitized and fixed, so they are safe to show verbatim.
+  ...EDITOR_EXPORT_ERRORS,
 };
 
 function safeCode(error: Record<string, unknown>): string | null {
