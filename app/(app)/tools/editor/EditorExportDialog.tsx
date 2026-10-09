@@ -2,13 +2,17 @@
 
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
+import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
 import {
   DEFAULT_EXPORT_SETTINGS,
+  EXPORT_FORMATS,
+  EXPORT_FORMAT_SPEC,
   EXPORT_FPS,
   EXPORT_QUALITIES,
   EXPORT_QUALITY_LABEL,
   EXPORT_RESOLUTIONS,
+  EXPORT_RESOLUTION_LABEL,
   type EditorExportSettings,
 } from "@/lib/editor-export-settings";
 
@@ -65,43 +69,50 @@ export default function EditorExportDialog({
           />
         </Field>
         <Field label="Resolution">
-          <select
-            value={settings.resolution}
-            onChange={(e) => setSettings({ ...settings, resolution: Number(e.target.value) as EditorExportSettings["resolution"] })}
-            className={FIELD}
-          >
-            {EXPORT_RESOLUTIONS.map((r) => (
-              <option key={r} value={r}>{r}p</option>
-            ))}
-          </select>
+          <ChipDropdown
+            field
+            icon={null}
+            value={EXPORT_RESOLUTION_LABEL[settings.resolution]}
+            options={EXPORT_RESOLUTIONS.map((r) => ({ id: String(r), label: EXPORT_RESOLUTION_LABEL[r] }))}
+            activeId={String(settings.resolution)}
+            onSelect={(id) => setSettings({ ...settings, resolution: Number(id) as EditorExportSettings["resolution"] })}
+            sheetTitle="Select resolution"
+          />
         </Field>
         <Field label="Quality">
-          <select
-            value={settings.quality}
-            onChange={(e) => setSettings({ ...settings, quality: e.target.value as EditorExportSettings["quality"] })}
-            className={FIELD}
-          >
-            {EXPORT_QUALITIES.map((q) => (
-              <option key={q} value={q}>{EXPORT_QUALITY_LABEL[q]}</option>
-            ))}
-          </select>
+          <ChipDropdown
+            field
+            icon={null}
+            value={EXPORT_QUALITY_LABEL[settings.quality]}
+            options={EXPORT_QUALITIES.map((q) => ({ id: q, label: EXPORT_QUALITY_LABEL[q] }))}
+            activeId={settings.quality}
+            onSelect={(id) => setSettings({ ...settings, quality: id as EditorExportSettings["quality"] })}
+            sheetTitle="Select quality"
+          />
         </Field>
         <Field label="Frame rate">
-          <select
-            value={settings.fps}
-            onChange={(e) => setSettings({ ...settings, fps: Number(e.target.value) as EditorExportSettings["fps"] })}
-            className={FIELD}
-          >
-            {EXPORT_FPS.map((f) => (
-              <option key={f} value={f}>{f}fps</option>
-            ))}
-          </select>
+          <ChipDropdown
+            field
+            icon={null}
+            value={`${settings.fps}fps`}
+            options={EXPORT_FPS.map((f) => ({ id: String(f), label: `${f}fps` }))}
+            activeId={String(settings.fps)}
+            onSelect={(id) => setSettings({ ...settings, fps: Number(id) as EditorExportSettings["fps"] })}
+            sheetTitle="Select frame rate"
+          />
         </Field>
         <Field label="Format">
-          <select disabled className={`${FIELD} opacity-60`} defaultValue="mp4">
-            <option value="mp4">MP4</option>
-          </select>
+          <ChipDropdown
+            field
+            icon={null}
+            value={EXPORT_FORMAT_SPEC[settings.format].label}
+            options={EXPORT_FORMATS.map((f) => ({ id: f, label: EXPORT_FORMAT_SPEC[f].label }))}
+            activeId={settings.format}
+            onSelect={(id) => setSettings({ ...settings, format: id as EditorExportSettings["format"] })}
+            sheetTitle="Select format"
+          />
         </Field>
+        {settings.resolution === 2160 && <p role="status" className="text-xs text-text-secondary">4K exports take longer.</p>}
         <button
           type="button"
           onClick={() => onConfirm(name, settings)}

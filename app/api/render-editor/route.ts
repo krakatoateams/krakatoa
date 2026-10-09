@@ -1,37 +1,24 @@
 import { NextResponse } from "next/server";
 import { parseExportSettings, sanitizeExportTitle } from "@/lib/editor-export-settings";
 import { requireCurrentProfile } from "@/lib/profiles-db";
-import { createJob, startJob, finishJob, failJob, cancelJob } from "@/lib/jobs-db";
-import { createJobStep, finishJobStep, failJobStep } from "@/lib/job-steps-db";
+import { createJob, startJob, failJob, cancelJob } from "@/lib/jobs-db";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
-import { recordUsageEvent } from "@/lib/usage-events-db";
 import {
   readIdempotencyKey,
   isValidIdempotencyKey,
   computeRequestHash,
   beginGenerationRequest,
   attachGenerationRequestJob,
-  finishGenerationRequestSuccess,
   finishGenerationRequestFailure,
 } from "@/lib/generation-idempotency";
-import { assertNotCancelled } from "@/lib/generation-cancel";
-import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import { start } from "workflow/api";
+import { isRefundableUserCancellation } from "@/lib/generation-commit";
 import { isCancellation } from "@/lib/replicate-server";
-import {
-  assertPathOwnedByUser,
-  signStoragePathForPipeline,
-  signStoragePathForUser,
-} from "@/lib/storage-signed-url";
-import {
-  MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
-  videosGeneratedVideoPath,
-  videosUserTempRefPath,
-} from "@/lib/storage-buckets";
+import { assertPathOwnedByUser } from "@/lib/storage-signed-url";
+import { STORAGE_BUCKET, videosUserTempRefPath } from "@/lib/storage-buckets";
 import { supabaseServer } from "@/lib/supabase-server";
-import { createProcessingAsset, markAssetReady, markAssetFailed } from "@/lib/assets-db";
-import { insertUserCreation, getUserCreationForUser } from "@/lib/creations-db";
-import { CREATION_TOOLS } from "@/lib/creations";
+import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
+import { getUserCreationForUser } from "@/lib/creations-db";
 import {
   acceptEditorExportUploads,
   collectEditorMediaRefs,
@@ -40,27 +27,33 @@ import {
   sequenceDurationSec,
   validateEditorExport,
 } from "@/lib/editor-document";
-import { runEditorRender } from "@/lib/editor-render";
+import { editorExportWorkflow } from "@/lib/editor-export-workflow";
+import type { EditorExportParams } from "@/lib/editor-export-core";
+import { EditorExportError, editorExportErrorJson } from "@/lib/editor-export-pure";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 
-export const maxDuration = 300;
+// The route only validates and starts the durable export; encoding runs in a Sandbox via Workflow.
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 const JOB_TYPE = "video_editor";
 
 /**
- * POST /api/render-editor — stitch the Editor timeline via Rendi FFmpeg
- * and write the MP4 into My Library.
+ * POST /api/render-editor — start an in-system FFmpeg export of the Editor
+ * timeline (Vercel Sandbox via Workflow, never Rendi). Returns 202; the client
+ * polls /api/generations/status with the same Idempotency-Key until the
+ * workflow writes the MP4 into My Library.
  */
 export async function POST(req: Request) {
   let profileId: string | null = null;
   let jobId: string | null = null;
-  let currentStepId: string | null = null;
   let generationRequestId: string | null = null;
   let videoAssetId: string | null = null;
   // Device files uploaded only for this export (#245); removed on every exit below.
   let exportUploadPaths: string[] = [];
+  // Once the workflow owns the uploads it deletes them; the route must not.
+  let workflowStarted = false;
 
   const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
@@ -142,7 +135,8 @@ export async function POST(req: Request) {
     exportUploadPaths = exportUploads.map((u) => u.storagePath);
 
     const refs = collectEditorMediaRefs(document);
-    const urls: Record<string, string> = {};
+    // Owner-validated storage paths; the workflow mints signed URLs itself, so none sit in its payload.
+    const mediaPaths: Record<string, string> = {};
 
     for (const creationId of refs.creationIds) {
       const item = await getUserCreationForUser(userId!, creationId);
@@ -160,12 +154,12 @@ export async function POST(req: Request) {
         );
       }
       await assertPathOwnedByUser(path, userId!);
-      urls[creationId] = await signStoragePathForPipeline(path, userId!);
+      mediaPaths[creationId] = path;
     }
 
     for (const storagePath of refs.storagePaths) {
       await assertPathOwnedByUser(storagePath, userId!);
-      urls[storagePath] = await signStoragePathForPipeline(storagePath, userId!);
+      mediaPaths[storagePath] = storagePath;
     }
 
     const durationSec = sequenceDurationSec(document);
@@ -255,7 +249,7 @@ export async function POST(req: Request) {
         profileId: profileId!,
         tool: "editor",
         jobType: JOB_TYPE,
-        provider: "rendi",
+        provider: "vercel-sandbox",
         model: "ffmpeg",
         input: {
           prompt: "Editor export",
@@ -285,158 +279,33 @@ export async function POST(req: Request) {
         tool: "editor",
         assetType: "video",
         role: JOB_TYPE,
-        provider: "rendi",
+        provider: "vercel-sandbox",
         model: "ffmpeg",
         metadata: { aspect: document.aspect, durationSec },
       })
     );
     if (asset) videoAssetId = asset.id;
 
-    const beginStep = async (key: string, name: string) => {
-      if (!jobId || !profileId) return;
-      const step = await safe("createStep", () =>
-        createJobStep({
-          jobId: jobId!,
-          profileId: profileId!,
-          stepKey: key,
-          stepName: name,
-          status: "running",
-        })
-      );
-      currentStepId = step?.id ?? null;
-    };
-    const endStep = async (output?: Record<string, unknown>) => {
-      if (!currentStepId || !profileId) return;
-      await safe("finishStep", () => finishJobStep(profileId!, currentStepId!, output));
-      currentStepId = null;
-    };
-
-    await beginStep("rendi_stitch", "Trim, stitch, and composite via Rendi");
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    const rendered = await runEditorRender(
+    const workflowParams: EditorExportParams = {
+      profileId: profileId!,
+      userId: userId!,
+      jobId,
+      generationRequestId: generationRequestId!,
+      videoAssetId,
       document,
-      urls,
-      {
-        abortCheck: async () => {
-          if (generationRequestId && profileId) {
-            await assertNotCancelled(profileId, generationRequestId);
-          }
-        },
-      },
-      exportSettings
-    );
-    await endStep({ durationSec: rendered.durationSec });
-
-    if (generationRequestId && profileId) {
-      await markProviderCommitted({
-        generationRequestId,
-        profileId,
-        reason: "editor_rendi",
-      });
-    }
-
-    await beginStep("storage_upload", "Download export + save to Supabase");
-    if (generationRequestId && profileId) {
-      await assertNotCancelled(profileId, generationRequestId);
-    }
-    const videoResponse = await fetch(rendered.url);
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to download editor export: ${videoResponse.statusText}`);
-    }
-    const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-    const storagePath = videosGeneratedVideoPath(userId!, "editor", `video_${Date.now()}.mp4`);
-    const { error: uploadError } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, videoBuffer, {
-        contentType: "video/mp4",
-        cacheControl: MEDIA_CACHE_CONTROL,
-        upsert: false,
-      });
-    if (uploadError) {
-      throw new Error(`Failed to save video to storage: ${uploadError.message}`);
-    }
-    const { url: publicUrl } = await signStoragePathForUser(storagePath, userId!, "ui");
-    await endStep({ storagePath });
-
-    const title = sanitizeExportTitle(b.title);
-    const historyItem = await safe("insertUserCreation", () =>
-      insertUserCreation({
-        userId: userId!,
-        tool: "video_editor",
-        mediaType: "video",
-        mediaUrl: storagePath,
-        storagePath,
-        title,
-        metadata: {
-          aspect: document.aspect,
-          resolution: exportSettings.resolution,
-          quality: exportSettings.quality,
-          fps: exportSettings.fps,
-          durationSec: rendered.durationSec,
-          clipCount: document.sequence.length,
-          overlayCount: document.overlays.length,
-        },
-      })
-    );
-
-    if (videoAssetId && profileId) {
-      await safe("markAssetReady", () =>
-        markAssetReady(profileId!, videoAssetId!, {
-          storagePath,
-          mimeType: "video/mp4",
-          durationSec: rendered.durationSec,
-          width: rendered.width,
-          height: rendered.height,
-          fileSizeBytes: videoBuffer.length,
-          costCredits: 0,
-        })
-      );
-    }
-    if (jobId && profileId) {
-      await safe("finishJob", () =>
-        finishJob(profileId!, jobId!, {
-          output: { storagePath, creationId: historyItem?.id ?? null },
-          costCredits: 0,
-        })
-      );
-    }
-    await safe("usage", () =>
-      recordUsageEvent({
-        profileId: profileId!,
-        jobId: jobId ?? null,
-        assetId: videoAssetId,
-        tool: "editor",
-        provider: "rendi",
-        model: "ffmpeg",
-        creditsCharged: 0,
-        units: rendered.durationSec,
-        unitType: "second",
-        metadata: { durationSec: rendered.durationSec, aspect: document.aspect },
-      })
-    );
-
-    const successResponse = {
-      ok: true,
-      storagePath,
-      mediaUrl: publicUrl,
-      creation: historyItem,
-      durationSec: rendered.durationSec,
-      credits: 0,
-      toolLabel: CREATION_TOOLS.video_editor.label,
+      settings: exportSettings,
+      mediaPaths,
+      exportUploadPaths,
+      title: sanitizeExportTitle(b.title),
     };
-    if (generationRequestId && profileId) {
-      await safe("idemSuccess", () =>
-        finishGenerationRequestSuccess({
-          id: generationRequestId!,
-          profileId: profileId!,
-          jobId: jobId ?? null,
-          responseJson: successResponse,
-        })
-      );
+    try {
+      await start(editorExportWorkflow, [workflowParams]);
+    } catch (e) {
+      console.error("[render-editor] workflow start failed:", generationErrorLogSafe(e));
+      throw new EditorExportError("EDITOR_EXPORT_RUNNER_UNAVAILABLE");
     }
-    return NextResponse.json(successResponse);
+    workflowStarted = true;
+    return NextResponse.json({ status: "processing", jobId }, { status: 202 });
   } catch (error: unknown) {
     const cancelled =
       profileId && generationRequestId
@@ -446,6 +315,7 @@ export async function POST(req: Request) {
     else {
       console.error("[render-editor] Error:", generationErrorLogSafe(error));
     }
+    const exportError = error instanceof EditorExportError ? error : null;
     const message = cancelled
       ? "Export cancelled."
       : error instanceof Error
@@ -460,11 +330,8 @@ export async function POST(req: Request) {
             typeof (error as { code?: unknown }).code === "string"
           ? (error as { code: string }).code
           : undefined;
-    const errJson = code ? { message, code } : { message };
+    const errJson = exportError ? editorExportErrorJson(exportError.code) : code ? { message, code } : { message };
 
-    if (currentStepId && profileId) {
-      await safe("failStep", () => failJobStep(profileId!, currentStepId!, errJson));
-    }
     if (videoAssetId && profileId) {
       await safe("failAsset", () => markAssetFailed(profileId!, videoAssetId!, errJson));
     }
@@ -493,13 +360,16 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
+    if (exportError) {
+      return NextResponse.json({ error: exportError.message, code: exportError.code }, { status: 503 });
+    }
     return NextResponse.json(
       { error: GENERIC_GENERATION_CLIENT_ERROR },
       { status: 500 }
     );
   } finally {
-    // Rendi no longer needs its inputs; keep only the exported MP4.
-    if (exportUploadPaths.length > 0) {
+    // Pre-start exits only: after the workflow starts it owns (and deletes) the uploads.
+    if (!workflowStarted && exportUploadPaths.length > 0) {
       const { error } = await supabaseServer.storage
         .from(STORAGE_BUCKET)
         .remove(exportUploadPaths)

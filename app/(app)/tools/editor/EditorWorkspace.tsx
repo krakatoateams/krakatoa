@@ -13,7 +13,6 @@ import {
   Eye,
   EyeOff,
   ImagePlus,
-  Loader2,
   Lock,
   Pause,
   Play,
@@ -37,6 +36,15 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useSignedMediaUrl } from "@/lib/use-signed-media-url";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import {
+  clearPersistedIdempotentAttempt,
+  readPersistedIdempotentAttempt,
+} from "@/lib/idempotent-submit-state";
+import { monotonicPct, parseExportProgress } from "@/lib/editor-export-progress";
+import {
+  EditorExportProgressDialog,
+  type ExportProgressState,
+} from "./EditorExportProgressDialog";
 import { canDropOnEditor } from "@/lib/editor-handoff";
 import { uploadRefFile } from "@/components/studio/RefGroup";
 import { useStudioGenerationPreview } from "@/components/studio";
@@ -826,6 +834,39 @@ function EditorToast({ toast, onDismiss }: { toast: EditorToastState; onDismiss:
   );
 }
 
+type EditorExportPollData = { error?: string; code?: string; ok?: boolean; creation?: { id?: string } };
+
+const EXPORT_POLL_MS = 3000;
+
+/** Polls the generation status for an accepted (202) export until it succeeds or fails. */
+async function pollEditorExport(
+  idempotencyKey: string
+): Promise<{ ok: boolean; data: EditorExportPollData }> {
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, EXPORT_POLL_MS));
+    try {
+      const res = await fetch("/api/generations/status", { headers: { "Idempotency-Key": idempotencyKey } });
+      // A missing request or lost session can never recover; anything else is transient, so the
+      // attempt stays locked and polling continues until an explicit terminal status.
+      if (res.status === 401 || res.status === 404) {
+        return { ok: false, data: { error: "Couldn't confirm the export. Check My Library in a moment." } };
+      }
+      if (!res.ok) continue;
+      const body = (await res.json()) as {
+        status?: string;
+        result?: EditorExportPollData | null;
+        error?: { message?: string; code?: string } | null;
+      };
+      if (body.status === "succeeded") return { ok: true, data: body.result ?? {} };
+      if (body.status === "failed") {
+        return { ok: false, data: { error: body.error?.message, code: body.error?.code } };
+      }
+    } catch {
+      /* transient network error: keep polling */
+    }
+  }
+}
+
 export default function EditorWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -834,7 +875,7 @@ export default function EditorWorkspace() {
   const { openSignInModal } = useAuthModal();
   const { openLibrary } = useEditorLibrary();
   const { openPreview } = useStudioGenerationPreview();
-  const { begin, cancel, cancelling } = useIdempotentSubmit("editor:export");
+  const { begin } = useIdempotentSubmit("editor:export");
 
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -845,7 +886,13 @@ export default function EditorWorkspace() {
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
   const [timeInputDraft, setTimeInputDraft] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [exportPhase, setExportPhase] = useState<"uploading" | "rendering" | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
+  const [exportProgressOpen, setExportProgressOpen] = useState(false);
+  // Idempotency-Key being polled for display / resume; null stops polling.
+  const [pollKey, setPollKey] = useState<string | null>(null);
+  // True when this tab did not start the render fetch (page reload): polling decides the outcome.
+  const resumedExportRef = useRef(false);
+  const lastExportRef = useRef<{ name: string; settings: EditorExportSettings } | null>(null);
   // Session-only device media: localMediaId → object URL (null = this browser no longer has it).
   // Never written to the document.
   const [localUrls, setLocalUrls] = useState<Record<string, string | null>>({});
@@ -1847,8 +1894,32 @@ export default function EditorWorkspace() {
     }
     const attempt = begin(`${fingerprint}|${exportName}|${JSON.stringify(exportSettings)}`);
     if (!attempt) return;
+    lastExportRef.current = { name: exportName, settings: exportSettings };
+    resumedExportRef.current = false;
     setExporting(true);
     setExportError(null);
+    const startedAt = Date.now();
+    const finishExport = (patch: Partial<ExportProgressState>) => {
+      setPollKey(null);
+      setExportProgress((p) =>
+        p ? { ...p, outcome: "failed", cancelling: false, endedAt: Date.now(), ...patch } : p,
+      );
+      setExportProgressOpen(true);
+    };
+    setExportProgress({
+      outcome: "running",
+      stage: [...doc.sequence, ...doc.overlays].some(isLocalOnlyLayer) ? "uploading" : "preparing",
+      pct: null,
+      uploadDone: 0,
+      uploadTotal: 0,
+      startedAt,
+      endedAt: null,
+      error: null,
+      creationId: null,
+      cancelAllowed: true,
+      cancelling: false,
+    });
+    setExportProgressOpen(true);
     // Device files upload only now, to temp paths the export route deletes when it finishes.
     // The editor's own doc stays local-only; the server gets a copy with storagePath filled.
     const localIds = [
@@ -1859,7 +1930,7 @@ export default function EditorWorkspace() {
       const upload = { controller: new AbortController(), paths: [] as string[] };
       const { signal } = upload.controller;
       exportUploadRef.current = upload;
-      setExportPhase("uploading");
+      setExportProgress((p) => (p ? { ...p, uploadTotal: localIds.length } : p));
       try {
         for (const localMediaId of localIds) {
           const file = localFilesRef.current.get(localMediaId);
@@ -1870,15 +1941,15 @@ export default function EditorWorkspace() {
           });
           signal.throwIfAborted();
           exportUploads.push({ localMediaId, storagePath: uploaded.path });
+          setExportProgress((p) => (p ? { ...p, uploadDone: exportUploads.length } : p));
         }
         signal.throwIfAborted();
       } catch (err) {
         deleteRefUploads(upload.paths.splice(0));
         attempt.settle(false);
-        if (signal.aborted) showToast({ type: "info", message: "Export cancelled" });
-        else setExportError(err instanceof Error ? err.message : "Couldn't upload media for export.");
+        if (signal.aborted) finishExport({ outcome: "cancelled" });
+        else finishExport({ error: err instanceof Error ? err.message : "Couldn't upload media for export." });
         setExporting(false);
-        setExportPhase(null);
         return;
       } finally {
         if (exportUploadRef.current === upload) exportUploadRef.current = null;
@@ -1886,7 +1957,8 @@ export default function EditorWorkspace() {
     }
     // From here the render route owns the uploads (it deletes them on every exit),
     // so Cancel goes through the generation cancel flow.
-    setExportPhase("rendering");
+    setExportProgress((p) => (p ? { ...p, stage: "preparing", pct: null } : p));
+    setPollKey(attempt.key);
     const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
     const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
       isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
@@ -1903,8 +1975,9 @@ export default function EditorWorkspace() {
           "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
+        // A dropped connection is not a terminal answer: treat it like 202 and poll the attempt's status.
+      }).catch(() => new Response(null, { status: 202 }));
+      let data = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
         ok?: boolean;
@@ -1913,26 +1986,153 @@ export default function EditorWorkspace() {
       if (res.status === 401) {
         openSignInModal();
         attempt.settle(false);
+        finishExport({ error: "Sign in again to export." });
         return;
       }
-      if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
-        attempt.settle(false);
-        showToast({ type: "info", message: "Export cancelled" });
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(data.error || "Export failed.");
+      // 202 is non-terminal: stay locked on this attempt until the export reports a terminal status.
+      if (res.status === 202) {
+        const finished = await pollEditorExport(attempt.key);
+        data = finished.data;
+        if (!finished.ok) {
+          if (data.code === "GENERATION_CANCELLED") {
+            attempt.settle(false);
+            finishExport({ outcome: "cancelled" });
+            return;
+          }
+          throw new Error(data.error || "Export failed.");
+        }
+      } else {
+        if (res.status === 409 && data.code === "GENERATION_CANCELLED") {
+          attempt.settle(false);
+          finishExport({ outcome: "cancelled" });
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(data.error || "Export failed.");
+        }
       }
       attempt.settle(true);
-      if (data.creation?.id) void openPreview(data.creation.id);
+      finishExport({ outcome: "success", creationId: data.creation?.id ?? null });
     } catch (err) {
       attempt.settle(false);
-      setExportError(err instanceof Error ? err.message : "Export failed.");
+      finishExport({ error: err instanceof Error ? err.message : "Export failed." });
     } finally {
       setExporting(false);
-      setExportPhase(null);
     }
   };
+
+  // Display polling (and the only outcome source after a reload). Never stops on a
+  // non-terminal response; backs off while the tab is hidden.
+  useEffect(() => {
+    if (!pollKey) return;
+    let stop = false;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/generations/status", {
+          headers: { "Idempotency-Key": pollKey },
+          cache: "no-store",
+        });
+        if (res.ok && !stop) applyExportStatus(await res.json());
+      } catch {
+        // transient; next tick retries
+      }
+      if (!stop) timer = window.setTimeout(tick, document.hidden ? 8000 : 1500);
+    };
+    timer = window.setTimeout(tick, 400);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+    // applyExportStatus only uses setters and refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollKey]);
+
+  function applyExportStatus(data: {
+    status?: string;
+    cancelAllowed?: boolean;
+    progress?: unknown;
+    result?: { creation?: { id?: string } } | null;
+    error?: { message?: string; code?: string } | null;
+  }) {
+    if (data.status === "started") {
+      const prog = parseExportProgress(data.progress);
+      setExportProgress((p) =>
+        p && p.outcome === "running"
+          ? {
+              ...p,
+              stage: prog?.stage ?? p.stage,
+              pct: prog ? monotonicPct({ stage: p.stage, pct: p.pct }, prog) : p.pct,
+              cancelAllowed: data.cancelAllowed !== false,
+            }
+          : p,
+      );
+      return;
+    }
+    if (!resumedExportRef.current) return; // the render fetch settles this attempt
+    const patch: Partial<ExportProgressState> | null =
+      data.status === "succeeded"
+        ? { outcome: "success", creationId: data.result?.creation?.id ?? null }
+        : data.status === "failed"
+          ? data.error?.code === "GENERATION_CANCELLED"
+            ? { outcome: "cancelled" }
+            : { outcome: "failed", error: data.error?.message ?? "Export failed." }
+          : null;
+    if (!patch) return;
+    if (data.status === "succeeded") {
+      try {
+        const attempt = readPersistedIdempotentAttempt(window.sessionStorage, "editor:export");
+        if (attempt) clearPersistedIdempotentAttempt(window.sessionStorage, "editor:export", attempt);
+      } catch {
+        // best effort
+      }
+    }
+    resumedExportRef.current = false;
+    setPollKey(null);
+    setExporting(false);
+    setExportProgress((p) => (p ? { ...p, cancelling: false, endedAt: Date.now(), ...patch } : p));
+    setExportProgressOpen(true);
+  }
+
+  // Reload during an export: resume the same persisted attempt (never start a second one).
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let key: string | undefined;
+    try {
+      key = readPersistedIdempotentAttempt(window.sessionStorage, "editor:export")?.key;
+    } catch {
+      return;
+    }
+    if (!key) return;
+    let cancelled = false;
+    void fetch("/api/generations/status", { headers: { "Idempotency-Key": key }, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data || (data.status !== "started" && data.status !== "succeeded")) return;
+        resumedExportRef.current = true;
+        setExporting(true);
+        setExportProgress({
+          outcome: "running",
+          stage: "preparing",
+          pct: null,
+          uploadDone: 0,
+          uploadTotal: 0,
+          startedAt: Date.now(),
+          endedAt: null,
+          error: null,
+          creationId: null,
+          cancelAllowed: data.cancelAllowed !== false,
+          cancelling: false,
+        });
+        setExportProgressOpen(true);
+        setPollKey(key!);
+        if (data.status === "succeeded") applyExportStatus(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
 
   // Upload phase: abort and delete this export's uploads here (no generation request exists
   // yet). Render phase: the generation cancel flow; the route deletes the uploads.
@@ -1943,7 +2143,30 @@ export default function EditorWorkspace() {
       deleteRefUploads(upload.paths.splice(0));
       return;
     }
-    void cancel();
+    const key = pollKey;
+    if (!key) return;
+    setExportProgress((p) => (p ? { ...p, cancelling: true } : p));
+    void fetch("/api/generations/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: key }),
+    })
+      .then(async (res) => {
+        if (res.ok) return; // the render settles with a cancelled outcome
+        const body = await res.json().catch(() => ({}));
+        const notAllowed = res.status === 409 && body?.code === "CANCEL_NOT_ALLOWED";
+        setExportProgress((p) =>
+          p ? { ...p, cancelling: false, cancelAllowed: notAllowed ? false : p.cancelAllowed } : p,
+        );
+      })
+      .catch(() => setExportProgress((p) => (p ? { ...p, cancelling: false } : p)));
+  };
+
+  const retryExport = () => {
+    setExportProgressOpen(false);
+    const last = lastExportRef.current;
+    if (last) void handleExport(last.name, last.settings);
+    else setExportDialogOpen(true);
   };
 
   const pxPerSec = 64;
@@ -1960,7 +2183,13 @@ export default function EditorWorkspace() {
         saving={saving}
         exportReady={!exportCheck && duration > 0}
         exporting={exporting}
-        cancelling={cancelling}
+        exportChip={
+          exporting && exportProgress
+            ? exportProgress.pct == null
+              ? "Exporting…"
+              : `Exporting… ${exportProgress.pct}%`
+            : null
+        }
         onTitleChange={setTitle}
         onTitleCommit={(value) => void commitTitle(value)}
         onSave={() => void handleSave()}
@@ -1976,10 +2205,24 @@ export default function EditorWorkspace() {
             openSignInModal();
             return;
           }
-          setExportDialogOpen(true);
+          if (exporting) setExportProgressOpen(true);
+          else setExportDialogOpen(true);
         }}
-        onCancel={cancelExport}
       />
+
+      {exportProgress ? (
+        <EditorExportProgressDialog
+          open={exportProgressOpen}
+          state={exportProgress}
+          onClose={() => setExportProgressOpen(false)}
+          onCancel={cancelExport}
+          onRetry={retryExport}
+          onOpenLibrary={(id) => {
+            setExportProgressOpen(false);
+            void openPreview(id);
+          }}
+        />
+      ) : null}
 
       {exportDialogOpen ? (
         <EditorExportDialog
@@ -2975,19 +3218,6 @@ export default function EditorWorkspace() {
           }
         }}
       />
-
-      {exportPhase === "uploading" ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-brand-primary/40 bg-N100/95 px-4 py-2.5 text-xs text-brand-primary shadow-2xl backdrop-blur-md transition-all duration-300"
-        >
-          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-brand-primary" />
-          <span className="font-medium text-text-primary">
-            Uploading media for export…
-          </span>
-        </div>
-      ) : null}
 
       {toast ? <EditorToast toast={toast} onDismiss={dismissToast} /> : null}
     </div>
