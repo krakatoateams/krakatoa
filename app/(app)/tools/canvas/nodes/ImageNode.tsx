@@ -22,7 +22,6 @@ import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_STYLE,
   DEFAULT_PRODUCT_PHOTO_QUALITY,
-  PRODUCT_PHOTO_TIERS,
   photoAspectRatioDisplayForTier,
   getProductPhotoTier,
   photoAspectRatioOptionsForTier,
