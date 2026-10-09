@@ -12,7 +12,10 @@ import {
   Info,
   Eye,
   EyeOff,
+  Film,
   ImagePlus,
+  Image as ImageIcon,
+  Layers,
   Lock,
   Pause,
   Play,
@@ -301,7 +304,8 @@ function TimelineLayerRow({
   maxSpan,
   inSec,
   label,
-  selectedClassName,
+  timecode,
+  icon,
   onSelect,
   onMove,
   onTrimStart,
@@ -322,8 +326,10 @@ function TimelineLayerRow({
   maxSpan: number;
   /** Source in-point for video layers; undefined when the layer has no source. */
   inSec?: number;
-  label: ReactNode;
-  selectedClassName: string;
+  label: string;
+  /** Shown in the chip only while the strip is selected or hovered. */
+  timecode: string;
+  icon: ReactNode;
   onSelect: () => void;
   onMove: (startSec: number, endSec: number) => void;
   onTrimStart: (startSec: number, inSec?: number) => void;
@@ -373,23 +379,30 @@ function TimelineLayerRow({
             onMove(nextStart, nextStart + origSpan);
           });
         }}
-        className={`absolute inset-y-0 flex items-center rounded-md ${
+        aria-pressed={selected}
+        title={`${label} ${timecode}`}
+        className={`group absolute inset-y-0 flex items-center rounded-md ${
           locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-        } ${hidden ? "opacity-40" : ""} ${selected ? selectedClassName : "bg-white/10"}`}
+        } ${hidden ? "opacity-40" : ""} bg-white/10 ${selected ? "shadow-[0_0_0_1px_rgba(0,0,0,0.6)]" : ""}`}
         style={{ left: startSec * pxPerSec, width }}
       >
         {frames ? (
           <span
             aria-hidden
-            className={`pointer-events-none absolute inset-0 flex overflow-hidden rounded-md ${selected ? "opacity-60" : ""}`}
+            className="pointer-events-none absolute inset-0 flex overflow-hidden rounded-md"
           >
             {frames.map((src, i) => (
               // eslint-disable-next-line @next/next/no-img-element -- in-memory data URL frames
               <img key={i} src={src} alt="" draggable={false} className="h-full min-w-0 flex-1 object-cover" />
             ))}
-            <span className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/35 to-black/10" />
           </span>
         ) : null}
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 rounded-md ring-inset transition-shadow duration-100 motion-reduce:transition-none ${
+            selected ? "ring-2 ring-brand-primary" : `ring-1 ring-white/10 ${locked ? "" : "group-hover:ring-white/30"}`
+          }`}
+        />
         {!locked ? (
           <span
             data-trim="start"
@@ -409,14 +422,22 @@ function TimelineLayerRow({
               });
             }}
           >
-            <span className="pointer-events-none ml-1 h-full w-1.5 rounded-l-md bg-white/50" />
+            <span className={`pointer-events-none ml-1 h-full w-1.5 rounded-l-md ${selected ? "bg-white" : "bg-white/50"}`} />
           </span>
         ) : null}
-        <span
-          className={`relative min-w-0 flex-1 truncate px-2 text-left text-[10px] leading-8 ${frames ? "text-white" : ""}`}
-        >
-          {label}
-        </span>
+        {width >= 48 ? (
+          <span
+            className={`pointer-events-none absolute left-1 top-1 flex max-w-[calc(100%-0.5rem)] items-center gap-1 truncate rounded bg-black/60 px-1 text-[10px] leading-4 text-white ${
+              selected ? "font-semibold" : ""
+            }`}
+          >
+            {icon}
+            {locked ? <Lock className="h-3 w-3 shrink-0" aria-hidden /> : null}
+            {hidden ? <EyeOff className="h-3 w-3 shrink-0" aria-hidden /> : null}
+            <span className="truncate">{label}</span>
+            <span className={`tabular-nums opacity-80 ${selected ? "" : "hidden group-hover:inline"}`}>{timecode}</span>
+          </span>
+        ) : null}
         {!locked ? (
           <span
             data-trim="end"
@@ -435,7 +456,7 @@ function TimelineLayerRow({
               });
             }}
           >
-            <span className="pointer-events-none mr-1 h-full w-1.5 rounded-r-md bg-white/50" />
+            <span className={`pointer-events-none mr-1 h-full w-1.5 rounded-r-md ${selected ? "bg-white" : "bg-white/50"}`} />
           </span>
         ) : null}
       </div>
@@ -3151,6 +3172,7 @@ export default function EditorWorkspace() {
                       {overlayRows.map(({ overlay, label }) => (
                         <TimelineLayerRow
                           key={overlay.id}
+                          label={label}
                           selected={overlay.id === selectedId}
                           locked={overlay.locked}
                           hidden={overlay.hidden}
@@ -3162,7 +3184,8 @@ export default function EditorWorkspace() {
                           maxEnd={EDITOR_MAX_DURATION_SEC}
                           maxSpan={maxOverlayLayerDurationSec(overlay)}
                           inSec={overlay.kind === "video" ? overlay.inSec ?? 0 : undefined}
-                          selectedClassName="bg-white/25 ring-1 ring-white/40"
+                          icon={overlay.kind === "video" ? <Layers className="h-3 w-3 shrink-0" aria-hidden /> : overlay.kind === "image" ? <ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> : <Type className="h-3 w-3 shrink-0" aria-hidden />}
+                          timecode={`${formatTimecode(overlay.startSec)}–${formatTimecode(overlay.endSec)}`}
                           filmstrip={
                             overlay.kind === "video"
                               ? {
@@ -3183,14 +3206,6 @@ export default function EditorWorkspace() {
                           onTrimEnd={(endSec) =>
                             updateOverlay(overlay.id, { endSec }, { coalesceKey: `tl-trim-e:${overlay.id}` })
                           }
-                          label={
-                            <>
-                              <span className="truncate capitalize">{label}</span>
-                              <span className="ml-1 tabular-nums text-text-secondary">
-                                {formatTimecode(overlay.startSec)}–{formatTimecode(overlay.endSec)}
-                              </span>
-                            </>
-                          }
                         />
                       ))}
                     </div>
@@ -3204,6 +3219,7 @@ export default function EditorWorkspace() {
                         return (
                           <TimelineLayerRow
                             key={clip.id}
+                            label={label}
                             selected={clip.id === selectedId}
                             locked={clip.locked}
                             hidden={clip.hidden}
@@ -3215,7 +3231,8 @@ export default function EditorWorkspace() {
                             maxEnd={EDITOR_MAX_DURATION_SEC}
                             maxSpan={maxClipLayerDurationSec(clip)}
                             inSec={clip.inSec}
-                            selectedClassName="bg-brand-primary/80 text-white ring-1 ring-white/40"
+                            icon={<Film className="h-3 w-3 shrink-0" aria-hidden />}
+                            timecode={`${formatTimecode(clip.startSec)}–${formatTimecode(clip.endSec)} · ${formatTimecode(clipDur)}`}
                             filmstrip={{
                               storagePath: clip.storagePath,
                               localUrl: localUrlFor(clip),
@@ -3231,15 +3248,6 @@ export default function EditorWorkspace() {
                             }
                             onTrimEnd={(endSec) =>
                               updateClip(clip.id, { endSec }, { coalesceKey: `tl-trim-e:${clip.id}` })
-                            }
-                            label={
-                              <>
-                                <span className="truncate">{label}</span>
-                                <span className="ml-1 tabular-nums opacity-80">
-                                  {formatTimecode(clip.startSec)}–{formatTimecode(clip.endSec)}
-                                </span>
-                                <span className="ml-1 tabular-nums opacity-60">{formatTimecode(clipDur)}</span>
-                              </>
                             }
                           />
                         );
