@@ -63,6 +63,7 @@ import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
 import type { ImageNodeData } from "../node-data";
 import { describeGenerateHttpError } from "@/lib/canvas-generation-error";
+import { photoPromptLimitError } from "@/lib/skills";
 
 export type ImageFlowNode = Node<ImageNodeData, "image">;
 
@@ -115,7 +116,8 @@ export default function ImageNode({
   const quality = data.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
   const photoPricingKey = photoTierPricingKey(tier, data.resolution, quality);
   const cost = imageCredits(photoPricingKey, 1);
-  const canGenerate = prompt.length > 0 && !data.uploading && photoTiers.length > 0;
+  const limitError = photoPromptLimitError(prompt);
+  const canGenerate = prompt.length > 0 && !limitError && !data.uploading && photoTiers.length > 0;
 
   const patch = (next: Partial<ImageNodeData>) => updateNodeData(id, next);
 
@@ -383,6 +385,12 @@ export default function ImageNode({
               />
             )}
           </div>
+          {limitError && (
+            <p role="alert" className="mb-2 flex items-start gap-1.5 text-[11px] text-error">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              {limitError}
+            </p>
+          )}
           {data.error && (
             <p className="mb-2 flex items-start gap-1.5 text-[11px] text-error">
               <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />

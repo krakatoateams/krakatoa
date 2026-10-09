@@ -131,11 +131,21 @@ export function defaultSkillInputs(mediaType: SkillMediaType): SkillInputSlot[] 
 }
 
 export type SkillPhotoMode = "image" | "product" | "character";
-export const SKILL_PHOTO_PROMPT_MAX_CHARS = 1_500;
+// Single photo-prompt limit shared by the route, Canvas, photo-v2 and Skills.
+// Replicate's nano-banana schemas set no prompt maxLength, so this is our own cap.
+export const SKILL_PHOTO_PROMPT_MAX_CHARS = 8_000;
 export const SKILL_VIDEO_PROMPT_MAX_CHARS = 4_000;
 
 export function normalizeSkillUserPrompt(prompt: string, maxChars: number): string {
   return prompt.trim().slice(0, maxChars);
+}
+
+/** Inline/400 message for a photo prompt over the limit; null when it fits. */
+export function photoPromptLimitError(prompt: string): string | null {
+  const length = prompt.trim().length;
+  return length > SKILL_PHOTO_PROMPT_MAX_CHARS
+    ? `Your prompt is too long (${length.toLocaleString("en-US")} characters). The limit is ${SKILL_PHOTO_PROMPT_MAX_CHARS.toLocaleString("en-US")}.`
+    : null;
 }
 
 export type SkillFileIdentity = {
@@ -173,7 +183,7 @@ export function skillPhotoAttemptSignature(
     "skills:photo",
     input.skillId,
     input.mode,
-    normalizeSkillUserPrompt(input.prompt, SKILL_PHOTO_PROMPT_MAX_CHARS),
+    input.prompt.trim(),
     input.poseId,
     input.styleId,
     input.modelTier,
@@ -963,14 +973,18 @@ export function skillsSelfCheck(): void {
     }) !== photoAttemptSignature,
     "photo skill file lastModified must rotate the signature",
   );
-  const maxServerPrompt = "x".repeat(1_500);
+  const atLimit = "x".repeat(SKILL_PHOTO_PROMPT_MAX_CHARS);
+  assert(photoPromptLimitError(atLimit) === null, "prompt at the limit must pass");
+  assert(photoPromptLimitError(`  ${atLimit}\n `) === null, "limit counts the trimmed prompt");
+  assert(photoPromptLimitError("short") === null, "prompt under the limit must pass");
+  const overMsg = photoPromptLimitError(`${atLimit}x`) ?? "";
   assert(
-    skillPhotoAttemptSignature({ ...photoAttempt, prompt: maxServerPrompt }) ===
-      skillPhotoAttemptSignature({
-        ...photoAttempt,
-        prompt: `${maxServerPrompt} ignored by the server`,
-      }),
-    "photo skill signature must use the server-normalized prompt",
+    overMsg.includes("8,001") && overMsg.includes("8,000"),
+    "over-limit prompt must be refused with length and limit",
+  );
+  assert(
+    skillPhotoAttemptSignature({ ...photoAttempt, prompt: `${atLimit}x` }).includes(`${atLimit}x`),
+    "photo skill signature must keep the full prompt",
   );
   for (const changed of [
     { ...photoAttempt, mode: "character" as const },
