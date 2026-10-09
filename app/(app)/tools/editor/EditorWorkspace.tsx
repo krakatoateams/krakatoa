@@ -52,7 +52,6 @@ import {
   EDITOR_ASPECTS,
   EDITOR_CANVAS,
   EDITOR_MAX_DURATION_SEC,
-  DEFAULT_EDITOR_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
   EDITOR_MAX_UPLOAD_MB,
@@ -103,7 +102,9 @@ import {
   ZOOM_STEP,
   anchoredScrollLeft,
   clampScale,
+  FIT_MARGIN_SEC,
   fitPxPerSec,
+  openFitPxPerSec,
   formatRulerLabel,
   rulerIntervalSec,
   stepScale,
@@ -862,6 +863,20 @@ export default function EditorWorkspace() {
   /** scrollLeft to apply once the new width is laid out (anchored zoom). */
   const pendingScrollRef = useRef<number | null>(null);
   const preFitScaleRef = useRef<number | null>(null);
+  /** Set by loadProject; the first non-empty measured layout after it fits the timeline once. */
+  const fitOnOpenRef = useRef(false);
+  const setScaleAndRewind = useCallback((next: number) => {
+    const scroller = tracksScrollRef.current;
+    preFitScaleRef.current = null;
+    if (next !== pxPerSecRef.current) {
+      pendingScrollRef.current = 0;
+      pxPerSecRef.current = next;
+      setPxPerSec(next);
+    } else if (scroller) {
+      scroller.scrollLeft = 0;
+      if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = 0;
+    }
+  }, []);
   /** Latest zoom actions for the long-lived keydown listener. */
   const applyScaleRef = useRef<(next: number, anchorX: number) => void>(() => {});
   const measureViewportRef = useRef(() => {});
@@ -1203,6 +1218,7 @@ export default function EditorWorkspace() {
       setTitle(data.project.title);
       persistedTitleRef.current = data.project.title;
       setDoc(parsed);
+      fitOnOpenRef.current = true;
       setSelectedId(null);
       setPlayhead(0);
       setPlaying(false);
@@ -1220,6 +1236,8 @@ export default function EditorWorkspace() {
     setTitle(DEFAULT_EDITOR_TITLE);
     persistedTitleRef.current = DEFAULT_EDITOR_TITLE;
     setDoc(empty);
+    fitOnOpenRef.current = false;
+    setScaleAndRewind(DEFAULT_PX_PER_SEC);
     setSelectedId(null);
     setPlayhead(0);
     setPlaying(false);
@@ -1227,7 +1245,7 @@ export default function EditorWorkspace() {
     setFuture([]);
     lastSavedRef.current = fingerprintOf(DEFAULT_EDITOR_TITLE, empty);
     applyUrl(null);
-  }, [applyUrl]);
+  }, [applyUrl, setScaleAndRewind]);
 
   const handleSave = useCallback(async () => {
     if (status !== "authenticated") {
@@ -2066,9 +2084,23 @@ export default function EditorWorkspace() {
     return () => observer.disconnect();
   }, []);
 
-  // Headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
-  const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, Math.max(DEFAULT_EDITOR_DURATION_SEC, duration + 4));
-  const timelineWidth = Math.max(320, Math.ceil(timelineSec * pxPerSec));
+  // Fit once per project load, after the document is applied and the scroller has a width.
+  // Never re-runs on edits or resizes: the flag is only set by loadProject.
+  useLayoutEffect(() => {
+    if (!fitOnOpenRef.current) return;
+    const scroller = tracksScrollRef.current;
+    if (!scroller || scroller.clientWidth <= 0) return;
+    fitOnOpenRef.current = false;
+    if (doc.sequence.length === 0 && doc.overlays.length === 0) {
+      setScaleAndRewind(DEFAULT_PX_PER_SEC);
+      return;
+    }
+    setScaleAndRewind(openFitPxPerSec(duration, scroller.clientWidth - TIMELINE_PAD_PX * 2));
+  }, [doc, duration, rulerView.width, setScaleAndRewind]);
+
+  // Small headroom past the last layer so strips can be dragged longer; the project itself ends at `duration`.
+  const timelineSec = Math.min(EDITOR_MAX_DURATION_SEC, duration + FIT_MARGIN_SEC);
+  const timelineWidth = Math.max(rulerView.width - TIMELINE_PAD_PX * 2, 320, Math.ceil(timelineSec * pxPerSec));
   const laneWidth = duration * pxPerSec;
 
   return (
