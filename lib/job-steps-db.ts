@@ -85,6 +85,20 @@ export async function startJobStep(
   return (data as JobStep | null) ?? null;
 }
 
+/** Best-effort live progress for a running step (read by GET /api/generations/status). */
+export async function reportJobStepProgress(
+  profileId: string,
+  stepId: string,
+  output: Record<string, unknown>
+): Promise<void> {
+  await supabaseServer
+    .from(JOB_STEPS_TABLE)
+    .update({ output })
+    .eq("id", stepId)
+    .eq("profile_id", profileId)
+    .eq("status", "running");
+}
+
 /** Mark a step 'succeeded' with structured output (ownership-checked). */
 export async function finishJobStep(
   profileId: string,

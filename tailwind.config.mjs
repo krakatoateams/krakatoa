@@ -279,11 +279,16 @@ const config = {
         'fade-in': 'fade-in 1s ease-out',
         'marquee-left': 'marquee-left 60s linear infinite',
         'marquee-right': 'marquee-right 75s linear infinite',
+        'progress-sweep': 'progress-sweep 1.4s ease-in-out infinite',
       },
       keyframes: {
         'fade-in': {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'progress-sweep': {
+          from: { transform: 'translateX(-100%)' },
+          to: { transform: 'translateX(250%)' },
         },
         'marquee-left': {
           from: { transform: 'translateX(0)' },

@@ -127,6 +127,8 @@ export type EditorOverlay = {
   localMediaId?: string | null;
   /** Video overlays only: known source length; layer span cannot exceed it. */
   sourceDurationSec?: number | null;
+  /** Video overlays only: source in-point (default 0). */
+  inSec?: number;
   locked: boolean;
   hidden: boolean;
   muted?: boolean;
@@ -252,7 +254,7 @@ export function maxClipLayerDurationSec(clip: EditorClip): number {
 
 export function maxOverlayLayerDurationSec(overlay: EditorOverlay): number {
   if (overlay.kind === "video" && overlay.sourceDurationSec != null && overlay.sourceDurationSec > 0) {
-    return Math.max(0.1, snapTenth(overlay.sourceDurationSec));
+    return Math.max(0.1, snapTenth(overlay.sourceDurationSec - (overlay.inSec ?? 0)));
   }
   return EDITOR_MAX_DURATION_SEC;
 }
@@ -443,6 +445,21 @@ export function trimClipEndToPlayhead(
   };
 }
 
+/**
+ * Left-edge drag: start and source in-point move together so the end and source
+ * out-point stay fixed. `inSec` is undefined for layers with no source (image/text).
+ */
+export function trimStartBy(
+  startSec: number,
+  endSec: number,
+  inSec: number | undefined,
+  deltaSec: number
+): { startSec: number; inSec?: number } {
+  const lowest = inSec === undefined ? 0 : Math.max(0, snapTenth(startSec - inSec));
+  const next = snapTenth(clamp(startSec + deltaSec, lowest, Math.max(lowest, endSec - CLIP_MIN_SPAN_SEC)));
+  return { startSec: next, inSec: inSec === undefined ? undefined : snapTenth(inSec + next - startSec) };
+}
+
 /** Clamps an overlay to the composition cap and, for video, its source length. */
 export function clampOverlayToComposition(overlay: EditorOverlay): EditorOverlay {
   const duration = EDITOR_MAX_DURATION_SEC;
@@ -609,6 +626,7 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
     storagePath: kind === "text" ? null : asPath(o.storagePath),
     localMediaId: kind === "text" ? null : asLocalMediaId(o.localMediaId),
     sourceDurationSec: kind === "video" ? sourceDurationSec : undefined,
+    inSec: kind === "video" ? snapTenth(clamp(asFiniteNumber(o.inSec, 0), 0, EDITOR_MAX_DURATION_SEC)) : undefined,
     locked: Boolean(o.locked),
     hidden: Boolean(o.hidden),
     muted: kind === "video" ? Boolean(o.muted) : undefined,
@@ -1020,6 +1038,25 @@ export function editorDocumentSelfCheck(): void {
     sequence: [clipAt("placeholder", 0, 3), clipAt("stretched", 2.1, 16.7)],
     overlays: [ov("ovPlaceholder", "video", 1, 3), ov("ovStretched", "video", 0, 20)],
   };
+  // Left-edge drag math: end and source out-point stay fixed.
+  const tsA = trimStartBy(1, 11, 0, 2.04);
+  assert(tsA.startSec === 3 && tsA.inSec === 2, "drag right advances start and in together");
+  assert(trimStartBy(3, 11, 2, -9).startSec === 1 && trimStartBy(3, 11, 2, -9).inSec === 0, "drag left stops at source start");
+  assert(trimStartBy(0, 11, 0, -5).startSec === 0, "cannot go before timeline start");
+  assert(trimStartBy(1, 11, 0, 50).startSec === 10.8, "min span 0.2 kept");
+  assert(trimStartBy(1, 3, undefined, 0.5).inSec === undefined, "no source: in untouched");
+  assert(trimStartBy(3, 11, undefined, -9).startSec === 0, "no source: free down to 0");
+  const ovIn = parseEditorDocument({
+    v: EDITOR_DOCUMENT_VERSION,
+    aspect: "9:16",
+    sequence: [],
+    overlays: [
+      { id: "a", kind: "video", startSec: 0, endSec: 2, inSec: 1.23 },
+      { id: "b", kind: "video", startSec: 0, endSec: 2 },
+      { id: "c", kind: "image", startSec: 0, endSec: 2, inSec: 4 },
+    ],
+  });
+  assert(ovIn?.overlays[0].inSec === 1.2 && ovIn.overlays[1].inSec === 0 && ovIn.overlays[2].inSec === undefined, "overlay inSec sanitised");
   const measureAll = (doc: EditorDocument, sec: number) =>
     [...doc.sequence, ...doc.overlays].reduce(
       (current, layer) => withProbedLayerSource(current, layer.id, sec, isPlaceholderSpan),

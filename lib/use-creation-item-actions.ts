@@ -16,7 +16,9 @@ export function creationItemDownloadFilename(
 ): string {
   const ext =
     item.mediaType === "video"
-      ? "mp4"
+      ? mimeType?.includes("webm") || item.storagePath?.toLowerCase().endsWith(".webm")
+        ? "webm"
+        : "mp4"
       : mimeType?.includes("png")
         ? "png"
         : mimeType?.includes("webp")
@@ -224,6 +226,13 @@ export function creationItemActionsSelfCheck(): void {
     creationItemDownloadFilename(videoItem as CreationHistoryItem) ===
       "my-reel-abc12345.mp4",
     "video uses mp4 extension"
+  );
+
+  assert(
+    creationItemDownloadFilename({ ...videoItem, storagePath: "u/videos/v.webm" } as CreationHistoryItem) ===
+      "my-reel-abc12345.webm" &&
+      creationItemDownloadFilename(videoItem as CreationHistoryItem, "video/webm") === "my-reel-abc12345.webm",
+    "webm video keeps its extension"
   );
 
   const pngItem = {
