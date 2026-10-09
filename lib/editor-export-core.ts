@@ -1,5 +1,5 @@
 import "server-only";
-import { Sandbox } from "@vercel/sandbox";
+import { Sandbox, Snapshot } from "@vercel/sandbox";
 import { supabaseServer } from "@/lib/supabase-server";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import {
@@ -22,7 +22,7 @@ import {
 import { LOCK_TTL_MS } from "@/lib/generation-idempotency-pure";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { probeAudioSources } from "@/lib/editor-audio-probe";
-import { EDITOR_FONT_URL } from "@/lib/editor-font";
+import { FFMPEG_BIN, FONT_FILE, WORK, ffmpegHasCapabilities, installPinnedTools } from "@/lib/editor-export-pin";
 import {
   audibleLayerUrls,
   buildEditorFfmpegGraph,
@@ -32,7 +32,9 @@ import type { EditorDocument } from "@/lib/editor-document";
 import { EXPORT_FORMAT_SPEC, exportOutputFilename, sanitizeExportTitle, type EditorExportSettings } from "@/lib/editor-export-settings";
 import {
   classifyEditorExportFailure,
+  classifySandboxCreateError,
   editorExportErrorJson,
+  editorExportTimeoutMs,
   editorExportVcpus,
   signedUploadArgs,
   type EditorExportErrorCode,
@@ -64,18 +66,11 @@ export type EncodeStart =
   | { ok: true; sandboxName: string; cmdId: string; durationSec: number; width: number; height: number }
   | { ok: false; code: EditorExportErrorCode };
 
-/** Sandbox lifetime = the export's time budget. Plan max: 45 min Hobby, 5 h Pro/Enterprise. */
-export const EDITOR_EXPORT_TIMEOUT_MS = Number(process.env.EDITOR_EXPORT_TIMEOUT_MS) || 3 * 60 * 60 * 1000;
+/** Sandbox lifetime = the export's time budget: 40 min default, clamped to the plan max (45 min Hobby). */
+export const EDITOR_EXPORT_TIMEOUT_MS = editorExportTimeoutMs(process.env);
 
-const WORK = "export";
 const outFile = (p: EditorExportParams) => `${WORK}/${exportOutputFilename(p.settings.format)}`;
 const PROGRESS_FILE = `${WORK}/progress.txt`;
-const FONT_FILE = `${WORK}/Poppins.ttf`;
-const FFMPEG = `${WORK}/ff/ffmpeg`;
-// ponytail: third-party static build fetched per run; host it ourselves or bake a Sandbox snapshot if this becomes flaky.
-const FFMPEG_URL =
-  process.env.EDITOR_EXPORT_FFMPEG_URL ||
-  "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
 
 const requiredEncoders = (s: EditorExportSettings) => {
   const f = EXPORT_FORMAT_SPEC[s.format];
@@ -93,21 +88,24 @@ async function run(sandbox: Sandbox, cmd: string, args: string[]): Promise<{ ok:
   return { ok: r.exitCode === 0, stdout: await r.stdout() };
 }
 
-/** Download FFmpeg + font into the sandbox and assert the build has what the graph needs. */
+/**
+ * Boot from the baked snapshot when `EDITOR_EXPORT_SNAPSHOT_ID` is set (no download at export time); otherwise
+ * install the pinned, SHA-256-verified build (local dev, previews). Either way the capability check runs and
+ * every failure is closed: FFmpeg is never executed unverified.
+ */
+async function createSandbox(p: EditorExportParams): Promise<Sandbox> {
+  const snapshotId = process.env.EDITOR_EXPORT_SNAPSHOT_ID;
+  const base = { name: sandboxName(p), timeout: EDITOR_EXPORT_TIMEOUT_MS, resources: { vcpus: editorExportVcpus(p.settings, process.env) }, persistent: false };
+  if (!snapshotId) return Sandbox.create(base);
+  const snap = await Snapshot.get({ snapshotId });
+  if (snap.status !== "created") throw new Error("snapshot not usable");
+  return Sandbox.create({ ...base, source: { type: "snapshot", snapshotId } });
+}
+
 async function prepareSandbox(sandbox: Sandbox, needsFont: boolean, encoders: string[]): Promise<boolean> {
-  await sandbox.mkDir(WORK);
-  await sandbox.mkDir(`${WORK}/ff`);
-  if (!(await run(sandbox, "curl", ["-fsSL", "--retry", "3", "-o", `${WORK}/ff.tar.xz`, FFMPEG_URL])).ok) return false;
-  if (!(await run(sandbox, "tar", ["-xJf", `${WORK}/ff.tar.xz`, "-C", `${WORK}/ff`, "--strip-components=1"])).ok) return false;
-  const enc = await run(sandbox, FFMPEG, ["-hide_banner", "-encoders"]);
-  const filt = await run(sandbox, FFMPEG, ["-hide_banner", "-filters"]);
-  if (!enc.ok || !filt.ok || !/\bdrawtext\b/.test(filt.stdout)) return false;
-  // Whole-word match so e.g. "libvpx-vp9" is not satisfied by "libvpx".
-  if (!encoders.every((e) => new RegExp(`\\s${e}\\s`).test(enc.stdout))) return false;
-  if (needsFont && !(await run(sandbox, "curl", ["-fsSL", "--retry", "3", "-o", FONT_FILE, EDITOR_FONT_URL])).ok) {
-    return false;
-  }
-  return true;
+  const exec = (cmd: string, args: string[]) => run(sandbox, cmd, args);
+  if (!process.env.EDITOR_EXPORT_SNAPSHOT_ID && !(await installPinnedTools(exec, needsFont))) return false;
+  return ffmpegHasCapabilities(exec, encoders, needsFont);
 }
 
 export async function beginStepCore(p: EditorExportParams, key: string, name: string): Promise<string | null> {
@@ -138,12 +136,12 @@ export async function startEncodeCore(p: EditorExportParams): Promise<EncodeStar
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings);
     const hasFont = Boolean(graph.inputFiles.in_font);
 
-    sandbox = await Sandbox.create({
-      name: sandboxName(p),
-      timeout: EDITOR_EXPORT_TIMEOUT_MS,
-      resources: { vcpus: editorExportVcpus(p.settings) },
-      persistent: false,
-    });
+    try {
+      sandbox = await createSandbox(p);
+    } catch (e) {
+      logSafe("sandbox create failed", e);
+      return { ok: false, code: classifySandboxCreateError(e) };
+    }
     if (!(await prepareSandbox(sandbox, hasFont, requiredEncoders(p.settings)))) throw new Error("sandbox preparation failed");
 
     const values: Record<string, string> = { out_v: outFile(p), in_font: FONT_FILE };
@@ -151,7 +149,7 @@ export async function startEncodeCore(p: EditorExportParams): Promise<EncodeStar
       if (alias !== "in_font") values[alias] = url;
     }
     const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", PROGRESS_FILE, ...localizeFfmpegArgs(graph.args, values)];
-    const cmd = await sandbox.runCommand({ cmd: FFMPEG, args, detached: true });
+    const cmd = await sandbox.runCommand({ cmd: FFMPEG_BIN, args, detached: true });
     return { ok: true, sandboxName: sandbox.name, cmdId: cmd.cmdId, durationSec: graph.durationSec, width: graph.width, height: graph.height };
   } catch (e) {
     logSafe("encode start failed", e);
