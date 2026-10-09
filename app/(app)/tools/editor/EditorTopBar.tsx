@@ -1,12 +1,12 @@
 "use client";
 
-import { EXPORT_BUTTON_ID } from "./EditorExportProgressDialog";
 import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { FolderKanban, Loader2, Pencil, Save } from "lucide-react";
 import CreditBadge from "@/components/CreditBadge";
 import { GENERATE_BTN_CLASS } from "@/components/studio/CreditButton";
+import { EXPORT_BUTTON_ID } from "./EditorExportProgressDialog";
 
 export default function EditorTopBar({
   title,

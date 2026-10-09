@@ -6,15 +6,13 @@ export function ProgressBar({
   value,
   label,
   valueText,
-  tone = "brand",
 }: {
   value?: number | null;
   label: string;
   valueText?: string;
-  tone?: "brand" | "success" | "error";
 }) {
   const determinate = typeof value === "number";
-  const fill = tone === "success" ? "bg-success" : tone === "error" ? "bg-error" : "bg-brand-primary";
+  const fill = "bg-brand-primary";
   return (
     <div
       role="progressbar"

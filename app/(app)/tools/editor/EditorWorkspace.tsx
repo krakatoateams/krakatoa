@@ -1944,7 +1944,8 @@ export default function EditorWorkspace() {
           "Idempotency-Key": attempt.key,
         },
         body: JSON.stringify({ title: exportName, document: exportDoc, exportUploads, settings: exportSettings }),
-      });
+        // A dropped connection is not a terminal answer: treat it like 202 and poll the attempt's status.
+      }).catch(() => new Response(null, { status: 202 }));
       let data = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
@@ -2076,7 +2077,7 @@ export default function EditorWorkspace() {
     void fetch("/api/generations/status", { headers: { "Idempotency-Key": key }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data || data.status !== "started") return;
+        if (cancelled || !data || (data.status !== "started" && data.status !== "succeeded")) return;
         resumedExportRef.current = true;
         setExporting(true);
         setExportProgress({
@@ -2094,6 +2095,7 @@ export default function EditorWorkspace() {
         });
         setExportProgressOpen(true);
         setPollKey(key!);
+        if (data.status === "succeeded") applyExportStatus(data);
       })
       .catch(() => {});
     return () => {

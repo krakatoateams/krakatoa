@@ -28,11 +28,6 @@ export function encodePct(outTimeUs: number, totalSec: number): number | null {
   return Math.min(99, Math.floor((outTimeUs / 1e6 / totalSec) * 100));
 }
 
-export function uploadPct(done: number, total: number): number | null {
-  if (total <= 0) return null;
-  return Math.min(99, Math.floor((Math.min(done, total) / total) * 100));
-}
-
 /** Read the `progress` object from an untrusted status payload; null when malformed. */
 export function parseExportProgress(raw: unknown): ExportProgress | null {
   if (!raw || typeof raw !== "object") return null;
@@ -73,7 +68,6 @@ export function editorExportProgressSelfCheck(): void {
   assert(encodePct(10e6, 10) === 99, "never 100 before success");
   assert(encodePct(99e6, 10) === 99, "overshoot clamps");
   assert(encodePct(1, 0) === null && encodePct(NaN, 5) === null, "bad input is indeterminate");
-  assert(uploadPct(2, 5) === 40 && uploadPct(5, 5) === 99 && uploadPct(0, 0) === null, "upload files fraction");
   assert(parseExportProgress({ stage: "bogus" }) === null, "unknown stage rejected");
   assert(parseExportProgress({ stage: "encoding", progressPct: 150, updatedAt: "x" })?.progressPct === 99, "pct clamped");
   assert(parseExportProgress({ stage: "preparing", progressPct: null })?.progressPct === null, "null stays indeterminate");
