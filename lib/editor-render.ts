@@ -10,6 +10,7 @@
 
 import {
   DEFAULT_EXPORT_SETTINGS,
+  EXPORT_RESOLUTIONS,
   EXPORT_FORMAT_SPEC,
   exportAudioArgs,
   exportOutputFilename,
@@ -115,6 +116,7 @@ function placeClipFilter(
   clip: EditorClip,
   width: number,
   height: number,
+  scaleFlags: string,
   label: string
 ): string {
   const start = round2(clip.inSec);
@@ -122,7 +124,7 @@ function placeClipFilter(
   const at = round2(clip.startSec);
   return (
     `[${inputIndex}:v]trim=start=${start}:end=${end},setpts=PTS-STARTPTS+${at}/TB,` +
-    `fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+    `fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease${scaleFlags},` +
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[${label}]`
   );
 }
@@ -150,6 +152,7 @@ export function buildEditorFfmpegGraph(
   // Overlay coordinates remain normalized to the preview canvas, but composition happens at the requested output size.
   const { w: width, h: height } = out;
   const textScale = out.h / canvas.h;
+  const scaleFlags = out.w === canvas.w && out.h === canvas.h ? "" : ":flags=lanczos";
   const durationSec = round2(sequenceDurationSec(doc));
   const sequence = sortedSequence(doc).filter((clip) => !clip.hidden);
   const overlays = sortedOverlays(doc).filter((overlay) => !overlay.hidden);
@@ -171,7 +174,7 @@ export function buildEditorFfmpegGraph(
     inputFiles[alias] = url;
     addInput(alias);
     const label = `v${clipOverlays.length}`;
-    filters.push(placeClipFilter(inputIndex, clip, width, height, label));
+    filters.push(placeClipFilter(inputIndex, clip, width, height, scaleFlags, label));
     clipOverlays.push({ clip, index: inputIndex, label });
     inputIndex += 1;
   }
@@ -267,11 +270,11 @@ export function buildEditorFfmpegGraph(
     const dur = overlayDurationSec(overlay);
     if (mapped.kind === "video") {
       filters.push(
-        `[${mapped.index}:v]trim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + dur)},setpts=PTS-STARTPTS+${round2(overlay.startSec)}/TB,scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
+        `[${mapped.index}:v]trim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + dur)},setpts=PTS-STARTPTS+${round2(overlay.startSec)}/TB,scale=${ow}:${oh}:force_original_aspect_ratio=decrease${scaleFlags},setsar=1,format=yuv420p[${ovLabel}]`
       );
     } else {
       filters.push(
-        `[${mapped.index}:v]scale=${ow}:${oh}:force_original_aspect_ratio=decrease,setsar=1,format=yuv420p[${ovLabel}]`
+        `[${mapped.index}:v]scale=${ow}:${oh}:force_original_aspect_ratio=decrease${scaleFlags},setsar=1,format=yuv420p[${ovLabel}]`
       );
     }
     filters.push(`[${current}][${ovLabel}]overlay=${x}:${y}:${enable}[${next}]`);
@@ -482,7 +485,7 @@ export function editorRenderSelfCheck(): void {
   );
   assert(webm.width === 2160 && webm.height === 3840, "4K 9:16 graph dimensions");
   assert(webm.command.includes("color=c=black:s=2160x3840"), "4K composes on its output canvas");
-  assert(webm.command.includes("scale=2160:3840:force_original_aspect_ratio=decrease"), "4K clips scale from source directly to output");
+  assert(webm.command.includes("scale=2160:3840:force_original_aspect_ratio=decrease:flags=lanczos"), "4K clips scale from source directly to output with Lanczos");
   assert(webm.command.includes("fontsize=120") && webm.command.includes("shadowx=6:shadowy=6"), "4K text scales from the preview coordinate space");
   assert(!webm.command.includes("scale=720:1280:force_original_aspect_ratio=decrease"), "4K never routes clips through the 720p canvas");
   assert(webm.outputFiles.out_v === "editor_export.webm" && EXPORT_FORMAT_SPEC.webm.mime === "video/webm", "webm ext/mime from table");
@@ -506,6 +509,21 @@ export function editorRenderSelfCheck(): void {
     golden720("9:16") === `-i {{in_s0}} -filter_complex "color=c=black:s=720x1280:d=1:r=30,format=yuv420p[base];[0:v]trim=start=0:end=1,setpts=PTS-STARTPTS+0/TB,fps=30,scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v0];[base][v0]overlay=0:0:enable='between(t,0,1)'[c0];[c0]fps=30,format=yuv420p[vfinal]" -map "[vfinal]" -t 1 -c:v libx264 -crf 23 -pix_fmt yuv420p -an -movflags +faststart {{out_v}}`,
     "9:16 720p command stays byte-identical"
   );
+  for (const aspect of ["9:16", "1:1", "16:9"] as const) {
+    for (const resolution of EXPORT_RESOLUTIONS) {
+      const output = exportDimensions(aspect, resolution);
+      const aspectDoc: EditorDocument = {
+        ...doc,
+        aspect,
+        overlays: [{ ...doc.overlays[0], text: "First line\\nSecond line" }],
+      };
+      const rendered = buildEditorFfmpegGraph(aspectDoc, urls, new Set(), { ...DEFAULT_EXPORT_SETTINGS, resolution });
+      const layout = textOverlayLayout(aspectDoc.overlays[0], output, output.h / EDITOR_CANVAS[aspect].h);
+      assert(rendered.width === output.w && rendered.height === output.h && output.w % 2 === 0 && output.h % 2 === 0, `${aspect} ${resolution}p output dimensions`);
+      assert(rendered.command.includes(`color=c=black:s=${output.w}x${output.h}`), `${aspect} ${resolution}p composes at output dimensions`);
+      assert(rendered.command.includes(`x=${layout.box.x}+(${layout.box.w}-text_w)/2`) && rendered.command.includes(`y=${layout.box.y}+(${layout.box.h}-text_h)/2`), `${aspect} ${resolution}p keeps multiline text centered in its relative box`);
+    }
+  }
 
   // --- In-system run: placeholders resolve to argv entries (no shell) ---
   const local = localizeFfmpegArgs(graph.args, {
