@@ -3510,10 +3510,12 @@ export default function EditorWorkspace() {
                 }}
               >
                 <div
-                  className="relative min-h-full"
+                  className="relative min-h-full select-none"
                   style={{ width: timelineWidth }}
                   onPointerDown={(event) => {
                     if (event.button !== 0) return;
+                    event.preventDefault();
+                    window.getSelection()?.removeAllRanges();
                     const content = event.currentTarget;
                     const origin = content.getBoundingClientRect();
                     const x0 = event.clientX - origin.left;
