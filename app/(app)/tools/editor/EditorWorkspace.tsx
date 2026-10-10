@@ -3311,11 +3311,16 @@ export default function EditorWorkspace() {
                   onPointerDown={(event) => scrubFromPointer(event, event.currentTarget)}
                 >
                   <div
-                    className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
+                    className="absolute top-0 z-20 flex h-6 w-6 -translate-x-1/2 cursor-ew-resize touch-none select-none items-start justify-center"
                     style={{ left: playhead * pxPerSec }}
                     aria-hidden
                   >
-                    {formatTimecode(playhead)}
+                    <svg width="14" height="18" viewBox="0 0 14 18" className="text-info drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                      <path d="M2.5 1h9a1.5 1.5 0 0 1 1.5 1.5v8L7 17 1 10.5v-8A1.5 1.5 0 0 1 2.5 1Z" fill="currentColor" stroke="rgba(0,0,0,0.65)" strokeWidth="1.5" strokeLinejoin="round" />
+                    </svg>
+                    <span className="pointer-events-none absolute left-full top-1 ml-0.5 whitespace-nowrap text-[9px] font-semibold leading-none tabular-nums text-info">
+                      {formatTimecode(playhead)}
+                    </span>
                   </div>
                   {(() => {
                     const interval = rulerIntervalSec(pxPerSec);
@@ -3573,7 +3578,7 @@ export default function EditorWorkspace() {
                     />
                   ) : null}
                   <div
-                    className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info"
+                    className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info shadow-[0_0_0_0.5px_rgba(0,0,0,0.35)]"
                     style={{ left: playhead * pxPerSec }}
                   />
                   <div
