@@ -7,6 +7,8 @@
  *   moov-at-end files.
  * - WebM / Matroska: the Tracks element sits in the file head; look for an
  *   audio CodecID (`A_…`).
+ * - MP3 / ADTS AAC / WAV (Editor audio layers): the file itself is audio, so
+ *   an ID3 tag, an MPEG frame sync or a RIFF/WAVE header is enough.
  *
  * Structurally undeterminable sources (unknown container, no Range support,
  * oversized moov) count as silent with a warning, so a missing audio stream can
@@ -114,10 +116,19 @@ async function fetchRange(
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/** Audio-only containers: ID3-tagged MP3, a bare MPEG/ADTS frame sync, or RIFF/WAVE. */
+export function isAudioFileHead(head: Uint8Array): boolean {
+  if (head.length < 12) return false;
+  if (ascii(head, 0, 3) === "ID3") return true;
+  if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return true;
+  return ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WAVE";
+}
+
 async function probe(url: string, fetchImpl: FetchLike, signal: AbortSignal): Promise<boolean | null> {
   const head = await fetchRange(fetchImpl, url, 0, HEAD_BYTES - 1, signal);
   if (!head || head.length < 8) return null;
   if (indexOfBytes(head.subarray(0, 4), EBML_MAGIC) === 0) return webmHeadHasAudio(head);
+  if (isAudioFileHead(head)) return true;
 
   let offset = 0;
   for (let n = 0; n < MAX_TOP_LEVEL_BOXES; n++) {
@@ -292,6 +303,15 @@ export async function editorAudioProbeSelfCheck(): Promise<void> {
     fakeFetch(url === "a" ? faststart : concat(ftyp, videoOnlyMoov))(url, init)
   );
   assert(set.has("a") && !set.has("b") && set.size === 1, "probeAudioSources dedupes and filters");
+
+  // Audio-layer files (#359)
+  const pad = new Uint8Array(64);
+  assert(await sourceHasAudio("x", fakeFetch(concat(bytesOf("ID3\x04\x00"), pad))), "ID3-tagged MP3 has audio");
+  assert(await sourceHasAudio("x", fakeFetch(concat(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), pad))), "bare MP3 frame sync has audio");
+  assert(await sourceHasAudio("x", fakeFetch(concat(new Uint8Array([0xff, 0xf1, 0x50, 0x80]), pad))), "ADTS AAC has audio");
+  assert(await sourceHasAudio("x", fakeFetch(concat(bytesOf("RIFF\x24\x00\x00\x00WAVEfmt "), pad))), "WAV has audio");
+  assert(!isAudioFileHead(concat(bytesOf("RIFF\x24\x00\x00\x00AVI "), pad)), "RIFF AVI is not an audio file");
+  assert(!isAudioFileHead(faststart), "MP4 still goes through the moov walk");
 }
 
 if (require.main === module) {

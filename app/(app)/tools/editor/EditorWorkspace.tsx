@@ -21,6 +21,7 @@ import {
   Play,
   Plus,
   Maximize2,
+  Music,
   Repeat,
   Scissors,
   SkipBack,
@@ -74,11 +75,14 @@ import {
   DEFAULT_EDITOR_TITLE,
   EDITOR_ASPECTS,
   EDITOR_CANVAS,
+  EDITOR_MAX_AUDIO,
   EDITOR_MAX_DURATION_SEC,
   EDITOR_MAX_OVERLAYS,
   EDITOR_MAX_SEQUENCE,
   EDITOR_MAX_UPLOAD_MB,
   validateEditorUploadFile,
+  editorUploadMimeType,
+  normalizeAudioVolume,
   canSplitClip,
   canTrimClipEnd,
   canTrimClipStart,
@@ -112,6 +116,7 @@ import {
   withProbedLayerSource,
   withProbedOverlaySource,
   withProjectAspect,
+  type EditorAudioLayer,
   type EditorClip,
   type EditorDocument,
   type EditorOverlay,
@@ -300,6 +305,27 @@ function clipFromLibrary(item: CreationHistoryItem, order: number, playheadSec: 
 
 function clipFromDevice(localMediaId: string, order: number, playheadSec: number): EditorClip {
   return newClipLayer({ creationId: null, storagePath: null, localMediaId }, order, playheadSec);
+}
+
+type MediaLayer = EditorClip | EditorOverlay | EditorAudioLayer;
+
+function audioFromDevice(localMediaId: string, name: string, playheadSec: number): EditorAudioLayer {
+  // Placeholder span until the source length is probed, like a new clip.
+  const { start, end } = placeLayer(playheadSec, 3);
+  return {
+    id: newId("audio"),
+    name: normalizeLayerName(name.replace(/\.[^.]+$/, "")),
+    creationId: null,
+    storagePath: null,
+    localMediaId,
+    startSec: start,
+    endSec: end,
+    inSec: 0,
+    sourceDurationSec: null,
+    volume: 1,
+    muted: false,
+    locked: false,
+  };
 }
 
 function TimelineLayerRow({
@@ -505,6 +531,8 @@ function LayerPanelRow({
   hidden,
   canMute = false,
   muted = false,
+  volume,
+  onVolumeChange,
   icon,
   label,
   dragOver,
@@ -525,6 +553,9 @@ function LayerPanelRow({
   hidden: boolean;
   canMute?: boolean;
   muted?: boolean;
+  /** Audio layers: 0–1 gain shown as a compact slider. */
+  volume?: number;
+  onVolumeChange?: (volume: number) => void;
   icon: ReactNode;
   label: string;
   dragOver: boolean;
@@ -533,7 +564,7 @@ function LayerPanelRow({
   onReorderHover: (targetId: string | null) => void;
   onReorderCommit: (targetId: string | null) => void;
   onToggleLock: () => void;
-  onToggleHidden: () => void;
+  onToggleHidden?: () => void;
   onToggleMute?: () => void;
   /** Set when the layer's device file is missing from this browser. */
   onRepick?: () => void;
@@ -641,6 +672,23 @@ function LayerPanelRow({
             Re-pick
           </button>
         ) : null}
+        {volume !== undefined && onVolumeChange ? (
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={Math.round(volume * 100)}
+            disabled={locked}
+            onChange={(event) => onVolumeChange(Number(event.target.value) / 100)}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            aria-label="Layer volume"
+            aria-valuetext={`${Math.round(volume * 100)}%`}
+            title={`Volume ${Math.round(volume * 100)}%`}
+            className="h-1 w-12 cursor-pointer accent-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
+          />
+        ) : null}
         {canMute && onToggleMute ? (
           <button
             type="button"
@@ -655,18 +703,20 @@ function LayerPanelRow({
             {muted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleHidden();
-          }}
-          className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
-          aria-label={hidden ? "Show layer" : "Hide layer"}
-          title={hidden ? "Show layer" : "Hide layer"}
-        >
-          {hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-        </button>
+        {onToggleHidden ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleHidden();
+            }}
+            className="rounded p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
+            aria-label={hidden ? "Show layer" : "Hide layer"}
+            title={hidden ? "Show layer" : "Hide layer"}
+          >
+            {hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={(event) => {
@@ -819,6 +869,45 @@ function SignedVideo({
         const video = event.currentTarget;
         onNaturalSize?.(video.videoWidth, video.videoHeight);
       }}
+    />
+  );
+}
+
+/** Hidden audio element kept on the timeline clock: mounted only while its layer covers the playhead. */
+function AudioLayerPlayer({
+  storagePath,
+  localUrl,
+  currentTime,
+  playing,
+  volume,
+  audioRef,
+}: {
+  storagePath: string | null;
+  localUrl: string | null;
+  currentTime: number;
+  playing: boolean;
+  volume: number;
+  audioRef: (node: HTMLAudioElement | null) => void;
+}) {
+  const url = useSignedMediaUrl(localUrl ? null : storagePath, localUrl);
+  const ref = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !url) return;
+    if (Math.abs(el.currentTime - currentTime) > 0.18) el.currentTime = Math.max(0, currentTime);
+    el.volume = Math.min(1, Math.max(0, volume));
+    if (playing) void el.play().catch(() => undefined);
+    else el.pause();
+  }, [currentTime, playing, url, volume]);
+  if (!url) return null;
+  return (
+    <audio
+      ref={(node) => {
+        ref.current = node;
+        audioRef(node);
+      }}
+      src={url}
+      preload="auto"
     />
   );
 }
@@ -988,6 +1077,7 @@ export default function EditorWorkspace() {
   const [rulerView, setRulerView] = useState({ width: 0, bucket: 0 });
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const underlyingVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const fittedOverlaysRef = useRef<Set<string>>(new Set());
   const [playing, setPlaying] = useState(false);
   // Session-only: not part of EditorDocument, autosave, undo history, or export.
@@ -1018,7 +1108,7 @@ export default function EditorWorkspace() {
   const playStartHead = useRef(0);
   const creationLinkRef = useRef(false);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const uploadKindRef = useRef<"sequence" | "image" | "video">("sequence");
+  const uploadKindRef = useRef<"sequence" | "image" | "video" | "audio">("sequence");
   const repickLayerIdRef = useRef<string | null>(null);
   // Device files for this session (and the export upload), by localMediaId.
   const localFilesRef = useRef<Map<string, File>>(new Map());
@@ -1056,11 +1146,12 @@ export default function EditorWorkspace() {
   };
 
   const duration = sequenceDurationSec(doc);
-  const localUrlFor = (layer: EditorClip | EditorOverlay): string | null =>
+  const localUrlFor = (layer: MediaLayer): string | null =>
     layer.localMediaId ? localUrls[layer.localMediaId] ?? null : null;
-  const isMissingMedia = (layer: EditorClip | EditorOverlay): boolean =>
+  const isMissingMedia = (layer: MediaLayer): boolean =>
     isLocalOnlyLayer(layer) && localUrls[layer.localMediaId!] === null;
-  const hasMissingMedia = [...doc.sequence, ...doc.overlays].some(isMissingMedia);
+  const audioLayers = doc.audio ?? [];
+  const hasMissingMedia = [...doc.sequence, ...doc.overlays, ...audioLayers].some(isMissingMedia);
   const exportCheck =
     validateEditorExport(doc, { allowLocal: true }) ??
     (hasMissingMedia ? { code: "LOCAL_MEDIA_MISSING", message: "Re-pick missing media to export." } : null);
@@ -1102,6 +1193,11 @@ export default function EditorWorkspace() {
   );
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
+  const selectedAudio = audioLayers.find((a) => a.id === selectedId) ?? null;
+  // Audio layers sounding at the playhead (end-exclusive, like clips).
+  const audibleAudio = audioLayers.filter(
+    (a) => !a.muted && a.volume > 0 && playhead >= a.startSec && playhead < a.endSec
+  );
   const navClip = selectedClip ?? active?.clip ?? null;
 
   const canSplitSelected = selectedClip ? canSplitClip(selectedClip, playhead) : false;
@@ -1163,8 +1259,10 @@ export default function EditorWorkspace() {
       return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
+  const audioRows = audioLayers.map((layer, i) => ({ layer, label: resolveLayerLabel(layer, i) }));
   // A manual resize wins; until then the timeline fits every layer plus one empty row.
-  const timelineHeight = tracksHeight ?? editorTimelineDefaultHeight(overlayRows.length, clipRows.length);
+  // ponytail: audio rows count with the overlay group (one shared 8 px gap); exact enough for a default.
+  const timelineHeight = tracksHeight ?? editorTimelineDefaultHeight(overlayRows.length + audioRows.length, clipRows.length);
 
   // Panel/lane rows display frontmost-on-top, i.e. the reverse of ascending order/z.
   // Reorder against that same displayed order so a drop lands where it visually looks like it did.
@@ -1287,7 +1385,7 @@ export default function EditorWorkspace() {
   }, []);
 
   const removeLayer = useCallback(
-    (kind: "clip" | "overlay", id: string) => {
+    (kind: "clip" | "overlay" | "audio", id: string) => {
       patchDoc((current) => ({
         ...current,
         sequence:
@@ -1295,6 +1393,7 @@ export default function EditorWorkspace() {
             ? current.sequence.filter((c) => c.id !== id).map((c, order) => ({ ...c, order }))
             : current.sequence,
         overlays: kind === "overlay" ? current.overlays.filter((o) => o.id !== id) : current.overlays,
+        audio: kind === "audio" ? (current.audio ?? []).filter((a) => a.id !== id) : current.audio,
       }));
       setSelectedId((current) => (current === id ? null : current));
     },
@@ -1305,7 +1404,8 @@ export default function EditorWorkspace() {
     const id = selectedIdRef.current;
     if (!id) return;
     const isClip = docRef.current.sequence.some((c) => c.id === id);
-    removeLayer(isClip ? "clip" : "overlay", id);
+    const isAudio = (docRef.current.audio ?? []).some((a) => a.id === id);
+    removeLayer(isClip ? "clip" : isAudio ? "audio" : "overlay", id);
   }, [removeLayer]);
 
   const loadProject = useCallback(
@@ -1498,7 +1598,9 @@ export default function EditorWorkspace() {
   const resolvingLocalRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const usedIds = (current: EditorDocument) =>
-      new Set([...current.sequence, ...current.overlays].flatMap((layer) => layer.localMediaId ?? []));
+      new Set(
+        [...current.sequence, ...current.overlays, ...(current.audio ?? [])].flatMap((layer) => layer.localMediaId ?? [])
+      );
     const ids = usedIds(doc);
     const urls = localUrlsRef.current;
     const unused = Object.keys(urls).filter((id) => !ids.has(id));
@@ -1646,6 +1748,7 @@ export default function EditorWorkspace() {
           // SignedVideo's effect also plays these; starting them here keeps the user gesture.
           if (next) {
             for (const v of underlyingVideosRef.current.values()) void v.play().catch(() => undefined);
+            for (const a of audioElsRef.current.values()) void a.play().catch(() => undefined);
           }
           return next;
         });
@@ -1668,7 +1771,7 @@ export default function EditorWorkspace() {
   const probeLayerSource = useCallback(async (
     layerId: string,
     storagePath: string | null,
-    fillSpan: (layer: EditorClip | EditorOverlay) => boolean,
+    fillSpan: (layer: MediaLayer) => boolean,
     apply: (updater: (current: EditorDocument) => EditorDocument) => void,
     localUrl?: string | null
   ) => {
@@ -1716,8 +1819,8 @@ export default function EditorWorkspace() {
       docRef.current = next;
       setDoc(next);
     };
-    const { sequence, overlays } = docRef.current;
-    for (const layer of [...sequence, ...overlays.filter((o) => o.kind === "video")]) {
+    const { sequence, overlays, audio = [] } = docRef.current;
+    for (const layer of [...sequence, ...overlays.filter((o) => o.kind === "video"), ...audio]) {
       if (layer.sourceDurationSec != null) continue;
       const localUrl = layer.localMediaId ? localUrlsRef.current[layer.localMediaId] : null;
       void probeLayerSource(layer.id, layer.storagePath, isPlaceholderSpan, apply, localUrl);
@@ -1799,6 +1902,19 @@ export default function EditorWorkspace() {
       void repickMedia(repickId, file);
       return true;
     }
+    if (kind === "audio") {
+      if ((docRef.current.audio ?? []).length >= EDITOR_MAX_AUDIO) {
+        showToast({ type: "error", message: `Audio limit reached (${EDITOR_MAX_AUDIO} layers).` });
+        return false;
+      }
+      const { localMediaId, url } = keepDeviceFile(file);
+      const layer = audioFromDevice(localMediaId, file.name, playhead);
+      patchDoc((current) => ({ ...current, audio: [...(current.audio ?? []), layer] }));
+      setSelectedId(layer.id);
+      void attachSourceDuration(layer.id, null, layer, url);
+      showToast({ type: "success", message: "Audio added" });
+      return true;
+    }
     if (kind === "sequence") {
       if (docRef.current.sequence.length >= EDITOR_MAX_SEQUENCE) {
         showToast({
@@ -1876,7 +1992,8 @@ export default function EditorWorkspace() {
       // A Re-pick whose file dialog was dismissed must not capture this drop.
       repickLayerIdRef.current = null;
       for (const file of Array.from(event.dataTransfer.files)) {
-        if (!onUpload(file, file.type.startsWith("image/") ? "image" : "sequence")) break;
+        const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : "sequence";
+        if (!onUpload(file, kind)) break;
       }
     },
   };
@@ -1886,7 +2003,7 @@ export default function EditorWorkspace() {
   const repickMedia = async (layerId: string, file: File) => {
     const { localMediaId, url } = keepDeviceFile(file);
     // Bounded: a probe that never reports metadata must not block the re-pick.
-    const sourceSec = file.type.startsWith("video/")
+    const sourceSec = file.type.startsWith("video/") || file.type.startsWith("audio/")
       ? await Promise.race([
           probeVideoDurationSec(url).catch(() => null),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
@@ -1900,25 +2017,52 @@ export default function EditorWorkspace() {
       const next = { ...o, localMediaId, sourceDurationSec: o.kind === "video" ? null : o.sourceDurationSec };
       return sourceSec != null ? withProbedOverlaySource(next, sourceSec, false) : next;
     };
+    const audio = (a: EditorAudioLayer): EditorAudioLayer => {
+      const next = { ...a, localMediaId, sourceDurationSec: null };
+      return sourceSec != null ? withProbedClipSource(next, sourceSec, false) : next;
+    };
     fittedOverlaysRef.current.delete(layerId);
     patchDoc((current) => ({
       ...current,
       sequence: current.sequence.map((c) => (c.id === layerId ? clip(c) : c)),
       overlays: current.overlays.map((o) => (o.id === layerId ? overlay(o) : o)),
+      audio: current.audio?.map((a) => (a.id === layerId ? audio(a) : a)),
     }));
   };
 
-  const openFilePicker = (kind: "sequence" | "image" | "video", repickLayerId: string | null = null) => {
+  const openFilePicker = (kind: "sequence" | "image" | "video" | "audio", repickLayerId: string | null = null) => {
     const input = uploadRef.current;
     if (!input) return;
     uploadKindRef.current = kind;
     repickLayerIdRef.current = repickLayerId;
-    input.accept = kind === "image" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm";
+    input.accept =
+      kind === "image"
+        ? "image/jpeg,image/png,image/webp"
+        : kind === "audio"
+          ? ".mp3,.m4a,.aac,.wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav"
+          : "video/mp4,video/quicktime,video/webm";
     input.click();
   };
 
-  const pickRepick = (layer: EditorClip | EditorOverlay) =>
-    openFilePicker("kind" in layer ? (layer.kind === "image" ? "image" : "video") : "sequence", layer.id);
+  const pickRepick = (layer: MediaLayer) =>
+    openFilePicker(
+      "volume" in layer ? "audio" : "kind" in layer ? (layer.kind === "image" ? "image" : "video") : "sequence",
+      layer.id
+    );
+
+  const updateAudio = (id: string, patch: Partial<EditorAudioLayer>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
+    const next: Partial<EditorAudioLayer> = { ...patch };
+    if (next.startSec != null) next.startSec = snapTenth(next.startSec);
+    if (next.endSec != null) next.endSec = snapTenth(next.endSec);
+    if (next.inSec != null) next.inSec = snapTenth(next.inSec);
+    if (next.volume != null) next.volume = normalizeAudioVolume(next.volume);
+    patchDoc((current) => ({
+      ...current,
+      audio: (current.audio ?? []).map((layer) =>
+        layer.id === id ? clampClipToComposition({ ...layer, ...next }) : layer
+      ),
+    }), opts);
+  };
 
   const updateClip = (id: string, patch: Partial<EditorClip>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorClip> = { ...patch };
@@ -2016,7 +2160,7 @@ export default function EditorWorkspace() {
     };
     setExportProgress({
       outcome: "running",
-      stage: [...doc.sequence, ...doc.overlays].some(isLocalOnlyLayer) ? "uploading" : "preparing",
+      stage: [...doc.sequence, ...doc.overlays, ...audioLayers].some(isLocalOnlyLayer) ? "uploading" : "preparing",
       pct: null,
       uploadDone: 0,
       uploadTotal: 0,
@@ -2034,7 +2178,7 @@ export default function EditorWorkspace() {
     // Device files upload only now, to temp paths the export route deletes when it finishes.
     // The editor's own doc stays local-only; the server gets a copy with storagePath filled.
     const localIds = [
-      ...new Set([...doc.sequence, ...doc.overlays].filter(isLocalOnlyLayer).map((l) => l.localMediaId!)),
+      ...new Set([...doc.sequence, ...doc.overlays, ...audioLayers].filter(isLocalOnlyLayer).map((l) => l.localMediaId!)),
     ];
     const exportUploads: { localMediaId: string; storagePath: string }[] = [];
     if (localIds.length > 0) {
@@ -2044,8 +2188,10 @@ export default function EditorWorkspace() {
       setExportProgress((p) => (p ? { ...p, uploadTotal: localIds.length } : p));
       try {
         for (const localMediaId of localIds) {
-          const file = localFilesRef.current.get(localMediaId);
-          if (!file) throw new Error("Re-pick missing media to export.");
+          const kept = localFilesRef.current.get(localMediaId);
+          if (!kept) throw new Error("Re-pick missing media to export.");
+          const type = editorUploadMimeType(kept.type);
+          const file = type === kept.type ? kept : new File([kept], kept.name, { type });
           const uploaded = await uploadRefFile(file, {
             signal,
             onSigned: (path) => upload.paths.push(path),
@@ -2071,12 +2217,13 @@ export default function EditorWorkspace() {
     setExportProgress((p) => (p ? { ...p, stage: "preparing", pct: null } : p));
     setPollKey(attempt.key);
     const pathById = new Map(exportUploads.map((u) => [u.localMediaId, u.storagePath]));
-    const withUpload = <T extends EditorClip | EditorOverlay>(layer: T): T =>
+    const withUpload = <T extends MediaLayer>(layer: T): T =>
       isLocalOnlyLayer(layer) ? { ...layer, storagePath: pathById.get(layer.localMediaId!) ?? null } : layer;
     const exportDoc: EditorDocument = {
       ...doc,
       sequence: doc.sequence.map(withUpload),
       overlays: doc.overlays.map(withUpload),
+      audio: audioLayers.map(withUpload),
     };
     try {
       const res = await fetch("/api/render-editor", {
@@ -2461,7 +2608,7 @@ export default function EditorWorkspace() {
     const scroller = tracksScrollRef.current;
     if (!scroller || scroller.clientWidth <= 0) return;
     fitOnOpenRef.current = false;
-    if (doc.sequence.length === 0 && doc.overlays.length === 0) {
+    if (doc.sequence.length === 0 && doc.overlays.length === 0 && !doc.audio?.length) {
       setScaleAndRewind(DEFAULT_PX_PER_SEC);
       return;
     }
@@ -2553,7 +2700,7 @@ export default function EditorWorkspace() {
             {fileDragOver ? (
               <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-brand-primary bg-brand-primary/10 ring-2 ring-brand-primary/30">
                 <span className="rounded-lg bg-N50/90 px-3 py-1.5 text-xs font-medium text-text-primary">
-                  Drop videos or images to add them
+                  Drop videos, images, or audio to add them
                 </span>
               </div>
             ) : null}
@@ -2599,6 +2746,22 @@ export default function EditorWorkspace() {
                     videoRef={(node) => {
                       if (node) underlyingVideosRef.current.set(clip.id, node);
                       else underlyingVideosRef.current.delete(clip.id);
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="hidden" aria-hidden>
+                {audibleAudio.map((layer) => (
+                  <AudioLayerPlayer
+                    key={layer.id}
+                    storagePath={layer.storagePath}
+                    localUrl={localUrlFor(layer)}
+                    currentTime={layer.inSec + (playhead - layer.startSec)}
+                    playing={playing}
+                    volume={layer.volume}
+                    audioRef={(node) => {
+                      if (node) audioElsRef.current.set(layer.id, node);
+                      else audioElsRef.current.delete(layer.id);
                     }}
                   />
                 ))}
@@ -2883,6 +3046,23 @@ export default function EditorWorkspace() {
                         <Video className="h-3.5 w-3.5" />
                         PiP
                       </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={audioLayers.length >= EDITOR_MAX_AUDIO}
+                        onClick={() => {
+                          setAddMenuOpen(false);
+                          openFilePicker("audio");
+                        }}
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={`Add music or a sound effect from device: MP3, M4A, or WAV (max ${EDITOR_MAX_UPLOAD_MB} MB)`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Music className="h-3.5 w-3.5" />
+                          Audio
+                        </span>
+                        <span className="text-[10px] text-text-secondary">Max {EDITOR_MAX_UPLOAD_MB} MB</span>
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -2946,6 +3126,7 @@ export default function EditorWorkspace() {
                       void el.play().catch(() => undefined);
                     }
                     for (const v of underlyingVideosRef.current.values()) void v.play().catch(() => undefined);
+                    for (const a of audioElsRef.current.values()) void a.play().catch(() => undefined);
                     setPlaying(true);
                   }}
                   className="rounded-lg bg-white/10 p-2 text-text-primary hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-primary"
@@ -3229,6 +3410,37 @@ export default function EditorWorkspace() {
                     ))
                   )}
                 </div>
+                {audioRows.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {audioRows.map(({ layer, label }) => (
+                      <LayerPanelRow
+                        key={layer.id}
+                        id={layer.id}
+                        selected={layer.id === selectedId}
+                        locked={layer.locked}
+                        hidden={false}
+                        canMute={true}
+                        muted={layer.muted}
+                        volume={layer.volume}
+                        onVolumeChange={(volume) =>
+                          updateAudio(layer.id, { volume }, { coalesceKey: `volume:${layer.id}`, keepPlaying: true })
+                        }
+                        dragOver={false}
+                        icon={<Music className="h-3 w-3" />}
+                        label={label}
+                        onSelect={() => setSelectedId(layer.id)}
+                        onReorderStart={() => undefined}
+                        onReorderHover={() => undefined}
+                        onReorderCommit={() => undefined}
+                        onToggleLock={() => updateAudio(layer.id, { locked: !layer.locked })}
+                        onToggleMute={() => updateAudio(layer.id, { muted: !layer.muted }, { keepPlaying: true })}
+                        onRepick={isMissingMedia(layer) ? () => pickRepick(layer) : undefined}
+                        onDelete={() => removeLayer("audio", layer.id)}
+                        onRename={(nextName) => updateAudio(layer.id, { name: normalizeLayerName(nextName) })}
+                      />
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               <div
@@ -3368,6 +3580,41 @@ export default function EditorWorkspace() {
                       })
                     )}
                   </div>
+                  {audioRows.length > 0 ? (
+                    <div className="mt-2 space-y-1">
+                      {audioRows.map(({ layer, label }) => (
+                        <TimelineLayerRow
+                          key={layer.id}
+                          label={label}
+                          selected={layer.id === selectedId}
+                          locked={layer.locked}
+                          hidden={layer.muted}
+                          startSec={layer.startSec}
+                          endSec={layer.endSec}
+                          pxPerSec={pxPerSec}
+                          viewLeft={rulerView.bucket * RULER_BUCKET_PX - RULER_BUCKET_PX}
+                          viewRight={(rulerView.bucket + 1) * RULER_BUCKET_PX + rulerView.width + RULER_BUCKET_PX}
+                          trackWidth={timelineWidth}
+                          laneWidth={laneWidth}
+                          maxEnd={EDITOR_MAX_DURATION_SEC}
+                          maxSpan={maxClipLayerDurationSec(layer)}
+                          inSec={layer.inSec}
+                          icon={<Music className="h-3 w-3 shrink-0" aria-hidden />}
+                          timecode={`${formatTimecode(layer.startSec)}–${formatTimecode(layer.endSec)}`}
+                          onSelect={() => setSelectedId(layer.id)}
+                          onMove={(startSec, endSec) =>
+                            updateAudio(layer.id, { startSec, endSec }, { coalesceKey: `tl-move:${layer.id}` })
+                          }
+                          onTrimStart={(startSec, inSec) =>
+                            updateAudio(layer.id, { startSec, inSec }, { coalesceKey: `tl-trim-s:${layer.id}` })
+                          }
+                          onTrimEnd={(endSec) =>
+                            updateAudio(layer.id, { endSec }, { coalesceKey: `tl-trim-e:${layer.id}` })
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -3550,6 +3797,46 @@ export default function EditorWorkspace() {
                   className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-text-primary outline-none hover:bg-white/10 focus:border-brand-primary focus-visible:ring-1 focus-visible:ring-brand-primary"
                 />
               </label>
+            </div>
+          ) : selectedAudio ? (
+            <div className="space-y-2 text-xs">
+              <p className="font-medium">Audio layer</p>
+              <label className="block text-text-secondary">
+                <span className="flex items-center justify-between">
+                  Volume
+                  <span className="tabular-nums">{selectedAudio.muted ? "Muted" : `${Math.round(selectedAudio.volume * 100)}%`}</span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(selectedAudio.volume * 100)}
+                  disabled={selectedAudio.locked}
+                  onChange={(event) =>
+                    updateAudio(
+                      selectedAudio.id,
+                      { volume: Number(event.target.value) / 100 },
+                      { coalesceKey: `volume:${selectedAudio.id}`, keepPlaying: true }
+                    )
+                  }
+                  className="mt-2 w-full cursor-pointer accent-brand-primary disabled:cursor-not-allowed disabled:opacity-40"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => updateAudio(selectedAudio.id, { muted: !selectedAudio.muted }, { keepPlaying: true })}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs font-medium hover:bg-white/15"
+              >
+                {selectedAudio.muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+                {selectedAudio.muted ? "Unmute" : "Mute"}
+              </button>
+              {selectedAudio.sourceDurationSec != null ? (
+                <p className="text-text-secondary">
+                  Source {formatTimecode(selectedAudio.sourceDurationSec)} · layer max{" "}
+                  {formatTimecode(maxClipLayerDurationSec(selectedAudio))}
+                </p>
+              ) : null}
             </div>
           ) : (
             <p className="text-xs text-text-secondary">
