@@ -119,6 +119,12 @@ import {
 import { Poppins } from "next/font/google";
 import { containSize } from "@/lib/editor-preview-size";
 import {
+  TIMELINE_RULER_HEIGHT,
+  TIMELINE_TRACKS_MAX_HEIGHT,
+  TIMELINE_TRACKS_MIN_HEIGHT,
+  editorTimelineDefaultHeight,
+} from "@/lib/editor-filmstrip";
+import {
   DEFAULT_PX_PER_SEC,
   MAX_PX_PER_SEC,
   MIN_PX_PER_SEC,
@@ -170,13 +176,6 @@ const LAYER_PANEL_MAX_WIDTH = 320;
 const LAYER_PANEL_DEFAULT_WIDTH = 176;
 /** Smallest usable preview canvas edge, e.g. below the stage size on a very narrow viewport. */
 const EDITOR_PREVIEW_MIN_PX = 160;
-
-const TIMELINE_TRACKS_MIN_HEIGHT = 140;
-const TIMELINE_TRACKS_MAX_HEIGHT = 420;
-const TIMELINE_TRACKS_DEFAULT_HEIGHT = 180;
-// Ruler lives outside the vertically-scrolling rows so it stays pinned in view;
-// its own height is carved out of tracksHeight to keep the resizable split intact.
-const TIMELINE_RULER_HEIGHT = 36;
 
 /** Ruler ticks render for the visible range snapped to buckets of this width. */
 const RULER_BUCKET_PX = 400;
@@ -379,7 +378,7 @@ function TimelineLayerRow({
     }
   };
   return (
-    <div className="relative h-8" style={{ width: trackWidth }}>
+    <div className="relative h-11" style={{ width: trackWidth }}>
       <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
       <div
         role="button"
@@ -578,7 +577,7 @@ function LayerPanelRow({
         startLayerReorderDrag(event, onReorderHover, onReorderCommit);
       }}
       onClick={onSelect}
-      className={`flex h-8 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
+      className={`flex h-11 items-center gap-1 rounded-sm px-2 text-[11px] select-none touch-none ${
         locked ? "cursor-default" : editing ? "cursor-text" : "cursor-grab active:cursor-grabbing"
       } ${dragOver ? "ring-1 ring-brand-primary bg-brand-primary/10" : ""} ${
         selected ? "bg-brand-primary/20 text-text-primary" : "text-text-secondary hover:bg-white/5"
@@ -962,6 +961,7 @@ export default function EditorWorkspace() {
   const addMenuRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
   const tracksScrollRef = useRef<HTMLDivElement>(null);
+  const rowsScrollRef = useRef<HTMLDivElement>(null);
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
   const pxPerSecRef = useRef(DEFAULT_PX_PER_SEC);
   /** scrollLeft to apply once the new width is laid out (anchored zoom). */
@@ -998,7 +998,8 @@ export default function EditorWorkspace() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(LAYER_PANEL_DEFAULT_WIDTH);
-  const [tracksHeight, setTracksHeight] = useState(TIMELINE_TRACKS_DEFAULT_HEIGHT);
+  // null = automatic: sized from the layer count until the user drags the handle.
+  const [tracksHeight, setTracksHeight] = useState<number | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [tool, setTool] = useState<EditorTool>("select");
   const [past, setPast] = useState<EditorDocument[]>([]);
@@ -1162,6 +1163,8 @@ export default function EditorWorkspace() {
       return { overlay, label: resolveLayerLabel(overlay, typeIndex) };
     })
     .reverse();
+  // A manual resize wins; until then the timeline fits every layer plus one empty row.
+  const timelineHeight = tracksHeight ?? editorTimelineDefaultHeight(overlayRows.length, clipRows.length);
 
   // Panel/lane rows display frontmost-on-top, i.e. the reverse of ascending order/z.
   // Reorder against that same displayed order so a drop lands where it visually looks like it did.
@@ -2754,7 +2757,14 @@ export default function EditorWorkspace() {
                 event.preventDefault();
                 event.stopPropagation();
                 const startY = event.clientY;
-                const startHeight = tracksHeight;
+                // Start from what is on screen (the automatic height may be capped at 45vh).
+                const startHeight = Math.max(
+                  TIMELINE_TRACKS_MIN_HEIGHT,
+                  Math.min(
+                    TIMELINE_TRACKS_MAX_HEIGHT,
+                    TIMELINE_RULER_HEIGHT + (rowsScrollRef.current?.offsetHeight ?? timelineHeight - TIMELINE_RULER_HEIGHT)
+                  )
+                );
                 const move = (ev: PointerEvent) => {
                   setTracksHeight(
                     Math.max(
@@ -3122,11 +3132,17 @@ export default function EditorWorkspace() {
             </div>
 
             <div
+              ref={rowsScrollRef}
               className="flex min-h-0 items-start overflow-y-auto"
-              style={{ height: Math.max(0, tracksHeight - TIMELINE_RULER_HEIGHT) }}
+              style={{
+                height:
+                  tracksHeight === null
+                    ? `min(${timelineHeight - TIMELINE_RULER_HEIGHT}px, 45vh)`
+                    : Math.max(0, tracksHeight - TIMELINE_RULER_HEIGHT),
+              }}
             >
               <div
-                className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-11 pl-3 md:flex"
+                className="hidden shrink-0 flex-col border-r border-white/10 pt-2 pb-12 pl-3 md:flex"
                 style={{ width: panelWidth }}
               >
                 {overlayRows.length > 0 ? (
@@ -3178,7 +3194,7 @@ export default function EditorWorkspace() {
                 ) : null}
                 <div className="space-y-1">
                   {clipRows.length === 0 ? (
-                    <div className="h-8" />
+                    <div className="h-11" />
                   ) : (
                     clipRows.map(({ clip, label }) => (
                       <LayerPanelRow
@@ -3233,7 +3249,7 @@ export default function EditorWorkspace() {
 
               <div
                 ref={tracksScrollRef}
-                className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-11"
+                className="min-w-0 flex-1 overflow-x-auto px-3 pt-2 pb-12"
                 onScroll={(event) => {
                   if (rulerScrollRef.current) {
                     rulerScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
@@ -3308,7 +3324,7 @@ export default function EditorWorkspace() {
                   ) : null}
                   <div className="space-y-1">
                     {sequence.length === 0 ? (
-                      <div className="h-8 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
+                      <div className="h-11 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
                     ) : (
                       clipRows.map(({ clip, label }) => {
                         const clipDur = clipLayerDurationSec(clip);

@@ -1,7 +1,40 @@
 /** Pure math for the timeline clip filmstrip (see useClipFilmstrip). */
 
-/** Timeline row height in CSS px (`h-8`); tiles are this tall on screen. */
-export const FILMSTRIP_ROW_PX = 32;
+/** Timeline layer row height in CSS px (`h-11`): label rows, clip strips, and placeholders. */
+export const TIMELINE_ROW_PX = 44;
+/** Gap between stacked rows (`space-y-1`). */
+export const TIMELINE_ROW_GAP_PX = 4;
+/** One row plus its gap; the empty space kept under the last layer (`pb-12`). */
+export const TIMELINE_ROW_PITCH_PX = TIMELINE_ROW_PX + TIMELINE_ROW_GAP_PX;
+/** Tiles are one row tall on screen. */
+export const FILMSTRIP_ROW_PX = TIMELINE_ROW_PX;
+
+export const TIMELINE_TRACKS_MIN_HEIGHT = 140;
+export const TIMELINE_TRACKS_MAX_HEIGHT = 420;
+// Ruler lives outside the vertically-scrolling rows so it stays pinned in view;
+// its own height is carved out of the timeline height to keep the resizable split intact.
+export const TIMELINE_RULER_HEIGHT = 36;
+/** Rows scroller top padding (`pt-2`) and the gap between overlay and clip groups (`mb-2`). */
+const TIMELINE_ROWS_TOP_PX = 8;
+const TIMELINE_GROUP_GAP_PX = 8;
+
+/**
+ * Timeline height (ruler included) that shows every layer plus one empty row under the last,
+ * clamped to the manual resize range. With no clips the clip group still renders one
+ * placeholder row, so it always counts as at least one row.
+ */
+export function editorTimelineDefaultHeight(overlayCount: number, clipCount: number): number {
+  const overlays = Math.max(0, overlayCount);
+  const rows = overlays + Math.max(1, clipCount);
+  const content =
+    TIMELINE_RULER_HEIGHT +
+    TIMELINE_ROWS_TOP_PX +
+    rows * TIMELINE_ROW_PITCH_PX -
+    TIMELINE_ROW_GAP_PX +
+    (overlays > 0 ? TIMELINE_GROUP_GAP_PX : 0) +
+    TIMELINE_ROW_PITCH_PX;
+  return Math.max(TIMELINE_TRACKS_MIN_HEIGHT, Math.min(TIMELINE_TRACKS_MAX_HEIGHT, content));
+}
 /** Frame grid for tile times and cache keys (about one frame at 30 fps). */
 export const FILMSTRIP_GRID_FPS = 30;
 
@@ -89,13 +122,13 @@ function assert(cond: boolean, msg: string): void {
 }
 
 export function editorFilmstripSelfCheck(): void {
-  // 16:9 tile at 32 px is 57 px wide.
-  assert(filmstripTileWidth(16 / 9) === 57, "tile width is an integer");
+  // 16:9 tile at 44 px is 78 px wide.
+  assert(filmstripTileWidth(16 / 9) === 78, "tile width is an integer");
   assert(filmstripCount(28, 16 / 9) === 1, "a minimum-width block gets one tile");
-  assert(filmstripCount(120, 16 / 9) === 3, "120 px of 16:9 needs three tiles");
-  assert(filmstripCount(120, 9 / 16) === 7, "portrait tiles are narrower, so more of them");
-  assert(filmstripCount(36_000, 16 / 9) === 632, "count is not capped");
-  assert(filmstripCount(120, 0) === 3, "unknown aspect falls back to 16:9");
+  assert(filmstripCount(120, 16 / 9) === 2, "120 px of 16:9 needs two tiles");
+  assert(filmstripCount(120, 9 / 16) === 5, "portrait tiles are narrower, so more of them");
+  assert(filmstripCount(36_000, 16 / 9) === 462, "count is not capped");
+  assert(filmstripCount(120, 0) === 2, "unknown aspect falls back to 16:9");
   assert(filmstripCount(0, 1) === 1, "never zero tiles");
   const tw = filmstripTileWidth(16 / 9);
   const ZOOMS = [6, 12, 32, 64, 128, 300, 600];
@@ -156,18 +189,26 @@ export function editorFilmstripSelfCheck(): void {
     assert(after.filter((s) => before.has(s)).length >= 0.8 * before.size, `a zoom step reuses most frames (${px})`);
   }
 
-  assert(filmstripStepSec(600, tw) === 2 / fps, "600 px/s: 57 px spans ~2.85 frames, step 2 frames");
+  assert(filmstripStepSec(600, tw) === 2 / fps, "600 px/s: 78 px spans ~3.9 frames, step 2 frames");
   assert(filmstripStepSec(100_000, tw) === 1 / fps, "step bottoms out at one frame");
-  assert(filmstripTileSlot(0, 1, 1, 100, 57) === 30, "an empty range collapses to the in-point");
-  assert(filmstripTileSlot(1, 1, 1.2, 64, 57) === 36, "a tile past the out-point clamps to it");
-  assert(filmstripTileSlot(0, 2.5, 4, 64, 57) === filmstripTileSlot(0, 2.5, 9, 600, 57), "tile 0 ignores zoom");
+  assert(filmstripTileSlot(0, 1, 1, 100, tw) === 30, "an empty range collapses to the in-point");
+  assert(filmstripTileSlot(1, 1, 1.2, 64, tw) === 36, "a tile past the out-point clamps to it");
+  assert(filmstripTileSlot(0, 2.5, 4, 64, tw) === filmstripTileSlot(0, 2.5, 9, 600, tw), "tile 0 ignores zoom");
 
   // A 1 hour clip at max zoom only produces the tiles near a 1200 px viewport.
   const longCount = filmstripCount(3600 * 600, 16 / 9);
   const [vf, vl] = filmstripVisibleRange(longCount, tw, 500_000 - 600, 500_000 + 1800);
-  assert(longCount > 30_000 && vl - vf + 1 <= Math.ceil(2400 / tw) + 1, "visible tiles stay bounded");
+  assert(longCount > 25_000 && vl - vf + 1 <= Math.ceil(2400 / tw) + 1, "visible tiles stay bounded");
   const [f0, l0] = filmstripVisibleRange(3, tw, -1000, -10);
   assert(f0 === 0 && l0 === 0, "a viewport left of the block clamps to tile 0");
+
+  assert(TIMELINE_ROW_PITCH_PX === 48, "bottom breathing room is one row pitch");
+  assert(editorTimelineDefaultHeight(0, 1) === 140, "one layer clamps up to the minimum");
+  assert(editorTimelineDefaultHeight(0, 4) === 280, "four clip layers plus one empty row");
+  assert(editorTimelineDefaultHeight(1, 4) === 336, "the overlay group adds its 8 px gap");
+  assert(editorTimelineDefaultHeight(0, 10) === 420, "many layers clamp to the maximum");
+  assert(editorTimelineDefaultHeight(0, 0) === 140, "no layers still fits the placeholder row");
+  assert(editorTimelineDefaultHeight(2, 0) === 240, "overlays without clips keep the clip placeholder row");
 }
 
 if (require.main === module) {
