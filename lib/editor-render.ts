@@ -31,6 +31,7 @@ import {
   sortedSequence,
   textOverlayLayout,
   validateEditorExport,
+  type EditorAudioLayer,
   type EditorClip,
   type EditorDocument,
   type EditorOverlay,
@@ -92,20 +93,43 @@ export function isAudibleLayer(layer: EditorClip | EditorOverlay): boolean {
   return !("kind" in layer) || layer.kind === "video";
 }
 
+/** Unmuted audio layer with a non-zero volume. */
+export function isAudibleAudioLayer(layer: EditorAudioLayer): boolean {
+  return !layer.muted && layer.volume > 0;
+}
+
 /** Source URLs of audible layers — what `runEditorRender` probes for audio. */
 export function audibleLayerUrls(doc: EditorDocument, urls: EditorMediaUrls): string[] {
-  return [...doc.sequence, ...doc.overlays]
-    .filter(isAudibleLayer)
+  const audio = (doc.audio ?? []).filter(isAudibleAudioLayer);
+  return [...[...doc.sequence, ...doc.overlays].filter(isAudibleLayer), ...audio]
     .map((layer) => mediaUrlFor(urls, layer.creationId, layer.storagePath, layer.id))
     .filter((url): url is string => Boolean(url));
+}
+
+/**
+ * True when an audible audio layer's file has no audio stream. Clips and video
+ * overlays may be silent; an audio layer that is silent is a broken upload.
+ */
+export function hasSilentAudioLayer(doc: EditorDocument, urls: EditorMediaUrls, audioUrls: ReadonlySet<string>): boolean {
+  return (doc.audio ?? []).filter(isAudibleAudioLayer).some((layer) => {
+    const url = mediaUrlFor(urls, layer.creationId, layer.storagePath, layer.id);
+    return !url || !audioUrls.has(url);
+  });
 }
 
 /** Common sample format so `amix` never renegotiates between sources. */
 const AUDIO_FORMAT = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo";
 
-function placeAudioFilter(inputIndex: number, trim: string, startSec: number, label: string): string {
+/**
+ * Several unnormalized layers can sum past full scale; a brickwall at -0.5 dBFS
+ * keeps the mix from clipping. `level=0` stops it re-amplifying quiet mixes.
+ */
+const MIX_LIMITER = "alimiter=limit=0.944:level=0";
+
+function placeAudioFilter(inputIndex: number, trim: string, startSec: number, label: string, volume?: number): string {
   const delayMs = Math.round(startSec * 1000);
-  return `[${inputIndex}:a]${trim},asetpts=PTS-STARTPTS,${AUDIO_FORMAT},adelay=${delayMs}:all=1[${label}]`;
+  const gain = volume === undefined ? "" : `,volume=${volume}`;
+  return `[${inputIndex}:a]${trim},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}${gain},adelay=${delayMs}:all=1[${label}]`;
 }
 
 function overlayDurationSec(overlay: EditorOverlay): number {
@@ -209,15 +233,17 @@ export function buildEditorFfmpegGraph(
 
   // Dedicated audio inputs prevent FFmpeg demuxer buffer deadlocks between concurrent video overlay and audio amix filters.
   const audioLabels: string[] = [];
-  const addAudio = (layer: EditorClip | EditorOverlay, url: string, trim: string) => {
-    if (!isAudibleLayer(layer) || !audioUrls.has(url)) return;
+  const addAudio = (layer: EditorClip | EditorOverlay | EditorAudioLayer, url: string, trim: string) => {
+    const volume = "volume" in layer ? layer.volume : undefined;
+    const audible = "volume" in layer ? isAudibleAudioLayer(layer) : isAudibleLayer(layer);
+    if (!audible || !audioUrls.has(url)) return;
     const alias = `in_a${audioLabels.length}`;
     inputFiles[alias] = url;
     addInput(alias);
     const audioInputIndex = inputIndex;
     inputIndex += 1;
     const label = `a${audioLabels.length}`;
-    filters.push(placeAudioFilter(audioInputIndex, trim, layer.startSec, label));
+    filters.push(placeAudioFilter(audioInputIndex, trim, layer.startSec, label, volume));
     audioLabels.push(label);
   };
 
@@ -234,6 +260,15 @@ export function buildEditorFfmpegGraph(
     if (url) {
       addAudio(overlay, url, `atrim=start=${round2(overlay.inSec ?? 0)}:end=${round2((overlay.inSec ?? 0) + overlayDurationSec(overlay))}`);
     }
+  }
+
+  for (const layer of doc.audio ?? []) {
+    const url = mediaUrlFor(urls, layer.creationId, layer.storagePath, layer.id);
+    if (!url) {
+      if (isAudibleAudioLayer(layer)) throw new Error(`Missing media URL for audio layer ${layer.id}.`);
+      continue;
+    }
+    addAudio(layer, url, `atrim=start=${round2(layer.inSec)}:end=${round2(clipSourceOutSec(layer))}`);
   }
 
   const hasText = overlays.some((o) => o.kind === "text");
@@ -292,7 +327,7 @@ export function buildEditorFfmpegGraph(
   if (audioLabels.length > 0) {
     filters.push(
       `${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,` +
-        `apad,atrim=duration=${durationSec}[aout]`
+        `${MIX_LIMITER},apad,atrim=duration=${durationSec}[aout]`
     );
     audioArgs = ["-map", "[aout]", ...exportAudioArgs(settings.format)];
   }
@@ -606,7 +641,7 @@ export function editorRenderSelfCheck(): void {
   assert(av.includes("trim=start=0:end=2.5,setpts=PTS-STARTPTS+2/TB,scale="), "video overlay video PTS shifted to startSec so it plays instead of freezing");
   assert(!av.includes("[2:a]") && !av.includes("[3:a]"), "image overlay and video inputs never contribute audio");
   assert(
-    av.includes("[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=duration=5[aout]"),
+    av.includes(`[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,${MIX_LIMITER},apad,atrim=duration=5[aout]`),
     "overlapping layers mixed, padded/trimmed to durationSec"
   );
   assert(av.includes(`-map "[aout]" -c:a aac`) && !av.includes("-an"), "mixed audio mapped and AAC-encoded");
@@ -685,6 +720,38 @@ export function editorRenderSelfCheck(): void {
   assert(
     audibleLayerUrls(avDoc, avUrls).join() === "https://example.com/a.mp4,https://example.com/b.mp4,https://example.com/v.mp4",
     "probe list covers only audible layers"
+  );
+
+  // --- Audio layers (#359) ---
+  const music: EditorAudioLayer = {
+    id: "m1", creationId: null, storagePath: "u/videos/temp/refs/song.mp3", startSec: 1.5, endSec: 4.5,
+    inSec: 2, sourceDurationSec: 30, volume: 0.4, muted: false, locked: false,
+  };
+  const sfx: EditorAudioLayer = { ...music, id: "m2", storagePath: "u/videos/temp/refs/hit.wav", startSec: 0, endSec: 0.5, inSec: 0, volume: 1 };
+  const layerUrls = { ...avUrls, m1: "https://example.com/song.mp3", m2: "https://example.com/hit.wav" };
+  const layerAudio = new Set([...withAudio, "https://example.com/song.mp3", "https://example.com/hit.wav"]);
+  const musicDoc: EditorDocument = { ...avDoc, audio: [music, sfx] };
+  const mixed = buildEditorFfmpegGraph(musicDoc, layerUrls, layerAudio).command;
+  assert(
+    mixed.includes(`[7:a]atrim=start=2:end=5,asetpts=PTS-STARTPTS,${fmt},volume=0.4,adelay=1500:all=1[a3]`),
+    "audio layer: atrim from inSec, per-layer volume, adelay to startSec"
+  );
+  assert(mixed.includes(`[8:a]atrim=start=0:end=0.5,asetpts=PTS-STARTPTS,${fmt},volume=1,adelay=0:all=1[a4]`), "second audio layer at full volume");
+  assert(mixed.includes(`[a0][a1][a2][a3][a4]amix=inputs=5:duration=longest:normalize=0,${MIX_LIMITER},apad,atrim=duration=5[aout]`), "audio layers join the same amix, limited");
+  assert(!av.includes("volume="), "clip and overlay audio keep unity gain");
+  assert(audibleLayerUrls(musicDoc, layerUrls).includes("https://example.com/song.mp3"), "audio layers are probed");
+  assert(!hasSilentAudioLayer(musicDoc, layerUrls, layerAudio), "probed audio layers are fine");
+  assert(hasSilentAudioLayer(musicDoc, layerUrls, withAudio), "an audio layer without an audio stream is reported");
+  const mutedMusic = buildEditorFfmpegGraph({ ...musicDoc, audio: [{ ...music, muted: true }, { ...sfx, volume: 0 }] }, layerUrls, layerAudio).command;
+  assert(!mutedMusic.includes("song.mp3") && !mutedMusic.includes("volume=") && mutedMusic.includes("amix=inputs=3"), "muted or zero-volume audio layers are skipped");
+  assert(!hasSilentAudioLayer({ ...musicDoc, audio: [{ ...music, muted: true }] }, layerUrls, withAudio), "muted audio layer is never probed");
+  const audioOnlyDoc: EditorDocument = { v: 1, aspect: "16:9", sequence: [], overlays: [], audio: [music] };
+  const audioOnly = buildEditorFfmpegGraph(audioOnlyDoc, layerUrls, layerAudio);
+  assert(audioOnly.durationSec === 4.5, "audio-only export length is the audio layer end");
+  assert(
+    audioOnly.command.startsWith(`-i {{in_a0}} -filter_complex "color=c=black:s=1280x720:d=4.5:r=30,format=yuv420p[base];[0:a]atrim=start=2:end=5`) &&
+      audioOnly.command.includes(`[base]fps=30,format=yuv420p[vfinal]`) && audioOnly.command.includes(`-map "[aout]" -c:a aac`),
+    "audio-only project: black picture plus the mixed audio layer"
   );
 }
 

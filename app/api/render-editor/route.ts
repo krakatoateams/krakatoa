@@ -204,6 +204,17 @@ export async function POST(req: Request) {
         inSec: o.inSec,
         muted: o.muted,
       })),
+      audio: (hashDoc.audio ?? []).map((a) => ({
+        id: a.id,
+        creationId: a.creationId,
+        storagePath: a.storagePath,
+        startSec: a.startSec,
+        endSec: a.endSec,
+        inSec: a.inSec,
+        sourceDurationSec: a.sourceDurationSec,
+        volume: a.volume,
+        muted: a.muted,
+      })),
     });
     const begin = await beginGenerationRequest({
       profileId: profileId!,

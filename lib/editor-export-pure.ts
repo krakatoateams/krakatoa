@@ -11,6 +11,7 @@ export const EDITOR_EXPORT_ERRORS = {
   EDITOR_EXPORT_BUSY: "Too many exports are running right now. Please try again in a few minutes.",
   EDITOR_EXPORT_ENCODER_FAILED: "The video encoder failed. Please try again.",
   EDITOR_EXPORT_INPUT_UNAVAILABLE: "One of your clips could not be read for export. Please try again.",
+  EDITOR_EXPORT_AUDIO_MISSING: "An audio layer has no readable sound. Replace it with an MP3, M4A, or WAV file.",
   EDITOR_EXPORT_OUT_OF_MEMORY: "The export ran out of memory. Try a lower resolution.",
   EDITOR_EXPORT_RUNNER_UNAVAILABLE: "The export service is unavailable. Please try again in a moment.",
   EDITOR_EXPORT_UPLOAD_FAILED: "The exported video could not be saved. Please try again.",

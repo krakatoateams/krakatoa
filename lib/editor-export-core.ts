@@ -24,6 +24,7 @@ import { EditorExportProbeError, probeAudioSources } from "@/lib/editor-audio-pr
 import { FFMPEG_BIN, FONT_FILE, WORK, ffmpegHasCapabilities, installPinnedTools } from "@/lib/editor-export-pin";
 import {
   audibleLayerUrls,
+  hasSilentAudioLayer,
   buildEditorFfmpegGraph,
   localizeFfmpegArgs,
 } from "@/lib/editor-render";
@@ -180,6 +181,7 @@ export async function startEncodeCore(p: EditorExportParams, stepId: string | nu
       limit("sign")
     );
     const audioUrls = await withPhaseTimeout("probe", probeAudioSources(audibleLayerUrls(p.document, urls)), limit("probe"));
+    if (hasSilentAudioLayer(p.document, urls, audioUrls)) return { ok: false, code: "EDITOR_EXPORT_AUDIO_MISSING" };
     const graph = buildEditorFfmpegGraph(p.document, urls, audioUrls, p.settings, editorExportMaxFileBytes(process.env));
     const hasFont = Boolean(graph.inputFiles.in_font);
 

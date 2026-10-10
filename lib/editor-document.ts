@@ -14,6 +14,7 @@ export const EDITOR_DOCUMENT_VERSION = 1;
 export const EDITOR_TITLE_MAX = 80;
 export const EDITOR_MAX_SEQUENCE = 8;
 export const EDITOR_MAX_OVERLAYS = 8;
+export const EDITOR_MAX_AUDIO = 4;
 export const EDITOR_MAX_DURATION_SEC = 60;
 export const DEFAULT_EDITOR_DURATION_SEC = 8;
 export const EDITOR_DOCUMENT_JSON_MAX = 200_000;
@@ -135,13 +136,37 @@ export type EditorOverlay = {
   muted?: boolean;
 };
 
+/** Music / sound effect track mixed into the export; timing works like a clip's. */
+export type EditorAudioLayer = {
+  id: string;
+  name?: string | null;
+  creationId: string | null;
+  storagePath: string | null;
+  /** Device file kept in this browser (lib/editor-local-media.ts); uploaded only on export. */
+  localMediaId?: string | null;
+  startSec: number;
+  endSec: number;
+  inSec: number;
+  sourceDurationSec: number | null;
+  /** Linear gain 0–1. */
+  volume: number;
+  muted: boolean;
+  locked: boolean;
+};
+
 /** Duration is not stored; it is derived from layers by projectDurationSec. */
 export type EditorDocument = {
   v: typeof EDITOR_DOCUMENT_VERSION;
   aspect: EditorAspect;
   sequence: EditorClip[];
   overlays: EditorOverlay[];
+  /** Optional so documents saved before audio layers parse unchanged; parse always fills it. */
+  audio?: EditorAudioLayer[];
 };
+
+/** Layers with a source in-point and length: clips and audio layers. */
+type SourceTimed = Pick<EditorClip, "startSec" | "endSec" | "inSec" | "sourceDurationSec">;
+type MediaSourced = Pick<EditorClip, "creationId" | "storagePath" | "localMediaId">;
 
 export type EditorSummary = {
   id: string;
@@ -164,11 +189,14 @@ export function normalizeLayerName(raw: unknown): string | null {
 }
 
 export function resolveLayerLabel(
-  layer: EditorClip | EditorOverlay,
+  layer: EditorClip | EditorOverlay | EditorAudioLayer,
   fallbackIndex?: number
 ): string {
   if (layer.name && layer.name.trim().length > 0) {
     return layer.name.trim();
+  }
+  if ("volume" in layer) {
+    return typeof fallbackIndex === "number" ? `Audio ${fallbackIndex + 1}` : "Audio";
   }
   if ("kind" in layer) {
     if (layer.kind === "text") {
@@ -225,6 +253,7 @@ export function emptyEditorDocument(): EditorDocument {
     aspect: "9:16",
     sequence: [],
     overlays: [],
+    audio: [],
   };
 }
 
@@ -242,11 +271,11 @@ export function clipDurationSec(clip: EditorClip): number {
   return clipLayerDurationSec(clip);
 }
 
-export function clipSourceOutSec(clip: EditorClip): number {
-  return snapTenth(clip.inSec + clipLayerDurationSec(clip));
+export function clipSourceOutSec(clip: SourceTimed): number {
+  return snapTenth(clip.inSec + Math.max(0, snapTenth(clip.endSec) - snapTenth(clip.startSec)));
 }
 
-export function maxClipLayerDurationSec(clip: EditorClip): number {
+export function maxClipLayerDurationSec(clip: SourceTimed): number {
   if (clip.sourceDurationSec != null && clip.sourceDurationSec > 0) {
     return Math.max(0.1, snapTenth(clip.sourceDurationSec - clip.inSec));
   }
@@ -262,7 +291,7 @@ export function maxOverlayLayerDurationSec(overlay: EditorOverlay): number {
 
 /** Latest layer end, capped at EDITOR_MAX_DURATION_SEC; the default length while empty. */
 export function projectDurationSec(doc: EditorDocument): number {
-  const ends = [...doc.sequence, ...doc.overlays].map((layer) => layer.endSec);
+  const ends = [...doc.sequence, ...doc.overlays, ...(doc.audio ?? [])].map((layer) => layer.endSec);
   if (ends.length === 0) return DEFAULT_EDITOR_DURATION_SEC;
   return snapTenth(clamp(Math.max(...ends), 0.1, EDITOR_MAX_DURATION_SEC));
 }
@@ -301,8 +330,8 @@ export function clipAtPlayhead(doc: EditorDocument, playheadSec: number): ClipAt
   return covering[covering.length - 1] ?? null;
 }
 
-/** Clamps a clip to the composition cap and its source length. */
-export function clampClipToComposition(clip: EditorClip): EditorClip {
+/** Clamps a clip (or audio layer) to the composition cap and its source length. */
+export function clampClipToComposition<T extends SourceTimed>(clip: T): T {
   const duration = EDITOR_MAX_DURATION_SEC;
   const maxSpan = Math.min(maxClipLayerDurationSec(clip), duration);
   let startSec = snapTenth(clamp(clip.startSec, 0, Math.max(0, duration - 0.1)));
@@ -479,7 +508,7 @@ export function clampOverlayToComposition(overlay: EditorOverlay): EditorOverlay
  * placeholder span) the layer grows to the remaining source, fit to the cap;
  * otherwise a user edit made before the probe returned is kept, only capped.
  */
-export function withProbedClipSource(clip: EditorClip, sourceSec: number, fillSpan = true): EditorClip {
+export function withProbedClipSource<T extends SourceTimed>(clip: T, sourceSec: number, fillSpan = true): T {
   if (clip.sourceDurationSec != null) return clip;
   const sourceDurationSec = snapTenth(sourceSec);
   return clampClipToComposition({
@@ -499,8 +528,8 @@ export function withProbedOverlaySource(overlay: EditorOverlay, sourceSec: numbe
   });
 }
 
-/** A layer still at the span it was created with: a 3 s clip from the source start, or a 2 s video overlay. */
-export function isPlaceholderSpan(layer: EditorClip | EditorOverlay): boolean {
+/** A layer still at the span it was created with: a 3 s clip / audio layer from the source start, or a 2 s video overlay. */
+export function isPlaceholderSpan(layer: EditorClip | EditorOverlay | EditorAudioLayer): boolean {
   const span = snapTenth(layer.endSec - layer.startSec);
   return "kind" in layer ? span === 2 : layer.inSec === 0 && span === 3;
 }
@@ -513,14 +542,19 @@ export function withProbedLayerSource(
   doc: EditorDocument,
   layerId: string,
   sourceSec: number,
-  fillSpan: (layer: EditorClip | EditorOverlay) => boolean
+  fillSpan: (layer: EditorClip | EditorOverlay | EditorAudioLayer) => boolean
 ): EditorDocument {
   const sequence = doc.sequence.map((c) => (c.id === layerId ? withProbedClipSource(c, sourceSec, fillSpan(c)) : c));
   const overlays = doc.overlays.map((o) =>
     o.id === layerId ? withProbedOverlaySource(o, sourceSec, fillSpan(o)) : o
   );
-  const changed = sequence.some((c, i) => c !== doc.sequence[i]) || overlays.some((o, i) => o !== doc.overlays[i]);
-  return changed ? { ...doc, sequence, overlays } : doc;
+  const audioIn = doc.audio ?? [];
+  const audio = audioIn.map((a) => (a.id === layerId ? withProbedClipSource(a, sourceSec, fillSpan(a)) : a));
+  const changed =
+    sequence.some((c, i) => c !== doc.sequence[i]) ||
+    overlays.some((o, i) => o !== doc.overlays[i]) ||
+    audio.some((a, i) => a !== audioIn[i]);
+  return changed ? { ...doc, sequence, overlays, audio } : doc;
 }
 
 function reprojectOverlayToAspect(
@@ -634,6 +668,38 @@ function parseOverlay(raw: unknown, index: number): EditorOverlay | null {
   };
 }
 
+export const EDITOR_AUDIO_DEFAULT_VOLUME = 1;
+
+export function normalizeAudioVolume(value: unknown): number {
+  return Math.round(clamp(asFiniteNumber(value, EDITOR_AUDIO_DEFAULT_VOLUME), 0, 1) * 100) / 100;
+}
+
+function parseAudioLayer(raw: unknown): EditorAudioLayer | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = asId(o.id);
+  if (!id) return null;
+  const startSec = snapTenth(clamp(asFiniteNumber(o.startSec, 0), 0, EDITOR_MAX_DURATION_SEC));
+  const endSec = snapTenth(clamp(asFiniteNumber(o.endSec, startSec + 3), startSec + 0.1, EDITOR_MAX_DURATION_SEC));
+  if (endSec <= startSec) return null;
+  const sourceRaw = o.sourceDurationSec;
+  return clampClipToComposition({
+    id,
+    name: normalizeLayerName(o.name),
+    creationId: asId(o.creationId),
+    storagePath: asPath(o.storagePath),
+    localMediaId: asLocalMediaId(o.localMediaId),
+    startSec,
+    endSec,
+    inSec: snapTenth(clamp(asFiniteNumber(o.inSec, 0), 0, EDITOR_MAX_DURATION_SEC)),
+    sourceDurationSec:
+      typeof sourceRaw === "number" && Number.isFinite(sourceRaw) && sourceRaw > 0 ? snapTenth(sourceRaw) : null,
+    volume: normalizeAudioVolume(o.volume),
+    muted: Boolean(o.muted),
+    locked: Boolean(o.locked),
+  });
+}
+
 export function parseEditorDocument(raw: unknown): EditorDocument | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -665,6 +731,14 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
     seen.add(overlay.id);
     overlays.push(overlay);
   }
+  const audioRaw = Array.isArray(o.audio) ? o.audio : [];
+  const audio: EditorAudioLayer[] = [];
+  for (let i = 0; i < audioRaw.length && audio.length < EDITOR_MAX_AUDIO; i++) {
+    const layer = parseAudioLayer(audioRaw[i]);
+    if (!layer || seen.has(layer.id)) continue;
+    seen.add(layer.id);
+    audio.push(layer);
+  }
   // Legacy `durationSec` is ignored: duration is derived, and layers were already clamped to it.
   const sequence = parsedClips.map((clip) =>
     clampClipToComposition(
@@ -689,6 +763,7 @@ export function parseEditorDocument(raw: unknown): EditorDocument | null {
     aspect: asAspect(o.aspect),
     sequence,
     overlays: overlays.map((overlay) => clampOverlayToComposition(overlay)),
+    audio,
   };
 }
 
@@ -697,12 +772,12 @@ export function editorDocumentJsonTooLarge(doc: EditorDocument): boolean {
 }
 
 /** A device file that lives only in this browser until export. */
-export function isLocalOnlyLayer(layer: EditorClip | EditorOverlay): boolean {
+export function isLocalOnlyLayer(layer: MediaSourced): boolean {
   return Boolean(layer.localMediaId && !layer.creationId && !layer.storagePath);
 }
 
 /** `allowLocal`: count browser-only device media as a source (client pre-export check). */
-export function clipHasSource(clip: EditorClip, allowLocal = false): boolean {
+export function clipHasSource(clip: MediaSourced, allowLocal = false): boolean {
   return Boolean(clip.creationId || clip.storagePath || (allowLocal && clip.localMediaId));
 }
 
@@ -718,8 +793,12 @@ export function validateEditorExport(
   opts?: { allowLocal?: boolean }
 ): EditorExportError | null {
   const allowLocal = Boolean(opts?.allowLocal);
-  if (doc.sequence.length === 0) {
-    return { code: "EMPTY_SEQUENCE", message: "Add at least one clip before exporting." };
+  const audio = doc.audio ?? [];
+  if (doc.sequence.length === 0 && audio.length === 0) {
+    return { code: "EMPTY_SEQUENCE", message: "Add at least one clip or audio layer before exporting." };
+  }
+  if (audio.length > EDITOR_MAX_AUDIO) {
+    return { code: "AUDIO_CAP", message: `Audio is limited to ${EDITOR_MAX_AUDIO} layers.` };
   }
   if (doc.sequence.length > EDITOR_MAX_SEQUENCE) {
     return { code: "SEQUENCE_CAP", message: `Sequence is limited to ${EDITOR_MAX_SEQUENCE} clips.` };
@@ -750,6 +829,14 @@ export function validateEditorExport(
       return { code: "OVERLAY_SOURCE", message: "Every overlay needs text or a media source." };
     }
   }
+  for (const layer of audio) {
+    if (!clipHasSource(layer, allowLocal)) {
+      return { code: "AUDIO_SOURCE", message: "Every audio layer needs an uploaded file." };
+    }
+    if (layer.endSec - layer.startSec > maxClipLayerDurationSec(layer) + 0.05) {
+      return { code: "AUDIO_SOURCE_LENGTH", message: "An audio layer is longer than its source file." };
+    }
+  }
   return null;
 }
 
@@ -773,6 +860,7 @@ export function collectEditorMediaRefs(doc: EditorDocument): {
   };
   for (const clip of doc.sequence) add(clip.creationId, clip.storagePath);
   for (const overlay of doc.overlays) add(overlay.creationId, overlay.storagePath);
+  for (const layer of doc.audio ?? []) add(layer.creationId, layer.storagePath);
   return { creationIds, storagePaths };
 }
 
@@ -790,8 +878,8 @@ export function acceptEditorExportUploads(
   ownerPrefix: string
 ): EditorExportUpload[] | null {
   if (raw == null) return [];
-  if (!Array.isArray(raw) || raw.length > EDITOR_MAX_SEQUENCE + EDITOR_MAX_OVERLAYS) return null;
-  const layers = [...doc.sequence, ...doc.overlays];
+  if (!Array.isArray(raw) || raw.length > EDITOR_MAX_SEQUENCE + EDITOR_MAX_OVERLAYS + EDITOR_MAX_AUDIO) return null;
+  const layers: MediaSourced[] = [...doc.sequence, ...doc.overlays, ...(doc.audio ?? [])];
   const accepted: EditorExportUpload[] = [];
   const seen = new Set<string>();
   for (const entry of raw) {
@@ -821,11 +909,11 @@ export function editorExportHashDocument(
   uploads: EditorExportUpload[]
 ): EditorDocument {
   const uploaded = new Set(uploads.map((u) => u.storagePath));
-  const swap = <T extends EditorClip | EditorOverlay>(layer: T): T =>
+  const swap = <T extends MediaSourced>(layer: T): T =>
     layer.storagePath && uploaded.has(layer.storagePath) && layer.localMediaId
       ? { ...layer, storagePath: `local:${layer.localMediaId}` }
       : layer;
-  return { ...doc, sequence: doc.sequence.map(swap), overlays: doc.overlays.map(swap) };
+  return { ...doc, sequence: doc.sequence.map(swap), overlays: doc.overlays.map(swap), audio: (doc.audio ?? []).map(swap) };
 }
 
 export const EDITOR_MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB, editor-only client limit
@@ -843,14 +931,34 @@ export const EDITOR_ACCEPTED_IMAGE_MIME_TYPES = [
   "image/webp",
 ] as const;
 
+/** MP3, M4A/AAC and WAV, under the MIME aliases browsers report for them. */
+export const EDITOR_ACCEPTED_AUDIO_MIME_TYPES = [
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+] as const;
+
+/** Canonical type for the ref upload signer, which only knows one alias per format. */
+export function editorUploadMimeType(type: string): string {
+  if (type === "audio/x-m4a") return "audio/mp4";
+  if (type === "audio/wave") return "audio/wav";
+  return type;
+}
+
 export const EDITOR_ACCEPTED_UPLOAD_MIME_TYPES = new Set<string>([
   ...EDITOR_ACCEPTED_VIDEO_MIME_TYPES,
   ...EDITOR_ACCEPTED_IMAGE_MIME_TYPES,
+  ...EDITOR_ACCEPTED_AUDIO_MIME_TYPES,
 ]);
 
 export function validateEditorUploadFile(
   file: { size: number; type: string; name: string },
-  expectedKind?: "sequence" | "image" | "video"
+  expectedKind?: "sequence" | "image" | "video" | "audio"
 ): { ok: true } | { ok: false; error: string } {
   if (file.size > EDITOR_MAX_UPLOAD_BYTES) {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
@@ -863,7 +971,7 @@ export function validateEditorUploadFile(
   if (!file.type || !EDITOR_ACCEPTED_UPLOAD_MIME_TYPES.has(file.type)) {
     return {
       ok: false,
-      error: `File type "${file.type || file.name}" isn't supported. Use MP4, MOV, WebM, JPEG, PNG, or WebP.`,
+      error: `File type "${file.type || file.name}" isn't supported. Use MP4, MOV, WebM, JPEG, PNG, WebP, MP3, M4A, or WAV.`,
     };
   }
 
@@ -871,6 +979,13 @@ export function validateEditorUploadFile(
     return {
       ok: false,
       error: "Only image files (JPEG, PNG, WebP) can be used as image overlays.",
+    };
+  }
+
+  if (expectedKind === "audio" && !file.type.startsWith("audio/")) {
+    return {
+      ok: false,
+      error: "Only audio files (MP3, M4A, WAV) can be used as audio layers.",
     };
   }
 
@@ -1423,6 +1538,51 @@ export function editorDocumentSelfCheck(): void {
   const scaled = textOverlayLayout({ ...sampleOverlay, fontSize: 500 }, { w: 2160, h: 3840 }, 3);
   assert(scaled.fontSize === 600, "font clamp applies before export scaling");
   assert(scaled.shadow.x === 6 && scaled.shadow.y === 6, "shadow scales with export height");
+
+  // Audio layers (#359)
+  assert(parseEditorDocument({ sequence: [] })?.audio?.length === 0, "old documents without audio parse to []");
+  const withAudio = parseEditorDocument({
+    sequence: [{ id: "c", creationId: "x", startSec: 0, endSec: 2, inSec: 0, order: 0 }],
+    audio: [
+      { id: "a1", localMediaId: "m-1", startSec: 1, endSec: 30, inSec: 2, sourceDurationSec: 10, volume: 1.7, muted: true },
+      { id: "a2", storagePath: "u/videos/temp/refs/s.mp3", startSec: 0, endSec: 4, volume: 0.456 },
+      { id: "c", localMediaId: "dup", startSec: 0, endSec: 1 },
+      { startSec: 0, endSec: 1 },
+    ],
+  })!;
+  assert(withAudio.audio?.length === 2, "invalid and duplicate-id audio layers dropped");
+  const [a1, a2] = withAudio.audio!;
+  assert(a1.endSec === 9 && a1.inSec === 2, "audio layer clamped to its source (10 - inSec 2)");
+  assert(a1.volume === 1 && a1.muted === true && a1.locked === false, "volume clamped to 1; flags parsed");
+  assert(a2.volume === 0.46 && a2.muted === false, "volume rounded; defaults unmuted");
+  assert(normalizeAudioVolume(undefined) === 1 && normalizeAudioVolume(-2) === 0, "volume default 1, floor 0");
+  assert(projectDurationSec(withAudio) === 9, "audio layers extend the project duration");
+  assert(JSON.stringify(parseEditorDocument(JSON.parse(JSON.stringify(withAudio)))) === JSON.stringify(withAudio), "audio round-trips");
+  assert(
+    parseEditorDocument({ audio: Array.from({ length: 9 }, (_, i) => ({ id: `a${i}`, localMediaId: `m${i}`, startSec: 0, endSec: 1 })) })?.audio?.length === EDITOR_MAX_AUDIO,
+    "audio layer cap at parse"
+  );
+  const audioOnly = parseEditorDocument({ audio: [{ id: "a", localMediaId: "m", startSec: 0, endSec: 3 }] })!;
+  assert(validateEditorExport(audioOnly) !== null && validateEditorExport(audioOnly, { allowLocal: true }) === null, "audio-only project exports once its file is uploaded");
+  assert(validateEditorExport(emptyEditorDocument())?.code === "EMPTY_SEQUENCE", "empty project still blocked");
+  assert(resolveLayerLabel(a1, 0) === "Audio 1", "audio fallback label");
+  assert(
+    collectEditorMediaRefs(withAudio).storagePaths.includes("u/videos/temp/refs/s.mp3"),
+    "audio storage paths are owner-checked with other media"
+  );
+  const probedAudio = withProbedLayerSource(audioOnly, "a", 20, isPlaceholderSpan);
+  assert(probedAudio.audio?.[0].endSec === 20 && probedAudio.audio[0].sourceDurationSec === 20, "placeholder audio fills its probed source");
+  const audioOwner = "u1/videos/temp/refs/";
+  const audioUpload = `${audioOwner}abc-song.mp3`;
+  const uploadedAudioDoc = { ...audioOnly, audio: [{ ...audioOnly.audio![0], storagePath: audioUpload }] };
+  assert(acceptEditorExportUploads([{ localMediaId: "m", storagePath: audioUpload }], uploadedAudioDoc, audioOwner)?.length === 1, "audio export uploads accepted");
+  assert(editorExportHashDocument(uploadedAudioDoc, [{ localMediaId: "m", storagePath: audioUpload }]).audio?.[0].storagePath === "local:m", "audio uploads hash by localMediaId");
+  assert(validateEditorUploadFile({ size: 1024, type: "audio/mpeg", name: "s.mp3" }, "audio").ok, "mp3 accepted for audio");
+  assert(validateEditorUploadFile({ size: 1024, type: "audio/x-m4a", name: "s.m4a" }, "audio").ok, "m4a accepted for audio");
+  assert(!validateEditorUploadFile({ size: 1024, type: "video/mp4", name: "v.mp4" }, "audio").ok, "video rejected as audio");
+  assert(!validateEditorUploadFile({ size: 1024, type: "audio/wav", name: "s.wav" }, "sequence").ok, "audio rejected as a clip");
+  assert(!validateEditorUploadFile({ size: EDITOR_MAX_UPLOAD_BYTES + 1, type: "audio/wav", name: "s.wav" }, "audio").ok, "audio shares the upload cap");
+  assert(editorUploadMimeType("audio/x-m4a") === "audio/mp4" && editorUploadMimeType("audio/mpeg") === "audio/mpeg", "upload MIME canonicalized");
 }
 
 if (require.main === module) {
