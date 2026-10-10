@@ -2,7 +2,7 @@
 
 import EditorExportDialog from "./EditorExportDialog";
 import type { EditorExportSettings } from "@/lib/editor-export-settings";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -145,6 +145,7 @@ import {
   stepScale,
   visibleTickRange,
 } from "@/lib/editor-timeline-zoom";
+import { MARQUEE_THRESHOLD_PX, marqueeHits, marqueeRect, type MarqueeRect, type MarqueeStrip } from "@/lib/editor-timeline-marquee";
 import { useClipFilmstrip } from "./useClipFilmstrip";
 import { useEditorViewport } from "./useEditorViewport";
 import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
@@ -329,6 +330,7 @@ function audioFromDevice(localMediaId: string, name: string, playheadSec: number
 }
 
 function TimelineLayerRow({
+  id,
   selected,
   locked,
   hidden,
@@ -351,6 +353,7 @@ function TimelineLayerRow({
   viewLeft,
   viewRight,
 }: {
+  id: string;
   selected: boolean;
   locked: boolean;
   hidden: boolean;
@@ -369,7 +372,7 @@ function TimelineLayerRow({
   /** Shown in the chip only while the strip is selected or hovered. */
   timecode: string;
   icon: ReactNode;
-  onSelect: () => void;
+  onSelect: (additive: boolean) => void;
   onMove: (startSec: number, endSec: number) => void;
   onTrimStart: (startSec: number, inSec?: number) => void;
   onTrimEnd: (endSec: number) => void;
@@ -404,14 +407,14 @@ function TimelineLayerRow({
     }
   };
   return (
-    <div className="relative h-11" style={{ width: trackWidth }}>
+    <div data-strip-row={id} className="relative h-11" style={{ width: trackWidth }}>
       <div className="absolute inset-y-0 left-0 rounded-sm bg-white/[0.03]" style={{ width: laneWidth }} />
       <div
         role="button"
         tabIndex={0}
         onClick={(event) => {
           event.stopPropagation();
-          onSelect();
+          onSelect(event.shiftKey || event.metaKey || event.ctrlKey);
         }}
         onPointerDown={(event) => {
           if (locked) return;
@@ -1022,7 +1025,15 @@ export default function EditorWorkspace() {
   const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [doc, setDoc] = useState<EditorDocument>(emptyEditorDocument);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdOnly] = useState<string | null>(null);
+  // Marquee/shift selections of 2+ strips; selectedId stays null then, so single-select consumers stay inactive.
+  const [multiIds, setMultiIds] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+  const multiIdsRef = useRef(multiIds);
+  const setSelectedId = useCallback((next: SetStateAction<string | null>) => {
+    setMultiIds([]);
+    setSelectedIdOnly(next);
+  }, []);
   const [rawPlayhead, setPlayhead] = useState(0);
   // Duration is derived from layers, so it can shrink under the playhead; clamp on read.
   const playhead = Math.min(rawPlayhead, sequenceDurationSec(doc));
@@ -1129,6 +1140,7 @@ export default function EditorWorkspace() {
   pastRef.current = past;
   futureRef.current = future;
   selectedIdRef.current = selectedId;
+  multiIdsRef.current = multiIds;
   playheadRef.current = playhead;
   loopRef.current = loop;
 
@@ -1191,6 +1203,14 @@ export default function EditorWorkspace() {
     stageSize,
     tool === "hand"
   );
+  const isSelected = (id: string) => id === selectedId || multiIds.includes(id);
+  const selectStrip = (id: string, additive: boolean) => {
+    if (!additive) return setSelectedId(id);
+    const current = selectedId ? [selectedId] : multiIds;
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+    setSelectedIdOnly(next.length === 1 ? next[0] : null);
+    setMultiIds(next.length > 1 ? next : []);
+  };
   const selectedClip = doc.sequence.find((c) => c.id === selectedId) ?? null;
   const selectedOverlay = doc.overlays.find((o) => o.id === selectedId) ?? null;
   const selectedAudio = audioLayers.find((a) => a.id === selectedId) ?? null;
@@ -1338,7 +1358,7 @@ export default function EditorWorkspace() {
     if (!result) return;
     patchDoc(() => result.doc);
     setSelectedId(result.rightClipId);
-  }, [patchDoc]);
+  }, [patchDoc, setSelectedId]);
 
   const handleTrimStartToPlayhead = useCallback(() => {
     const id = selectedIdRef.current;
@@ -1370,7 +1390,7 @@ export default function EditorWorkspace() {
     setDoc(prev);
     setSelectedId(null);
     lastPatchRef.current = null;
-  }, []);
+  }, [setSelectedId]);
 
   const redo = useCallback(() => {
     const f = futureRef.current;
@@ -1382,7 +1402,7 @@ export default function EditorWorkspace() {
     setDoc(next);
     setSelectedId(null);
     lastPatchRef.current = null;
-  }, []);
+  }, [setSelectedId]);
 
   const removeLayer = useCallback(
     (kind: "clip" | "overlay" | "audio", id: string) => {
@@ -1397,16 +1417,30 @@ export default function EditorWorkspace() {
       }));
       setSelectedId((current) => (current === id ? null : current));
     },
-    [patchDoc]
+    [patchDoc, setSelectedId]
   );
 
   const deleteSelected = useCallback(() => {
+    const cur = docRef.current;
+    const lockedIds = new Set([...cur.sequence, ...cur.overlays, ...(cur.audio ?? [])].filter((l) => l.locked).map((l) => l.id));
+    const ids = multiIdsRef.current.filter((id) => !lockedIds.has(id));
+    if (multiIdsRef.current.length > 1) {
+      if (ids.length === 0) return;
+      patchDoc((current) => ({
+        ...current,
+        sequence: current.sequence.filter((c) => !ids.includes(c.id)).map((c, order) => ({ ...c, order })),
+        overlays: current.overlays.filter((o) => !ids.includes(o.id)),
+        audio: current.audio ? current.audio.filter((a) => !ids.includes(a.id)) : current.audio,
+      }));
+      setSelectedId(null);
+      return;
+    }
     const id = selectedIdRef.current;
     if (!id) return;
     const isClip = docRef.current.sequence.some((c) => c.id === id);
     const isAudio = (docRef.current.audio ?? []).some((a) => a.id === id);
     removeLayer(isClip ? "clip" : isAudio ? "audio" : "overlay", id);
-  }, [removeLayer]);
+  }, [patchDoc, removeLayer, setSelectedId]);
 
   const loadProject = useCallback(
     async (id: string) => {
@@ -1436,7 +1470,7 @@ export default function EditorWorkspace() {
       lastSavedRef.current = fingerprintOf(data.project.title, parsed);
       applyUrl(data.project.id);
     },
-    [applyUrl, openSignInModal]
+    [applyUrl, openSignInModal, setSelectedId]
   );
 
   const resetProject = useCallback(() => {
@@ -1454,7 +1488,7 @@ export default function EditorWorkspace() {
     setFuture([]);
     lastSavedRef.current = fingerprintOf(DEFAULT_EDITOR_TITLE, empty);
     applyUrl(null);
-  }, [applyUrl, setScaleAndRewind]);
+  }, [applyUrl, setScaleAndRewind, setSelectedId]);
 
   const handleSave = useCallback(async () => {
     if (status !== "authenticated") {
@@ -3263,16 +3297,56 @@ export default function EditorWorkspace() {
                   className="relative h-5"
                   style={{ width: timelineWidth }}
                   onPointerDown={(event) => {
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
-                    setPlayhead(startPlayhead);
-                    setPlaying(false);
-                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
-                      setPlayhead(
-                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
-                      );
-                    });
+                    if (event.button !== 0) return;
+                    const content = event.currentTarget;
+                    const origin = content.getBoundingClientRect();
+                    const x0 = event.clientX - origin.left;
+                    const y0 = event.clientY - origin.top;
+                    const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                    const startPx = pxPerSec;
+                    const base = additive ? (selectedId ? [selectedId] : multiIds) : [];
+                    const strips = (): MarqueeStrip[] => {
+                      const bounds = new Map<string, { top: number; bottom: number }>();
+                      content.querySelectorAll<HTMLElement>("[data-strip-row]").forEach((el) => {
+                        const r = el.getBoundingClientRect();
+                        bounds.set(el.dataset.stripRow!, { top: r.top - origin.top, bottom: r.bottom - origin.top });
+                      });
+                      const all = [...docRef.current.sequence, ...docRef.current.overlays, ...(docRef.current.audio ?? [])];
+                      return all.flatMap((l) => {
+                        const b = bounds.get(l.id);
+                        return b ? [{ id: l.id, startSec: l.startSec, endSec: l.endSec, locked: l.locked, ...b }] : [];
+                      });
+                    };
+                    let dragging = false;
+                    activeTimelineDrags += 1;
+                    const apply = (ev: PointerEvent) => {
+                      const rect = marqueeRect(x0, y0, ev.clientX - origin.left, ev.clientY - origin.top);
+                      setMarquee(rect);
+                      const ids = [...new Set([...base, ...marqueeHits(rect, strips(), startPx)])];
+                      setSelectedIdOnly(ids.length === 1 ? ids[0] : null);
+                      setMultiIds(ids.length > 1 ? ids : []);
+                    };
+                    const move = (ev: PointerEvent) => {
+                      if (!dragging && Math.hypot(ev.clientX - event.clientX, ev.clientY - event.clientY) < MARQUEE_THRESHOLD_PX) {
+                        return;
+                      }
+                      dragging = true;
+                      apply(ev);
+                    };
+                    const up = () => {
+                      activeTimelineDrags = Math.max(0, activeTimelineDrags - 1);
+                      window.removeEventListener("pointermove", move);
+                      window.removeEventListener("pointerup", up);
+                      window.removeEventListener("pointercancel", up);
+                      setMarquee(null);
+                      if (dragging) return;
+                      if (!additive) setSelectedId(null);
+                      setPlayhead(snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x0 / startPx))));
+                      setPlaying(false);
+                    };
+                    window.addEventListener("pointermove", move);
+                    window.addEventListener("pointerup", up);
+                    window.addEventListener("pointercancel", up);
                   }}
                 >
                   <div
@@ -3332,7 +3406,7 @@ export default function EditorWorkspace() {
                       <LayerPanelRow
                         key={overlay.id}
                         id={overlay.id}
-                        selected={overlay.id === selectedId}
+                        selected={isSelected(overlay.id)}
                         locked={overlay.locked}
                         hidden={overlay.hidden}
                         canMute={overlay.kind === "video"}
@@ -3381,7 +3455,7 @@ export default function EditorWorkspace() {
                       <LayerPanelRow
                         key={clip.id}
                         id={clip.id}
-                        selected={clip.id === selectedId}
+                        selected={isSelected(clip.id)}
                         locked={clip.locked}
                         hidden={clip.hidden}
                         canMute={true}
@@ -3416,7 +3490,7 @@ export default function EditorWorkspace() {
                       <LayerPanelRow
                         key={layer.id}
                         id={layer.id}
-                        selected={layer.id === selectedId}
+                        selected={isSelected(layer.id)}
                         locked={layer.locked}
                         hidden={false}
                         canMute={true}
@@ -3473,18 +3547,70 @@ export default function EditorWorkspace() {
                   className="relative min-h-full"
                   style={{ width: timelineWidth }}
                   onPointerDown={(event) => {
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const startPlayhead = snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x / pxPerSec)));
-                    setPlayhead(startPlayhead);
-                    setPlaying(false);
-                    startTimelineDrag(event, pxPerSec, (deltaSec) => {
-                      setPlayhead(
-                        snapTenth(Math.max(0, Math.min(Math.max(duration, 0), startPlayhead + deltaSec)))
-                      );
-                    });
+                    if (event.button !== 0) return;
+                    const content = event.currentTarget;
+                    const origin = content.getBoundingClientRect();
+                    const x0 = event.clientX - origin.left;
+                    const y0 = event.clientY - origin.top;
+                    const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                    const startPx = pxPerSec;
+                    const base = additive ? (selectedId ? [selectedId] : multiIds) : [];
+                    const strips = (): MarqueeStrip[] => {
+                      const bounds = new Map<string, { top: number; bottom: number }>();
+                      content.querySelectorAll<HTMLElement>("[data-strip-row]").forEach((el) => {
+                        const r = el.getBoundingClientRect();
+                        bounds.set(el.dataset.stripRow!, { top: r.top - origin.top, bottom: r.bottom - origin.top });
+                      });
+                      const all = [...docRef.current.sequence, ...docRef.current.overlays, ...(docRef.current.audio ?? [])];
+                      return all.flatMap((l) => {
+                        const b = bounds.get(l.id);
+                        return b ? [{ id: l.id, startSec: l.startSec, endSec: l.endSec, locked: l.locked, ...b }] : [];
+                      });
+                    };
+                    let dragging = false;
+                    activeTimelineDrags += 1;
+                    const apply = (ev: PointerEvent) => {
+                      const rect = marqueeRect(x0, y0, ev.clientX - origin.left, ev.clientY - origin.top);
+                      setMarquee(rect);
+                      const ids = [...new Set([...base, ...marqueeHits(rect, strips(), startPx)])];
+                      setSelectedIdOnly(ids.length === 1 ? ids[0] : null);
+                      setMultiIds(ids.length > 1 ? ids : []);
+                    };
+                    const move = (ev: PointerEvent) => {
+                      if (!dragging && Math.hypot(ev.clientX - event.clientX, ev.clientY - event.clientY) < MARQUEE_THRESHOLD_PX) {
+                        return;
+                      }
+                      dragging = true;
+                      apply(ev);
+                    };
+                    const up = () => {
+                      activeTimelineDrags = Math.max(0, activeTimelineDrags - 1);
+                      window.removeEventListener("pointermove", move);
+                      window.removeEventListener("pointerup", up);
+                      window.removeEventListener("pointercancel", up);
+                      setMarquee(null);
+                      if (dragging) return;
+                      if (!additive) setSelectedId(null);
+                      setPlayhead(snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x0 / startPx))));
+                      setPlaying(false);
+                    };
+                    window.addEventListener("pointermove", move);
+                    window.addEventListener("pointerup", up);
+                    window.addEventListener("pointercancel", up);
                   }}
                 >
+                  {marquee ? (
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute z-30 rounded-sm border border-brand-primary bg-brand-primary/15"
+                      style={{
+                        left: marquee.left,
+                        top: marquee.top,
+                        width: marquee.right - marquee.left,
+                        height: marquee.bottom - marquee.top,
+                      }}
+                    />
+                  ) : null}
                   <div
                     className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info"
                     style={{ left: playhead * pxPerSec }}
@@ -3494,8 +3620,9 @@ export default function EditorWorkspace() {
                       {overlayRows.map(({ overlay, label }) => (
                         <TimelineLayerRow
                           key={overlay.id}
+                          id={overlay.id}
                           label={label}
-                          selected={overlay.id === selectedId}
+                          selected={isSelected(overlay.id)}
                           locked={overlay.locked}
                           hidden={overlay.hidden}
                           startSec={overlay.startSec}
@@ -3520,7 +3647,7 @@ export default function EditorWorkspace() {
                                 }
                               : undefined
                           }
-                          onSelect={() => setSelectedId(overlay.id)}
+                          onSelect={(additive) => selectStrip(overlay.id, additive)}
                           onMove={(startSec, endSec) =>
                             updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
                           }
@@ -3543,8 +3670,9 @@ export default function EditorWorkspace() {
                         return (
                           <TimelineLayerRow
                             key={clip.id}
+                            id={clip.id}
                             label={label}
-                            selected={clip.id === selectedId}
+                            selected={isSelected(clip.id)}
                             locked={clip.locked}
                             hidden={clip.hidden}
                             startSec={clip.startSec}
@@ -3565,7 +3693,7 @@ export default function EditorWorkspace() {
                               inSec: clip.inSec,
                               outSec: clipSourceOutSec(clip),
                             }}
-                            onSelect={() => setSelectedId(clip.id)}
+                            onSelect={(additive) => selectStrip(clip.id, additive)}
                             onMove={(startSec, endSec) =>
                               updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
                             }
@@ -3585,8 +3713,9 @@ export default function EditorWorkspace() {
                       {audioRows.map(({ layer, label }) => (
                         <TimelineLayerRow
                           key={layer.id}
+                          id={layer.id}
                           label={label}
-                          selected={layer.id === selectedId}
+                          selected={isSelected(layer.id)}
                           locked={layer.locked}
                           hidden={layer.muted}
                           startSec={layer.startSec}
@@ -3601,7 +3730,7 @@ export default function EditorWorkspace() {
                           inSec={layer.inSec}
                           icon={<Music className="h-3 w-3 shrink-0" aria-hidden />}
                           timecode={`${formatTimecode(layer.startSec)}–${formatTimecode(layer.endSec)}`}
-                          onSelect={() => setSelectedId(layer.id)}
+                          onSelect={(additive) => selectStrip(layer.id, additive)}
                           onMove={(startSec, endSec) =>
                             updateAudio(layer.id, { startSec, endSec }, { coalesceKey: `tl-move:${layer.id}` })
                           }
