@@ -32,3 +32,13 @@ export function marqueeHits(rect: MarqueeRect, strips: MarqueeStrip[], pxPerSec:
     )
     .map((s) => s.id);
 }
+
+/** One shared time delta for a group move: no strip crosses 0 or maxEnd, offsets stay intact, starts stay on the 0.1s grid. */
+export function groupMoveDelta(strips: { startSec: number; endSec: number }[], rawDelta: number, maxEnd: number): number {
+  if (strips.length === 0) return 0;
+  const lo = -Math.min(...strips.map((s) => s.startSec));
+  const hi = maxEnd - Math.max(...strips.map((s) => s.endSec));
+  const clamped = Math.max(lo, Math.min(hi, rawDelta));
+  // Snap, then re-clamp: rounding must not push a strip past 0 or maxEnd.
+  return Math.max(lo, Math.min(hi, Math.round(clamped * 10) / 10));
+}
