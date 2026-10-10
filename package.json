@@ -17,6 +17,7 @@
     "storage:migrate-layout": "node scripts/migrate-storage-layout.mjs",
     "storage:migrate-user-first": "node scripts/migrate-storage-user-first.mjs",
     "storage:list-orphans": "tsx scripts/list-storage-orphans.ts",
+    "test:instagram-sharp-lazy": "tsx --conditions=react-server lib/instagram-sharp-lazy-self-check.ts",
     "test:idempotency": "tsx lib/generation-idempotency-self-check.ts",
     "test:generation-commit": "tsx lib/generation-commit-self-check.ts",
     "test:recoverable-refund": "tsx lib/pipeline-recovery/refund-policy-pure.ts",

@@ -1,6 +1,5 @@
 import "server-only";
 
-import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   STORAGE_BUCKET,
@@ -659,6 +658,7 @@ async function ensureTikTokCompatiblePhoto(storagePath: string): Promise<string>
   const format = sniffImageFormat(bytes);
   if (format === "jpeg" || format === "webp") return storagePath;
 
+  const { default: sharp } = await import("sharp");
   const jpegBuffer = await sharp(Buffer.from(bytes)).jpeg({ quality: 90 }).toBuffer();
   // Sibling path (not overwriting the original) so the source asset — still
   // used elsewhere (Product Photo history, other posts) — is untouched.
