@@ -145,7 +145,7 @@ import {
   stepScale,
   visibleTickRange,
 } from "@/lib/editor-timeline-zoom";
-import { MARQUEE_THRESHOLD_PX, marqueeHits, marqueeRect, type MarqueeRect, type MarqueeStrip } from "@/lib/editor-timeline-marquee";
+import { MARQUEE_THRESHOLD_PX, groupMoveDelta, marqueeHits, marqueeRect, type MarqueeRect, type MarqueeStrip } from "@/lib/editor-timeline-marquee";
 import { useClipFilmstrip } from "./useClipFilmstrip";
 import { useEditorViewport } from "./useEditorViewport";
 import EditorPreviewToolbar, { type EditorTool } from "./EditorPreviewToolbar";
@@ -347,6 +347,7 @@ function TimelineLayerRow({
   icon,
   onSelect,
   onMove,
+  onGroupMoveStart,
   onTrimStart,
   onTrimEnd,
   filmstrip,
@@ -374,6 +375,8 @@ function TimelineLayerRow({
   icon: ReactNode;
   onSelect: (additive: boolean) => void;
   onMove: (startSec: number, endSec: number) => void;
+  /** Returns a delta mover when this strip belongs to a 2+ multi-selection; null otherwise. */
+  onGroupMoveStart: () => ((deltaSec: number) => void) | null;
   onTrimStart: (startSec: number, inSec?: number) => void;
   onTrimEnd: (endSec: number) => void;
   /** Video layers: source range to show as a frame strip behind the label. */
@@ -419,6 +422,11 @@ function TimelineLayerRow({
         onPointerDown={(event) => {
           if (locked) return;
           if ((event.target as HTMLElement).dataset.trim) return;
+          const groupMove = selected ? onGroupMoveStart() : null;
+          if (groupMove) {
+            startTimelineDrag(event, pxPerSec, groupMove);
+            return;
+          }
           const origStart = startSec;
           const origEnd = endSec;
           const origSpan = Math.max(0.2, origEnd - origStart);
@@ -2084,6 +2092,33 @@ export default function EditorWorkspace() {
       layer.id
     );
 
+  const beginGroupMove = () => {
+    const ids = multiIdsRef.current;
+    if (ids.length < 2) return null;
+    const cur = docRef.current;
+    const orig = new Map<string, { startSec: number; endSec: number }>();
+    for (const l of [...cur.sequence, ...cur.overlays, ...(cur.audio ?? [])]) {
+      if (ids.includes(l.id) && !l.locked) orig.set(l.id, { startSec: l.startSec, endSec: l.endSec });
+    }
+    const origs = [...orig.values()];
+    return (rawDelta: number) => {
+      const delta = groupMoveDelta(origs, rawDelta, EDITOR_MAX_DURATION_SEC);
+      const move = <T extends { id: string; startSec: number; endSec: number }>(l: T): T => {
+        const o = orig.get(l.id);
+        return o ? { ...l, startSec: snapTenth(o.startSec + delta), endSec: snapTenth(o.endSec + delta) } : l;
+      };
+      patchDoc(
+        (current) => ({
+          ...current,
+          sequence: current.sequence.map((l) => move(l)),
+          overlays: current.overlays.map((l) => move(l)),
+          audio: (current.audio ?? []).map((l) => move(l)),
+        }),
+        { coalesceKey: "tl-move-group" }
+      );
+    };
+  };
+
   const updateAudio = (id: string, patch: Partial<EditorAudioLayer>, opts?: { coalesceKey?: string; keepPlaying?: boolean }) => {
     const next: Partial<EditorAudioLayer> = { ...patch };
     if (next.startSec != null) next.startSec = snapTenth(next.startSec);
@@ -3621,6 +3656,7 @@ export default function EditorWorkspace() {
                               : undefined
                           }
                           onSelect={(additive) => selectStrip(overlay.id, additive)}
+                          onGroupMoveStart={beginGroupMove}
                           onMove={(startSec, endSec) =>
                             updateOverlay(overlay.id, { startSec, endSec }, { coalesceKey: `tl-move:${overlay.id}` })
                           }
@@ -3667,7 +3703,8 @@ export default function EditorWorkspace() {
                               outSec: clipSourceOutSec(clip),
                             }}
                             onSelect={(additive) => selectStrip(clip.id, additive)}
-                            onMove={(startSec, endSec) =>
+                            onGroupMoveStart={beginGroupMove}
+                          onMove={(startSec, endSec) =>
                               updateClip(clip.id, { startSec, endSec }, { coalesceKey: `tl-move:${clip.id}` })
                             }
                             onTrimStart={(startSec, inSec) =>
@@ -3704,6 +3741,7 @@ export default function EditorWorkspace() {
                           icon={<Music className="h-3 w-3 shrink-0" aria-hidden />}
                           timecode={`${formatTimecode(layer.startSec)}–${formatTimecode(layer.endSec)}`}
                           onSelect={(additive) => selectStrip(layer.id, additive)}
+                          onGroupMoveStart={beginGroupMove}
                           onMove={(startSec, endSec) =>
                             updateAudio(layer.id, { startSec, endSec }, { coalesceKey: `tl-move:${layer.id}` })
                           }
