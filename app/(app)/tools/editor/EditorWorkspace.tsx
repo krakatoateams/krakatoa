@@ -195,7 +195,8 @@ let activeTimelineDrags = 0;
 function startTimelineDrag(
   event: ReactPointerEvent,
   pxPerSec: number,
-  onMove: (deltaSec: number) => void
+  onMove: (deltaSec: number) => void,
+  onEnd?: () => void
 ): void {
   event.preventDefault();
   event.stopPropagation();
@@ -209,6 +210,7 @@ function startTimelineDrag(
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    onEnd?.();
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -2696,9 +2698,18 @@ export default function EditorWorkspace() {
     const startPlayhead = snapTenth(Math.max(0, Math.min(max, x / pxPerSec)));
     setPlayhead(startPlayhead);
     setPlaying(false);
-    startTimelineDrag(event, pxPerSec, (deltaSec) => {
-      setPlayhead(snapTenth(Math.max(0, Math.min(max, startPlayhead + deltaSec))));
-    });
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = "ew-resize";
+    startTimelineDrag(
+      event,
+      pxPerSec,
+      (deltaSec) => {
+        setPlayhead(snapTenth(Math.max(0, Math.min(max, startPlayhead + deltaSec))));
+      },
+      () => {
+        document.body.style.cursor = prevCursor;
+      }
+    );
   };
 
   return (
@@ -3357,6 +3368,16 @@ export default function EditorWorkspace() {
                       {formatTimecode(playhead)}
                     </span>
                   </div>
+                  {/* -bottom-2 runs through the ruler's pb-2 so the line meets the tracks line. */}
+                  <div
+                    className="pointer-events-none absolute top-0 -bottom-2 z-10 w-px bg-info shadow-[0_0_0_0.5px_rgba(0,0,0,0.35)]"
+                    style={{ left: playhead * pxPerSec }}
+                  />
+                  <div
+                    className="pointer-events-auto absolute top-0 -bottom-2 z-10 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
+                    style={{ left: playhead * pxPerSec }}
+                    onPointerDown={(event) => scrubFromPointer(event, event.currentTarget.parentElement!)}
+                  />
                   {(() => {
                     const interval = rulerIntervalSec(pxPerSec);
                     const [first, last] = visibleTickRange(
@@ -3615,11 +3636,11 @@ export default function EditorWorkspace() {
                     />
                   ) : null}
                   <div
-                    className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info shadow-[0_0_0_0.5px_rgba(0,0,0,0.35)]"
+                    className="pointer-events-none absolute -top-2 bottom-0 z-20 w-px bg-info shadow-[0_0_0_0.5px_rgba(0,0,0,0.35)]"
                     style={{ left: playhead * pxPerSec }}
                   />
                   <div
-                    className="pointer-events-auto absolute top-0 bottom-0 z-20 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
+                    className="pointer-events-auto absolute -top-2 bottom-0 z-20 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
                     style={{ left: playhead * pxPerSec }}
                     onPointerDown={(event) => scrubFromPointer(event, event.currentTarget.parentElement!)}
                   />
