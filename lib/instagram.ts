@@ -5,7 +5,6 @@
 
 import "server-only";
 
-import sharp from "sharp";
 import { supabaseServer } from "@/lib/supabase-server";
 import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 import { instagramTokenExchangeErrorDetail } from "@/lib/instagram-oauth-pure";
@@ -264,6 +263,7 @@ export async function ensureInstagramCompatibleImage(storagePath: string): Promi
   const bytes = new Uint8Array(await data.arrayBuffer());
   if (sniffImageFormat(bytes) === "jpeg") return storagePath;
 
+  const { default: sharp } = await import("sharp");
   const jpegBuffer = await sharp(Buffer.from(bytes)).jpeg({ quality: 90 }).toBuffer();
   const convertedPath = `${storagePath.replace(/\.[^./]+$/, "")}.instagram.jpg`;
 

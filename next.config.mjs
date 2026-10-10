@@ -35,6 +35,18 @@ function supabaseStorageImagePattern() {
 const nextConfig = {
   transpilePackages: ["shaders", "@xyflow/react"],
   poweredByHeader: false,
+  // Routes that never convert photos skip the sharp/libvips binaries
+  // (see docs/ops/function-bundle-size.md). /api/cron must keep sharp.
+  outputFileTracingExcludes: Object.fromEntries(
+    [
+      "/api/posts",
+      "/api/cron/instagram-token-refresh",
+      "/api/connections/instagram/callback",
+      "/api/connections/tiktok/start",
+      "/api/connections/tiktok/callback",
+      "/api/connections/tiktok/creator-info",
+    ].map((route) => [route, ["node_modules/sharp/**", "node_modules/@img/**"]]),
+  ),
   // Former design-variant route; homepage is only `/` now.
   async redirects() {
     return [
