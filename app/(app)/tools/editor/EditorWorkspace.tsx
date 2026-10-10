@@ -2654,6 +2654,18 @@ export default function EditorWorkspace() {
   const timelineWidth = Math.max(rulerView.width - TIMELINE_PAD_PX * 2, 320, Math.ceil(timelineSec * pxPerSec));
   const laneWidth = duration * pxPerSec;
 
+  const scrubFromPointer = (event: ReactPointerEvent, origin: HTMLElement) => {
+    if (event.button !== 0) return;
+    const max = Math.max(duration, 0);
+    const x = event.clientX - origin.getBoundingClientRect().left;
+    const startPlayhead = snapTenth(Math.max(0, Math.min(max, x / pxPerSec)));
+    setPlayhead(startPlayhead);
+    setPlaying(false);
+    startTimelineDrag(event, pxPerSec, (deltaSec) => {
+      setPlayhead(snapTenth(Math.max(0, Math.min(max, startPlayhead + deltaSec))));
+    });
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-N50 text-text-primary">
       <EditorTopBar
@@ -3296,58 +3308,7 @@ export default function EditorWorkspace() {
                 <div
                   className="relative h-5"
                   style={{ width: timelineWidth }}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    const content = event.currentTarget;
-                    const origin = content.getBoundingClientRect();
-                    const x0 = event.clientX - origin.left;
-                    const y0 = event.clientY - origin.top;
-                    const additive = event.shiftKey || event.metaKey || event.ctrlKey;
-                    const startPx = pxPerSec;
-                    const base = additive ? (selectedId ? [selectedId] : multiIds) : [];
-                    const strips = (): MarqueeStrip[] => {
-                      const bounds = new Map<string, { top: number; bottom: number }>();
-                      content.querySelectorAll<HTMLElement>("[data-strip-row]").forEach((el) => {
-                        const r = el.getBoundingClientRect();
-                        bounds.set(el.dataset.stripRow!, { top: r.top - origin.top, bottom: r.bottom - origin.top });
-                      });
-                      const all = [...docRef.current.sequence, ...docRef.current.overlays, ...(docRef.current.audio ?? [])];
-                      return all.flatMap((l) => {
-                        const b = bounds.get(l.id);
-                        return b ? [{ id: l.id, startSec: l.startSec, endSec: l.endSec, locked: l.locked, ...b }] : [];
-                      });
-                    };
-                    let dragging = false;
-                    activeTimelineDrags += 1;
-                    const apply = (ev: PointerEvent) => {
-                      const rect = marqueeRect(x0, y0, ev.clientX - origin.left, ev.clientY - origin.top);
-                      setMarquee(rect);
-                      const ids = [...new Set([...base, ...marqueeHits(rect, strips(), startPx)])];
-                      setSelectedIdOnly(ids.length === 1 ? ids[0] : null);
-                      setMultiIds(ids.length > 1 ? ids : []);
-                    };
-                    const move = (ev: PointerEvent) => {
-                      if (!dragging && Math.hypot(ev.clientX - event.clientX, ev.clientY - event.clientY) < MARQUEE_THRESHOLD_PX) {
-                        return;
-                      }
-                      dragging = true;
-                      apply(ev);
-                    };
-                    const up = () => {
-                      activeTimelineDrags = Math.max(0, activeTimelineDrags - 1);
-                      window.removeEventListener("pointermove", move);
-                      window.removeEventListener("pointerup", up);
-                      window.removeEventListener("pointercancel", up);
-                      setMarquee(null);
-                      if (dragging) return;
-                      if (!additive) setSelectedId(null);
-                      setPlayhead(snapTenth(Math.max(0, Math.min(Math.max(duration, 0), x0 / startPx))));
-                      setPlaying(false);
-                    };
-                    window.addEventListener("pointermove", move);
-                    window.addEventListener("pointerup", up);
-                    window.addEventListener("pointercancel", up);
-                  }}
+                  onPointerDown={(event) => scrubFromPointer(event, event.currentTarget)}
                 >
                   <div
                     className="absolute top-0 z-20 -translate-x-1/2 cursor-ew-resize select-none whitespace-nowrap rounded-[3px] bg-info px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-white shadow after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-x-4 after:border-t-4 after:border-x-transparent after:border-t-info after:content-['']"
@@ -3614,6 +3575,11 @@ export default function EditorWorkspace() {
                   <div
                     className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-info"
                     style={{ left: playhead * pxPerSec }}
+                  />
+                  <div
+                    className="pointer-events-auto absolute top-0 bottom-0 z-20 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
+                    style={{ left: playhead * pxPerSec }}
+                    onPointerDown={(event) => scrubFromPointer(event, event.currentTarget.parentElement!)}
                   />
                   {overlayRows.length > 0 ? (
                     <div className="mb-2 space-y-1">
