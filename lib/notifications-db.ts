@@ -1,8 +1,10 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import type { Profile } from "@/lib/profiles-db";
+import { CREATION_TOOLS } from "@/lib/creations";
 import {
   describeNotification,
   type NotificationContext,
+  type NotificationCreationFacts,
   type NotificationPostFacts,
   type NotificationRecord,
   type NotificationView,
@@ -98,6 +100,33 @@ async function postFacts(
   );
 }
 
+/**
+ * Library rows the caller's finished jobs saved, keyed by job id (newest per
+ * job). Same scope as getUserCreationIdForJob: owner only, trashed excluded.
+ */
+async function creationFacts(
+  profile: Profile,
+  jobIds: string[],
+): Promise<Map<string, NotificationCreationFacts>> {
+  if (jobIds.length === 0) return new Map();
+  const { data, error } = await supabaseServer
+    .from("user_creations")
+    .select("id, tool, job_id")
+    .eq("user_id", profile.user_id)
+    .in("job_id", jobIds)
+    .is("metadata->>deletedAt", null)
+    .order("created_at", { ascending: false });
+  handleError(error, "Failed to read creations.");
+  type CreationRow = { id: string; tool: string; job_id: string };
+  const byJob = new Map<string, NotificationCreationFacts>();
+  for (const row of (data ?? []) as CreationRow[]) {
+    // An unknown tool has no page to open; fall back to the plain tool link.
+    if (byJob.has(row.job_id) || !(row.tool in CREATION_TOOLS)) continue;
+    byJob.set(row.job_id, { id: row.id, tool: row.tool as NotificationCreationFacts["tool"] });
+  }
+  return byJob;
+}
+
 /** The caller's newest Notifications, rendered for display. */
 export async function listNotificationViews(profile: Profile): Promise<NotificationView[]> {
   const { data, error } = await supabaseServer
@@ -109,11 +138,12 @@ export async function listNotificationViews(profile: Profile): Promise<Notificat
   handleError(error, "Failed to list notifications.");
   const rows = (data ?? []) as NotificationRow[];
 
-  const [refunds, posts] = await Promise.all([
+  const [refunds, posts, creations] = await Promise.all([
     refundedJobIds(profile.id, idsFrom(rows, ["generation_failed"], "job_id")),
     postFacts(profile, idsFrom(rows, ["post_published", "post_failed"], "post_id")),
+    creationFacts(profile, idsFrom(rows, ["generation_succeeded"], "job_id")),
   ]);
-  const context: NotificationContext = { refundedJobIds: refunds, posts };
+  const context: NotificationContext = { refundedJobIds: refunds, posts, creations };
 
   return rows.map((row) =>
     describeNotification(

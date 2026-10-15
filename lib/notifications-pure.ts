@@ -7,6 +7,9 @@
  * No DOM, no network: covered by lib/notifications-self-check.ts.
  */
 
+import type { CreationTool } from "@/lib/creations";
+import { generationSucceededHref, postNotificationHref } from "@/lib/notification-links-pure";
+
 export type NotificationKind =
   | "generation_succeeded"
   | "generation_failed"
@@ -30,10 +33,18 @@ export type NotificationPostFacts = {
   tiktokShareUrl: string | null;
 };
 
+/** The library row a finished job saved, if any (user_creations, by job_id). */
+export type NotificationCreationFacts = {
+  id: string;
+  tool: CreationTool;
+};
+
 /** Read-time facts looked up for the rows being rendered. */
 export type NotificationContext = {
   refundedJobIds: Set<string>;
   posts: Map<string, NotificationPostFacts>;
+  /** Keyed by job id. Absent → the tool page without a specific creation. */
+  creations?: Map<string, NotificationCreationFacts>;
 };
 
 export type NotificationTone = "success" | "error" | "info";
@@ -137,12 +148,15 @@ export function describeNotification(
 
   if (record.kind === "generation_succeeded") {
     const tool = toolInfo(data.tool);
+    const jobId = text(data.job_id);
+    // When the job saved a library row, open that exact creation's preview.
+    const creation = jobId ? context.creations?.get(jobId) : undefined;
     return {
       ...base,
       tone: "success",
       title: `Your ${tool.noun} is ready`,
       body: "Open it from your recent creations.",
-      href: tool.href,
+      href: creation ? generationSucceededHref(creation.tool, creation.id) : tool.href,
     };
   }
 
@@ -170,7 +184,7 @@ export function describeNotification(
       tone: "success",
       title: `Posted to ${platformLabel(data.platform)}`,
       body: postTitle ? `“${postTitle}” is live.` : "Your scheduled post is live.",
-      href: "/tools/scheduler/calendar",
+      href: postId ? postNotificationHref(postId) : "/tools/scheduler/calendar",
       externalHref: livePostUrl(postId ? context.posts.get(postId) : undefined),
     };
   }
@@ -194,7 +208,7 @@ export function describeNotification(
       tone: "error",
       title: `Your ${platform} post couldn't be published`,
       body,
-      href: "/tools/scheduler/calendar",
+      href: postId ? postNotificationHref(postId) : "/tools/scheduler/calendar",
     };
   }
 

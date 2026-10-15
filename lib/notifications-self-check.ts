@@ -68,6 +68,18 @@ export function notificationsSelfCheck(): void {
   assert(unknown.title === "Your generation is ready", `unknown title: ${unknown.title}`);
   assert(unknown.href === "/dashboard/assets", `unknown tool falls back to My Library: ${unknown.href}`);
 
+  // A job that saved a creation opens that creation's preview on its tool page.
+  const exact = describeNotification(record("generation_succeeded", { job_id: "j7", tool: "reels" }), {
+    refundedJobIds: new Set(),
+    posts: new Map(),
+    creations: new Map([["j7", { id: "c-42", tool: "video_image2video" }]]),
+  });
+  assert(
+    exact.href === "/tools/video?type=image2video&creation=c-42",
+    `success opens the exact creation: ${exact.href}`,
+  );
+  assert(exact.title === "Your video is ready", `title unchanged with a creation: ${exact.title}`);
+
   // ── Generation failed → the tool page to try again ──────────────────────
   const refunded = describeNotification(record("generation_failed", { job_id: "j9", tool: "photo" }), {
     refundedJobIds: new Set(["j9"]),
@@ -105,7 +117,7 @@ export function notificationsSelfCheck(): void {
   });
   assert(yt.title === "Posted to YouTube", `published title: ${yt.title}`);
   assert(yt.body === "“Tutorial #3” is live.", `published body: ${yt.body}`);
-  assert(yt.href === "/tools/scheduler/calendar", `published href: ${yt.href}`);
+  assert(yt.href === "/tools/scheduler/calendar?post=p1", `published opens that post: ${yt.href}`);
   assert(yt.externalHref === "https://youtu.be/abc123", `youtube link: ${yt.externalHref}`);
   assert(yt.tone === "success", "published tone");
 
@@ -162,7 +174,7 @@ export function notificationsSelfCheck(): void {
     reconnect.body === "Reconnect your TikTok in Settings, then reschedule the post.",
     `reconnect body: ${reconnect.body}`,
   );
-  assert(reconnect.href === "/tools/scheduler/calendar", `post failed href: ${reconnect.href}`);
+  assert(reconnect.href === "/tools/scheduler/calendar?post=p9", `post failed opens that post: ${reconnect.href}`);
   assert(reconnect.tone === "error", "post failed tone");
 
   const media = failedPost("TikTok rejected this post: file_format_check_failed");
