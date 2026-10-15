@@ -47,6 +47,69 @@ export function youtubeCallbackNextStep(input: {
   return "exchange";
 }
 
+/** Result of reading the connecting account's own channel (channels.list mine=true). */
+export type YoutubeChannelLookup =
+  | { kind: "found"; title: string }
+  | { kind: "none" }
+  | { kind: "error" };
+
+export type YoutubeChannelGate = {
+  /** Save the token, i.e. YouTube shows as connected. */
+  persist: boolean;
+  /** Channel name to store as the YouTube username. */
+  username: string | null;
+  /** Delete this user's previously stored YouTube connection. */
+  removeExisting: boolean;
+  /** Revoke the grant Google just issued, since we won't keep it. */
+  revokeGrant: boolean;
+  /** `error` URL param for Settings → Connections, if any. */
+  errorParam: string | null;
+};
+
+/**
+ * Publishing can't work without a channel, so a confirmed channel-less
+ * account must never end up "Connected". A failed lookup is not proof of a
+ * missing channel, so it still connects rather than blocking a real channel
+ * on a transient error.
+ *
+ * `existing` is the stored connection's own channel lookup (made with its
+ * stored token), or "absent". We can't tell whether the newly picked Google
+ * account is the stored one, so the stored connection is judged on its own:
+ * - no channel either → it can never publish, so clear it
+ * - has a channel → a different, working account: keep it
+ * - can't be checked → keep it, and don't revoke: it may share the grant
+ */
+export function youtubeChannelGate(input: {
+  lookup: YoutubeChannelLookup;
+  existing: YoutubeChannelLookup | "absent";
+}): YoutubeChannelGate {
+  const { lookup, existing } = input;
+  if (lookup.kind === "none") {
+    const existingUncheckable = existing !== "absent" && existing.kind === "error";
+    return {
+      persist: false,
+      username: null,
+      removeExisting: existing !== "absent" && existing.kind === "none",
+      revokeGrant: !existingUncheckable,
+      errorParam: "youtube_no_channel",
+    };
+  }
+  return {
+    persist: true,
+    username: lookup.kind === "found" ? lookup.title : null,
+    removeExisting: false,
+    revokeGrant: false,
+    errorParam: null,
+  };
+}
+
+/** The callback must read the channel before its token upsert (see youtubeChannelGate). */
+export function youtubeCallbackChecksChannelBeforeSaving(source: string): boolean {
+  const lookupIdx = source.search(/lookupYouTubeChannel\s*\(/);
+  const upsertIdx = source.search(/\.upsert\s*\(/);
+  return lookupIdx >= 0 && upsertIdx >= 0 && lookupIdx < upsertIdx;
+}
+
 export function youtubeCallbackBindsSessionBeforeCodeExchange(source: string): boolean {
   const sessionIdx = source.search(/await getSessionUserId\s*\(/);
   const tokenIdx = source.search(/\.getToken\s*\(/);
@@ -54,6 +117,61 @@ export function youtubeCallbackBindsSessionBeforeCodeExchange(source: string): b
 }
 
 export function youtubeOAuthSelfCheck(): void {
+  // ── Channel gate: no channel → never a saved ("Connected") YouTube ──────
+  type Gate = ReturnType<typeof youtubeChannelGate>;
+  const expectGate = (actual: Gate, expected: Gate, why: string) => {
+    for (const key of Object.keys(expected) as (keyof Gate)[]) {
+      if (actual[key] !== expected[key]) {
+        throw new Error(`${why} (${key}: expected ${String(expected[key])}, got ${String(actual[key])})`);
+      }
+    }
+  };
+
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "found", title: "Kelolako Studio" }, existing: "absent" }),
+    { persist: true, username: "Kelolako Studio", removeExisting: false, revokeGrant: false, errorParam: null },
+    "an account with a channel connects and stores the channel name",
+  );
+
+  // A failed lookup is not proof of a missing channel. It still connects, and
+  // stores no name, so an old channel's name can't stick to new tokens.
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "error" }, existing: { kind: "found", title: "Old" } }),
+    { persist: true, username: null, removeExisting: false, revokeGrant: false, errorParam: null },
+    "a failed lookup still connects, without a name",
+  );
+
+  const noChannel = { persist: false, username: null, errorParam: "youtube_no_channel" } as const;
+
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "none" }, existing: "absent" }),
+    { ...noChannel, removeExisting: false, revokeGrant: true },
+    "a first connect with no channel stores nothing and revokes the grant",
+  );
+
+  // The stored connection has no channel either: it can never publish.
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "none" }, existing: { kind: "none" } }),
+    { ...noChannel, removeExisting: true, revokeGrant: true },
+    "a channel-less reconnect clears a stored connection that has no channel",
+  );
+
+  // The stored connection has a channel, so it is a different, working
+  // account: keep it. Revoking is safe because the grants differ.
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "none" }, existing: { kind: "found", title: "Real" } }),
+    { ...noChannel, removeExisting: false, revokeGrant: true },
+    "picking a channel-less account on Reconnect keeps a working connection",
+  );
+
+  // The stored connection can't be checked (e.g. it predates youtube.readonly).
+  // It may be the same Google account, whose grant a revoke would kill.
+  expectGate(
+    youtubeChannelGate({ lookup: { kind: "none" }, existing: { kind: "error" } }),
+    { ...noChannel, removeExisting: false, revokeGrant: false },
+    "an uncheckable stored connection is kept and its possibly shared grant is not revoked",
+  );
+
   const preserved = youtubeRefreshTokenForUpsert(null, "stored-refresh");
   if (preserved !== "stored-refresh") {
     throw new Error("reconnect without a new refresh_token must keep the stored one");
@@ -129,6 +247,21 @@ export function youtubeOAuthSelfCheck(): void {
     new URL("../app/api/connections/youtube/callback/route.ts", import.meta.url),
     "utf8",
   );
+  if (
+    !youtubeCallbackChecksChannelBeforeSaving(
+      "const t = await lookupYouTubeChannel(r);\nawait db.from('platform_tokens').upsert(row);",
+    ) ||
+    youtubeCallbackChecksChannelBeforeSaving(
+      "await db.from('platform_tokens').upsert(row);\nconst t = await lookupYouTubeChannel(r);",
+    )
+  ) {
+    throw new Error("the channel-before-save check must tell the two orders apart");
+  }
+  if (!youtubeCallbackChecksChannelBeforeSaving(callbackSource)) {
+    throw new Error(
+      "YouTube callback must look up the channel before saving the token, so a channel-less account is never stored as connected",
+    );
+  }
   if (!youtubeCallbackBindsSessionBeforeCodeExchange(callbackSource)) {
     throw new Error(
       "YouTube callback must bind the session before Google getToken so a logged-out browser cannot consume the authorization code",
