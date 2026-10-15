@@ -226,43 +226,6 @@ export default function ConnectionsTab() {
         </div>
       )}
 
-      {youtubeNoChannel && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-          <div className="flex-1 space-y-3">
-            <p className="text-warning">
-              This Google account doesn&apos;t have a YouTube channel yet. Create a free channel on
-              YouTube, then connect again.
-              {youtubeConnected ? " Your current YouTube connection wasn't changed." : null}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <a
-                href="https://www.youtube.com/create_channel"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-radius-xl bg-bg-static-white px-3 py-1.5 text-xs font-medium text-text-static-black transition-colors hover:bg-N800"
-              >
-                Create YouTube channel
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-              <a
-                href="/api/connections/youtube/start"
-                className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
-              >
-                Connect again
-              </a>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setYoutubeNoChannel(false)}
-            className="mt-0.5 shrink-0 text-warning/60 hover:text-warning"
-            aria-label="Dismiss"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
       <div className="divide-y divide-white/10 rounded-xl border border-white/10 bg-white/[0.04]">
         {/* YouTube row — interactive */}
         {youtubeConnected === null ? (
@@ -270,79 +233,120 @@ export default function ConnectionsTab() {
             <div className="h-10 animate-pulse rounded-lg bg-white/10" />
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-4 px-5 py-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                <Video className="h-5 w-5 text-R600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-N900">YouTube</p>
-                <p className="truncate text-xs text-text-disabled">
-                  {youtubeConnected
-                    ? youtubeUsername
+          <div className="px-5 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                  <Video className="h-5 w-5 text-R600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-N900">YouTube</p>
+                  <p className="truncate text-xs text-text-disabled">
+                    {youtubeConnected
                       ? youtubeUsername
-                      : "YouTube publishing enabled"
-                    : "YouTube publishing not yet connected"}
-                </p>
+                        ? youtubeUsername
+                        : "YouTube publishing enabled"
+                      : "YouTube publishing not yet connected"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {youtubeConnected ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
+                      <Check className="h-3.5 w-3.5" />
+                      Connected
+                    </span>
+                    {/* Connected before youtube.readonly existed (or never
+                        picked up the scope for any other reason) — reconnecting
+                        re-runs the OAuth flow with the current scope list and
+                        the callback upserts in place, no disconnect needed
+                        first. Reusing this signal (username never captured)
+                        rather than a dedicated "has readonly scope" flag: it
+                        converges to the same advice either way (missing scope
+                        or missing channel), so one nudge covers both. */}
+                    {!youtubeUsername && (
+                      <a
+                        href="/api/connections/youtube/start"
+                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
+                      >
+                        Reconnect
+                      </a>
+                    )}
+                    {confirmDisconnect ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDisconnect}
+                          disabled={disconnecting}
+                          className="rounded-radius-xl border border-error/40 bg-error/10 px-3 py-1 text-xs font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
+                        >
+                          {disconnecting ? "Disconnecting…" : "Confirm"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDisconnect(false)}
+                          disabled={disconnecting}
+                          className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-N900 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnect(true)}
+                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <ConnectAction platform="youtube" availability={platformAvailability} />
+                )}
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              {youtubeConnected ? (
-                <>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
-                    <Check className="h-3.5 w-3.5" />
-                    Connected
-                  </span>
-                  {/* Connected before youtube.readonly existed (or never
-                      picked up the scope for any other reason) — reconnecting
-                      re-runs the OAuth flow with the current scope list and
-                      the callback upserts in place, no disconnect needed
-                      first. Reusing this signal (username never captured)
-                      rather than a dedicated "has readonly scope" flag: it
-                      converges to the same advice either way (missing scope
-                      or missing channel), so one nudge covers both. */}
-                  {!youtubeUsername && (
+            {/* Inside the YouTube row (aligned under its name) so it reads as
+                YouTube's state, not a page-wide alert. */}
+            {youtubeNoChannel && (
+              <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm sm:ml-[52px]">
+                <div className="flex-1 space-y-3">
+                  <p className="text-warning">
+                    This Google account doesn&apos;t have a YouTube channel yet. Create a free channel
+                    on YouTube, then connect again.
+                    {youtubeConnected ? " Your current YouTube connection wasn't changed." : null}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href="https://www.youtube.com/create_channel"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-radius-xl bg-bg-static-white px-3 py-1.5 text-xs font-medium text-text-static-black transition-colors hover:bg-N800"
+                    >
+                      Create YouTube channel
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
                     <a
                       href="/api/connections/youtube/start"
-                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
+                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
                     >
-                      Reconnect
+                      Connect again
                     </a>
-                  )}
-                  {confirmDisconnect ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleDisconnect}
-                        disabled={disconnecting}
-                        className="rounded-radius-xl border border-error/40 bg-error/10 px-3 py-1 text-xs font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
-                      >
-                        {disconnecting ? "Disconnecting…" : "Confirm"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDisconnect(false)}
-                        disabled={disconnecting}
-                        className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-N900 disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDisconnect(true)}
-                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/40 hover:text-error"
-                    >
-                      Disconnect
-                    </button>
-                  )}
-                </>
-              ) : (
-                <ConnectAction platform="youtube" availability={platformAvailability} />
-              )}
-            </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setYoutubeNoChannel(false)}
+                  className="mt-0.5 shrink-0 text-warning/60 hover:text-warning"
+                  aria-label="Dismiss"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
