@@ -3,9 +3,9 @@ import { google } from "googleapis";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { resolveOrigin } from "@/lib/http";
-import { getYouTubeChannelTitle } from "@/lib/youtube";
-import { updatePlatformUsername } from "@/lib/platform-tokens";
+import { lookupYouTubeChannel, revokeYouTubeGrant } from "@/lib/youtube";
 import {
+  youtubeChannelGate,
   youtubeRefreshLookupDenied,
   youtubeRefreshTokenForUpsert,
 } from "@/lib/youtube-oauth-pure";
@@ -69,6 +69,44 @@ export async function GET(request: NextRequest) {
       return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
     }
 
+    // Read the channel BEFORE saving anything: publishing can't work without
+    // one, so a channel-less account must never be stored as "Connected"
+    // (see youtubeChannelGate). Uses the tokens Google just issued, so the
+    // answer is about the account the user just picked.
+    const lookup = await lookupYouTubeChannel({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    });
+
+    // Only when refusing: judge any stored connection by its own token, since
+    // we can't tell whether the newly picked account is the same one.
+    const existingLookup =
+      lookup.kind === "none" && existing
+        ? await lookupYouTubeChannel({ refreshToken: existing.refresh_token })
+        : ("absent" as const);
+
+    const gate = youtubeChannelGate({ lookup, existing: existingLookup });
+
+    if (!gate.persist) {
+      const grantToken = tokens.refresh_token ?? tokens.access_token;
+      if (gate.revokeGrant && grantToken) {
+        await revokeYouTubeGrant(grantToken).catch((err) =>
+          console.warn("[youtube-connect] revoking channel-less grant failed:", err),
+        );
+      }
+      if (gate.removeExisting && existing) {
+        const { error: deleteErr } = await supabaseServer
+          .from("platform_tokens")
+          .delete()
+          .eq("user_id", userId)
+          .eq("platform", "youtube");
+        if (deleteErr) {
+          console.error("[youtube-connect] clearing channel-less connection failed:", deleteErr.message);
+        }
+      }
+      return clearState(NextResponse.redirect(`${settingsBase}&error=${gate.errorParam}`));
+    }
+
     // expiry_date from googleapis is already an absolute Unix ms timestamp.
     const expiresAt = tokens.expiry_date
       ? new Date(tokens.expiry_date).toISOString()
@@ -88,6 +126,9 @@ export async function GET(request: NextRequest) {
           access_token: tokens.access_token ?? "",
           refresh_token: refreshTokenForUpsert,
           expires_at: expiresAt,
+          // Written with the tokens (null when the lookup failed), so a
+          // previous account's channel name can never label new tokens.
+          username: gate.username,
         },
         { onConflict: "user_id,platform" },
       );
@@ -97,31 +138,7 @@ export async function GET(request: NextRequest) {
       return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
     }
 
-    // Best-effort channel lookup — must never block the connect flow itself
-    // (same philosophy as TikTok's creator-info capture above). Needs
-    // youtube.readonly, so an account that connected before this scope was
-    // added won't have it until it reconnects; that's fine, this just stays
-    // a no-op for it. Captures the channel name for the Connected accounts
-    // badge (parity with TikTok/Instagram) AND — distinctly — surfaces a
-    // non-blocking warning when the account genuinely has no channel at all,
-    // the root cause of uploadToYouTube's bare 401 "Unauthorized" found in a
-    // real production incident. The connection itself still succeeds (the
-    // OAuth grant is valid either way); only publishing would fail.
-    let warning = "";
-    if (refreshTokenForUpsert) {
-      try {
-        const channelTitle = await getYouTubeChannelTitle(refreshTokenForUpsert);
-        if (channelTitle) {
-          await updatePlatformUsername(userId, "youtube", channelTitle);
-        } else {
-          warning = "&warning=youtube_no_channel";
-        }
-      } catch (err) {
-        console.warn("[youtube-connect] channel lookup failed:", err);
-      }
-    }
-
-    return clearState(NextResponse.redirect(`${settingsBase}${warning}`));
+    return clearState(NextResponse.redirect(settingsBase));
   } catch (err) {
     console.error("[youtube-connect] token exchange failed:", err);
     return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));

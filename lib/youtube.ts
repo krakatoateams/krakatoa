@@ -3,6 +3,7 @@ import "server-only";
 import { google } from "googleapis";
 import { Readable } from "stream";
 import { youtubeStorageFetchError } from "@/lib/youtube-publish-pure";
+import type { YoutubeChannelLookup } from "@/lib/youtube-oauth-pure";
 
 export type YouTubePrivacyStatus = "public" | "unlisted" | "private";
 
@@ -154,27 +155,66 @@ function youtubeAuthError(message: string): Error {
 }
 
 /**
- * The connected account's own YouTube channel title, or `null` if the
+ * The connecting account's own YouTube channel title, or `null` if the
  * account has no channel at all (an empty `items` array — confirmed via a
  * real production incident that this is exactly what causes uploadToYouTube's
  * bare 401 "Unauthorized"). Requires the youtube.readonly scope — confirmed
  * empirically that youtube.upload alone 403s on this call ("insufficient
- * authentication scopes"), so this only works for accounts that connected
- * (or reconnected) after that scope was added.
+ * authentication scopes").
+ *
+ * Pass the tokens Google just issued for this consent, so the answer is about
+ * the account the user just picked — not a previously stored, possibly
+ * different, account.
  *
  * Throws on any other failure (network, auth) — distinct from "confirmed no
  * channel" so callers don't misreport a transient failure as a missing
- * channel. Callers should treat this as best-effort and never let it block
- * the connect flow itself.
+ * channel.
  */
-export async function getYouTubeChannelTitle(refreshToken: string): Promise<string | null> {
+export async function getYouTubeChannelTitle(tokens: {
+  accessToken?: string | null;
+  refreshToken?: string | null;
+}): Promise<string | null> {
   const auth = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID!,
     process.env.GOOGLE_CLIENT_SECRET!,
   );
-  auth.setCredentials({ refresh_token: refreshToken, expiry_date: 1 });
+  auth.setCredentials({
+    access_token: tokens.accessToken ?? undefined,
+    refresh_token: tokens.refreshToken ?? undefined,
+  });
 
   const youtube = google.youtube({ version: "v3", auth });
   const { data } = await youtube.channels.list({ part: ["snippet"], mine: true });
   return data.items?.[0]?.snippet?.title ?? null;
+}
+
+/**
+ * getYouTubeChannelTitle as a lookup result that never throws: a confirmed
+ * missing channel ("none") stays distinct from a failure to check ("error").
+ */
+export async function lookupYouTubeChannel(tokens: {
+  accessToken?: string | null;
+  refreshToken?: string | null;
+}): Promise<YoutubeChannelLookup> {
+  if (!tokens.accessToken && !tokens.refreshToken) return { kind: "error" };
+  try {
+    const title = await getYouTubeChannelTitle(tokens);
+    return title ? { kind: "found", title } : { kind: "none" };
+  } catch (err) {
+    console.warn("[youtube] channel lookup failed:", err);
+    return { kind: "error" };
+  }
+}
+
+/**
+ * Revoke a grant we decided not to keep (e.g. a channel-less account), so it
+ * doesn't linger in the user's Google Account permissions. Revoking either
+ * token ends the whole grant.
+ */
+export async function revokeYouTubeGrant(token: string): Promise<void> {
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID!,
+    process.env.GOOGLE_CLIENT_SECRET!,
+  );
+  await auth.revokeToken(token);
 }

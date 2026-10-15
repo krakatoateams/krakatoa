@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
-import { Video, Camera, Music2, Check, X } from "lucide-react";
+import { Video, Camera, Music2, Check, X, ExternalLink } from "lucide-react";
 import { isPlatformUsable, platformBadge, type Platform } from "@/lib/platform-availability-pure";
 
 function ConnectAction({
@@ -65,10 +65,10 @@ export default function ConnectionsTab() {
   const [youtubeUsername, setYoutubeUsername] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
-  // Non-blocking — the connection itself succeeded, this just means
-  // publishing will fail until a channel exists (see the callback route's
-  // getYouTubeChannelTitle comment).
-  const [warning, setWarning] = useState<string | null>(null);
+  // The Google account picked has no YouTube channel, so the callback refused
+  // to connect it (publishing can't work without one — see
+  // youtubeChannelGate). Shown with a way to create the channel and retry.
+  const [youtubeNoChannel, setYoutubeNoChannel] = useState(false);
 
   // Platform availability (see CONTEXT.md) — "coming soon" actually blocks
   // connecting for a regular user; an admin sees a "Preview" badge instead
@@ -107,12 +107,16 @@ export default function ConnectionsTab() {
       );
     } else if (urlError === "invalid_state") {
       setError("Connection attempt expired or was tampered with. Please try again.");
+    } else if (urlError === "youtube_no_channel") {
+      setYoutubeNoChannel(true);
     }
 
-    if (searchParams.get("warning") === "youtube_no_channel") {
-      setWarning(
-        "YouTube connected, but this Google account has no YouTube channel yet — create one at youtube.com before scheduling a post, or publishing will fail.",
-      );
+    // Shown once: drop the param so a refresh (e.g. after creating a channel
+    // in another tab) doesn't bring back a banner that no longer applies.
+    if (urlError) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("error");
+      window.history.replaceState(window.history.state, "", url);
     }
   }, [searchParams]);
 
@@ -222,12 +226,35 @@ export default function ConnectionsTab() {
         </div>
       )}
 
-      {warning && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-          <span className="flex-1">{warning}</span>
+      {youtubeNoChannel && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+          <div className="flex-1 space-y-3">
+            <p className="text-warning">
+              This Google account doesn&apos;t have a YouTube channel yet. Create a free channel on
+              YouTube, then connect again.
+              {youtubeConnected ? " Your current YouTube connection wasn't changed." : null}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="https://www.youtube.com/create_channel"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-radius-xl bg-bg-static-white px-3 py-1.5 text-xs font-medium text-text-static-black transition-colors hover:bg-N800"
+              >
+                Create YouTube channel
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+              <a
+                href="/api/connections/youtube/start"
+                className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
+              >
+                Connect again
+              </a>
+            </div>
+          </div>
           <button
             type="button"
-            onClick={() => setWarning(null)}
+            onClick={() => setYoutubeNoChannel(false)}
             className="mt-0.5 shrink-0 text-warning/60 hover:text-warning"
             aria-label="Dismiss"
           >
