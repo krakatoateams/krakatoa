@@ -152,3 +152,29 @@ function googleApiStatus(err: unknown): number | undefined {
 function youtubeAuthError(message: string): Error {
   return Object.assign(new Error(message), { response: { status: 401 } });
 }
+
+/**
+ * The connected account's own YouTube channel title, or `null` if the
+ * account has no channel at all (an empty `items` array — confirmed via a
+ * real production incident that this is exactly what causes uploadToYouTube's
+ * bare 401 "Unauthorized"). Requires the youtube.readonly scope — confirmed
+ * empirically that youtube.upload alone 403s on this call ("insufficient
+ * authentication scopes"), so this only works for accounts that connected
+ * (or reconnected) after that scope was added.
+ *
+ * Throws on any other failure (network, auth) — distinct from "confirmed no
+ * channel" so callers don't misreport a transient failure as a missing
+ * channel. Callers should treat this as best-effort and never let it block
+ * the connect flow itself.
+ */
+export async function getYouTubeChannelTitle(refreshToken: string): Promise<string | null> {
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID!,
+    process.env.GOOGLE_CLIENT_SECRET!,
+  );
+  auth.setCredentials({ refresh_token: refreshToken, expiry_date: 1 });
+
+  const youtube = google.youtube({ version: "v3", auth });
+  const { data } = await youtube.channels.list({ part: ["snippet"], mine: true });
+  return data.items?.[0]?.snippet?.title ?? null;
+}
