@@ -3,6 +3,8 @@ import { google } from "googleapis";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { resolveOrigin } from "@/lib/http";
+import { getYouTubeChannelTitle } from "@/lib/youtube";
+import { updatePlatformUsername } from "@/lib/platform-tokens";
 import {
   youtubeRefreshLookupDenied,
   youtubeRefreshTokenForUpsert,
@@ -72,12 +74,11 @@ export async function GET(request: NextRequest) {
       ? new Date(tokens.expiry_date).toISOString()
       : new Date(Date.now() + 3_600_000).toISOString();
 
-    // No channel-title capture here on purpose: reading it (channels.list)
-    // needs at least the youtube.readonly scope, and this app only ever
-    // requests youtube.upload — broadening that would mean every user
-    // re-consenting and possibly a Google OAuth re-verification, decided
-    // against for now. The YouTube badge just shows "Connected" with no
-    // name, unlike TikTok/Instagram.
+    const refreshTokenForUpsert = youtubeRefreshTokenForUpsert(
+      tokens.refresh_token,
+      existing?.refresh_token,
+    );
+
     const { error: upsertErr } = await supabaseServer
       .from("platform_tokens")
       .upsert(
@@ -85,10 +86,7 @@ export async function GET(request: NextRequest) {
           user_id: userId,
           platform: "youtube",
           access_token: tokens.access_token ?? "",
-          refresh_token: youtubeRefreshTokenForUpsert(
-            tokens.refresh_token,
-            existing?.refresh_token,
-          ),
+          refresh_token: refreshTokenForUpsert,
           expires_at: expiresAt,
         },
         { onConflict: "user_id,platform" },
@@ -99,7 +97,31 @@ export async function GET(request: NextRequest) {
       return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));
     }
 
-    return clearState(NextResponse.redirect(settingsBase));
+    // Best-effort channel lookup — must never block the connect flow itself
+    // (same philosophy as TikTok's creator-info capture above). Needs
+    // youtube.readonly, so an account that connected before this scope was
+    // added won't have it until it reconnects; that's fine, this just stays
+    // a no-op for it. Captures the channel name for the Connected accounts
+    // badge (parity with TikTok/Instagram) AND — distinctly — surfaces a
+    // non-blocking warning when the account genuinely has no channel at all,
+    // the root cause of uploadToYouTube's bare 401 "Unauthorized" found in a
+    // real production incident. The connection itself still succeeds (the
+    // OAuth grant is valid either way); only publishing would fail.
+    let warning = "";
+    if (refreshTokenForUpsert) {
+      try {
+        const channelTitle = await getYouTubeChannelTitle(refreshTokenForUpsert);
+        if (channelTitle) {
+          await updatePlatformUsername(userId, "youtube", channelTitle);
+        } else {
+          warning = "&warning=youtube_no_channel";
+        }
+      } catch (err) {
+        console.warn("[youtube-connect] channel lookup failed:", err);
+      }
+    }
+
+    return clearState(NextResponse.redirect(`${settingsBase}${warning}`));
   } catch (err) {
     console.error("[youtube-connect] token exchange failed:", err);
     return clearState(NextResponse.redirect(`${settingsBase}&error=youtube_connect_failed`));

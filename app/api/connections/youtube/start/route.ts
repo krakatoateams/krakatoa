@@ -41,7 +41,16 @@ export async function GET(request: NextRequest) {
   );
 
   const authUrl = auth.generateAuthUrl({
-    scope: ["https://www.googleapis.com/auth/youtube.upload"],
+    // youtube.readonly lets the callback read the connected channel's name
+    // (channels.list) — confirmed empirically that youtube.upload alone
+    // can't call it (403: insufficient authentication scopes). Also used to
+    // detect a channel-less account at connect time instead of only
+    // discovering it when a scheduled upload fails (lib/youtube.ts's
+    // uploadToYouTube 401 handling stays as a defense-in-depth fallback).
+    scope: [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ],
     access_type: "offline",
     prompt: "consent",
     state,

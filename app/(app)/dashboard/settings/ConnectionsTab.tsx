@@ -55,13 +55,20 @@ export default function ConnectionsTab() {
   const [disconnectingInstagram, setDisconnectingInstagram] = useState(false);
   const [confirmDisconnectInstagram, setConfirmDisconnectInstagram] = useState(false);
 
-  // TikTok creator nickname / Instagram @username — best-effort, can stay
-  // null even for a connected account (see supabase/migrations/100_platform_tokens_username.sql).
-  // Never populated for YouTube (see that migration's own comment).
+  // TikTok creator nickname / Instagram @username / YouTube channel title —
+  // best-effort, can stay null even for a connected account (see
+  // supabase/migrations/100_platform_tokens_username.sql). YouTube's only
+  // populates for an account connected (or reconnected) after the
+  // youtube.readonly scope was added — channels.list needs it.
   const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
   const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
+  const [youtubeUsername, setYoutubeUsername] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
+  // Non-blocking — the connection itself succeeded, this just means
+  // publishing will fail until a channel exists (see the callback route's
+  // getYouTubeChannelTitle comment).
+  const [warning, setWarning] = useState<string | null>(null);
 
   // Platform availability (see CONTEXT.md) — "coming soon" actually blocks
   // connecting for a regular user; an admin sees a "Preview" badge instead
@@ -101,6 +108,12 @@ export default function ConnectionsTab() {
     } else if (urlError === "invalid_state") {
       setError("Connection attempt expired or was tampered with. Please try again.");
     }
+
+    if (searchParams.get("warning") === "youtube_no_channel") {
+      setWarning(
+        "YouTube connected, but this Google account has no YouTube channel yet — create one at youtube.com before scheduling a post, or publishing will fail.",
+      );
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -118,11 +131,12 @@ export default function ConnectionsTab() {
           youtube?: boolean;
           tiktok?: boolean;
           instagram?: boolean;
-          usernames?: { tiktok?: string | null; instagram?: string | null };
+          usernames?: { youtube?: string | null; tiktok?: string | null; instagram?: string | null };
         }) => {
           setYoutubeConnected(Boolean(data.youtube));
           setTiktokConnected(Boolean(data.tiktok));
           setInstagramConnected(Boolean(data.instagram));
+          setYoutubeUsername(data.usernames?.youtube ?? null);
           setTiktokUsername(data.usernames?.tiktok ?? null);
           setInstagramUsername(data.usernames?.instagram ?? null);
         },
@@ -208,6 +222,20 @@ export default function ConnectionsTab() {
         </div>
       )}
 
+      {warning && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+          <span className="flex-1">{warning}</span>
+          <button
+            type="button"
+            onClick={() => setWarning(null)}
+            className="mt-0.5 shrink-0 text-warning/60 hover:text-warning"
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <div className="divide-y divide-white/10 rounded-xl border border-white/10 bg-white/[0.04]">
         {/* YouTube row — interactive */}
         {youtubeConnected === null ? (
@@ -224,7 +252,9 @@ export default function ConnectionsTab() {
                 <p className="text-sm font-medium text-N900">YouTube</p>
                 <p className="truncate text-xs text-text-disabled">
                   {youtubeConnected
-                    ? "YouTube publishing enabled"
+                    ? youtubeUsername
+                      ? youtubeUsername
+                      : "YouTube publishing enabled"
                     : "YouTube publishing not yet connected"}
                 </p>
               </div>
@@ -237,6 +267,22 @@ export default function ConnectionsTab() {
                     <Check className="h-3.5 w-3.5" />
                     Connected
                   </span>
+                  {/* Connected before youtube.readonly existed (or never
+                      picked up the scope for any other reason) — reconnecting
+                      re-runs the OAuth flow with the current scope list and
+                      the callback upserts in place, no disconnect needed
+                      first. Reusing this signal (username never captured)
+                      rather than a dedicated "has readonly scope" flag: it
+                      converges to the same advice either way (missing scope
+                      or missing channel), so one nudge covers both. */}
+                  {!youtubeUsername && (
+                    <a
+                      href="/api/connections/youtube/start"
+                      className="rounded-radius-xl border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-brand-primary/40 hover:text-brand-primary"
+                    >
+                      Reconnect
+                    </a>
+                  )}
                   {confirmDisconnect ? (
                     <>
                       <button

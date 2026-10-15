@@ -6,12 +6,13 @@ import type { Platform } from "@/lib/platform-tokens";
 /**
  * GET /api/connections/status — returns which platform tokens exist for the
  * current user, plus the connected account's display identity for TikTok
- * (creator nickname) and Instagram (@username), so the Scheduler's
- * "Connected accounts" row can show WHO, not just whether.
+ * (creator nickname), Instagram (@username), and YouTube (channel title), so
+ * the Scheduler's "Connected accounts" row can show WHO, not just whether.
  * `usernames[platform]` is null for a disconnected platform, for a connected
  * one whose best-effort fetch never succeeded (see each OAuth callback
- * route), or always for YouTube (see migration 100 — reading the channel
- * title would need a broader OAuth scope than this app requests).
+ * route), or for a YouTube account that connected before the youtube.readonly
+ * scope was added (see lib/youtube.ts's getYouTubeChannelTitle) — it only
+ * populates on a (re)connect made after that scope existed.
  */
 export async function GET() {
   const userId = await getSessionUserId();
