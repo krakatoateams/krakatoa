@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -384,6 +385,13 @@ function HoverPlayVideo({
   );
 }
 
+/** Reports ?creation=. Own Suspense boundary so pickers' pages needn't wrap useSearchParams. */
+function CreationQueryParam({ onChange }: { onChange: (id: string) => void }) {
+  const id = useSearchParams().get("creation")?.trim() ?? "";
+  useEffect(() => onChange(id), [id, onChange]);
+  return null;
+}
+
 export default function CreationsHistory({
   title = "Your generations",
   description,
@@ -458,12 +466,16 @@ export default function CreationsHistory({
   // Stable so the preview's key handler doesn't resubscribe on every render.
   const closePreview = useCallback(() => setPreviewItem(null), []);
 
-  // ?creation=<id> opens this preview. A miss (deleted, trashed, expired,
-  // someone else's id) stays on the tool page with a short note.
+  // ?creation=<id> opens this preview, also when a link (e.g. a notification)
+  // changes it while this page is already open. A miss (deleted, trashed,
+  // expired, someone else's id) stays on the tool page with a short note.
+  const [queryCreationId, setQueryCreationId] = useState("");
+  const previewId = previewItem?.id ?? null;
+  const previewIdRef = useRef(previewId);
   useEffect(() => {
-    if (!openFromQuery) return;
-    const id = new URLSearchParams(window.location.search).get("creation")?.trim() ?? "";
-    if (!id) return;
+    const id = queryCreationId;
+    // Skip the param the sync below wrote for the preview that's already open.
+    if (!id || id === previewIdRef.current) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -485,7 +497,22 @@ export default function CreationsHistory({
     return () => {
       cancelled = true;
     };
-  }, [openFromQuery]);
+  }, [queryCreationId]);
+
+  // Mirror the open preview into ?creation=<id> so the address bar is a
+  // shareable link. Only clear a param this component wrote, so a deep link
+  // isn't stripped before the lookup above reads it.
+  const wroteCreationParamRef = useRef(false);
+  useEffect(() => {
+    previewIdRef.current = previewId;
+    if (!openFromQuery) return;
+    if (!previewId && !wroteCreationParamRef.current) return;
+    wroteCreationParamRef.current = Boolean(previewId);
+    const url = new URL(window.location.href);
+    if (previewId) url.searchParams.set("creation", previewId);
+    else url.searchParams.delete("creation");
+    window.history.replaceState(window.history.state, "", url);
+  }, [openFromQuery, previewId]);
 
   // Navigate the preview across the currently loaded page of items.
   const previewIndex = previewItem
@@ -1177,6 +1204,12 @@ export default function CreationsHistory({
             </div>
           </div>
         </div>
+      )}
+
+      {openFromQuery && (
+        <Suspense fallback={null}>
+          <CreationQueryParam onChange={setQueryCreationId} />
+        </Suspense>
       )}
 
       {previewItem && (
