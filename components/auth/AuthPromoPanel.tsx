@@ -74,17 +74,21 @@ function PromoVisual({
   subtitle: string;
 }) {
   return (
-    <div className="relative h-full min-h-[320px] w-full overflow-hidden">
+    // Compact below sm: on a phone the panel sits ABOVE the form (see
+    // AuthModalShell), and at full height it pushed the submit button
+    // off-screen. Title + subtitle stay (signup's carries the free-generation
+    // offer); the model marquee is desktop/tablet only.
+    <div className="relative h-full min-h-[140px] w-full overflow-hidden sm:min-h-[320px]">
       <VideoBackdrop srcs={SHOWREEL_SRCS} overlayClassName="bg-N0/30" />
       {/* Darker, taller gradient than a typical scrim: the showreel is busy
           footage, and title/subtitle need to read clearly over any frame of
           it, not just the darkest ones. */}
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-N0 via-N0/85 to-transparent px-6 pb-6 pt-32">
-        <h2 className="font-display text-2xl font-bold leading-tight tracking-tight text-N900 sm:text-3xl">
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-N0 via-N0/85 to-transparent px-6 pb-5 pt-10 sm:pb-6 sm:pt-32">
+        <h2 className="font-display text-xl font-bold leading-tight tracking-tight text-N900 sm:text-3xl">
           <AccentedTitle title={title} accent={titleAccent} />
         </h2>
         <p className="mt-1.5 text-body-3 text-N900/85">{subtitle}</p>
-        <div className="mt-4">
+        <div className="mt-4 hidden sm:block">
           <ModelMarquee />
         </div>
       </div>
