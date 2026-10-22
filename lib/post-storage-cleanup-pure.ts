@@ -14,8 +14,24 @@ export function postCleanupMayReclaim(status: string): boolean {
   return (POST_CLEANUP_RECLAIM_STATUSES as readonly string[]).includes(status);
 }
 
-export function isSchedulerRawPhotoUpload(path: string): boolean {
+export function isSchedulerRawUpload(path: string): boolean {
   return path.includes("/uploads/scheduler/");
+}
+
+/**
+ * Whether post cleanup may delete a post's source file. Only the Scheduler's
+ * own raw device uploads (`{userId}/{videos|photos}/uploads/scheduler/…`) are
+ * ever reclaimed — a file picked from My Library / handed off from a tool is
+ * the library's own copy, and deleting it left blank library tiles (#385).
+ * Even a raw upload stays while another post (multi-platform scheduling) or a
+ * library row still points at it.
+ */
+export function postSourceDeletable(input: {
+  path: string;
+  otherPostRefs: number;
+  libraryRefs: number;
+}): boolean {
+  return isSchedulerRawUpload(input.path) && input.otherPostRefs === 0 && input.libraryRefs === 0;
 }
 
 /** Sibling written by TikTok JPEG conversion (`foo.png` → `foo.tiktok.jpg`). */
@@ -54,11 +70,11 @@ export function postStorageCleanupSelfCheck(): void {
     "confirmed publish cleanup may still reclaim source media",
   );
   assert(
-    isSchedulerRawPhotoUpload("u1/photos/uploads/scheduler/shot.jpg") === true,
+    isSchedulerRawUpload("u1/photos/uploads/scheduler/shot.jpg") === true,
     "scheduler raw uploads are reclaimable",
   );
   assert(
-    isSchedulerRawPhotoUpload("u1/photos/generated/product/shot.jpg") === false,
+    isSchedulerRawUpload("u1/photos/generated/product/shot.jpg") === false,
     "library photos must not be deleted",
   );
   assert(
@@ -71,6 +87,29 @@ export function postStorageCleanupSelfCheck(): void {
       "u1/photos/uploads/scheduler/shot.png,u1/photos/uploads/scheduler/shot.tiktok.jpg",
     "photo cleanup must also remove the converted TikTok sibling",
   );
+  // ── Which post source files may be deleted (#385) ──────────────────────
+  const free = { otherPostRefs: 0, libraryRefs: 0 };
+  assert(
+    postSourceDeletable({ path: "u1/videos/uploads/scheduler/clip.mp4", ...free }) === true,
+    "a raw scheduler video upload nothing else uses is reclaimable",
+  );
+  assert(
+    postSourceDeletable({ path: "u1/videos/generated/reels/clip.mp4", ...free }) === false,
+    "a library video (picked from My Assets / a tool hand-off) is never deleted by post cleanup",
+  );
+  assert(
+    postSourceDeletable({ path: "u1/photos/generated/product/shot.jpg", ...free }) === false,
+    "a library photo is never deleted by post cleanup",
+  );
+  assert(
+    postSourceDeletable({ path: "u1/videos/uploads/scheduler/clip.mp4", otherPostRefs: 1, libraryRefs: 0 }) === false,
+    "a video shared with another post (TikTok + YouTube) stays until the last post is done with it",
+  );
+  assert(
+    postSourceDeletable({ path: "u1/videos/uploads/scheduler/clip.mp4", otherPostRefs: 0, libraryRefs: 1 }) === false,
+    "anything a library row points at is never deleted",
+  );
+
   const signed =
     "https://example.supabase.co/storage/v1/object/sign/krakatoa/u1/videos/clip.mp4?token=secret-jwt";
   assert(

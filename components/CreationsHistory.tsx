@@ -18,6 +18,7 @@ import {
   User,
   Video,
   type LucideIcon,
+  ImageOff,
 } from "lucide-react";
 import {
   CreationHistoryItem,
@@ -297,6 +298,26 @@ function cachePoster(key: string, dataUrl: string) {
   }
 }
 
+/**
+ * Shown when a tile's file can't be loaded (e.g. its storage object was
+ * deleted, see #385) — a deliberate state instead of an empty tile.
+ */
+function MediaUnavailable() {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-white/[0.04] p-3 text-center text-text-disabled">
+      <ImageOff className="h-5 w-5" aria-hidden />
+      <span className="text-[11px] font-medium leading-tight">Media unavailable</span>
+    </div>
+  );
+}
+
+/** Library image tile; falls back to MediaUnavailable when the file won't load. */
+function LibraryImage({ src, alt, sizes }: { src: string; alt: string; sizes: string }) {
+  const [missing, setMissing] = useState(false);
+  if (missing) return <MediaUnavailable />;
+  return <Image src={src} alt={alt} fill className="object-cover" sizes={sizes} onError={() => setMissing(true)} />;
+}
+
 /** Muted hover preview for library video cards (first frame at rest). */
 function HoverPlayVideo({
   src,
@@ -316,6 +337,7 @@ function HoverPlayVideo({
   const [durationSec, setDurationSec] = useState<number | undefined>(
     fallbackDurationSec
   );
+  const [missing, setMissing] = useState(false);
 
   const play = () => {
     const el = ref.current;
@@ -356,6 +378,8 @@ function HoverPlayVideo({
     }
   };
 
+  if (missing) return <MediaUnavailable />;
+
   return (
     <div
       className="relative h-full w-full"
@@ -375,6 +399,7 @@ function HoverPlayVideo({
         preload="metadata"
         crossOrigin="anonymous"
         onLoadedData={handleLoadedData}
+        onError={() => setMissing(true)}
       />
       {durationSec !== undefined && (
         <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/80 backdrop-blur-sm">
@@ -969,11 +994,9 @@ export default function CreationsHistory({
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <Image
+                  <LibraryImage
                     src={item.mediaUrl}
                     alt={item.title}
-                    fill
-                    className="object-cover"
                     sizes="(min-width: 1024px) 20vw, (min-width: 768px) 25vw, (min-width: 640px) 33vw, 50vw"
                   />
                 )}

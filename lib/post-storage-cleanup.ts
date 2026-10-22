@@ -5,14 +5,60 @@ import { errorLogSafe } from "@/lib/error-log-safe";
 import {
   POST_CLEANUP_RECLAIM_STATUSES,
   cleanupLogVideoRef,
-  isSchedulerRawPhotoUpload,
+  isSchedulerRawUpload,
+  postSourceDeletable,
   storageCleanupPaths,
 } from "@/lib/post-storage-cleanup-pure";
 
+/** PostgREST filter value, quoted so path characters can't break the filter. */
+const pgValue = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
 /**
- * Best-effort: delete the video file from storage (only when the post has no
- * asset_id — asset-owned files must not be removed here) and null out
- * video_url on the post row. Logs but never throws — a storage failure must
+ * Who else still points at a storage path: other posts (multi-platform
+ * scheduling shares one upload) and library rows. Null when the lookup fails —
+ * callers then keep the file (fail safe).
+ */
+async function sourceReferences(
+  postId: string,
+  path: string,
+  rawRef?: string | null,
+): Promise<{ otherPostRefs: number; libraryRefs: number } | null> {
+  const postMatches = [`video_url.eq.${pgValue(path)}`, `photo_urls.cs.{${pgValue(path)}}`];
+  if (rawRef && rawRef !== path) postMatches.push(`video_url.eq.${pgValue(rawRef)}`);
+
+  const [posts, library] = await Promise.all([
+    supabaseServer
+      .from("posts")
+      .select("id", { head: true, count: "exact" })
+      .neq("id", postId)
+      .or(postMatches.join(",")),
+    supabaseServer
+      .from("user_creations")
+      .select("id", { head: true, count: "exact" })
+      .eq("storage_path", path),
+  ]);
+  if (posts.error || library.error) {
+    console.warn(
+      `[post-cleanup] reference check failed for post ${postId} — keeping the file:`,
+      errorLogSafe(posts.error ?? library.error),
+    );
+    return null;
+  }
+  return { otherPostRefs: posts.count ?? 0, libraryRefs: library.count ?? 0 };
+}
+
+/** True when `path` may be deleted for this post (see postSourceDeletable). */
+async function mayDeleteSource(postId: string, path: string, rawRef?: string | null): Promise<boolean> {
+  if (!isSchedulerRawUpload(path)) return false; // library media: never, skip the lookup
+  const refs = await sourceReferences(postId, path, rawRef);
+  return refs !== null && postSourceDeletable({ path, ...refs });
+}
+
+/**
+ * Best-effort: null out video_url on the post row and delete the video file
+ * from storage — only when it's the Scheduler's own raw upload that no other
+ * post or library row still uses (postSourceDeletable; #385), and the post has
+ * no asset_id. Logs but never throws — a storage failure must
  * not unwind a successful publish (or, for the failed-post safety net, must
  * not block reclaiming the rest of the batch).
  *
@@ -52,6 +98,10 @@ export async function cleanupPostVideo(
   }
   const path = resolveStoragePath(null, videoUrl);
   if (path) {
+    if (!(await mayDeleteSource(postId, path, videoUrl))) {
+      console.log(`[post-cleanup] post ${postId}: keeping ${path} (library media or still in use)`);
+      return;
+    }
     await removeStorageObjects([path]);
     console.log(`[post-cleanup] storage object removed: ${path}`);
   } else if (videoUrl) {
@@ -77,8 +127,8 @@ export async function cleanupPostVideo(
 export async function cleanupPostPhotos(postId: string, photoUrls: string[] | null | undefined): Promise<void> {
   if (!Array.isArray(photoUrls) || photoUrls.length === 0) return;
 
-  const toDelete = photoUrls.filter(isSchedulerRawPhotoUpload);
-  const toKeep = photoUrls.filter((p) => !isSchedulerRawPhotoUpload(p));
+  const toDelete = photoUrls.filter(isSchedulerRawUpload);
+  const toKeep = photoUrls.filter((p) => !isSchedulerRawUpload(p));
 
   if (toDelete.length === 0) {
     console.log(`[post-cleanup] post ${postId}: no raw-uploaded photos to clean up (all asset-linked)`);
@@ -104,7 +154,17 @@ export async function cleanupPostPhotos(postId: string, photoUrls: string[] | nu
     return;
   }
 
-  const paths = storageCleanupPaths(toDelete);
+  // A raw upload can still be shared with another post; only delete the ones
+  // nothing else uses (the row above already dropped them from this post).
+  const deletable: string[] = [];
+  for (const path of toDelete) {
+    if (await mayDeleteSource(postId, path)) deletable.push(path);
+  }
+  if (deletable.length === 0) {
+    console.log(`[post-cleanup] post ${postId}: raw photos still in use elsewhere — nothing deleted`);
+    return;
+  }
+  const paths = storageCleanupPaths(deletable);
   await removeStorageObjects(paths);
   console.log(`[post-cleanup] storage objects removed for post ${postId}:`, paths);
 }

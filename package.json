@@ -90,7 +90,8 @@
     "ci:checks": "npm run test:deployment-ci && npm run test:dependency-security && npm run test:client-secret-boundary && npm run test:internal-routes && npm run test:security-headers && npm run test:public-auth-flow && npm run test:public-marketing && npm run test:cron-auth && npm audit --omit=dev --audit-level=high && npm run lint && npm run typecheck && npm run build",
     "admin:probe-monitoring": "tsx scripts/probe-monitoring.ts",
     "probe:signed-url-cache": "tsx scripts/probe-signed-url-cache.ts",
-    "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\""
+    "cron:test": "node -e \"fetch('http://localhost:3000/api/cron').then(r=>r.json()).then(console.log)\"",
+    "library:count-missing": "node scripts/count-missing-library-media.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
