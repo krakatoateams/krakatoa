@@ -272,7 +272,7 @@ export function SignUpForm({
             required
             autoComplete="name"
             placeholder="Your name"
-            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-2 sm:text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
           />
         </div>
         <div>
@@ -285,7 +285,7 @@ export function SignUpForm({
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-2 sm:text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
           />
         </div>
         <div>
@@ -299,7 +299,7 @@ export function SignUpForm({
             required
             minLength={6}
             autoComplete="new-password"
-            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
+            className="w-full rounded-radius-xl border border-white/10 bg-white/10 px-3 py-2 text-body-2 sm:text-body-3 text-text-primary placeholder-text-disabled outline-none focus:border-brand-primary"
           />
         </div>
 

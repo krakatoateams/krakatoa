@@ -72,16 +72,23 @@ export function AuthModalShell({
           onClick={onClose}
           disabled={closeDisabled}
           aria-label="Close"
-          className="absolute right-spacing-lg top-spacing-lg z-30 rounded-radius-xl p-spacing-sm text-icon-low-emphasis transition-colors hover:bg-bg-surface-2 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className={`absolute right-spacing-lg top-spacing-lg z-30 rounded-radius-xl p-spacing-sm transition-colors hover:bg-bg-surface-2 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 ${
+            // Over the promo video the bare icon was hard to see; give it a
+            // dark backing there. The bare card keeps its original look.
+            promoPanel ? "bg-N0/50 text-text-primary backdrop-blur-sm" : "text-icon-low-emphasis"
+          }`}
         >
           <X className="h-4 w-4" />
         </button>
         {promoPanel ? (
+          // Phones get the full dynamic viewport minus a 1rem margin (dvh, so
+          // iOS's collapsing URL bar can't clip it) — the extra room keeps
+          // sign-up's submit in view on a 667px-tall screen.
           // Fixed lg:min-h so sign-in/sign-up/forgot-password (different
           // form field counts, different content height) don't resize the
           // whole modal when switching views — the shorter form just centers
           // in the extra space instead.
-          <div className="flex max-h-[90vh] flex-col overflow-y-auto lg:min-h-[560px] lg:flex-row">
+          <div className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-y-auto sm:max-h-[90dvh] lg:min-h-[560px] lg:flex-row">
             {/* Promo panel first in source order on purpose — see the prop comment above. */}
             <div className="w-full shrink-0 lg:w-1/2">{promoPanel}</div>
             <div className="flex w-full items-center p-spacing-xl lg:w-1/2">
