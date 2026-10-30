@@ -338,6 +338,10 @@ function HoverPlayVideo({
     fallbackDurationSec
   );
   const [missing, setMissing] = useState(false);
+  // CORS mode lets us snapshot a poster, but R2 omits ACAO and Vary on
+  // non-CORS responses, so a URL a plain <video> already cached fails the CORS
+  // check. Retry without CORS (no poster) before calling the file missing.
+  const [cors, setCors] = useState(true);
 
   const play = () => {
     const el = ref.current;
@@ -387,6 +391,7 @@ function HoverPlayVideo({
       onMouseLeave={pause}
     >
       <video
+        key={cors ? "cors" : "plain"}
         ref={ref}
         // The #t=0.001 fragment makes mobile Safari paint a real frame instead of
         // leaving the tile blank when it only preloads metadata.
@@ -397,9 +402,9 @@ function HoverPlayVideo({
         playsInline
         loop
         preload="metadata"
-        crossOrigin="anonymous"
+        crossOrigin={cors ? "anonymous" : undefined}
         onLoadedData={handleLoadedData}
-        onError={() => setMissing(true)}
+        onError={() => (cors ? setCors(false) : setMissing(true))}
       />
       {durationSec !== undefined && (
         <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/80 backdrop-blur-sm">

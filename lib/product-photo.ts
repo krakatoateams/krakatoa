@@ -880,13 +880,13 @@ export function buildPhotoProviderInput(params: {
   }
 }
 
-/** Filename: {timestamp}__{poseId}__{styleId}.png */
+/** Filename: {timestamp}__{poseId}__{styleId}.jpg (older outputs are .png) */
 export function buildGeneratedFilename(
   poseId: ModelPoseId,
   styleId: PhotoStyleId,
   timestamp = Date.now()
 ): string {
-  return `${timestamp}__${poseId}__${styleId}.png`;
+  return `${timestamp}__${poseId}__${styleId}.jpg`;
 }
 
 export function parseGeneratedFilename(name: string): {

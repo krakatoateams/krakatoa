@@ -7,8 +7,7 @@ import { mediaExists, signMediaGet } from "@/lib/media-storage";
 import {
   isStorageRelativePath,
   isVideosTempRefPath,
-  storagePathFromPublicUrl,
-  storagePathFromSignedUrl,
+  storagePathFromStorageUrl,
   storagePathOwnerUserId,
 } from "@/lib/storage-buckets";
 import { getAssetForProfile } from "@/lib/assets-db";
@@ -100,7 +99,7 @@ export function resolveStoragePath(
   if (!urlOrPath?.trim()) return null;
   const raw = urlOrPath.trim();
   if (isStorageRelativePath(raw)) return raw;
-  return storagePathFromPublicUrl(raw) ?? storagePathFromSignedUrl(raw);
+  return storagePathFromStorageUrl(raw);
 }
 
 function escapeIlikePattern(value: string): string {

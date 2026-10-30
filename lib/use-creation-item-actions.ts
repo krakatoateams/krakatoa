@@ -38,7 +38,9 @@ export async function saveMediaUrl(
   filenameFor: (mimeType: string) => string
 ): Promise<void> {
   try {
-    const res = await fetch(mediaUrl);
+    // no-store: a preview's cached non-CORS copy of an R2 object lacks ACAO
+    // (R2 sends no Vary), so reusing it would fail this CORS fetch.
+    const res = await fetch(mediaUrl, { cache: "no-store" });
     if (!res.ok) throw new Error("Download failed");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

@@ -29,7 +29,7 @@ import {
   DEFAULT_CHARACTER_GENDER,
   DEFAULT_CHARACTER_AGE,
 } from "@/lib/product-photo";
-import { saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
+import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
@@ -857,7 +857,6 @@ export async function POST(req: Request) {
 
     const generateOne = async (index: number) => {
       let imageBuffer: ArrayBuffer;
-      let mimeType = "image/png";
 
       if (devBlank && blankImageBuffer) {
         imageBuffer = blankImageBuffer.buffer.slice(
@@ -883,11 +882,6 @@ export async function POST(req: Request) {
         if (!imageResponse.ok) {
           throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
         }
-        const fetchedContentType = imageResponse.headers.get("content-type");
-        mimeType = fetchedContentType && fetchedContentType.startsWith("image/")
-          ? fetchedContentType
-          : "image/png";
-
         imageBuffer = await imageResponse.arrayBuffer();
       }
 
@@ -900,7 +894,6 @@ export async function POST(req: Request) {
         imageBuffer,
         poseId,
         styleId,
-        contentType: "image/png",
         prompt: userPrompt || undefined,
         title: savedTitle,
         // Tag character creations so the library can group/badge them.
@@ -916,7 +909,7 @@ export async function POST(req: Request) {
         jobId,
       });
       console.log("[Product Photo] Saved output.");
-      return { saved, mimeType };
+      return { saved };
     };
 
     await beginStep(
@@ -986,7 +979,7 @@ export async function POST(req: Request) {
         if (outcome && outcome.status === "fulfilled") {
           await safe("markAssetReady", () => markAssetReady(profileId!, assetId, {
             storagePath: outcome.value.saved.storagePath,
-            mimeType: outcome.value.mimeType,
+            mimeType: GENERATED_PHOTO_MIME,
             costCredits: perImageCredits,
             metadata: assetMetadata,
           }));

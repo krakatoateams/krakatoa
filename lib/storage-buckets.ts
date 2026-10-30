@@ -336,9 +336,29 @@ export function storagePathFromSignedUrl(url: string | null | undefined): string
   return url.slice(idx + marker.length).split("?")[0] || null;
 }
 
-/** Public or signed Supabase Storage URL → bucket-relative path. */
+/**
+ * R2 presigned URL (`https://{account}.r2.cloudflarestorage.com/{bucket}/[{R2_KEY_PREFIX}/]{path}?X-Amz-…`)
+ * → bucket-relative path. The prefix is server-only config, so take the first suffix that is a valid path.
+ */
+export function storagePathFromR2Url(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith(".r2.cloudflarestorage.com")) return null;
+    const segments = parsed.pathname.split("/").slice(2).map(decodeURIComponent);
+    for (let i = 0; i < segments.length; i += 1) {
+      const path = segments.slice(i).join("/");
+      if (isStorageRelativePath(path)) return path;
+    }
+  } catch {
+    // Not a URL, or a malformed %-escape.
+  }
+  return null;
+}
+
+/** Public or signed Supabase Storage URL, or R2 presigned URL → bucket-relative path. */
 export function storagePathFromStorageUrl(url: string | null | undefined): string | null {
-  return storagePathFromPublicUrl(url) ?? storagePathFromSignedUrl(url);
+  return storagePathFromPublicUrl(url) ?? storagePathFromSignedUrl(url) ?? storagePathFromR2Url(url);
 }
 
 // NOTE: this module is imported by client components too (e.g. lib/product-photo.ts,
@@ -379,5 +399,15 @@ if (process.env.NODE_ENV !== "production") {
   }
   if (isStorageRelativePath(`${uid}/secrets/x.txt`)) {
     throw new Error("storage-buckets self-check failed: unknown root accepted");
+  }
+  const r2Host = "https://acct.r2.cloudflarestorage.com/bucket";
+  const r2Sig = "?X-Amz-Expires=604800&X-Amz-Signature=abc";
+  if (
+    storagePathFromStorageUrl(`${r2Host}/user-generations/${video}${r2Sig}`) !== video ||
+    storagePathFromStorageUrl(`${r2Host}/${legacy}${r2Sig}`) !== legacy ||
+    storagePathFromStorageUrl(`${r2Host}/user-generations/${uid}/secrets/x.txt${r2Sig}`) !== null ||
+    storagePathFromStorageUrl(`https://evil.example/bucket/${video}`) !== null
+  ) {
+    throw new Error("storage-buckets self-check failed: R2 presigned URL parsing");
   }
 }
