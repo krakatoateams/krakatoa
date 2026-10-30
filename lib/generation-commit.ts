@@ -65,6 +65,34 @@ export async function markProviderCommitted(params: {
     : new Error("Failed to lock generation request after provider commit");
 }
 
+/**
+ * Compare-and-set lock for a provider whose cancel can still succeed while queued (Fal): one
+ * statement that locks only when `cancel_requested` is false. Resolves true when the attempt is
+ * locked (now or already), false when a cancel is in flight: the caller then owns the cancel
+ * outcome and either refunds (cancel confirmed) or calls `markProviderCommitted`.
+ */
+export async function lockProviderUnlessCancelRequested(params: {
+  generationRequestId: string;
+  profileId: string;
+}): Promise<boolean> {
+  const { data, error } = await supabaseServer
+    .from(REQUESTS_TABLE)
+    .update({ cancel_allowed: false })
+    .eq("id", params.generationRequestId)
+    .eq("profile_id", params.profileId)
+    .eq("cancel_allowed", true)
+    .eq("cancel_requested", false)
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    if (isMissingDbObject(error.message, REQUESTS_TABLE)) throw missingHint();
+    throw new Error(error.message || "lockProviderUnlessCancelRequested update failed");
+  }
+  if (data) return true;
+  // 0 rows: already locked (true) or a cancel is in flight (false).
+  return await isProviderCommitLocked(params.profileId, params.generationRequestId);
+}
+
 export async function isProviderCommitLocked(
   profileId: string,
   generationRequestId: string,

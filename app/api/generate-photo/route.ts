@@ -61,8 +61,9 @@ import {
   assertNotCancelled,
   makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
-import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
-import { shouldRefundFailedBatchImage } from "@/lib/generation-commit-pure";
+import { markProviderCommitted, isRefundableUserCancellation, lockProviderUnlessCancelRequested } from "@/lib/generation-commit";
+import { planBatchFailures } from "@/lib/photo-batch-failure-pure";
+import { recordCancelTrace } from "@/lib/generation-cancel-trace";
 import {
   DevBlankForbiddenError,
   DEV_BLANK_REQUEST_KEY,
@@ -856,6 +857,9 @@ export async function POST(req: Request) {
       return commitPromise;
     };
 
+    // Request-level Fal queue lock (compare-and-set), shared by every image of a batch.
+    let queueLocked = false;
+
     const generateOne = async (index: number) => {
       let imageBuffer: ArrayBuffer;
 
@@ -865,13 +869,22 @@ export async function POST(req: Request) {
           blankImageBuffer.byteOffset + blankImageBuffer.byteLength
         ) as ArrayBuffer;
       } else {
-        // A provider whose cancel is only a request (Fal) is committed at submit: cancel locks and no refund after.
-        const runHooks = provider!.commitsOnSubmit
+        // Fal (cancelWhileQueued): the adapter owns the cancel + confirmation and locks via these hooks only
+        // when the run leaves the queue / is ambiguous / a cancel is unconfirmed. Submit is not a commit.
+        const runHooks = provider!.cancelWhileQueued
           ? {
               ...photoHooks,
-              onPrediction: (tick: { id: string; status: string }) => {
-                photoHooks?.onPrediction?.(tick);
-                void commitProviderOnce().catch(() => undefined); // awaited again below, which rethrows
+              commit: async ({ ifNoCancel }: { ifNoCancel: boolean }) => {
+                if (!ifNoCancel) {
+                  await commitProviderOnce();
+                  return true;
+                }
+                if (!generationRequestId || !profileId) return true;
+                if (!queueLocked) queueLocked = await lockProviderUnlessCancelRequested({ generationRequestId, profileId });
+                return queueLocked;
+              },
+              onCancelAttempt: (a: { result: string; confirmed: boolean; status: string }) => {
+                if (profileId) void recordCancelTrace({ profileId, jobId, event: "cancel_outcome", detail: { ...a } });
               },
             }
           : photoHooks;
@@ -941,15 +954,17 @@ export async function POST(req: Request) {
     );
     const successes = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
     const failureCount = outcomes.length - successes.length;
-    // Refund policy per failed image (shouldRefundFailedBatchImage): providers that commit on
+    // Refund policy per failed image (planBatchFailures): providers that commit on
     // submit (Fal) refund only definitive failures; ambiguous ones stay charged for reconcile.
     const rejections = outcomes.flatMap((o) => (o.status === "rejected" ? [o.reason] : []));
-    const refundableFailures = rejections.filter((reason) =>
-      shouldRefundFailedBatchImage({
-        commitsOnSubmit: !!provider?.commitsOnSubmit,
-        definitiveProviderFailure: isProviderDefinitiveFailure(reason),
-      }),
-    ).length;
+    const plan = planBatchFailures({
+      rejections,
+      commitsOnSubmit: !!provider?.commitsOnSubmit,
+      cancelWhileQueued: !!provider?.cancelWhileQueued,
+      isDefinitive: isProviderDefinitiveFailure,
+      isCancelled: isGenerationCancelled,
+    });
+    const refundableFailures = plan.refundableFailures;
     const refundFailedImages = async () => {
       if (refundableFailures === 0) return;
       if (!jobId) {
@@ -973,7 +988,8 @@ export async function POST(req: Request) {
       // spend. Fal (commit on submit): the outer catch refunds only when the thrown reason is
       // definitive, so a mixed batch refunds its definitive images here and rethrows an
       // ambiguous reason (no further refund) — and an all-definitive batch rethrows a definitive one.
-      const ambiguous = rejections.find((r) => !isProviderDefinitiveFailure(r));
+      if (plan.fullyCancelled) throw rejections[0]; // Fal confirmed every queued image removed: outer cancel path refunds once
+      const ambiguous = plan.ambiguous;
       if (provider?.commitsOnSubmit && ambiguous !== undefined) await refundFailedImages();
       throw ambiguous !== undefined && provider?.commitsOnSubmit
         ? ambiguous

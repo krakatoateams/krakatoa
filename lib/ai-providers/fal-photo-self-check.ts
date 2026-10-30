@@ -1,5 +1,4 @@
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
-import { GenerationCancelledError } from "./errors";
 import {
   decodeFalPredictionId,
   encodeFalPredictionId,
@@ -80,7 +79,7 @@ async function main(): Promise<void> {
       submit: async (e, o) => { log.push(`submit ${e} ${Object.keys(o.input).join(",")}`); return { request_id: "r1" }; },
       status: async () => ({ status: ++polls > completeAfter ? "COMPLETED" : "IN_PROGRESS" }),
       result: async () => ({ data: { images: [{ url: host }] } }),
-      cancel: async (e, o) => { log.push(`cancel ${e} ${o.requestId}`); },
+      cancel: async (e, o) => { log.push(`cancel ${e} ${o.requestId}`); return "removed"; },
     },
     storage: { upload: async () => "https://v3.fal.media/up.png" },
   });
@@ -92,15 +91,6 @@ async function main(): Promise<void> {
   assert(ok === "https://v3.fal.media/f.png" && log[0].startsWith("submit fal-ai/nano-banana/edit"), "run returns the normalized url via the edit endpoint");
   assert(ticks[0] === "r1@fal-ai/nano-banana/edit:starting" && ticks.at(-1)!.endsWith(":succeeded"), "prediction ticks recorded with endpoint-bearing id");
 
-  polls = 0; log.length = 0;
-  let cancelled = false;
-  try {
-    await createFalPhotoProvider(fake(99), 0).run({
-      model: "fal-ai/nano-banana", input: replicateInput, hooks: { abortCheck: async () => { throw new GenerationCancelledError(); } },
-    });
-  } catch (e) { cancelled = e instanceof GenerationCancelledError; }
-  assert(cancelled && log.some((l) => l.startsWith("cancel fal-ai/nano-banana/edit r1")), "abort cancels the Fal request and rethrows");
-
   let rejected = false;
   try { await createFalPhotoProvider(fake(0, "https://evil.com/x.png"), 0).run({ model: "fal-ai/nano-banana", input: replicateInput }); } catch { rejected = true; }
   assert(rejected, "run rejects output from a non-allowlisted host");
@@ -108,7 +98,7 @@ async function main(): Promise<void> {
   const res = await createFalPhotoProvider(fake(0), 0).cancelPredictions([id, "garbage"]);
   assert(res.requested === 2 && res.cancelled === 1, "cancel by recorded id, bad ids skipped");
   const p = createFalPhotoProvider(fake(0), 0);
-  assert(p.commitsOnSubmit && p.id === "fal", "fal commits at submit");
+  assert(p.commitsOnSubmit && p.cancelWhileQueued && p.id === "fal", "fal: ambiguous after submit, cancellable while queued");
   console.log("fal-photo-self-check: ok");
 }
 void main();

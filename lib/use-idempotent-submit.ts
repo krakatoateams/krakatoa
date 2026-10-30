@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
+import { postGenerationCancel, type CancelResult } from "@/lib/generation-cancel-client-pure";
 import {
   clearPersistedIdempotentAttempt,
   readPersistedIdempotentAttempt,
@@ -129,36 +130,18 @@ export function useIdempotentSubmit(scope: string) {
    * Cancel the in-flight attempt. Sends the attempt's Idempotency-Key to the
    * cancel endpoint, which stops the underlying Replicate prediction(s). The
    * still-open generate request then settles on its own (with a refund), which
-   * resets `activeKey`/`cancelling` via settle(). Returns true when the cancel
-   * request was accepted. Safe to call when nothing is in flight (no-op).
+   * resets `activeKey`/`cancelling` via settle(). Resolves "cancelling" when the
+   * cancel was accepted, "not_allowed" (409: already started, credits used), "failed", or "idle". Safe to call when nothing is in flight (no-op).
    */
-  const cancel = useCallback(async (): Promise<boolean> => {
+  const cancel = useCallback(async (): Promise<CancelResult> => {
     const key = attemptStateRef.current?.key;
-    if (!key || !inFlightRef.current) return false;
+    if (!key || !inFlightRef.current) return "idle";
     if (mountedRef.current) setCancelling(true);
-    try {
-      const res = await fetch("/api/generations/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idempotencyKey: key }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 409 && data?.code === "CANCEL_NOT_ALLOWED") {
-          if (mountedRef.current) setCancelling(false);
-          return false;
-        }
-        // Let the user try again; the generate request is still running.
-        if (mountedRef.current) setCancelling(false);
-        return false;
-      }
-      // Keep `cancelling` true: the in-flight generate fetch will resolve shortly
-      // and settle() will reset the state.
-      return true;
-    } catch {
-      if (mountedRef.current) setCancelling(false);
-      return false;
-    }
+    const result = await postGenerationCancel((url, init) => fetch(url, init), key);
+    // Accepted: keep `cancelling` true, the in-flight generate fetch settles shortly and resets it.
+    // Refused or failed: let the user act again; the generate request is still running.
+    if (result !== "cancelling" && mountedRef.current) setCancelling(false);
+    return result;
   }, []);
 
   return { begin, cancel, activeKey, cancelling };

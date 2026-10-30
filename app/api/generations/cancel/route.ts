@@ -9,6 +9,7 @@ import {
   isPipelineRecoverableErrorJson,
 } from "@/lib/generation-idempotency";
 import { isProviderCommitLocked } from "@/lib/generation-commit";
+import { recordCancelTrace } from "@/lib/generation-cancel-trace";
 import { commitLockedFromCancelAllowed } from "@/lib/generation-commit-pure";
 import {
   requestCancel,
@@ -38,6 +39,8 @@ export const maxDuration = 60;
 async function cancelRecordedPredictions(
   profileId: string,
   generationRequestId: string,
+  /** Providers whose cancel the generate route owns (confirmation + refund), so it is not fired twice here. */
+  skipProviders: string[] = [],
 ): Promise<{ predictions: number; cancelled: number }> {
   let idsByProvider: Record<string, string[]> = {};
   try {
@@ -48,6 +51,7 @@ async function cancelRecordedPredictions(
       generationErrorLogSafe(e)
     );
   }
+  for (const id of skipProviders) delete idsByProvider[id];
   // Each group is cancelled by the provider recorded at submit time, never by current config.
   return cancelByRecordedProvider(idsByProvider, getPhotoProviderById);
 }
@@ -321,6 +325,7 @@ export async function POST(req: Request) {
     }
 
     if (commitLockedFromCancelAllowed(existing.cancel_allowed)) {
+      void recordCancelTrace({ profileId, jobId: existing.job_id, event: "cancel_refused", detail: { reason: "committed" } });
       return NextResponse.json(
         {
           code: "CANCEL_NOT_ALLOWED",
@@ -332,6 +337,7 @@ export async function POST(req: Request) {
     }
 
     if (await isProviderCommitLocked(profileId, existing.id)) {
+      void recordCancelTrace({ profileId, jobId: existing.job_id, event: "cancel_refused", detail: { reason: "committed" } });
       return NextResponse.json(
         {
           code: "CANCEL_NOT_ALLOWED",
@@ -345,6 +351,7 @@ export async function POST(req: Request) {
     const cancelAccepted = await requestCancel(profileId, existing.id);
     if (!cancelAccepted) {
       if (await isProviderCommitLocked(profileId, existing.id)) {
+        void recordCancelTrace({ profileId, jobId: existing.job_id, event: "cancel_refused", detail: { reason: "raced_with_commit" } });
         return NextResponse.json(
           {
             code: "CANCEL_NOT_ALLOWED",
@@ -358,7 +365,9 @@ export async function POST(req: Request) {
     }
 
     await settleEditorExportCancel(profileId, existing);
-    const predictionResult = await cancelRecordedPredictions(profileId, existing.id);
+    void recordCancelTrace({ profileId, jobId: existing.job_id, event: "cancel_requested" });
+    // Fal cancel is owned by the generate route (it confirms the cancel and refunds); only other providers are cancelled here.
+    const predictionResult = await cancelRecordedPredictions(profileId, existing.id, ["fal"]);
 
     return NextResponse.json({
       status: "cancelling",

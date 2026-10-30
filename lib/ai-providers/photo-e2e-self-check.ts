@@ -2,18 +2,21 @@
  * Offline end-to-end check for the 4 switchable Photo tiers on BOTH providers (no network, no
  * FAL_KEY). Real pieces: buildPhotoProviderInput, the Fal adapter + catalog, cancelByRecordedProvider.
  * Settlement is REAL: `chargedRun` mirrors the generate-photo route glue (spend, commit lock on
- * the first Fal tick, terminal catch) and settles through finishMeteredAttemptWithOps with the
+ * when the Fal run leaves the queue, terminal catch) and settles through finishMeteredAttemptWithOps with the
  * real resolveMeteredSettlement and the real commit/refund policy helpers. Only I/O is faked: the
  * Fal client, a scripted Replicate-side provider, the lock flag and the ledger (which dedupes the
  * refund idempotency key like credit_transactions does). The full route against Supabase is covered
  * by the live checklist in docs/generation/fal-provider-live-test-checklist.md.
  */
 import { ApiError } from "@fal-ai/client";
-import { GenerationCancelledError, isGenerationCancelled, isProviderDefinitiveFailure } from "./errors";
+import { isGenerationCancelled, isProviderDefinitiveFailure } from "./errors";
 import { finishMeteredAttemptWithOps, type MeteredLifecycleOps } from "../metered-generation/lifecycle-core";
 import { resolveMeteredSettlement } from "../metered-generation/settlement-pure";
 import {
+  casLockUnlessCancelRequested,
   commitLockedFromCancelAllowed,
+  forceCommitRow,
+  type CancelRow,
   isRefundableUserCancellationPure,
   shouldRefundFailedBatchImage,
   shouldRefundSpentCreditsAfterFailure,
@@ -91,6 +94,7 @@ async function chargedRun(
   if (ledger.balance < cost) return { status: 402, locked: false }; // no provider work, no asset
   ledger.balance -= cost;
   ledger.events.push("spend");
+  let row: CancelRow = { cancel_allowed: true, cancel_requested: false }; // generation_requests flags
   let locked = false; // generation_requests.cancel_allowed === false
   const ops = settlementOps(ledger, cost, () => locked);
   const handle = {
@@ -103,10 +107,17 @@ async function chargedRun(
       input,
       hooks: {
         ...hooks,
-        onPrediction: (t) => {
-          hooks?.onPrediction?.(t);
-          if (provider.commitsOnSubmit) locked = true;
-        },
+        // Fal locks through the same compare-and-set / unconditional commit the route uses.
+        ...(provider.cancelWhileQueued
+          ? {
+              commit: async ({ ifNoCancel }: { ifNoCancel: boolean }) => {
+                if (!ifNoCancel) row = forceCommitRow();
+                else row = casLockUnlessCancelRequested(row).row;
+                locked = !row.cancel_allowed;
+                return locked;
+              },
+            }
+          : {}),
       },
     });
     locked = true; // output handed back: committed
@@ -146,7 +157,7 @@ function fakeFal(log: string[], host = HOST_OK, failResult: boolean | FalFailure
         if (failure === "network") throw new Error("fetch failed");
         return { data: { images: [{ url: host }] } };
       },
-      cancel: async (endpoint, o) => { log.push(`cancel:${endpoint}:${o.requestId}`); },
+      cancel: async (endpoint, o) => { log.push(`cancel:${endpoint}:${o.requestId}`); return "signalled"; },
     },
     storage: { upload: async () => HOST_OK },
   };
@@ -156,6 +167,7 @@ function fakeReplicate(log: string[], failWith?: Error): PhotoProvider {
   return {
     id: "replicate",
     commitsOnSubmit: false,
+    cancelWhileQueued: false,
     uploadReference: async () => "https://replicate.delivery/ref.png",
     run: async ({ model }) => { log.push(`replicate-run:${model}`); if (failWith) throw failWith; return "https://replicate.delivery/out.png"; },
     cancelPredictions: async (ids) => { log.push(`replicate-cancel:${ids.join(",")}`); return { requested: ids.length, cancelled: ids.length }; },
@@ -232,17 +244,23 @@ async function main(): Promise<void> {
     for (const mode of ["status_error", "api_error"] as const) {
       const ledger: Ledger = { events: [], balance: 50 };
       const r = await falRun(fakeFal([], HOST_OK, mode), ledger, true);
-      assert(r.locked, `${tier.id}/${mode}: commit lock set at submit`);
+      assert(r.locked === (mode === "api_error"), `${tier.id}/${mode}: lock only once Fal reports COMPLETED (status error throws before it)`);
       assert(ledger.events.join() === "spend,refund" && ledger.balance === 50, `${tier.id}/${mode}: definitive Fal failure refunds exactly once`);
     }
-    // Fal ambiguous (network loss on result, abort after submit, timeout) => no refund, stays locked for reconcile.
+    // Fal ambiguous (network loss on result or status, timeout) => no refund, stays locked for reconcile.
     {
-      const timeout: PhotoProvider = { ...createFalPhotoProvider(fakeFal([]), 0), run: async ({ hooks }) => { hooks?.onPrediction?.({ id: "r@e", status: "processing" }); throw new Error("function timed out"); } };
+      // Status read fails after the run started (network loss / platform timeout): ambiguous, locked.
+      const statusDies = (msg: string): FalQueueLike => {
+        const f = fakeFal([]);
+        let n = 0;
+        f.queue.status = async () => { if (++n > 1) throw new Error(msg); return { status: "IN_PROGRESS" }; };
+        return f;
+      };
       const ambiguous: [string, () => Promise<RunResult>, Ledger][] = [];
       for (const [name, make] of [
         ["network", (l: Ledger) => falRun(fakeFal([], HOST_OK, "network"), l)],
-        ["abort", (l: Ledger) => falRun({ ...fakeFal([]), queue: { ...fakeFal([]).queue, status: async () => ({ status: "IN_PROGRESS" }) } }, l, false, { abortCheck: async () => { throw new GenerationCancelledError(); } })],
-        ["timeout", (l: Ledger) => chargedRun(l, 5, timeout, FAL_MODEL[tier.id], input)],
+        ["status-lost", (l: Ledger) => falRun(statusDies("fetch failed"), l)],
+        ["timeout", (l: Ledger) => falRun(statusDies("function timed out"), l)],
       ] as const) {
         const ledger: Ledger = { events: [], balance: 50 };
         ambiguous.push([name, () => make(ledger), ledger]);
@@ -322,14 +340,7 @@ async function main(): Promise<void> {
     assert(shouldRefundFailedBatchImage({ commitsOnSubmit: true, definitiveProviderFailure: true }), "fal definitive batch image refunds");
     assert(!shouldRefundFailedBatchImage({ commitsOnSubmit: true, definitiveProviderFailure: false }), "fal ambiguous batch image does not refund");
 
-    // Cancel mid-run: the Fal adapter cancels its own request and rethrows.
-    const clog: string[] = [];
-    let cancelled = false;
-    try {
-      await createFalPhotoProvider({ ...fakeFal(clog), queue: { ...fakeFal(clog).queue, status: async () => ({ status: "IN_PROGRESS" }) } }, 0)
-        .run({ model: FAL_MODEL[tier.id], input, hooks: { abortCheck: async () => { throw new GenerationCancelledError(); } } });
-    } catch (e) { cancelled = e instanceof GenerationCancelledError; }
-    assert(cancelled && clog.some((l) => l.startsWith("cancel:")), `${tier.id}: mid-run cancel reaches Fal`);
+    // Cancel while queued and confirmed by Fal: see fal-cancel-self-check.ts for the full matrix.
   }
 
   // Cancel routing follows the RECORDED provider, whatever the config says now.
