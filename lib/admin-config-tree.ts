@@ -38,12 +38,12 @@ import {
   defaultVideoComposerRows,
   modelEligibleForComposer,
 } from "@/lib/video-composer-features";
+import { photoTierPricingEntries, videoPricingContexts } from "@/lib/model-pricing-keys";
 import {
   STORYBOARD_VIDEO_MODEL_IDS,
   VIDEO_MODELS,
   type VideoModel,
   type VideoPricingContext,
-  type VideoResolution,
 } from "@/lib/video-models";
 
 // ---------------------------------------------------------------------------
@@ -232,21 +232,9 @@ function enumerateVideoVariants(
   settings: BillingSettings
 ): AdminCostVariant[] {
   const seen = new Map<string, string>();
-  const resolutions: VideoResolution[] =
-    model.resolutions.length > 0 ? model.resolutions : [model.defaultResolution];
-  const audioFlags = model.supportsAudio ? [false, true] : [false];
-  const refFlags = model.references.referenceVideos > 0 ? [false, true] : [false];
-
-  for (const resolution of resolutions) {
-    for (const generateAudio of audioFlags) {
-      for (const hasReferenceVideo of refFlags) {
-        const ctx: VideoPricingContext = { resolution, generateAudio, hasReferenceVideo };
-        const key = model.pricingKey(ctx);
-        if (!seen.has(key)) {
-          seen.set(key, humanVideoVariantLabel(model, ctx));
-        }
-      }
-    }
+  for (const ctx of videoPricingContexts(model)) {
+    const key = model.pricingKey(ctx);
+    if (!seen.has(key)) seen.set(key, humanVideoVariantLabel(model, ctx));
   }
 
   const variants: AdminCostVariant[] = [];
@@ -375,22 +363,8 @@ function enumeratePhotoVariants(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings
 ): AdminCostVariant[] {
-  if (tier.qualities) {
-    return tier.qualities
-      .map((q) => variantFromPricingRow(q.pricingKey, q.label, map, settings))
-      .filter((v): v is AdminCostVariant => v !== null);
-  }
-  if (tier.basicPricingKey) {
-    const v = variantFromPricingRow(
-      tier.basicPricingKey,
-      "Per image (no resolution tiers)",
-      map,
-      settings
-    );
-    return v ? [v] : [];
-  }
-  return tier.resolutions
-    .map((r) => variantFromPricingRow(r.pricingKey, r.label, map, settings))
+  return photoTierPricingEntries(tier)
+    .map((e) => variantFromPricingRow(e.pricingKey, e.label, map, settings))
     .filter((v): v is AdminCostVariant => v !== null);
 }
 
