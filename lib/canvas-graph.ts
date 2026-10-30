@@ -216,6 +216,25 @@ export function isDuplicateCanvasConnection(
   );
 }
 
+/** True when wiring source → target would close a loop (target already feeds source). */
+export function wouldCreateCanvasCycle(
+  edges: { source: string; target: string }[],
+  params: { source?: string | null; target?: string | null }
+): boolean {
+  const { source, target } = params;
+  if (!source || !target) return false;
+  const seen = new Set<string>();
+  const queue = [target];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (id === source) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const edge of edges) if (edge.source === id) queue.push(edge.target);
+  }
+  return false;
+}
+
 export type CanvasUpstreamImage = {
   id: string;
   resultStoragePath: string | null;
@@ -360,6 +379,8 @@ export function canvasGraphSelfCheck(): void {
     !isDuplicateCanvasConnection(edges, { source: "p1", target: "i1", id: "e1" }),
     "reconnecting the same edge is not a duplicate of itself"
   );
+  assert(wouldCreateCanvasCycle(edges, { source: "v1", target: "p1" }), "wiring the end back to the start is a cycle");
+  assert(!wouldCreateCanvasCycle(edges, { source: "p1", target: "v1" }), "a forward shortcut is not a cycle");
 
   const multiNodes: CanvasGraphNode[] = [
     { id: "p1", data: { kind: "prompt", text: "first" } },

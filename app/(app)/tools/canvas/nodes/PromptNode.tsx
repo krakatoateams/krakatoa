@@ -41,6 +41,15 @@ import CanvasOmniForm from "./CanvasOmniForm";
 import CanvasSourceRefs from "./CanvasSourceRefs";
 import CanvasMentionField from "./CanvasMentionField";
 import type { PromptNodeData } from "../node-data";
+import { canvasNodeFingerprint, canvasRunDeps } from "@/lib/canvas-run-plan";
+import {
+  canvasRunFailure,
+  useCanvasNodeRunner,
+  useFreshCanvasGraph,
+  type CanvasRunOutcome,
+} from "../canvas-run";
+
+const IMAGE_NOT_READY = "A connected image isn't ready to send. Wait for the upload to finish, then try again.";
 
 export type PromptFlowNode = Node<PromptNodeData, "prompt">;
 
@@ -60,44 +69,68 @@ export default function PromptNode({
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { canvasTextCredits } = usePricing();
+  const freshGraph = useFreshCanvasGraph(id, data);
+
+  // What Generate sends. Render, Generate and a chain run all resolve inputs here.
+  const resolveInputs = (
+    graphNodes: CanvasGraphNode[],
+    graphEdges: CanvasGraphEdge[],
+    nodeData: PromptNodeData
+  ) => {
+    const refImages = usableCanvasRefImages(
+      mergeCanvasImages(
+        findUpstreamImages(graphNodes, graphEdges, id),
+        mentionedCanvasImages(nodeData.prompt, graphNodes)
+      )
+    ).slice(0, MAX_CANVAS_REF_IMAGES);
+    const connectedPrompt =
+      findUpstreamPromptTexts(graphNodes, graphEdges, id).join("\n\n") || null;
+    const imageStoragePaths = canvasRefStoragePaths(refImages);
+    const selectedModel = getCanvasTextModel(nodeData.modelId);
+    const textModel =
+      imageStoragePaths.length > 0 && !selectedModel.vision
+        ? getCanvasTextModel("gpt5")
+        : selectedModel;
+    const instruction = nodeData.prompt.trim();
+    const resolvedInstruction = resolveCanvasMentionPrompt(instruction, graphNodes);
+    const canGenerate =
+      (resolvedInstruction.length > 0 || !!connectedPrompt || imageStoragePaths.length > 0) &&
+      !nodeData.loading;
+    return { refImages, connectedPrompt, imageStoragePaths, textModel, instruction, resolvedInstruction, canGenerate };
+  };
 
   const connectedPromptSources = findUpstreamPrompts(nodes, edges, id);
-  const connectedPrompts = findUpstreamPromptTexts(nodes, edges, id);
-  const connectedImages = findUpstreamImages(nodes, edges, id);
-  const mentionedImages = mentionedCanvasImages(data.prompt, nodes);
-  const refImages = usableCanvasRefImages(
-    mergeCanvasImages(connectedImages, mentionedImages)
-  ).slice(0, MAX_CANVAS_REF_IMAGES);
-  const connectedPrompt = connectedPrompts.join("\n\n") || null;
-  const imageStoragePaths = canvasRefStoragePaths(refImages);
-  const selectedModel = getCanvasTextModel(data.modelId);
-  const textModel =
-    imageStoragePaths.length > 0 && !selectedModel.vision
-      ? getCanvasTextModel("gpt5")
-      : selectedModel;
+  const { refImages, imageStoragePaths, textModel, canGenerate } = resolveInputs(nodes, edges, data);
   const cost = canvasTextCredits();
-  const instruction = data.prompt.trim();
-  const resolvedInstruction = resolveCanvasMentionPrompt(instruction, nodes);
-  const canGenerate =
-    (resolvedInstruction.length > 0 ||
-      !!connectedPrompt ||
-      imageStoragePaths.length > 0) &&
-    !data.loading;
 
   const patch = (next: Partial<PromptNodeData>) => updateNodeData(id, next);
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
+  const handleGenerate = async (options: { chain?: boolean } = {}): Promise<CanvasRunOutcome> => {
+    const graph = freshGraph();
+    const {
+      refImages,
+      connectedPrompt,
+      imageStoragePaths,
+      textModel,
+      instruction,
+      resolvedInstruction,
+      canGenerate,
+    } = resolveInputs(graph.nodes, graph.edges, graph.data);
+    const fingerprint = canvasNodeFingerprint(id, graph.nodes, graph.edges);
+    if (!canGenerate) {
+      if (options.chain && !graph.data.loading) {
+        patch(canvasRunFailure("Write an instruction or connect a node.", fingerprint));
+      }
+      return graph.data.loading ? "busy" : "failed";
+    }
     if (status !== "authenticated") {
       openSignInModal();
-      return;
+      return "auth";
     }
 
     if (refImages.length > 0 && imageStoragePaths.length < refImages.length) {
-      patch({
-        error: "A connected image isn't ready to send. Wait for the upload to finish, then try again.",
-      });
-      return;
+      patch(canvasRunFailure(IMAGE_NOT_READY, fingerprint));
+      return "failed";
     }
 
     const upstreamText =
@@ -109,10 +142,12 @@ export default function PromptNode({
       textModel.id,
     ].join("|");
     const attempt = beginSubmit(signature);
-    if (!attempt) return;
+    if (!attempt) return "busy";
 
-    pushHistory();
+    // A chain run records one history entry for the whole run.
+    if (!options.chain) pushHistory();
     let rotateKey = false;
+    let outcome: CanvasRunOutcome = "failed";
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-canvas-text", {
@@ -128,7 +163,7 @@ export default function PromptNode({
           imageStoragePaths,
           imageStoragePath: imageStoragePaths[0],
           imageLabels: refImages.map((image) => {
-            const node = nodes.find((item) => item.id === image.id);
+            const node = graph.nodes.find((item) => item.id === image.id);
             return node?.data.label?.trim() || "Image";
           }),
         }),
@@ -145,13 +180,15 @@ export default function PromptNode({
           attempt.settle(false);
           refetchCredits();
           patch({ loading: false });
-          return;
+          return "cancelled";
         }
         if (response.status === 402) {
+          outcome = "insufficient";
           throw new Error(
             `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        if (response.status === 409 && result.code === "GENERATION_IN_PROGRESS") outcome = "busy";
         rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
@@ -161,15 +198,51 @@ export default function PromptNode({
       if (!nextText) throw new Error("Model returned an empty prompt.");
       attempt.settle(true);
       refetchCredits();
-      patch({ loading: false, error: null, text: nextText });
-    } catch (err) {
-      attempt.settle(false, { rotate: rotateKey });
       patch({
         loading: false,
-        error: err instanceof Error ? err.message : "Generation failed",
+        error: null,
+        text: nextText,
+        runFingerprint: fingerprint,
+        lastRunError: undefined,
       });
+      return "done";
+    } catch (err) {
+      attempt.settle(false, { rotate: rotateKey });
+      const message = err instanceof Error ? err.message : "Generation failed";
+      // Credits and a run already in progress are not a failure of this node's inputs.
+      patch(
+        outcome === "failed"
+          ? { loading: false, ...canvasRunFailure(message, fingerprint) }
+          : { loading: false, error: message }
+      );
+      return outcome;
     }
   };
+
+  useCanvasNodeRunner(id, {
+    run: handleGenerate,
+    cancel: cancelSubmit,
+    cost: () => canvasTextCredits(),
+    check: (pending) => {
+      const graph = freshGraph();
+      const input = resolveInputs(graph.nodes, graph.edges, graph.data);
+      const deps = canvasRunDeps(id, graph.nodes, graph.edges)
+        .map((depId) => graph.nodes.find((node) => node.id === depId))
+        .filter((node) => node !== undefined);
+      const coming = deps.some((node) => pending.has(node.id));
+      const imageComing = deps.some((node) => node.data.kind === "image" && pending.has(node.id));
+      if (
+        deps.some((node) => node.data.uploading) ||
+        (!imageComing && input.imageStoragePaths.length < input.refImages.length)
+      ) {
+        return IMAGE_NOT_READY;
+      }
+      if (!input.resolvedInstruction && !input.connectedPrompt && input.imageStoragePaths.length === 0 && !coming) {
+        return "Write an instruction or connect a node.";
+      }
+      return null;
+    },
+  });
 
   return (
     <CanvasNodeFrame

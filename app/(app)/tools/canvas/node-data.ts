@@ -19,8 +19,9 @@ import {
   type CanvasTextModelId,
 } from "@/lib/canvas-text-models";
 import { nextCanvasNodeName, type CanvasNodeKind } from "@/lib/canvas-graph";
+import type { SavedRunState } from "@/lib/canvas-document";
 
-export type PromptNodeData = {
+export type PromptNodeData = SavedRunState & {
   kind: "prompt";
   label: string;
   /** Form instruction. */
@@ -32,7 +33,7 @@ export type PromptNodeData = {
   error: string | null;
 };
 
-export type ImageNodeData = {
+export type ImageNodeData = SavedRunState & {
   kind: "image";
   label: string;
   prompt: string;
@@ -52,7 +53,7 @@ export type ImageNodeData = {
   error: string | null;
 };
 
-export type VideoNodeData = {
+export type VideoNodeData = SavedRunState & {
   kind: "video";
   label: string;
   prompt: string;

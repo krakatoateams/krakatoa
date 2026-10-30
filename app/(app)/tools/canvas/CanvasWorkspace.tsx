@@ -26,6 +26,7 @@ import {
   inferCanvasTargetHandle,
   isDuplicateCanvasConnection,
   nextCanvasKinds,
+  wouldCreateCanvasCycle,
   type CanvasNodeKind,
 } from "@/lib/canvas-graph";
 import { canDropOnCanvas } from "@/lib/canvas-handoff";
@@ -50,6 +51,7 @@ import CanvasEdge from "./nodes/CanvasEdge";
 import { flowFromGraph, graphFromFlow } from "./canvas-persist";
 import { dataFromLibraryItem, labeledDataForKind, type CanvasNodeData } from "./node-data";
 import { CanvasActionsProvider } from "./canvas-actions";
+import { CanvasRunProvider } from "./canvas-run";
 
 const nodeTypes = {
   prompt: PromptNode,
@@ -617,6 +619,9 @@ export default function CanvasWorkspace() {
     ) {
       return false;
     }
+    const otherEdges =
+      "id" in connection ? edgesRef.current.filter((edge) => edge.id !== connection.id) : edgesRef.current;
+    if (wouldCreateCanvasCycle(otherEdges, connection)) return false;
     return canConnectCanvas({
       sourceKind,
       targetKind,
@@ -771,6 +776,7 @@ export default function CanvasWorkspace() {
       ) : null}
       <div ref={flowPaneRef} className="relative min-h-0 flex-1">
         <CanvasActionsProvider value={{ spawnFrom, attachLibraryRef, pushHistory, fileCreators }}>
+        <CanvasRunProvider canRun={canEdit} pushHistory={pushHistory}>
         <ReactFlow
           className="kk-canvas"
           nodes={nodes}
@@ -868,6 +874,7 @@ export default function CanvasWorkspace() {
           </div>
         )}
         {canEdit ? <CanvasToolbar onAdd={addNode} onOpenLibrary={openLibraryPicker} /> : null}
+        </CanvasRunProvider>
         </CanvasActionsProvider>
       </div>
       {canvasId ? (

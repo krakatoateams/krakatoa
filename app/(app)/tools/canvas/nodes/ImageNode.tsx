@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Sparkles } from "lucide-react";
 import {
@@ -67,6 +67,13 @@ import type { ImageNodeData } from "../node-data";
 import { useCanvasImageFeatures } from "../use-canvas-features";
 import { describeGenerateHttpError } from "@/lib/canvas-generation-error";
 import { photoPromptLimitError } from "@/lib/skills";
+import { canvasNodeFingerprint, canvasRunDeps } from "@/lib/canvas-run-plan";
+import {
+  canvasRunFailure,
+  useCanvasNodeRunner,
+  useFreshCanvasGraph,
+  type CanvasRunOutcome,
+} from "../canvas-run";
 
 export type ImageFlowNode = Node<ImageNodeData, "image">;
 
@@ -90,6 +97,8 @@ export default function ImageNode({
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { imageCredits } = usePricing();
+  const features = useCanvasImageFeatures();
+  const freshGraph = useFreshCanvasGraph(id, data);
 
   const { url: signedUrl, failed: mediaFailed } = useSignedMediaUrlState(
     data.resultStoragePath,
@@ -98,29 +107,37 @@ export default function ImageNode({
   const previewUrl = localPreview ?? signedUrl ?? data.resultUrl;
   const origin = useCanvasAssetOrigin(data.resultStoragePath, data.creationId, "image");
 
+  // What Generate sends. Render, Generate and a chain run all resolve inputs here.
+  const resolveInputs = (
+    graphNodes: CanvasGraphNode[],
+    graphEdges: CanvasGraphEdge[],
+    nodeData: ImageNodeData
+  ) => {
+    const connectedPrompt =
+      findUpstreamPromptTexts(graphNodes, graphEdges, id).join("\n\n") || null;
+    const refImages = usableCanvasRefImages(
+      mergeCanvasImages(
+        findUpstreamImages(graphNodes, graphEdges, id),
+        mentionedCanvasImages(nodeData.prompt, graphNodes)
+      )
+    ).slice(0, MAX_CANVAS_REF_IMAGES);
+    const hasImageRefs = refImages.some((image) => image.resultStoragePath || image.resultUrl);
+    const prompt =
+      resolveCanvasMentionPrompt(nodeData.prompt.trim(), graphNodes) || connectedPrompt || "";
+    const photoTiers = canvasImageTierOptions(hasImageRefs, features.data);
+    const tierValid = photoTiers.some((t) => t.id === nodeData.modelTier);
+    const tier = getProductPhotoTier(nodeData.modelTier);
+    const quality = nodeData.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
+    const cost = imageCredits(photoTierPricingKey(tier, nodeData.resolution, quality), 1);
+    const limitError = photoPromptLimitError(prompt);
+    const canGenerate = prompt.length > 0 && !limitError && !nodeData.uploading && tierValid;
+    return { refImages, hasImageRefs, prompt, photoTiers, tierValid, tier, quality, cost, limitError, canGenerate };
+  };
+
   const connectedPromptSources = findUpstreamPrompts(nodes, edges, id);
-  const connectedPrompts = findUpstreamPromptTexts(nodes, edges, id);
-  const connectedImages = findUpstreamImages(nodes, edges, id);
-  const refImages = usableCanvasRefImages(
-    mergeCanvasImages(connectedImages, mentionedCanvasImages(data.prompt, nodes))
-  ).slice(0, MAX_CANVAS_REF_IMAGES);
-  const connectedPrompt = connectedPrompts.join("\n\n") || null;
-  const hasImageRefs = refImages.some((image) => image.resultStoragePath || image.resultUrl);
-  const prompt =
-    resolveCanvasMentionPrompt(data.prompt.trim(), nodes) || connectedPrompt || "";
-  const features = useCanvasImageFeatures();
-  const photoTiers = useMemo(
-    () => canvasImageTierOptions(hasImageRefs, features.data),
-    [hasImageRefs, features.data]
-  );
+  const { refImages, photoTiers, tierValid, tier, quality, cost, limitError, canGenerate } =
+    resolveInputs(nodes, edges, data);
   const tiersReady = features.data !== null;
-  const tierValid = photoTiers.some((t) => t.id === data.modelTier);
-  const tier = getProductPhotoTier(data.modelTier);
-  const quality = data.quality ?? DEFAULT_PRODUCT_PHOTO_QUALITY;
-  const photoPricingKey = photoTierPricingKey(tier, data.resolution, quality);
-  const cost = imageCredits(photoPricingKey, 1);
-  const limitError = photoPromptLimitError(prompt);
-  const canGenerate = prompt.length > 0 && !limitError && !data.uploading && tierValid;
 
   const patch = (next: Partial<ImageNodeData>) => updateNodeData(id, next);
 
@@ -162,22 +179,32 @@ export default function ImageNode({
     }
   };
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
+  const handleGenerate = async (options: { chain?: boolean } = {}): Promise<CanvasRunOutcome> => {
+    const graph = freshGraph();
+    const input = resolveInputs(graph.nodes, graph.edges, graph.data);
+    const fingerprint = canvasNodeFingerprint(id, graph.nodes, graph.edges);
+    if (!input.canGenerate) {
+      if (options.chain) {
+        patch(canvasRunFailure(input.limitError ?? "This node isn't ready to run.", fingerprint));
+      }
+      return "failed";
+    }
     if (status !== "authenticated") {
       openSignInModal();
-      return;
+      return "auth";
     }
 
-    const modelTier = photoTiers.some((t) => t.id === data.modelTier)
-      ? data.modelTier
-      : photoTiers[0]?.id ?? data.modelTier;
+    const { refImages, tier, quality, prompt } = input;
+    const nodeData = graph.data;
+    const modelTier = input.photoTiers.some((t) => t.id === nodeData.modelTier)
+      ? nodeData.modelTier
+      : input.photoTiers[0]?.id ?? nodeData.modelTier;
     const formData = new FormData();
     formData.append("poseId", DEFAULT_MODEL_POSE);
     formData.append("styleId", DEFAULT_PHOTO_STYLE);
     formData.append("modelTier", modelTier);
-    formData.append("aspectRatio", data.aspectRatio);
-    if (tier.hasResolution) formData.append("resolution", data.resolution);
+    formData.append("aspectRatio", nodeData.aspectRatio);
+    if (tier.hasResolution) formData.append("resolution", nodeData.resolution);
     if (tier.qualities) formData.append("quality", quality);
     formData.append("prompt", prompt);
     formData.append("mode", "image");
@@ -192,26 +219,30 @@ export default function ImageNode({
           formData.append("reference", file);
         }
       } catch (err) {
-        patch({
-          error: err instanceof Error ? err.message : "Couldn't use the connected image.",
-        });
-        return;
+        patch(
+          canvasRunFailure(
+            err instanceof Error ? err.message : "Couldn't use the connected image.",
+            fingerprint
+          )
+        );
+        return "failed";
       }
     }
 
     const signature = canvasImageAttemptSignature({
       prompt,
       modelTier,
-      aspectRatio: data.aspectRatio,
-      resolution: tier.hasResolution ? data.resolution : null,
+      aspectRatio: nodeData.aspectRatio,
+      resolution: tier.hasResolution ? nodeData.resolution : null,
       quality: tier.qualities ? quality : null,
       refImageIds: refImages.map((image) => image.id),
       resolvedRefFrameCount,
     });
     const attempt = beginSubmit(signature);
-    if (!attempt) return;
+    if (!attempt) return "busy";
 
     let rotateKey = false;
+    let outcome: CanvasRunOutcome = "failed";
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-photo", {
@@ -225,13 +256,15 @@ export default function ImageNode({
           attempt.settle(false);
           refetchCredits();
           patch({ loading: false });
-          return;
+          return "cancelled";
         }
         if (response.status === 402) {
+          outcome = "insufficient";
           throw new Error(
-            `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
+            `Insufficient credits. Required: ${result.requiredCredits ?? input.cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        if (response.status === 409 && result.code === "GENERATION_IN_PROGRESS") outcome = "busy";
         rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
@@ -247,15 +280,51 @@ export default function ImageNode({
         resultUrl: result.imageUrl ?? null,
         resultStoragePath: storagePath,
         creationId: pickGenerateCreationId(result),
+        runFingerprint: fingerprint,
+        lastRunError: undefined,
       });
+      return "done";
     } catch (err) {
       attempt.settle(false, { rotate: rotateKey });
-      patch({
-        loading: false,
-        error: err instanceof Error ? err.message : "Generation failed",
-      });
+      const message = err instanceof Error ? err.message : "Generation failed";
+      // Credits and a run already in progress are not a failure of this node's inputs.
+      patch(
+        outcome === "failed"
+          ? { loading: false, ...canvasRunFailure(message, fingerprint) }
+          : { loading: false, error: message }
+      );
+      return outcome;
     }
   };
+
+  useCanvasNodeRunner(id, {
+    run: handleGenerate,
+    cancel: cancelSubmit,
+    cost: () => {
+      const graph = freshGraph();
+      return resolveInputs(graph.nodes, graph.edges, graph.data).cost;
+    },
+    check: (pending) => {
+      const graph = freshGraph();
+      const input = resolveInputs(graph.nodes, graph.edges, graph.data);
+      const deps = canvasRunDeps(id, graph.nodes, graph.edges)
+        .map((depId) => graph.nodes.find((node) => node.id === depId))
+        .filter((node) => node !== undefined);
+      const textComing = deps.some((node) => node.data.kind === "prompt" && pending.has(node.id));
+      const imageComing = deps.some((node) => node.data.kind === "image" && pending.has(node.id));
+      if (graph.data.uploading || deps.some((node) => node.data.uploading)) {
+        return "A connected image is still uploading.";
+      }
+      if (!input.prompt && !textComing) return "Add a prompt or connect a Text node.";
+      if (input.limitError && !textComing) return input.limitError;
+      if (features.data === null) return "Models are still loading. Try again in a moment.";
+      const tiers = canvasImageTierOptions(input.hasImageRefs || imageComing, features.data);
+      if (!tiers.some((t) => t.id === graph.data.modelTier)) {
+        return `${input.tier.modelLabel} isn't available for this input. Pick another model.`;
+      }
+      return null;
+    },
+  });
 
   return (
     <CanvasNodeFrame
