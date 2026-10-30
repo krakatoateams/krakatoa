@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { PwaRegister } from "@/components/PwaRegister";
-import { resolveSiteOrigin } from "@/lib/http";
 import { Analytics } from "@vercel/analytics/next";
 import "@/app/globals.css";
 
@@ -22,20 +21,34 @@ const inter = Inter({
   weight: ["400", "500", "600", "700"],
 });
 
-function metadataBaseUrl(): URL {
-  const fallback = "https://www.kelolako.com";
-  try {
-    return new URL(resolveSiteOrigin());
-  } catch {
-    return new URL(fallback);
-  }
-}
+const SITE_TITLE = "Kelolako - AI-powered tools for content creators";
+const SITE_DESCRIPTION =
+  "Turn your photos into viral reels and create AI product photos, right in your browser.";
+const OG_IMAGE = {
+  url: "/og.jpg",
+  width: 900,
+  height: 473,
+  alt: "Kelolako AI video templates and product photos",
+};
 
 export const metadata: Metadata = {
-  metadataBase: metadataBaseUrl(),
-  title: "Kelolako - AI-powered tools for content creators",
-  description:
-    "Generate faceless reels, product photos, and automate your social media — all in one place.",
+  metadataBase: new URL("https://www.kelolako.com"),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: "Kelolako",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
   applicationName: "Kelolako",
   manifest: "/site.webmanifest",
   appleWebApp: {
