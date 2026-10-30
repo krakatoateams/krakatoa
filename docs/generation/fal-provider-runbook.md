@@ -19,7 +19,13 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   `lib/generation-commit-pure.ts`): a DEFINITIVE Fal failure refunds exactly once (Fal queue status
   `COMPLETED` with `error`, or `queue.result()` throws a Fal `ApiError`). An AMBIGUOUS outcome (timeout
   past `maxDuration`, network loss, abort after submit) does not refund; the attempt stays locked
-  and the reconcile cron refunds it only if Fal's queue status confirms every recorded request failed.
+  and the reconcile cron refunds it only if Fal confirms every recorded request failed. The route
+  settles such a job `failed` with code `PROVIDER_OUTCOME_UNKNOWN` (user sees "we're verifying it;
+  credits are returned automatically if the run failed", not a refund claim); reconcile scans those
+  jobs for 24 h and refunds with the route's own idempotency key (`refund:product_photo:{jobId}`), so
+  route + reconcile can never double refund. Reconcile confirms failure via queue status `COMPLETED` +
+  `error`, or, when status has no `error`, a `result()` 4xx ApiError. An ApiError 5xx/408/429 or
+  network loss from `result()` is AMBIGUOUS in reconcile (no refund; the route's own rule is unchanged).
   A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
 - Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`
   + `error`/`error_type`) but do not say whether they are billed. Check the Fal billing dashboard
@@ -64,7 +70,7 @@ Signs: monitoring shows the amber "Fal jobs failed" banner, users report photo f
 page. A definitive Fal failure refunds; an ambiguous one (timeout, network loss) is held for reconcile (see Refund policy above).
 
 1. Switch every Fal tier back to Replicate (above). This stops new traffic to Fal.
-2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones wait for reconcile.
+2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones are held and refunded by reconcile only if Fal confirms the failure.
 3. After Fal recovers, switch one tier back and run the checklist before the rest.
 4. There is no automatic fallback between providers (deliberately: backlog item).
 

@@ -43,7 +43,20 @@ export function createFalPhotoProvider(
     (() => {
       const key = process.env.FAL_KEY;
       if (!key) throw new Error("AI provider is not configured.");
-      return createFalClient({ credentials: key }) as unknown as FalQueueLike;
+      const real = createFalClient({ credentials: key });
+      return {
+        queue: {
+          submit: (endpoint, o) => real.queue.submit(endpoint, o),
+          // `error` is documented on a failed request's COMPLETED status but missing from QueueStatus's type.
+          status: async (endpoint, o) => {
+            const s: { status: string; error?: unknown } = await real.queue.status(endpoint, o);
+            return { status: s.status, error: typeof s.error === "string" ? s.error : undefined };
+          },
+          result: (endpoint, o) => real.queue.result(endpoint, o),
+          cancel: (endpoint, o) => real.queue.cancel(endpoint, o),
+        },
+        storage: { upload: (file) => real.storage.upload(file) },
+      };
     })();
 
   return {
@@ -107,6 +120,19 @@ export function createFalPhotoProvider(
       if (!parsed) throw new Error("Unrecognized Fal prediction id.");
       const { status, error } = await fal.queue.status(parsed.endpoint, { requestId: parsed.requestId });
       if (status === "COMPLETED" && error) return { id: raw, status: "failed", error: "Fal reported the run failed." };
+      if (status === "COMPLETED") {
+        // Fal documents `error` on a failed COMPLETED status but it is unverified live, so also ask for
+        // the result: a 4xx ApiError is a definitive failure. 5xx/408/429 and network loss stay
+        // ambiguous (rethrown), so reconcile never refunds on them.
+        try {
+          await fal.queue.result(parsed.endpoint, { requestId: parsed.requestId });
+        } catch (e) {
+          if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
+            return { id: raw, status: "failed", error: "Fal reported the run failed." };
+          }
+          throw e;
+        }
+      }
       return { id: raw, status: TICK_STATUS[status] ?? "processing" };
     },
   };
