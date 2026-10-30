@@ -11,7 +11,7 @@
  * video + metadata.
  */
 import { runWithRetry } from "@/lib/reels-helpers";
-import { extractMediaUrl, ReplicateCancellationError, isCancellation } from "@/lib/replicate-server";
+import { extractMediaUrl, GenerationCancelledError, isGenerationCancelled } from "@/lib/replicate-server";
 import { buildAssContent } from "./ass";
 import { generateVeoStyle, generateScenes } from "./llm";
 import {
@@ -91,7 +91,7 @@ function mapWhisperToPerSceneVideoTimeline(
 }
 
 async function abortIfCancelled(ctx: ReelsPipelineContext): Promise<void> {
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  if (await ctx.isCancelled()) throw new GenerationCancelledError();
 }
 
 function rendiPollOpts(ctx: ReelsPipelineContext) {
@@ -213,7 +213,7 @@ ${promptInstruction}`,
   try {
     audioMp3Url = await extractVeoAudio(veoVideoUrl, rendiPoll);
   } catch (e: unknown) {
-    if (isCancellation(e)) throw e;
+    if (isGenerationCancelled(e)) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
       `Could not extract audio from the generated Veo video (required for captions). ${msg} If the file has no audio track, try a different theme or prompt.`

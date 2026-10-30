@@ -30,9 +30,7 @@ import {
   DEFAULT_CHARACTER_AGE,
 } from "@/lib/product-photo";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
-import { uploadProductImageToReplicate } from "@/lib/replicate-product-image";
-import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
-import { isCancellation } from "@/lib/replicate-server";
+import { getPhotoProvider, isGenerationCancelled, type PhotoProvider } from "@/lib/ai-providers";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
@@ -787,7 +785,7 @@ export async function POST(req: Request) {
 
     let blankImageBuffer: Buffer | null = null;
     let providerInput: Record<string, unknown> | null = null;
-    let replicate: ReturnType<typeof createReplicateClient> | null = null;
+    let provider: PhotoProvider | null = null;
 
     if (devBlank) {
       await beginStep("dev_blank", "Deliver blank placeholder image (admin test)");
@@ -795,7 +793,7 @@ export async function POST(req: Request) {
       await endStep({ devBlank: true });
     } else {
       // Provider client is created only after the spend has succeeded.
-      replicate = createReplicateClient();
+      provider = getPhotoProvider();
 
       // Upload all reference images. Product mode leads with the required product
       // image, then any optional character image. Image mode uploads only an optional
@@ -812,7 +810,7 @@ export async function POST(req: Request) {
         );
         console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
         for (const f of filesToUpload) {
-          referenceUrls.push(await uploadProductImageToReplicate(replicate, f));
+          referenceUrls.push(await provider.uploadReference(f));
         }
         await endStep({ referenceUrls });
       }
@@ -864,15 +862,12 @@ export async function POST(req: Request) {
           blankImageBuffer.byteOffset + blankImageBuffer.byteLength
         ) as ArrayBuffer;
       } else {
-        const output = await runWithRetry(
-          replicate!,
-          photoModelRef,
-          { input: providerInput! },
-          10,
-          replicateHooks,
-        );
-
-        const generatedImageUrl = extractMediaUrl(output);
+        const generatedImageUrl = await provider!.run({
+          model: photoModelRef,
+          input: providerInput!,
+          maxRetries: 10,
+          hooks: replicateHooks,
+        });
         if (!generatedImageUrl.startsWith("http")) {
           throw new Error("Nano Banana did not return a valid image URL");
         }
@@ -1051,7 +1046,7 @@ export async function POST(req: Request) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
-        : isCancellation(error);
+        : isGenerationCancelled(error);
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Product Photo] Cancelled by user.");

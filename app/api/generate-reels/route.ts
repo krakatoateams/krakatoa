@@ -34,7 +34,7 @@ import {
 import {
   markAssetReady,
 } from "@/lib/assets-db";
-import { isCancellation } from "@/lib/replicate-server";
+import { isGenerationCancelled } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, isCancelRequested, assertNotCancelled } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
 import { createPipelineRecoveryHandle } from "@/lib/pipeline-recovery/handle";
@@ -692,7 +692,7 @@ export async function POST(req: Request) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
-        : isCancellation(error);
+        : isGenerationCancelled(error);
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage =
       error instanceof Error ? error.message : String(error);

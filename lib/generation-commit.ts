@@ -1,5 +1,5 @@
 import { isMissingDbObject } from "@/lib/generation-db-errors";
-import { isCancellation } from "@/lib/replicate-server";
+import { isGenerationCancelled } from "@/lib/replicate-server";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   commitLockedFromCancelAllowed,
@@ -138,7 +138,7 @@ export async function isRefundableUserCancellation(
   generationRequestId: string | null,
   error: unknown,
 ): Promise<boolean> {
-  const isCancelError = isCancellation(error);
+  const isCancelError = isGenerationCancelled(error);
   if (!isCancelError) return false;
   if (!generationRequestId) return true;
   const locked = await isProviderCommitLocked(profileId, generationRequestId);

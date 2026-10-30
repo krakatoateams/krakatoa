@@ -1,32 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Replicate from "replicate";
 
-/**
- * Thrown by `runReplicateWithRetry` when the underlying Replicate prediction was
- * cancelled (status `canceled`/`aborted`) — typically because the user hit the
- * Cancel button, which calls `replicate.predictions.cancel(id)` from a separate
- * request. Routes catch this to mark the job 'cancelled' (not 'failed') and
- * refund, instead of surfacing a generic provider failure.
- *
- * NOTE: the Replicate JS SDK's `run()` only THROWS on `failed`; a cancelled
- * prediction makes `run()` resolve with `undefined` output. We detect the
- * cancelled status via the progress callback and throw this explicitly.
- */
-export class ReplicateCancellationError extends Error {
-  readonly code = "GENERATION_CANCELLED";
-  constructor(message = "Generation was cancelled.") {
-    super(message);
-    this.name = "ReplicateCancellationError";
-  }
-}
+import { GenerationCancelledError } from "@/lib/ai-providers/errors";
 
-/** Type guard for the cancellation error (also matches the code, post-serialization). */
-export function isCancellation(e: unknown): e is ReplicateCancellationError {
-  return (
-    e instanceof ReplicateCancellationError ||
-    (e instanceof Error && (e as any).code === "GENERATION_CANCELLED")
-  );
-}
+export { GenerationCancelledError, isGenerationCancelled } from "@/lib/ai-providers/errors";
 
 /** A minimal view of a Replicate prediction surfaced to the onPrediction hook. */
 export type PredictionTick = { id: string; status: string };
@@ -41,7 +18,7 @@ export type ReplicateRunHooks = {
   onPrediction?: (tick: PredictionTick) => void;
   /**
    * Polled on each wait tick (after the prediction id is recorded). Throw
-   * `ReplicateCancellationError` to abort the provider run and stop Replicate.
+   * `GenerationCancelledError` to abort the provider run and stop Replicate.
    */
   abortCheck?: () => Promise<void>;
 };
@@ -120,13 +97,13 @@ async function runReplicateOnce(
   const final = await replicate.wait(prediction as any, { interval: 500 }, async (updated) => {
     emitPredictionTick(updated, hooks);
     if (isCancelledStatus(updated.status)) {
-      throw new ReplicateCancellationError();
+      throw new GenerationCancelledError();
     }
     if (hooks?.abortCheck) {
       try {
         await hooks.abortCheck();
       } catch (e) {
-        if (e instanceof ReplicateCancellationError) {
+        if (e instanceof GenerationCancelledError) {
           try {
             await replicate.predictions.cancel(updated.id);
           } catch {
@@ -141,7 +118,7 @@ async function runReplicateOnce(
   });
 
   if (isCancelledStatus(final.status)) {
-    throw new ReplicateCancellationError();
+    throw new GenerationCancelledError();
   }
   if (final.status === "failed") {
     throw new Error(`Prediction failed: ${final.error ?? "unknown error"}`);
@@ -163,7 +140,7 @@ export async function runReplicateWithRetry(
     try {
       return await runReplicateOnce(replicate, model, options, hooks);
     } catch (e: any) {
-      if (e instanceof ReplicateCancellationError) throw e;
+      if (e instanceof GenerationCancelledError) throw e;
       const errMsg = e.message || String(e);
       if (errMsg.includes("429")) {
         let delayMs = 15000;

@@ -8,7 +8,7 @@
  * this function only produces the final video + metadata.
  */
 import { runWithRetry } from "@/lib/reels-helpers";
-import { extractMediaUrl, ReplicateCancellationError } from "@/lib/replicate-server";
+import { extractMediaUrl, GenerationCancelledError } from "@/lib/replicate-server";
 import { buildAssContent } from "./ass";
 import { generateSeedanceStyle, generateScenes } from "./llm";
 import { reelsSceneBreakdownStepOutput } from "@/lib/admin-prompt-capture-pure";
@@ -36,7 +36,7 @@ import type {
 } from "./types";
 
 async function abortIfCancelled(ctx: ReelsPipelineContext): Promise<void> {
-  if (await ctx.isCancelled()) throw new ReplicateCancellationError();
+  if (await ctx.isCancelled()) throw new GenerationCancelledError();
 }
 
 function rendiPollOpts(ctx: ReelsPipelineContext) {

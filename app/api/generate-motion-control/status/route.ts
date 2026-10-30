@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createReplicateClient } from "@/lib/replicate-utils";
 import { extractMediaUrl } from "@/lib/replicate-server";
-import { isCancellation } from "@/lib/replicate-server";
+import { isGenerationCancelled } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import {
   readIdempotencyKey,
@@ -248,7 +248,7 @@ export async function GET(req: Request) {
     if (error instanceof Error && /not authenticated/i.test(error.message)) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
-    if (isCancellation(error)) {
+    if (isGenerationCancelled(error)) {
       const errJson = { message: "Generation cancelled.", code: "GENERATION_CANCELLED" };
       const refundable =
         motionCtx?.generationRequestId

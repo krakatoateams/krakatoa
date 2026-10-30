@@ -1,0 +1,86 @@
+/**
+ * Guard: provider SDK/client usage stays behind `lib/ai-providers/`. The generate-photo
+ * path is migrated; every other caller is on the allowlist below. The allowlist may
+ * only shrink: a listed file that no longer violates must be removed (this check fails).
+ */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+
+const ROOT = path.resolve(__dirname, "..");
+const SCAN_DIRS = ["app", "lib", "scripts"];
+const PROVIDER_DIR = "lib/ai-providers/";
+const PATTERN =
+  /from\s*["']replicate["']|import\(\s*["']replicate["']\s*\)|require\(\s*["']replicate["']\s*\)|\bcreateReplicateClient\b|\bpredictions\.|\brunReplicateWithRetry\b|\brunWithRetry\b/;
+
+/** Not yet migrated to the provider seam. Remove entries as paths migrate; never add. */
+export const ALLOWLIST: readonly string[] = [
+  "app/(app)/admin/monitoring/page.tsx",
+  "app/api/generate-canvas-text/route.ts",
+  "app/api/generate-caption/route.ts",
+  "app/api/generate-motion-control/route.ts",
+  "app/api/generate-motion-control/status/route.ts",
+  "app/api/generate-reels/route.ts",
+  "app/api/generate-storyboard-video/route.ts",
+  "app/api/generate-video/route.ts",
+  "app/api/generations/cancel/route.ts",
+  "app/api/storyboards/import/route.ts",
+  "app/api/test-stitch/route.ts",
+  "lib/generation-cancel.ts",
+  "lib/generation-workflows/motion-control-workflow-core.ts",
+  "lib/generation-workflows/replicate-webhook.ts",
+  "lib/generation-workflows/submission-recovery-pure.ts",
+  "lib/photo-storyboard-generation.ts",
+  "lib/reels-helpers.ts",
+  "lib/reels-pipeline/llm.ts",
+  "lib/reels-pipeline/seedance.ts",
+  "lib/reels-pipeline/tts-whisper.ts",
+  "lib/reels-pipeline/types.ts",
+  "lib/reels-pipeline/veo.ts",
+  "lib/replicate-product-image.ts",
+  "lib/replicate-server.ts",
+  "lib/replicate-utils.ts",
+  "scripts/probe-monitoring.ts",
+  "scripts/recover-motion-control.ts",
+];
+
+/** Pure: files (repo-relative path -> source) -> error messages. */
+export function providerGuardErrors(files: Record<string, string>, allow: readonly string[]): string[] {
+  const errors: string[] = [];
+  const violating = new Set<string>();
+  for (const [file, src] of Object.entries(files)) {
+    if (file.startsWith(PROVIDER_DIR) || /self-check\.ts$/.test(file)) continue;
+    if (PATTERN.test(src)) violating.add(file);
+  }
+  for (const f of violating) {
+    if (!allow.includes(f)) errors.push(`${f}: provider usage outside lib/ai-providers/ (use the seam, do not extend the allowlist)`);
+  }
+  for (const f of allow) {
+    if (!violating.has(f)) errors.push(`${f}: allowlisted but no longer violates; remove it from ALLOWLIST`);
+  }
+  return errors;
+}
+
+function walk(dir: string, out: Record<string, string>): void {
+  for (const name of readdirSync(dir)) {
+    if (name === "node_modules" || name === ".next") continue;
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.(ts|tsx|mjs)$/.test(name)) out[path.relative(ROOT, full)] = readFileSync(full, "utf8");
+  }
+}
+
+function assert(cond: boolean, msg: string): void {
+  if (!cond) throw new Error(`aiProviderGuardSelfCheck: ${msg}`);
+}
+
+// The guard must fail on a new violation, and on a stale allowlist entry.
+assert(providerGuardErrors({ "app/api/new/route.ts": 'import Replicate from "replicate";' }, []).length === 1, "new SDK import not flagged");
+assert(providerGuardErrors({ "lib/x.ts": "createReplicateClient()" }, []).length === 1, "createReplicateClient not flagged");
+assert(providerGuardErrors({ "lib/ai-providers/a.ts": "createReplicateClient()" }, []).length === 0, "provider dir must be exempt");
+assert(providerGuardErrors({ "lib/x.ts": "const a = 1;" }, ["lib/x.ts"]).length === 1, "stale allowlist entry not flagged");
+
+const files: Record<string, string> = {};
+for (const d of SCAN_DIRS) walk(path.join(ROOT, d), files);
+const errors = providerGuardErrors(files, ALLOWLIST);
+assert(errors.length === 0, `\n${errors.join("\n")}`);
+console.log("ai-provider-guard-self-check: ok");

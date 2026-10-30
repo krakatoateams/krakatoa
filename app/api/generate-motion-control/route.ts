@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createReplicateClient, createPredictionWithRetry } from "@/lib/replicate-utils";
-import { isCancellation, ReplicateCancellationError } from "@/lib/replicate-server";
+import { isGenerationCancelled, GenerationCancelledError } from "@/lib/replicate-server";
 import { makePredictionRecorder, isCancelRequested } from "@/lib/generation-cancel";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob } from "@/lib/jobs-db";
@@ -582,7 +582,7 @@ export async function POST(req: Request) {
       }),
     );
     if (generationRequestId && (await isCancelRequested(profileId!, generationRequestId))) {
-      throw new ReplicateCancellationError();
+      throw new GenerationCancelledError();
     }
     console.log(
       `[Motion Control] Starting ${modelRef} (mode=${mode}, orientation=${characterOrientation})...`
@@ -602,7 +602,7 @@ export async function POST(req: Request) {
       { status: 202 },
     );
   } catch (error: unknown) {
-    const cancelled = isCancellation(error);
+    const cancelled = isGenerationCancelled(error);
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage = error instanceof Error ? error.message : String(error);
     if (cancelled) console.log("[Motion Control] Cancelled by user.");
