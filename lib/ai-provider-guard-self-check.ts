@@ -60,6 +60,16 @@ export function providerGuardErrors(files: Record<string, string>, allow: readon
   return errors;
 }
 
+/** Retired model slug (exact; `.5-flare` etc. are fine). Migrations and this file are exempt. */
+const RETIRED_SLUG = /openai\/gpt-image-2(?![.\-\w])/;
+
+/** Pure: files -> errors for any reintroduced retired slug. */
+export function retiredSlugErrors(files: Record<string, string>): string[] {
+  return Object.entries(files)
+    .filter(([file, src]) => !/ai-provider-guard-self-check\.ts$/.test(file) && RETIRED_SLUG.test(src))
+    .map(([file]) => `${file}: retired model slug openai/gpt-image-2 (use openai/gpt-image-2.5-flare)`);
+}
+
 function walk(dir: string, out: Record<string, string>): void {
   for (const name of readdirSync(dir)) {
     if (name === "node_modules" || name === ".next") continue;
@@ -79,8 +89,13 @@ assert(providerGuardErrors({ "lib/x.ts": "createReplicateClient()" }, []).length
 assert(providerGuardErrors({ "lib/ai-providers/a.ts": "createReplicateClient()" }, []).length === 0, "provider dir must be exempt");
 assert(providerGuardErrors({ "lib/x.ts": "const a = 1;" }, ["lib/x.ts"]).length === 1, "stale allowlist entry not flagged");
 
+assert(retiredSlugErrors({ "lib/x.ts": '"openai/gpt-image-2"' }).length === 1, "retired slug not flagged");
+assert(retiredSlugErrors({ "lib/x.ts": '"openai/gpt-image-2.5-flare"' }).length === 0, "flare slug wrongly flagged");
+
 const files: Record<string, string> = {};
 for (const d of SCAN_DIRS) walk(path.join(ROOT, d), files);
 const errors = providerGuardErrors(files, ALLOWLIST);
 assert(errors.length === 0, `\n${errors.join("\n")}`);
+const slugErrors = retiredSlugErrors(files);
+assert(slugErrors.length === 0, `\n${slugErrors.join("\n")}`);
 console.log("ai-provider-guard-self-check: ok");

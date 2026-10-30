@@ -22,7 +22,7 @@ for (const t of PRODUCT_PHOTO_TIERS) LABEL_BY_PROVIDER.set(t.providerModel, t.mo
 const TOOL_MODEL_FALLBACK: Partial<Record<CreationTool, string>> = {
   reels_seedance: "Seedance 2 Fast",
   reels_veo: "Veo 3.1 Lite",
-  storyboard: "GPT Image 2",
+  storyboard: "GPT Image 2.5 Flare",
   storyboard_video: "Seedance 2 Mini",
 };
 

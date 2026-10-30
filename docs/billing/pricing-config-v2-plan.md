@@ -100,7 +100,8 @@ admin-editable later and expected to change as providers adjust pricing.
 - 720p: **$0.05 / sec**
 - 1080p: **$0.08 / sec**
 
-### GPT Image 2 / Storyboard
+### GPT Image 2.5 Flare / Storyboard
+Source: the Flare model page. The default storyboard sheet runs at Flare `high` (key `auto`).
 - low: **$0.012 / image**
 - medium: **$0.047 / image**
 - auto / high: **$0.128 / image**
@@ -426,7 +427,7 @@ amount)", and runtime never falls back to an old undercharging legacy DB row.
 
 ### Storyboard Image
 
-- Runtime default uses `storyboard_gpt_image_2_auto_per_image` = **12 credits**.
+- Runtime default uses `storyboard_gpt_image_2_auto_per_image` = **12 credits** (Flare `high`).
   No fallback to the legacy `storyboard_image` row. No quality selector yet.
 
 ### Admin UI

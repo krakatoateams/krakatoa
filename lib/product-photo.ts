@@ -98,10 +98,7 @@ export type PhotoProviderFamily =
   | "ideogram"
   | "gpt_image";
 
-/** Shared Replicate slug for GPT Image 2 (Product Photo, Canvas and Storyboard fallbacks). */
-export const GPT_IMAGE_2_MODEL = "openai/gpt-image-2";
-
-/** Replicate slug for the Photo GPT Image tier only (storyboard stays on GPT_IMAGE_2_MODEL). */
+/** Replicate slug for GPT Image 2.5 Flare (Photo GPT Image tier and Storyboard sheets). */
 export const GPT_IMAGE_2_5_FLARE_MODEL = "openai/gpt-image-2.5-flare";
 
 export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";

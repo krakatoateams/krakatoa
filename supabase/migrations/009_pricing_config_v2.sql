@@ -111,7 +111,7 @@ values
   -- Veo (per second)
   ('veo_720p_per_second',      'Veo 720p (per sec)',       'per_second', 5,  0.05, 'per_second', 'veo',              '720p', 'USD'),
   ('veo_1080p_per_second',     'Veo 1080p (per sec)',      'per_second', 8,  0.08, 'per_second', 'veo',              '1080p','USD'),
-  -- Storyboard / GPT Image 2 (per image)
+  -- Storyboard / GPT Image 2.5 Flare (per image; default sheet = Flare high = key auto)
   ('storyboard_gpt_image_2_low_per_image',    'Storyboard Image — Low',    'per_image', 2,  0.012, 'per_image', 'storyboard_image', 'low',    'USD'),
   ('storyboard_gpt_image_2_medium_per_image', 'Storyboard Image — Medium', 'per_image', 5,  0.047, 'per_image', 'storyboard_image', 'medium', 'USD'),
   ('storyboard_gpt_image_2_auto_per_image',   'Storyboard Image — Auto',   'per_image', 12, 0.128, 'per_image', 'storyboard_image', 'auto',   'USD'),
