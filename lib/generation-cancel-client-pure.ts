@@ -31,3 +31,11 @@ export function cancelUiState(result: CancelResult): { refused: boolean; notice:
   if (result === "failed") return { refused: false, notice: CANCEL_FAILED_MESSAGE };
   return { refused: false, notice: null };
 }
+
+/** Cancel click for surfaces without a form banner (canvas nodes): runs the cancel and shows its notice. */
+export async function cancelWithNotice(cancel: () => Promise<CancelResult>, show: (notice: string) => void): Promise<CancelResult> {
+  const result = await cancel();
+  const { notice } = cancelUiState(result);
+  if (notice) show(notice);
+  return result;
+}

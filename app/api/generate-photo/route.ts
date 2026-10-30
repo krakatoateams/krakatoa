@@ -62,7 +62,7 @@ import {
   makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation, lockProviderUnlessCancelRequested } from "@/lib/generation-commit";
-import { planBatchFailures } from "@/lib/photo-batch-failure-pure";
+import { planBatchFailures, settleZeroSuccessBatch } from "@/lib/photo-batch-failure-pure";
 import { recordCancelTrace } from "@/lib/generation-cancel-trace";
 import {
   DevBlankForbiddenError,
@@ -957,13 +957,14 @@ export async function POST(req: Request) {
     // Refund policy per failed image (planBatchFailures): providers that commit on
     // submit (Fal) refund only definitive failures; ambiguous ones stay charged for reconcile.
     const rejections = outcomes.flatMap((o) => (o.status === "rejected" ? [o.reason] : []));
-    const plan = planBatchFailures({
+    const planInput = {
       rejections,
       commitsOnSubmit: !!provider?.commitsOnSubmit,
       cancelWhileQueued: !!provider?.cancelWhileQueued,
       isDefinitive: isProviderDefinitiveFailure,
       isCancelled: isGenerationCancelled,
-    });
+    };
+    const plan = planBatchFailures(planInput);
     const refundableFailures = plan.refundableFailures;
     const refundFailedImages = async () => {
       if (refundableFailures === 0) return;
@@ -988,14 +989,9 @@ export async function POST(req: Request) {
       // spend. Fal (commit on submit): the outer catch refunds only when the thrown reason is
       // definitive, so a mixed batch refunds its definitive images here and rethrows an
       // ambiguous reason (no further refund) — and an all-definitive batch rethrows a definitive one.
-      if (plan.fullyCancelled) throw rejections[0]; // Fal confirmed every queued image removed: outer cancel path refunds once
-      const ambiguous = plan.ambiguous;
-      if (provider?.commitsOnSubmit && ambiguous !== undefined) await refundFailedImages();
-      throw ambiguous !== undefined && provider?.commitsOnSubmit
-        ? ambiguous
-        : rejections.length > 0
-          ? rejections[0]
-          : new Error("Image generation failed");
+      const settle = settleZeroSuccessBatch(planInput);
+      if (settle.refundFirst) await refundFailedImages();
+      throw settle.reason;
     }
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);

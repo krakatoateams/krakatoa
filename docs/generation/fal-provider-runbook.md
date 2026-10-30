@@ -45,11 +45,16 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   refund cannot double it. Never refund a run that produced output.
   Cadence: if a daily check is too slow after an outage, a more frequent cron is the lever (needs plan
   support for sub-daily crons; not changed here).
-  Known limitation (batches, no per-image tracking): a Fal batch of several images where every image
-  failed but only some definitively is partial-refunded by the route and tagged `UNKNOWN`; reconcile
-  skips it because a refund already exists, so the ambiguous remainder is never revisited. A batch with
-  some images saved and some ambiguous failures is `succeeded`, so reconcile never sees it. Both need
-  per-image outcome records and per-image refund keys (schema change) and are left for a follow-up.
+  Batches with 0 delivered images: the route's `settleZeroSuccessBatch` is order independent. A definitive
+  failure mixed with confirmed-cancelled (removed) images refunds the whole spend once; an ambiguous
+  image keeps the job `UNKNOWN` (the removed/definitive images are refunded by the route with the
+  `:partial` key). Reconcile then refunds only the REMAINDER (spend minus refunds so far, valid because a
+  failed job delivered nothing) under `refund:product_photo:{jobId}:remainder`, only when Fal reports every
+  prediction failed (a cancelled request Fal no longer knows, status 404, keeps it unconfirmed: manual review).
+  Known limit (S2): a batch with some images saved and some ambiguous failures is `succeeded`, so reconcile
+  never sees it and the user stays charged for the undelivered image; fixing it needs per-image outcome
+  records and refund keys (schema change), left for a follow-up decision.
+  Expired results: reconcile treats a 404 on `result()` as ambiguous (the run may have delivered), never as failed.
   A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
 - Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`
   + `error`/`error_type`) but do not say whether they are billed. Check the Fal billing dashboard
@@ -178,6 +183,11 @@ COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRef
   409, all images are charged). Cancel while every image is queued cancels all and refunds the whole spend once. If the
   cancel races an image that just started, that image commits and delivers; the images Fal already removed are refunded
   per image (`planBatchFailures`), so the user is never charged for a missing image.
+- A cancel the API accepted but Fal could not confirm (202 / unconfirmed): the image arrives, the user is charged,
+  and the form or canvas node shows the same refused message ("... Credits are used.") when it lands.
+- Known limits (not fixed): (L1) if the generate route is killed while a request is still `IN_QUEUE`, nobody cancels
+  it at Fal; (L4) `abortCheck` fails closed on a DB error (the request is treated as committed); (L5) in a raced batch
+  the removed image is refunded as a partial refund (money correct, not the cancel path).
 - Trace: every attempt is kept as a finished job step (admin job timeline): `cancel_requested`, `cancel_refused`
   (reason `committed` / `raced_with_commit`) from the cancel endpoint, and `cancel_outcome` (`result`, `confirmed`,
   Fal status) from the generate route, plus a log line. No new column.

@@ -281,7 +281,7 @@ async function main(): Promise<void> {
           if (falStatus === "network") fal.queue.status = async () => { throw new Error("fetch failed"); };
           const provider = createFalPhotoProvider(fal, 0);
           const reconcileOps: SettledFailureOps = {
-            hasRefund: async () => l.events.includes("refund"),
+            refundedAmount: async () => (l.events.includes("refund") ? 5 : 0),
             spendAmount: async () => 5,
             getRequestId: async () => "req-1",
             isCommitLocked: async () => true,

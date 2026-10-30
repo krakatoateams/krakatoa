@@ -111,7 +111,8 @@ export async function expireSettledJob(
 }
 
 export type SettledFailureOps = {
-  hasRefund: (jobId: string) => Promise<boolean>;
+  /** Sum of succeeded refunds for the job (a batch partial refund counts; the remainder is what is still held). */
+  refundedAmount: (jobId: string) => Promise<number>;
   spendAmount: (jobId: string) => Promise<number>;
   getRequestId: (profileId: string, jobId: string) => Promise<string | null>;
   isCommitLocked: (profileId: string, requestId: string) => Promise<boolean>;
@@ -131,9 +132,12 @@ export async function reconcileSettledProviderFailure(
   ops: SettledFailureOps,
   job: { id: string; profileId: string; costCredits: number },
 ): Promise<"refunded" | "already_refunded" | "skipped"> {
-  if (await ops.hasRefund(job.id)) return "already_refunded";
   const spent = await ops.spendAmount(job.id);
-  const amount = spent > 0 ? spent : job.costCredits;
+  const total = spent > 0 ? spent : job.costCredits;
+  const refunded = await ops.refundedAmount(job.id);
+  // A settled-failed job delivered nothing, so what a batch partial refund left is the ambiguous remainder.
+  const amount = total - refunded;
+  if (amount <= 0) return "already_refunded";
   const requestId = await ops.getRequestId(job.profileId, job.id);
   if (!requestId) return "skipped";
   const commitLocked = await ops.isCommitLocked(job.profileId, requestId);
@@ -150,7 +154,7 @@ export async function reconcileSettledProviderFailure(
   await ops.refund({
     profileId: job.profileId,
     amount,
-    idempotencyKey: photoRefundIdempotencyKey(job.id),
+    idempotencyKey: refunded > 0 ? `${photoRefundIdempotencyKey(job.id)}:remainder` : photoRefundIdempotencyKey(job.id),
     jobId: job.id,
     description: "Refund after provider-confirmed generation failure (reconcile cron)",
     metadata: { reason: "generation_failed", reconciledAt: new Date().toISOString() },

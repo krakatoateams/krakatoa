@@ -1,3 +1,4 @@
+import { ApiError } from "@fal-ai/client";
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
 import {
   decodeFalPredictionId,
@@ -99,6 +100,15 @@ async function main(): Promise<void> {
   assert(res.requested === 2 && res.cancelled === 1, "cancel by recorded id, bad ids skipped");
   const p = createFalPhotoProvider(fake(0), 0);
   assert(p.commitsOnSubmit && p.cancelWhileQueued && p.id === "fal", "fal: ambiguous after submit, cancellable while queued");
+  // Reconcile status: an expired result (404) is ambiguous (the run may have delivered), a 422 result is failed.
+  const withResult = (status: number): FalQueueLike => ({
+    ...fake(0),
+    queue: { ...fake(0).queue, result: async () => { throw new ApiError({ message: "x", status, body: {} }); } },
+  });
+  const statusOf = (s: number) => createFalPhotoProvider(withResult(s), 0).getPredictionStatus(id).then((r) => r.status, () => "threw");
+  assert((await statusOf(404)) === "threw", "expired result (404) stays ambiguous: no refund");
+  assert((await statusOf(422)) === "failed", "4xx result stays definitive failed");
+  assert((await statusOf(500)) === "threw", "5xx stays ambiguous");
   console.log("fal-photo-self-check: ok");
 }
 void main();

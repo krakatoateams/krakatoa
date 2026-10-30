@@ -1,5 +1,6 @@
 "use client";
 
+import { cancelWithNotice } from "@/lib/generation-cancel-client-pure";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { AlertCircle, Clock, Cpu, Crop, Video, Volume2, VolumeX } from "lucide-react";
@@ -595,7 +596,7 @@ export default function VideoNode({
               visible={data.loading}
               cancelling={cancelling}
               cancelAllowed={cancelAllowed}
-              onCancel={() => void cancelSubmit()}
+              onCancel={() => void cancelWithNotice(cancelSubmit, (notice) => patch({ error: notice }))}
             />
           </div>
         </CanvasOmniForm>
