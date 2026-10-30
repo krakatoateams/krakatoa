@@ -1,5 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { removeMedia } from "@/lib/media-storage";
+import { USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
 import {
   type ExpirySettings,
   getExpirySettings,
@@ -213,9 +214,7 @@ export async function runCreationExpiry(
 
     // 3) Remove storage only after its library rows are confirmed deleted.
     for (const batch of chunk(paths, 100)) {
-      const { error: storageError } = await supabaseServer.storage
-        .from(STORAGE_BUCKET)
-        .remove(batch);
+      const { error: storageError } = await removeMedia(batch);
       if (storageError) {
         console.warn(
           "[creation-expiry] storage remove failed:",

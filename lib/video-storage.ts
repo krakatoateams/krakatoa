@@ -1,5 +1,4 @@
-import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { listMedia } from "@/lib/media-storage";
 import { resolveStoragePath } from "@/lib/storage-signed-url";
 
 // Server-only (imports lib/supabase-server, which needs SUPABASE_SERVICE_ROLE_KEY).
@@ -16,9 +15,7 @@ export async function videoObjectExists(path: string): Promise<boolean | null> {
   const dir = slashIdx === -1 ? "" : path.slice(0, slashIdx);
   const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
   try {
-    const { data, error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .list(dir, { search: name, limit: 1 });
+    const { data, error } = await listMedia(dir, { search: name, limit: 1 });
     if (error) return null;
     return (data ?? []).some((entry) => entry.name === name);
   } catch {

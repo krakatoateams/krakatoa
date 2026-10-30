@@ -1,7 +1,6 @@
-import { supabaseServer } from "@/lib/supabase-server";
+import { listMedia, removeMedia, uploadMedia } from "@/lib/media-storage";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
-  STORAGE_BUCKET,
   userResumablePath,
   userResumablePrefix,
   safeUserIdSegment,
@@ -21,9 +20,7 @@ async function listObjectPaths(prefix: string): Promise<string[]> {
     let offset = 0;
     const limit = 1000;
     for (;;) {
-      const { data, error } = await supabaseServer.storage
-        .from(STORAGE_BUCKET)
-        .list(p, { limit, offset, sortBy: { column: "name", order: "asc" } });
+      const { data, error } = await listMedia(p, { limit, offset, sortBy: { column: "name", order: "asc" } });
       if (error) throw new Error(`storage.list failed at "${p}": ${error.message}`);
       const entries = (data ?? []) as ListEntry[];
       for (const e of entries) {
@@ -57,9 +54,7 @@ export async function copyUrlToResumable(
   }
   const buffer = await resp.arrayBuffer();
   const storagePath = userResumablePath(userId, jobId, relativePath);
-  const { error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, {
+  const { error } = await uploadMedia(storagePath, buffer, {
       contentType,
       // Not MEDIA_CACHE_CONTROL: resumable paths are upserted on retry, and only
       // Rendi/Replicate ever fetch them, so there is no browser cache to win.
@@ -81,9 +76,7 @@ export async function uploadToResumable(
   contentType: string,
 ): Promise<string> {
   const storagePath = userResumablePath(userId, jobId, relativePath);
-  const { error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, body, {
+  const { error } = await uploadMedia(storagePath, body, {
       contentType,
       cacheControl: "3600",
       upsert: true,
@@ -100,7 +93,7 @@ export async function purgeResumableJobStorage(userId: string, jobId: string): P
   try {
     const paths = await listObjectPaths(prefix);
     if (paths.length === 0) return 0;
-    const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(paths);
+    const { error } = await removeMedia(paths);
     if (error) {
       console.warn(
         "[pipeline-recovery] purge remove failed:",
@@ -121,9 +114,7 @@ export async function purgeResumableJobStorage(userId: string, jobId: string): P
 /** List top-level resumable job folders for a user: `{userId}/resumable/{jobId}`. */
 export async function listUserResumableJobIds(userId: string): Promise<string[]> {
   const resumableRoot = `${safeUserIdSegment(userId)}/${RESUMABLE_SEGMENT}`;
-  const { data, error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .list(resumableRoot, { limit: 1000 });
+  const { data, error } = await listMedia(resumableRoot, { limit: 1000 });
   if (error) {
     console.warn(
       "[pipeline-recovery] list resumable root failed:",

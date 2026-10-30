@@ -7,10 +7,9 @@
 import { uploadToResumable } from "@/lib/pipeline-recovery/storage";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
-import { supabaseServer } from "@/lib/supabase-server";
+import { removeMedia, uploadMedia } from "@/lib/media-storage";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   videosGeneratedVideoPath,
   type VideoStudioMode,
   videosUserTempPath,
@@ -40,9 +39,7 @@ export async function uploadAssCaptions(
   filename: string
 ): Promise<{ srtFilename: string; srtUrl: string }> {
   const srtFilename = videosUserTempPath(userId, filename);
-  const { error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(srtFilename, assContent, {
+  const { error } = await uploadMedia(srtFilename, assContent, {
       contentType: "text/plain",
       cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,
@@ -71,9 +68,7 @@ export async function downloadAndStoreFinal(
   }
   const buffer = await resp.arrayBuffer();
   const storagePath = videosGeneratedVideoPath(userId, mode, filename);
-  const { error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, {
+  const { error } = await uploadMedia(storagePath, buffer, {
       contentType: "video/mp4",
       cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,
@@ -92,7 +87,7 @@ export async function downloadAndStoreFinal(
 /** Best-effort removal of the transient caption file (never throws). */
 export async function cleanupCaptions(srtFilename: string): Promise<void> {
   try {
-    await supabaseServer.storage.from(STORAGE_BUCKET).remove([srtFilename]);
+    await removeMedia([srtFilename]);
   } catch (e) {
     console.warn(
       "[reels-pipeline] caption cleanup (non-fatal):",

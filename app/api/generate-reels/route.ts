@@ -19,6 +19,7 @@
  * =============================================================================
  */
 import { NextResponse } from "next/server";
+import { uploadMedia } from "@/lib/media-storage";
 import { getCurrentAdmin } from "@/lib/admin-auth";
 import { insertUserCreation } from "@/lib/creations-db";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -60,10 +61,8 @@ import type {
   ReelsPipelineContext,
   ReelsPipelineResult,
 } from "@/lib/reels-pipeline/types";
-import { supabaseServer } from "@/lib/supabase-server";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
@@ -384,9 +383,7 @@ export async function POST(req: Request) {
         "reelscreator",
         `video_${Date.now()}.mp4`,
       );
-      const { error: uploadError } = await supabaseServer.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, videoBuffer, {
+      const { error: uploadError } = await uploadMedia(storagePath, videoBuffer, {
           contentType: "video/mp4",
           cacheControl: MEDIA_CACHE_CONTROL,
           upsert: false,

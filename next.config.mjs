@@ -31,6 +31,18 @@ function supabaseStorageImagePattern() {
   };
 }
 
+function r2ImagePattern() {
+  const id = process.env.R2_ACCOUNT_ID?.trim() ?? "";
+  if (!/^[a-f0-9]{32}$/i.test(id)) return [];
+  return [
+    {
+      protocol: "https",
+      hostname: `${id}.r2.cloudflarestorage.com`,
+      pathname: "/**",
+    },
+  ];
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["shaders", "@xyflow/react"],
@@ -65,6 +77,7 @@ const nextConfig = {
         headers: securityHeaders({
           isProduction: process.env.NODE_ENV === "production",
           supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+          r2AccountId: process.env.R2_ACCOUNT_ID,
         }),
       },
     ];
@@ -90,6 +103,7 @@ const nextConfig = {
         // own edge. Requires the signed URL to be stable (see lib/storage-signed-url).
         ...supabaseStorageImagePattern(),
       },
+      ...r2ImagePattern(),
       {
         protocol: "https",
         hostname: "images.higgs.ai",

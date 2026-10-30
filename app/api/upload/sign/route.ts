@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase-server";
+import { createMediaUploadUrl } from "@/lib/media-storage";
 import {
+  MEDIA_CACHE_CONTROL,
   STORAGE_BUCKET,
   photosSchedulerUploadPath,
   videosSchedulerUploadPath,
@@ -20,10 +21,10 @@ const ACCEPTED_VIDEO_MIME_TYPES = new Set([
 ]);
 const ACCEPTED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-// Mints a short-lived signed upload URL so the browser can upload the file
-// bytes DIRECTLY to Supabase Storage (uploadToSignedUrl), bypassing the
-// serverless request-body limit (~4.5 MB on Vercel) that the old multipart
-// /api/upload hit. Only tiny JSON metadata transits this function.
+// Mints a short-lived signed upload URL so the browser can PUT the file bytes
+// directly to storage, bypassing the serverless request-body limit (~4.5 MB on
+// Vercel) that the old multipart /api/upload hit. Only tiny JSON metadata
+// transits this function. The client must send the returned headers unchanged.
 //
 // mediaType (optional, defaults to "video" for backward compatibility with
 // every existing caller that predates photo support — see
@@ -81,9 +82,10 @@ export async function POST(req: NextRequest) {
       ? photosSchedulerUploadPath(userId, `${Date.now()}-${safeName}`)
       : videosSchedulerUploadPath(userId, `${Date.now()}-${safeName}`);
 
-    const { data, error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .createSignedUploadUrl(storagePath);
+    const { data, error } = await createMediaUploadUrl(storagePath, {
+      contentType,
+      cacheControl: MEDIA_CACHE_CONTROL,
+    });
 
     if (error || !data) {
       console.error("[upload/sign] createSignedUploadUrl error:", error?.message);
@@ -98,6 +100,8 @@ export async function POST(req: NextRequest) {
       bucket: STORAGE_BUCKET,
       path: data.path,
       token: data.token,
+      uploadUrl: data.signedUrl,
+      headers: data.headers,
       storagePath,
     });
   } catch (err: unknown) {

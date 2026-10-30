@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { removeMedia } from "@/lib/media-storage";
 import {
   CREATION_TOOLS,
   CreationHistoryItem,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/creation-library-filters";
 import type { PhotoStudioMode } from "@/lib/product-photo";
 import { VIDEO_STUDIO_TOOLS } from "@/lib/studio-product-tools";
-import { STORAGE_BUCKET, USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
+import { USER_CREATIONS_TABLE } from "@/lib/storage-buckets";
 import { resolveSignedMediaUrl } from "@/lib/storage-signed-url";
 import { CreationNotFoundError } from "@/lib/creation-ownership-pure";
 
@@ -553,7 +554,7 @@ export async function restoreUserCreation(
 export async function removeStorageObjects(paths: string[]): Promise<void> {
   const valid = paths.filter((p): p is string => !!p);
   if (!valid.length) return;
-  const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(valid);
+  const { error } = await removeMedia(valid);
   if (error) {
     console.warn("[storage] cleanup failed:", error.message);
   }

@@ -46,6 +46,12 @@ NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 SUPABASE_STORAGE_BUCKET=krakatoa
+# MEDIA_STORAGE_PROVIDER=supabase   # or r2, after the bucket below exists
+# R2_ACCOUNT_ID=
+# R2_ACCESS_KEY_ID=
+# R2_SECRET_ACCESS_KEY=
+# R2_BUCKET=video-banner
+# R2_KEY_PREFIX=user-generations   # folder inside the bucket; keeps other objects out
 
 # DOKU credit checkout (payments)
 DOKU_CLIENT_ID=your_doku_client_id

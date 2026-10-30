@@ -1,6 +1,6 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { removeMedia } from "@/lib/media-storage";
 import { errorLogSafe } from "@/lib/error-log-safe";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
 import {
   collectStorageReferences,
   listAllUserMediaObjects,
@@ -133,7 +133,7 @@ export async function runStorageSweep(opts?: {
   if (!dryRun && paths.length > 0) {
     for (let i = 0; i < paths.length; i += 100) {
       const batch = paths.slice(i, i + 100);
-      const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(batch);
+      const { error } = await removeMedia(batch);
       if (error) throw new Error(`storage.remove failed: ${error.message}`);
       deletedCount += batch.length;
     }

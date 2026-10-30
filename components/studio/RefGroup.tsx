@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Film, Image as ImageIcon, Info, Loader2, Music, Plus, X } from "lucide-react";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
-import { TEMP_REF_CACHE_CONTROL } from "@/lib/storage-buckets";
 import { Tooltip } from "./Tooltip";
 
 export type RefKind = "image" | "video" | "audio";
@@ -42,43 +41,32 @@ export async function uploadRefFile(
   if (!signRes.ok || !signData) {
     throw new Error(signData?.error || "Couldn't start the upload (server error).");
   }
-  const { bucket, path, token, storagePath } = signData as {
-    bucket: string;
+  const { path, storagePath, uploadUrl, headers } = signData as {
     path: string;
-    token: string;
     storagePath?: string;
+    uploadUrl?: string;
+    headers?: Record<string, string>;
   };
   const objectPath = storagePath?.trim() || path;
   opts?.onSigned?.(objectPath);
-  await putToSignedUploadUrl(bucket, objectPath, token, file, signal);
+  if (!uploadUrl) throw new Error("Couldn't start the upload (server error).");
+  await putToSignedUploadUrl(uploadUrl, headers ?? {}, file, signal);
   signal?.throwIfAborted();
   const signed = await fetchSignedUrl({ path: objectPath });
   return { url: signed.url, path: objectPath };
 }
 
-/**
- * Same request as storage-js `uploadToSignedUrl` (multipart, default cacheControl, no
- * upsert), which takes no AbortSignal; a plain fetch lets the upload be cancelled.
- */
+/** PUT the file with the headers the sign API signed. Extra headers break an R2 presign. */
 async function putToSignedUploadUrl(
-  bucket: string,
-  objectPath: string,
-  token: string,
+  uploadUrl: string,
+  headers: Record<string, string>,
   file: File,
   signal?: AbortSignal
 ): Promise<void> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!supabaseUrl || !anonKey) throw new Error("Uploads are not configured.");
-  const url = new URL(`${supabaseUrl}/storage/v1/object/upload/sign/${bucket}/${objectPath}`);
-  url.searchParams.set("token", token);
-  const body = new FormData();
-  body.append("cacheControl", TEMP_REF_CACHE_CONTROL);
-  body.append("", file);
-  const res = await fetch(url, {
+  const res = await fetch(uploadUrl, {
     method: "PUT",
-    headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "x-upsert": "false" },
-    body,
+    headers,
+    body: file,
     signal,
   });
   if (!res.ok) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { removeMedia } from "@/lib/media-storage";
 import { parseExportSettings, sanitizeExportTitle } from "@/lib/editor-export-settings";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { createJob, startJob, failJob, cancelJob } from "@/lib/jobs-db";
@@ -15,8 +16,7 @@ import { start } from "workflow/api";
 import { isRefundableUserCancellation } from "@/lib/generation-commit";
 import { isCancellation } from "@/lib/replicate-server";
 import { assertPathOwnedByUser } from "@/lib/storage-signed-url";
-import { STORAGE_BUCKET, videosUserTempRefPath } from "@/lib/storage-buckets";
-import { supabaseServer } from "@/lib/supabase-server";
+import { videosUserTempRefPath } from "@/lib/storage-buckets";
 import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
 import { getUserCreationForUser } from "@/lib/creations-db";
 import {
@@ -381,10 +381,7 @@ export async function POST(req: Request) {
   } finally {
     // Pre-start exits only: after the workflow starts it owns (and deletes) the uploads.
     if (!workflowStarted && exportUploadPaths.length > 0) {
-      const { error } = await supabaseServer.storage
-        .from(STORAGE_BUCKET)
-        .remove(exportUploadPaths)
-        .catch((e: unknown) => ({ error: e }));
+      const { error } = await removeMedia(exportUploadPaths).catch((e: unknown) => ({ error: e }));
       if (error) {
         console.warn("[render-editor] export upload cleanup failed:", generationErrorLogSafe(error));
       }

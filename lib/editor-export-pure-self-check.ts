@@ -58,8 +58,18 @@ async function editorExportPureSelfCheck(): Promise<void> {
   assert(classifySandboxCreateError(apiErr(429)) === "EDITOR_EXPORT_BUSY", "429 busy");
   assert(classifySandboxCreateError(apiErr(402)) === "EDITOR_EXPORT_CAPACITY_REACHED", "402 capacity");
   assert(classifySandboxCreateError(apiErr(500)) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE" && classifySandboxCreateError(null) === "EDITOR_EXPORT_RUNNER_UNAVAILABLE", "other create errors");
-  const args = signedUploadArgs({ url: "https://x/y", file: "export/o.mp4", contentType: "video/mp4", cacheControl: "31536000, immutable" });
-  assert(args.includes("cache-control: max-age=31536000, immutable") && args.at(-1) === "https://x/y", "signed upload argv");
+  const args = signedUploadArgs({
+    url: "https://x/y",
+    file: "export/o.mp4",
+    headers: {
+      "content-type": "video/mp4",
+      "cache-control": "max-age=31536000, immutable",
+      "x-upsert": "false",
+    },
+  });
+  assert(args.includes("cache-control: max-age=31536000, immutable") && args.includes("x-upsert: false") && args.at(-1) === "https://x/y", "signed upload argv");
+  const r2Args = signedUploadArgs({ url: "https://r2/y", file: "export/o.mp4", headers: { "content-type": "video/mp4" } });
+  assert(!r2Args.some((arg) => arg.includes("x-upsert")) && r2Args.at(-1) === "https://r2/y", "r2 upload sends only signed headers");
   assert(!args.includes("--fail") && args.includes("\\n%{http_code}"), "upload prints the HTTP status last");
   assert(uploadHttpStatus('{"Key":"krakatoa/u/v.mp4"}\n200') === 200 && uploadHttpStatus("413") === 413, "upload status parsed");
   const supabaseTooLarge = '{"statusCode":"413","error":"Payload too large","message":"The object exceeded the maximum allowed size"}\n400';

@@ -251,7 +251,7 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(
   nextConfig,
-  /SUPABASE_SERVICE_ROLE_KEY|REPLICATE_API_TOKEN|RENDI_API_KEY|DOKU_SECRET_KEY/,
+  /SUPABASE_SERVICE_ROLE_KEY|REPLICATE_API_TOKEN|RENDI_API_KEY|DOKU_SECRET_KEY|R2_SECRET_ACCESS_KEY|R2_ACCESS_KEY_ID/,
   "Next config must not inline server credentials",
 );
 

@@ -6,10 +6,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { consumePendingDraft } from "@/lib/pending-form-draft";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchSignedUrl } from "@/lib/storage-sign-client";
 import {
-  MEDIA_CACHE_CONTROL,
   isStorageRelativePath,
   storagePathFromStorageUrl,
 } from "@/lib/storage-buckets";
@@ -254,12 +252,11 @@ function photoCountLabel(count: number): string {
   return `These ${count} photos will be posted together as one carousel (max 35) · first = cover`;
 }
 
-// Direct-to-Supabase upload: the server only mints a tiny signed-URL payload
-// via /api/upload/sign, then the file bytes go browser → Storage via
-// uploadToSignedUrl. This bypasses the serverless request-body limit
-// (~4.5 MB on Vercel) that the old multipart /api/upload POST hit for larger
-// files. Shared by handleFilesAdded (new cards) and UploadCard's per-card
-// "add more photos → Upload new" flow (appends to an existing card).
+// Direct upload: the server mints a tiny signed-URL payload via /api/upload/sign,
+// then the file bytes go browser → storage with the returned headers. This
+// bypasses the serverless request-body limit (~4.5 MB on Vercel) that the old
+// multipart /api/upload POST hit for larger files. Shared by handleFilesAdded
+// (new cards) and UploadCard's per-card "add more photos → Upload new" flow.
 async function signAndUploadFile(
   file: File,
   mediaType: "video" | "image",
@@ -282,21 +279,20 @@ async function signAndUploadFile(
     throw new Error((signData && signData.error) || "Couldn't start the upload. Please try again.");
   }
 
-  const { bucket, path, token, storagePath } = signData as {
-    bucket: string;
+  const { path, storagePath, uploadUrl, headers } = signData as {
     path: string;
-    token: string;
     storagePath?: string;
+    uploadUrl?: string;
+    headers?: Record<string, string>;
   };
+  if (!uploadUrl) throw new Error("Couldn't start the upload. Please try again.");
 
-  const { error: uploadError } = await getSupabaseBrowser()
-    .storage.from(bucket)
-    .uploadToSignedUrl(path, token, file, {
-      contentType: file.type,
-      cacheControl: MEDIA_CACHE_CONTROL,
-    });
-
-  if (uploadError) throw new Error(uploadError.message || "Upload failed.");
+  const uploadRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: headers ?? {},
+    body: file,
+  });
+  if (!uploadRes.ok) throw new Error("Upload failed.");
   const resolvedPath = storagePath ?? path;
   const signed = await fetchSignedUrl({ path: resolvedPath });
   return { url: signed.url, storagePath: resolvedPath };

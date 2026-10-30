@@ -5,8 +5,8 @@
 
 import "server-only";
 
-import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { downloadMedia, uploadMedia } from "@/lib/media-storage";
+import { MEDIA_CACHE_CONTROL } from "@/lib/storage-buckets";
 import { instagramTokenExchangeErrorDetail } from "@/lib/instagram-oauth-pure";
 import {
   instagramGraphErrorDetail,
@@ -255,7 +255,7 @@ function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "webp" | "unknown
  * publish — the original path if no conversion was needed.
  */
 export async function ensureInstagramCompatibleImage(storagePath: string): Promise<string> {
-  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
+  const { data, error } = await downloadMedia(storagePath);
   if (error || !data) {
     throw new Error(instagramStorageCheckError(storagePath));
   }
@@ -267,9 +267,11 @@ export async function ensureInstagramCompatibleImage(storagePath: string): Promi
   const jpegBuffer = await sharp(Buffer.from(bytes)).jpeg({ quality: 90 }).toBuffer();
   const convertedPath = `${storagePath.replace(/\.[^./]+$/, "")}.instagram.jpg`;
 
-  const { error: uploadError } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(convertedPath, jpegBuffer, { contentType: "image/jpeg", upsert: true });
+  const { error: uploadError } = await uploadMedia(convertedPath, jpegBuffer, {
+    contentType: "image/jpeg",
+    cacheControl: MEDIA_CACHE_CONTROL,
+    upsert: true,
+  });
   if (uploadError) {
     throw new Error(`Failed to upload converted JPEG for Instagram: ${uploadError.message}`);
   }

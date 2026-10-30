@@ -18,6 +18,7 @@
  * signed_url_cache. Picks the smallest object available to keep that cost trivial.
  */
 import { readFileSync } from "node:fs";
+import { listMedia } from "@/lib/media-storage";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,7 +48,6 @@ async function main() {
   loadEnv();
   const { createSignedStorageUrl, SIGN_TTL } = await import("../lib/storage-signed-url");
   const { supabaseServer } = await import("../lib/supabase-server");
-  const { STORAGE_BUCKET } = await import("../lib/storage-buckets");
 
   // A real path the app would actually sign. Photos over videos so the one
   // unavoidable download stays small.
@@ -69,7 +69,7 @@ async function main() {
 
   // One list call on a single folder is enough to pick the smallest candidate.
   const dir = paths[0]!.slice(0, paths[0]!.lastIndexOf("/"));
-  const { data: listed } = await supabaseServer.storage.from(STORAGE_BUCKET).list(dir, {
+  const { data: listed } = await listMedia(dir, {
     limit: 100,
   });
   const inDir = new Set(paths.filter((p) => p.startsWith(`${dir}/`)));

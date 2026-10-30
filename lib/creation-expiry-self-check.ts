@@ -45,9 +45,7 @@ assert.match(
 const rowDeleteIndex = expirySource.indexOf(
   `.from(USER_CREATIONS_TABLE)\n      .delete()`
 );
-const storageDeleteIndex = expirySource.indexOf(
-  `.from(STORAGE_BUCKET)\n        .remove(`
-);
+const storageDeleteIndex = expirySource.indexOf("await removeMedia(batch)");
 assert.notEqual(rowDeleteIndex, -1, "creation-row deletion must be present");
 assert.notEqual(storageDeleteIndex, -1, "storage deletion must be present");
 assert.ok(

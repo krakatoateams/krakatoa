@@ -1,6 +1,5 @@
 import type Replicate from "replicate";
-import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { downloadMedia } from "@/lib/media-storage";
 
 /** Upload product image to Replicate Files API for use in model inputs. */
 export async function uploadProductImageToReplicate(
@@ -21,7 +20,7 @@ export async function uploadStoragePathToReplicate(
   replicate: Replicate,
   storagePath: string
 ): Promise<string> {
-  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
+  const { data, error } = await downloadMedia(storagePath);
   if (error || !data) {
     throw new Error("Couldn't read the connected image.");
   }

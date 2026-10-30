@@ -1,8 +1,8 @@
 import { supabaseServer } from "@/lib/supabase-server";
+import { listMedia, removeMedia } from "@/lib/media-storage";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
 import {
   PLATFORM_SKILLS_PREFIX,
-  STORAGE_BUCKET,
   isPlatformSkillThumbPath,
 } from "@/lib/storage-buckets";
 import { errorLogSafe } from "@/lib/error-log-safe";
@@ -721,7 +721,7 @@ async function removeSkillThumb(path: string | null | undefined): Promise<void> 
     console.warn("[skill-configs] refusing unexpected thumb path");
     return;
   }
-  const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove([path]);
+  const { error } = await removeMedia([path]);
   if (error) {
     console.warn(
       "[skill-configs] failed to remove thumb:",
@@ -735,7 +735,7 @@ async function removeLeftoverSkillThumbs(
   keepPath: string | null | undefined
 ): Promise<void> {
   const prefix = `${PLATFORM_SKILLS_PREFIX}${skillId}`;
-  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).list(prefix);
+  const { data, error } = await listMedia(prefix);
   if (error) {
     console.warn(
       "[skill-configs] leftover thumb list failed:",
@@ -748,9 +748,7 @@ async function removeLeftoverSkillThumbs(
     .map((entry) => `${prefix}/${entry.name}`)
     .filter((path) => isPlatformSkillThumbPath(path) && path !== keepPath);
   if (leftovers.length === 0) return;
-  const { error: removeError } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .remove(leftovers);
+  const { error: removeError } = await removeMedia(leftovers);
   if (removeError) {
     console.warn(
       "[skill-configs] leftover thumb remove failed:",

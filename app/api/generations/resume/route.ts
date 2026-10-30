@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { uploadMedia } from "@/lib/media-storage";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import {
   getJob,
@@ -26,7 +27,6 @@ import { insertUserCreation } from "@/lib/creations-db";
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   STORYBOARDS_TABLE,
   videosGeneratedVideoPath,
   videosStoryboardVideoPath,
@@ -236,9 +236,7 @@ export async function POST(req: Request) {
         upload: async (buffer, filename) => {
           if (pipeline === "storyboard_video") {
             const storagePath = videosStoryboardVideoPath(userId, filename);
-            const { error: uploadError } = await supabaseServer.storage
-              .from(STORAGE_BUCKET)
-              .upload(storagePath, Buffer.from(buffer), {
+            const { error: uploadError } = await uploadMedia(storagePath, Buffer.from(buffer), {
                 contentType: "video/mp4",
                 cacheControl: MEDIA_CACHE_CONTROL,
                 upsert: false,
@@ -253,9 +251,7 @@ export async function POST(req: Request) {
           const jobKind = job.job_type;
           const videoMode = jobKind === "video_image2video" ? "i2v" : "t2v";
           const storagePath = videosGeneratedVideoPath(userId, videoMode, filename);
-          const { error: uploadError } = await supabaseServer.storage
-            .from(STORAGE_BUCKET)
-            .upload(storagePath, Buffer.from(buffer), {
+          const { error: uploadError } = await uploadMedia(storagePath, Buffer.from(buffer), {
               contentType: "video/mp4",
               cacheControl: MEDIA_CACHE_CONTROL,
               upsert: false,

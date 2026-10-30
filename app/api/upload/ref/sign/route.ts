@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase-server";
+import { createMediaUploadUrl, removeMedia } from "@/lib/media-storage";
 import {
   STORAGE_BUCKET,
+  TEMP_REF_CACHE_CONTROL,
   videosUserTempRefPath,
 } from "@/lib/storage-buckets";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -9,8 +10,8 @@ import { requireCurrentProfile } from "@/lib/profiles-db";
 /**
  * Mints a short-lived signed upload URL for a GENERATION REFERENCE file
  * (first/last frame image, reference image/video/audio). The browser then
- * uploads the bytes DIRECTLY to Supabase Storage via uploadToSignedUrl,
- * bypassing the serverless request-body limit (~4.5 MB on Vercel).
+ * PUTs the bytes directly to storage with the returned headers, bypassing the
+ * serverless request-body limit (~4.5 MB on Vercel).
  *
  * Differences from /api/upload/sign:
  *   - Login required (requireCurrentProfile) — only authenticated users.
@@ -99,9 +100,10 @@ export async function POST(req: NextRequest) {
       `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`,
     );
 
-    const { data, error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .createSignedUploadUrl(storagePath);
+    const { data, error } = await createMediaUploadUrl(storagePath, {
+      contentType,
+      cacheControl: TEMP_REF_CACHE_CONTROL,
+    });
 
     if (error || !data) {
       console.error("[upload/ref/sign] createSignedUploadUrl error:", error?.message);
@@ -116,6 +118,8 @@ export async function POST(req: NextRequest) {
       bucket: STORAGE_BUCKET,
       path: data.path,
       token: data.token,
+      uploadUrl: data.signedUrl,
+      headers: data.headers,
       storagePath,
     });
   } catch (err: unknown) {
@@ -158,9 +162,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    const { error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .remove([storagePath]);
+    const { error } = await removeMedia([storagePath]);
     if (error) {
       console.error("[upload/ref/sign] remove error:", error.message);
       return NextResponse.json(

@@ -1,5 +1,5 @@
-import { getSupabase } from "@/lib/supabase";
 import { supabaseServer } from "@/lib/supabase-server";
+import { listMedia, uploadMedia } from "@/lib/media-storage";
 import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
 import {
   MEDIA_CACHE_CONTROL,
@@ -8,7 +8,7 @@ import {
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
 import {
-  PRODUCT_PHOTO_BUCKET,  ModelPoseId,
+  ModelPoseId,
   PhotoStyleId,
   ProductPhotoHistoryItem,
   PHOTO_STUDIO_MODES,
@@ -19,10 +19,6 @@ import {
   parseGeneratedFilename,
   historyItemFromPath,
 } from "@/lib/product-photo";
-
-function storage() {
-  return getSupabase().storage.from(PRODUCT_PHOTO_BUCKET);
-}
 
 function wrapStorageError(action: string, error: { message: string }) {
   const hint =
@@ -42,7 +38,7 @@ export async function uploadProductReferenceImage(
   const storagePath = uploadsPath(userId, filename);
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  const { error } = await storage().upload(storagePath, buffer, {
+  const { error } = await uploadMedia(storagePath, buffer, {
     contentType: file.type || `image/${safeExt === "jpg" ? "jpeg" : safeExt}`,
     cacheControl: MEDIA_CACHE_CONTROL,
     upsert: false,
@@ -75,7 +71,7 @@ export async function saveGeneratedProductPhoto(params: {
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
   const storagePath = photosGeneratedPath(params.userId, params.photoMode, params.filename);
 
-  const { error } = await storage().upload(storagePath, params.imageBuffer, {
+  const { error } = await uploadMedia(storagePath, params.imageBuffer, {
     contentType: params.contentType ?? "image/png",
     cacheControl: MEDIA_CACHE_CONTROL,
     upsert: false,
@@ -120,7 +116,7 @@ export async function reconcileProductPhotosFromStorage(
   const candidates: { storagePath: string; item: ProductPhotoHistoryItem }[] = [];
 
   async function collectFromPrefix(prefix: string): Promise<void> {
-    const { data: files, error: listError } = await storage().list(prefix, {
+    const { data: files, error: listError } = await listMedia(prefix, {
       limit: 1000,
       sortBy: { column: "name", order: "asc" },
     });
