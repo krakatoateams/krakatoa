@@ -18,6 +18,7 @@ import {
 } from "@/lib/video-composer-features";
 import { getEnabledCatalogModelIds } from "@/lib/model-catalog-configs-db";
 import { codeDefaults, codeVideoDefaults } from "@/lib/feature-enablement-defaults";
+import { setFeatureDefaultSafely } from "@/lib/feature-default-switch";
 import { resolveFeatureEnablement, type FeatureEnablement } from "@/lib/feature-enablement";
 
 /**
@@ -181,29 +182,47 @@ export async function casFeatureModelConfig(
   const update: Record<string, unknown> = { updated_by_profile_id: updatedByProfileId };
   if (patch.enabled !== undefined) update.enabled = patch.enabled;
   if (patch.is_default !== undefined) update.is_default = patch.is_default;
+  const before = await getFeatureModelConfigById(id);
 
-  const { data, error } = await supabaseServer
-    .from(TABLE)
-    .update(update)
-    .eq("id", id)
-    .eq("updated_at", expectedUpdatedAt)
-    .select("*")
-    .maybeSingle();
-  handleError(error, "Failed to update feature model config.");
-  const row = (data as FeatureModelConfig | null) ?? null;
-
-  if (row && patch.is_default === true) {
-    const { error: clearErr } = await supabaseServer
-      .from(TABLE)
-      .update({ is_default: false, updated_by_profile_id: updatedByProfileId })
-      .eq("tool_key", row.tool_key)
-      .eq("feature_key", row.feature_key)
-      .neq("id", id);
-    handleError(clearErr, "Failed to clear previous default.");
+  try {
+    return await setFeatureDefaultSafely<FeatureModelConfig>({
+      makesDefault: patch.is_default === true,
+      writeTarget: async () => {
+        const { data, error } = await supabaseServer
+          .from(TABLE)
+          .update(update)
+          .eq("id", id)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("*")
+          .maybeSingle();
+        handleError(error, "Failed to update feature model config.");
+        return (data as FeatureModelConfig | null) ?? null;
+      },
+      clearOthers: async () => {
+        if (!before) return;
+        const { error } = await supabaseServer
+          .from(TABLE)
+          .update({ is_default: false, updated_by_profile_id: updatedByProfileId })
+          .eq("tool_key", before.tool_key)
+          .eq("feature_key", before.feature_key)
+          .neq("id", id);
+        handleError(error, "Failed to clear previous default.");
+      },
+      revertTarget: async () => {
+        if (!before) return;
+        const { error } = await supabaseServer
+          .from(TABLE)
+          .update({ enabled: before.enabled, is_default: before.is_default, updated_by_profile_id: before.updated_by_profile_id })
+          .eq("id", id);
+        handleError(error, "Failed to restore the feature model config.");
+      },
+      onCompensationFailed: (e) =>
+        console.error("[feature-model-configs] could not undo a partial default switch:", generationErrorLogSafe(e)),
+    });
+  } finally {
+    cache = { map: null, expiresAt: 0 };
+    videoCache = { map: null, expiresAt: 0 };
   }
-  cache = { map: null, expiresAt: 0 };
-  videoCache = { map: null, expiresAt: 0 };
-  return row;
 }
 
 /** Reset a row to its shipped code default (enabled=true; default per code catalog). */

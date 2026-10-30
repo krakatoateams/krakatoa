@@ -31,7 +31,14 @@ export async function recordProviderChange(params: {
 /** Model enable/disable and per-feature model changes. Same best-effort contract as above. */
 export async function recordModelConfigChange(params: {
   actorProfileId: string;
-  action: "model_enable" | "model_add" | "model_disable" | "feature_model_update";
+  action:
+    | "model_enable"
+    | "model_add"
+    | "model_disable"
+    | "model_archive"
+    | "model_restore"
+    | "feature_model_update"
+    | "feature_model_reset";
   toolKey: string;
   /** modelId, or featureKey:modelId for feature rows. */
   modelId: string;

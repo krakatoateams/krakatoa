@@ -257,4 +257,25 @@ assert.equal(rDefault.disableCheck.code, "IS_DEFAULT");
 assert.equal(registry.find((m) => m.modelId === "seedance2_fast")!.reelsEngine, "seedance");
 assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
 
+// Archive / restore (migration 118): same hide rules, ARCHIVED blocks adding, restore never offers.
+{
+  const archivedRow: GuardCatalogRow = { tool_key: "photo", model_id: plain, enabled: false, archived_at: "2026-01-01T00:00:00Z" };
+  const archive = (over: Partial<ModelCatalogGuardInput>) => checkModelCatalogChange(base({ change: "archive", ...over }));
+  // Default / last enabled model are refused exactly like disable.
+  assert.equal(fail(archive({ modelId: DEFAULT_PRODUCT_PHOTO_TIER })).code, "IS_DEFAULT");
+  assert.ok(fail(archive({ modelId: plain, catalogRows: off("photo", ids("photo").filter((i) => i !== plain)) })).codes.includes("LAST_ENABLED_MODEL"));
+  // A normal model passes; an already-archived one is a no-op; a model that is not offered only sets the flag.
+  assert.deepEqual(archive({ modelId: plain }), { ok: true, noop: false, warnings: [] });
+  assert.equal((archive({ modelId: plain, catalogRows: [archivedRow] }) as { noop: boolean }).noop, true);
+  assert.equal((archive({ modelId: plain, catalogRows: off("photo", [plain]) }) as { noop: boolean }).noop, false);
+  // Enabling an archived model is rejected with ARCHIVED (before pricing/provider rules).
+  const enable = checkModelCatalogChange(base({ change: "enable", modelId: plain, catalogRows: [archivedRow], pricingRows: [] }));
+  assert.equal(fail(enable).code, "ARCHIVED");
+  // Restore clears the flag only: ok when archived, no-op otherwise, unknown models rejected.
+  const restore = (rows: GuardCatalogRow[], modelId = plain) => checkModelCatalogChange(base({ change: "restore", modelId, catalogRows: rows }));
+  assert.equal((restore([archivedRow]) as { noop: boolean }).noop, false);
+  assert.equal((restore([]) as { noop: boolean }).noop, true);
+  assert.equal(fail(restore([], "nope")).code, "UNKNOWN_MODEL");
+}
+
 console.log("model-catalog-guard self-check passed");
