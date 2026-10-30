@@ -104,3 +104,29 @@ export async function updateModelConfig(
   handleError(error, "Failed to update model config.");
   return (data as ModelConfig | null) ?? null;
 }
+
+/** Fetch the row for (tool_key, config_key), or null. */
+export async function getModelConfigByKey(toolKey: string, configKey: string): Promise<ModelConfig | null> {
+  const { data, error } = await supabaseServer
+    .from(MODEL_CONFIGS_TABLE)
+    .select("*")
+    .eq("tool_key", toolKey)
+    .eq("config_key", configKey)
+    .maybeSingle();
+  handleError(error, "Failed to fetch model config.");
+  return (data as ModelConfig | null) ?? null;
+}
+
+/**
+ * Insert the row if it does not exist yet (registry tiers such as GPT Image have no seed row),
+ * never touching an existing one. Returns the stored row either way.
+ */
+export async function ensureModelConfig(
+  seed: { tool_key: string; config_key: string; provider: string; model: string; parameters: Record<string, unknown> }
+): Promise<ModelConfig | null> {
+  const { error } = await supabaseServer
+    .from(MODEL_CONFIGS_TABLE)
+    .upsert({ ...seed, enabled: true, is_default: true }, { onConflict: "tool_key,config_key", ignoreDuplicates: true });
+  handleError(error, "Failed to create model config.");
+  return getModelConfigByKey(seed.tool_key, seed.config_key);
+}

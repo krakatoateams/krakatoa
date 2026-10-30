@@ -5,6 +5,7 @@ import { listPricingConfigs } from "@/lib/pricing-configs-db";
 import { photoTierPricingKeys } from "@/lib/product-photo";
 import { creditAmountsForKeys, providerSwitchPricingError, validateModelPatch } from "@/lib/admin-config-validation";
 import { isProviderConfigured } from "@/lib/ai-provider-catalog";
+import { recordProviderChange } from "@/lib/admin-config-audit-db";
 
 // Update a model config by id (admin only). Only safe fields are accepted
 // (provider, model, enabled, is_default, parameters, metadata). There is no
@@ -57,6 +58,13 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     if (!model) {
       return NextResponse.json({ error: "Model config not found." }, { status: 404 });
     }
+    await recordProviderChange({
+      actorProfileId: ctx.profile.id,
+      toolKey: row.tool_key,
+      configKey: row.config_key,
+      from: row.provider,
+      to: model.provider,
+    });
     return NextResponse.json({ model, warnings: result.warnings });
   });
 }
