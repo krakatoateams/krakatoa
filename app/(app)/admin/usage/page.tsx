@@ -13,7 +13,15 @@ type UsageAggregate = {
   creditsCharged: number;
   estimatedCostUsd: number;
   estimatedCostIdr: number;
+  costSource: "provider_cost" | "estimated" | "mixed";
+  providerCostEvents: number;
 };
+
+const COST_SOURCE_LABEL = {
+  provider_cost: "Provider cost",
+  estimated: "Estimate",
+  mixed: "Mixed",
+} as const;
 
 /** Format a USD money value. Tiny values keep up to 3 decimals so cents are visible. */
 function fmtUsd(value: number): string {
@@ -132,6 +140,12 @@ export default function AdminUsagePage() {
                   <th className={TH}>Credits</th>
                   <th className={TH}>Est. USD</th>
                   <th className={TH}>Est. Rupiah</th>
+                  <th
+                    className={TH}
+                    title="Provider cost = per-model cost × units. Estimate = credits converted to money. Mixed = some events of each."
+                  >
+                    Cost source
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
@@ -145,6 +159,10 @@ export default function AdminUsagePage() {
                     <td className="px-3 py-2">{u.creditsCharged}</td>
                     <td className="px-3 py-2 tabular-nums">{fmtUsd(u.estimatedCostUsd)}</td>
                     <td className="px-3 py-2 tabular-nums">{fmtIdr(u.estimatedCostIdr)}</td>
+                    <td className="px-3 py-2 text-xs text-gray-400">
+                      {COST_SOURCE_LABEL[u.costSource]}
+                      {u.costSource === "mixed" ? ` (${u.providerCostEvents}/${u.events})` : ""}
+                    </td>
                   </tr>
                 ))}
               </tbody>
