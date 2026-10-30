@@ -1,5 +1,6 @@
 "use client";
 
+import { enabledIdsFromRows } from "@/lib/model-catalog-configs";
 import {
   Suspense,
   useCallback,
@@ -696,6 +697,7 @@ function PhotoOmniPage({
   // it loads (or on API failure) fall back to the in-code capability rule so the
   // form is never empty.
   const enabledTierIds = featureModels?.[featureKey]?.enabledTiers ?? null;
+  const codeOfferedPhotoTiers = enabledIdsFromRows("photo", []);
   // Count every reference image the current request will send: product, an attached
   // character (Try-on), an uploaded reference (image/character modes), and any
   // @-mentioned asset. Mentions/references can only be honored by reference-capable
@@ -716,7 +718,9 @@ function PhotoOmniPage({
     (t) =>
       (enabledTierIds
         ? enabledTierIds.includes(t.id)
-        : isImageMode || isCharacterMode || isSocialMode || t.supportsReference) &&
+        : // Not loaded / failed: only models shipped as offered (never ship-dark ones).
+          codeOfferedPhotoTiers.has(t.id) &&
+          (isImageMode || isCharacterMode || isSocialMode || t.supportsReference)) &&
       (!needsReferenceModel || t.supportsReference) &&
       (!needsMultiReferenceModel || tierSupportsMultiReference(t))
   );

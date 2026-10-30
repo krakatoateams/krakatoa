@@ -17,6 +17,7 @@ import {
   type VideoComposerKey,
 } from "@/lib/video-composer-features";
 import { getEnabledCatalogModelIds } from "@/lib/model-catalog-configs-db";
+import { codeDefaults, codeVideoDefaults } from "@/lib/feature-enablement-defaults";
 import { resolveFeatureEnablement, type FeatureEnablement } from "@/lib/feature-enablement";
 
 /**
@@ -263,18 +264,6 @@ type VideoEnablementCache = {
 };
 let videoCache: VideoEnablementCache = { map: null, expiresAt: 0 };
 
-/** Pure code-default enablement (every eligible tier enabled; code default tier). */
-function codeDefaults(): Record<PhotoFeatureKey, FeatureEnablement> {
-  const out = {} as Record<PhotoFeatureKey, FeatureEnablement>;
-  for (const featureKey of PHOTO_FEATURE_KEYS) {
-    out[featureKey] = {
-      enabledTiers: eligibleTiersForFeature(featureKey),
-      defaultTier: defaultTierForFeature(featureKey),
-    };
-  }
-  return out;
-}
-
 /**
  * Resolve enabled tiers + default per Photo feature, merging admin DB overrides
  * over the code catalog. Eligibility (reference capability) is always enforced in
@@ -314,17 +303,6 @@ export async function getPhotoFeatureEnablement(): Promise<
     );
     return codeDefaults();
   }
-}
-
-function codeVideoDefaults(): Record<VideoComposerKey, FeatureEnablement> {
-  const out = {} as Record<VideoComposerKey, FeatureEnablement>;
-  for (const composerKey of VIDEO_COMPOSER_KEYS) {
-    out[composerKey] = {
-      enabledTiers: eligibleModelsForComposer(composerKey),
-      defaultTier: defaultModelForComposer(composerKey),
-    };
-  }
-  return out;
 }
 
 /**

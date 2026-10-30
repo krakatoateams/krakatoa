@@ -13,6 +13,7 @@ import {
   MOTION_CONTROL_MODELS,
   type MotionControlModelId,
 } from "@/lib/motion-control-models";
+import { enabledIdsFromRows } from "@/lib/model-catalog-configs";
 import { REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
 import type { ReelsEngine } from "@/lib/reels-pipeline/types";
 
@@ -216,7 +217,11 @@ export function filterEnabledCatalog<T extends { id: string }>(
   composerKey: VideoComposerKey,
   enablement: Record<VideoComposerKey, VideoComposerEnablement> | null
 ): T[] {
-  if (!enablement) return [...catalog];
+  // Enablement not loaded (or its read failed): show only models shipped as offered, never ship-dark ones.
+  if (!enablement) {
+    const offered = enabledIdsFromRows("reels", []);
+    return catalog.filter((m) => offered.has(m.id));
+  }
   const { enabledModelIds } = enablement[composerKey];
   return catalog.filter((m) => enabledModelIds.includes(m.id));
 }
