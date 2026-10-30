@@ -47,7 +47,6 @@ export function HelloFooter() {
 
         <div className="flex flex-col items-center gap-1 text-center text-[11px] font-medium tracking-wide text-text-disabled sm:justify-self-center sm:text-xs">
           <p>{FOOTER.copyright}</p>
-          <p>{FOOTER.operatedBy}</p>
         </div>
 
         <a
