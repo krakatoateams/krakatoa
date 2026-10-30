@@ -121,6 +121,8 @@ export type VideoReferenceCaps = {
 
 export type VideoModel = {
   id: VideoModelId;
+  /** Ship dark: not offered until an admin adds it in Admin Config → Models. Omit to offer on deploy. */
+  offeredByDefault?: false;
   label: string;
   /** Friendly name shown in the model chip. */
   modelLabel: string;

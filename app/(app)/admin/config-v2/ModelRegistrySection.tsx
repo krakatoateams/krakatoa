@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RegistryModel } from "@/lib/model-registry";
 import { Bone } from "../admin-ui";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -35,11 +35,13 @@ function ModelRow({
   busy,
   notice,
   onToggle,
+  onAdd,
 }: {
   m: RegistryModel;
   busy: boolean;
   notice: string[] | undefined;
   onToggle: (m: RegistryModel, enabled: boolean) => void;
+  onAdd: (m: RegistryModel) => void;
 }) {
   const missing = m.pricing.keys.filter((k) => !k.ready).map((k) => k.key);
   const check = m.enabled ? m.disableCheck : m.enableCheck;
@@ -76,6 +78,17 @@ function ModelRow({
         ) : null}
         {!m.provider.configured ? <Badge tone="warn">Provider not configured</Badge> : null}
         {m.availableToAdd ? <Badge tone="off">Available to add</Badge> : null}
+        {!m.enabled ? (
+          <button
+            type="button"
+            disabled={busy || !m.catalogConfigId || !m.updatedAt}
+            onClick={() => onAdd(m)}
+            aria-label={`Add ${m.label}`}
+            className="rounded border border-white/15 px-2 py-0.5 text-xs text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Add…
+          </button>
+        ) : null}
         <button
           type="button"
           role="switch"
@@ -96,6 +109,70 @@ function ModelRow({
         {busy ? <span className="text-[11px] text-gray-400">Saving…</span> : null}
       </div>
     </li>
+  );
+}
+
+/** Read-only summary of what adding a model does, with the server guard result. No inputs. */
+function AddModelDialog({ model, onConfirm, onCancel }: { model: RegistryModel | null; onConfirm: () => void; onCancel: () => void }) {
+  // Keep the last model while the dialog closes so its content does not blank mid-animation.
+  const last = useRef<RegistryModel | null>(null);
+  if (model) last.current = model;
+  const m = model ?? last.current;
+  const blocked = m ? !m.enableCheck.ok : false;
+  return (
+    <ConfirmDialog
+      open={model !== null}
+      title={m ? `Add ${m.label}?` : ""}
+      description="Users will see this model in the places listed below. It takes up to a minute to apply."
+      confirmLabel="Add model"
+      confirmVariant="primary"
+      confirmDisabled={blocked}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {m ? (
+        <dl className="mt-3 space-y-2 text-xs">
+          <div>
+            <dt className="text-gray-500">Tool</dt>
+            <dd className="text-white">{TOOL_LABEL[m.toolKey]}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Will appear in</dt>
+            <dd className="text-white">
+              {m.willAppearIn.length > 0 ? m.willAppearIn.map((f) => f.label).join(", ") : "No feature (all eligible features have it turned off)"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Price (credits)</dt>
+            <dd className="text-white">
+              {m.pricing.keys.length === 0
+                ? "No price keys"
+                : m.pricing.keys.map((k) => `${k.key}: ${k.ready && k.credits !== null ? k.credits : "not set"}`).join(" · ")}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Provider</dt>
+            <dd className="text-white">
+              {providerText(m)} · {m.provider.configured ? "configured" : "not configured"}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+      {m ? (
+        blocked ? (
+          <div role="alert" className="mt-3 rounded border border-amber-400/30 bg-amber-400/10 p-2 text-xs text-amber-300">
+            <p>Cannot be added yet: {m.enableCheck.reasons.join(" ")}</p>
+            {m.enableCheck.code === "PRICING_NOT_READY" ? (
+              <a href="#admin-config-tools" onClick={onCancel} className="mt-1 inline-block underline">
+                Go to Pricing
+              </a>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-emerald-300">All checks passed.</p>
+        )
+      ) : null}
+    </ConfirmDialog>
   );
 }
 
@@ -124,6 +201,7 @@ export function ModelRegistrySection({ refreshKey = 0, onChanged }: { refreshKey
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [notices, setNotices] = useState<Record<string, string[]>>({});
   const [confirm, setConfirm] = useState<RegistryModel | null>(null);
+  const [adding, setAdding] = useState<RegistryModel | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -239,7 +317,7 @@ export function ModelRegistrySection({ refreshKey = 0, onChanged }: { refreshKey
                 </h4>
                 <ul className="divide-y divide-white/5">
                   {group.map((m) => (
-                    <ModelRow key={keyOf(m)} m={m} busy={saving.has(keyOf(m))} notice={notices[keyOf(m)]} onToggle={onToggle} />
+                    <ModelRow key={keyOf(m)} m={m} busy={saving.has(keyOf(m))} notice={notices[keyOf(m)]} onToggle={onToggle} onAdd={setAdding} />
                   ))}
                 </ul>
               </div>
@@ -247,6 +325,15 @@ export function ModelRegistrySection({ refreshKey = 0, onChanged }: { refreshKey
           })
         )}
       </div>
+      <AddModelDialog
+        model={adding}
+        onConfirm={() => {
+          const m = adding;
+          setAdding(null);
+          if (m) void apply(m, true);
+        }}
+        onCancel={() => setAdding(null)}
+      />
       <ConfirmDialog
         open={confirm !== null}
         title={confirm ? `Hide ${confirm.label}?` : ""}

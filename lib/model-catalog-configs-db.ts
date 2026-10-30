@@ -1,6 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import {
   defaultModelCatalogRows,
+  enabledIdsFromRows,
   type ModelCatalogToolKey,
 } from "@/lib/model-catalog-configs";
 
@@ -152,17 +153,7 @@ export async function getEnabledCatalogModelIds(
 
   try {
     const rows = await listModelCatalogConfigs();
-    const toolRows = rows.filter((r) => r.tool_key === toolKey);
-    const defaults = defaultModelCatalogRows().filter((r) => r.toolKey === toolKey);
-    const byId = new Map(toolRows.map((r) => [r.model_id, r.enabled]));
-
-    const enabled = new Set<string>();
-    for (const def of defaults) {
-      const dbEnabled = byId.get(def.modelId);
-      if (dbEnabled === undefined ? def.enabled : dbEnabled) {
-        enabled.add(def.modelId);
-      }
-    }
+    const enabled = enabledIdsFromRows(toolKey, rows);
 
     cache.byTool = { ...cache.byTool, [toolKey]: enabled };
     cache.expiresAt = now + CACHE_TTL_MS;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { defaultModelCatalogRows } from "./model-catalog-configs";
+import { catalogRowsFrom, defaultModelCatalogRows, enabledIdsFromRows } from "./model-catalog-configs";
+import { PRODUCT_PHOTO_TIERS } from "./product-photo";
+import { buildModelRegistry } from "./model-registry";
 import { DEFAULT_PRODUCT_PHOTO_TIER } from "./product-photo";
 import { defaultTierForFeature, eligibleTiersForFeature, PHOTO_FEATURE_KEYS } from "./creation-features";
 import { modelPricingKeys } from "./model-pricing-keys";
@@ -19,8 +21,8 @@ const all = defaultModelCatalogRows();
 let clock = 0;
 const stamp = () => `2026-01-01T00:00:${String(++clock).padStart(2, "0")}Z`;
 
-function makeStore(opts: { falConfigured?: boolean; auditFails?: boolean; pricingMissing?: string[] } = {}) {
-  const catalog: CatalogRowFull[] = all.map((d, i) => ({
+function makeStore(opts: { falConfigured?: boolean; auditFails?: boolean; pricingMissing?: string[]; everOffered?: boolean | null } = {}) {
+  const catalog: CatalogRowFull[] = defaultModelCatalogRows().map((d, i) => ({
     id: `c${i}`,
     tool_key: d.toolKey,
     model_id: d.modelId,
@@ -55,6 +57,7 @@ function makeStore(opts: { falConfigured?: boolean; auditFails?: boolean; pricin
       Object.assign(r, patch, { updated_at: stamp() });
       return { ...r };
     },
+    everOffered: async () => (opts.everOffered === undefined ? false : opts.everOffered),
     audit: async (e) => {
       // A failing audit insert is swallowed by the real recorder; model that here.
       if (!opts.auditFails) audits.push(e);
@@ -221,6 +224,94 @@ async function main() {
     const row = t.catalog.find((r) => r.model_id === plain)!;
     assert.equal((await toggle(t.store, row.id, false, row.updated_at)).status, 200);
     assert.equal(row.enabled, false);
+  }
+
+  // Phase 3: ship dark + add from catalog. Flag the REAL plain tier dark for this block, then restore it.
+  {
+    const snapshot = defaultModelCatalogRows().map((d) => `${d.toolKey}:${d.modelId}:${d.enabled}`);
+    assert.ok(snapshot.every((s) => s.endsWith(":true")), "existing models all stay offered by default");
+    const tier = PRODUCT_PHOTO_TIERS.find((x) => x.id === plain)!;
+    tier.offeredByDefault = false;
+    try {
+      const dark = defaultModelCatalogRows().filter((d) => !d.enabled);
+      assert.deepEqual(dark.map((d) => d.modelId), [plain]);
+      assert.equal(catalogRowsFrom([{ id: "x", offeredByDefault: false }], [], []).at(0)!.enabled, false);
+      // Missing-row path (no DB row) and materialized path both keep it hidden; every other model stays offered.
+      assert.equal(enabledIdsFromRows("photo", []).has(plain), false);
+      assert.equal(enabledIdsFromRows("photo", [{ tool_key: "photo", model_id: plain, enabled: false }]).has(plain), false);
+      assert.equal(enabledIdsFromRows("photo", []).size, photo.length - 1);
+      assert.equal(enabledIdsFromRows("photo", [{ tool_key: "photo", model_id: plain, enabled: true }]).has(plain), true);
+
+      // Pricing not ready -> rejected; provider not configured -> rejected; unknown model never reachable.
+      const key = modelPricingKeys("photo", plain)[0];
+      const noPrice = makeStore({ pricingMissing: [key] });
+      const r0 = noPrice.catalog.find((r) => r.model_id === plain)!;
+      assert.equal(r0.enabled, false);
+      const blocked = await toggle(noPrice.store, r0.id, true, r0.updated_at);
+      assert.equal(blocked.body.code, "PRICING_NOT_READY");
+      assert.equal(noPrice.writes(), 0);
+      const noProv = makeStore({ falConfigured: false });
+      const rp = noProv.catalog.find((r) => r.model_id === plain)!;
+      assert.equal((await toggle(noProv.store, rp.id, true, rp.updated_at)).body.code, "PROVIDER_NOT_CONFIGURED");
+
+      // Registry view: dark model reports shipsDark, its price and where it would appear.
+      const t = makeStore();
+      const reg = buildModelRegistry({
+        catalogRows: t.catalog.map((r) => ({ ...r })),
+        featureRows: [],
+        pricingRows: await t.store.listPricing(),
+        modelConfigs: [],
+        providerConfigured: () => true,
+      }).find((m) => m.modelId === plain)!;
+      assert.equal(reg.shipsDark, true);
+      assert.equal(reg.enabled, false);
+      assert.ok(reg.pricing.keys.every((k) => k.credits === 5));
+      assert.ok(reg.willAppearIn.length > 0);
+
+      // Happy path: add -> model_add audit with before/after; it then appears in the eligible composers' list.
+      const row = t.catalog.find((r) => r.model_id === plain)!;
+      const seen = row.updated_at;
+      const added = await toggle(t.store, row.id, true, seen);
+      assert.equal(added.status, 200);
+      assert.equal(row.enabled, true);
+      assert.deepEqual(
+        { a: t.audits[0].action, b: t.audits[0].before, f: t.audits[0].after },
+        { a: "model_add", b: { enabled: false }, f: { enabled: true } }
+      );
+      assert.equal(enabledIdsFromRows("photo", t.catalog).has(plain), true);
+      const after = buildModelRegistry({
+        catalogRows: t.catalog.map((r) => ({ ...r })),
+        featureRows: [],
+        pricingRows: await t.store.listPricing(),
+        modelConfigs: [],
+        providerConfigured: () => true,
+      }).find((m) => m.modelId === plain)!;
+      assert.deepEqual(after.enabledIn.map((f) => f.key).sort(), reg.willAppearIn.map((f) => f.key).sort());
+
+      // Double submit is a no-op (one write, one audit); a stale token is a CAS conflict.
+      const again = await toggle(t.store, row.id, true, seen);
+      assert.equal(again.body.noop, true);
+      assert.equal(t.writes(), 1);
+      assert.equal(t.audits.length, 1);
+      const c = makeStore();
+      const cr = c.catalog.find((r) => r.model_id === plain)!;
+      assert.equal((await toggle(c.store, cr.id, true, "stale")).body.code, "STALE_MODEL_CONFIG");
+
+      // History unknown or already offered -> model_enable; audit failure never fails the add.
+      for (const everOffered of [null, true]) {
+        const u = makeStore({ everOffered });
+        const ur = u.catalog.find((r) => r.model_id === plain)!;
+        await toggle(u.store, ur.id, true, ur.updated_at);
+        assert.equal(u.audits[0].action, "model_enable");
+      }
+      const af = makeStore({ auditFails: true });
+      const ar = af.catalog.find((r) => r.model_id === plain)!;
+      assert.equal((await toggle(af.store, ar.id, true, ar.updated_at)).status, 200);
+      assert.equal(ar.enabled, true);
+    } finally {
+      delete tier.offeredByDefault;
+    }
+    assert.deepEqual(defaultModelCatalogRows().map((d) => `${d.toolKey}:${d.modelId}:${d.enabled}`), snapshot);
   }
 
   // Feature rows: last enabled model of a feature, unreplaced default, stale token, no-op.

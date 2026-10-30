@@ -42,7 +42,11 @@ export type RegistryModel = {
   /** Shipped code default of any composer / feature. */
   isCodeDefault: boolean;
   reelsEngine: ReelsEngine | null;
-  pricing: { ready: boolean; keys: { key: string; ready: boolean }[] };
+  pricing: { ready: boolean; keys: { key: string; ready: boolean; credits: number | null }[] };
+  /** Shipped dark by the developer (`offeredByDefault: false`). */
+  shipsDark: boolean;
+  /** Where it would appear if added now (eligible composers / features that are enabled or have no row). */
+  willAppearIn: { key: string; label: string }[];
   provider: { id: string; label: string; configured: boolean };
   /** Not offered and nothing blocks offering it: phase 3 will act on this. */
   availableToAdd: boolean;
@@ -119,7 +123,19 @@ export function buildModelRegistry(input: {
     for (const u of baseline.values()) if (u.defaultTier === def.modelId) isCodeDefault = true;
 
     const notReady = new Set(pricingNotReadyKeys(def.toolKey, def.modelId, input.pricingRows));
-    const pricingKeys = modelPricingKeys(def.toolKey, def.modelId).map((key) => ({ key, ready: !notReady.has(key) }));
+    const pricingKeys = modelPricingKeys(def.toolKey, def.modelId).map((key) => ({
+      key,
+      ready: !notReady.has(key),
+      credits: input.pricingRows.find((p) => p.pricing_key === key)?.credit_amount ?? null,
+    }));
+    const offeredIds = new Set(
+      defaultModelCatalogRows()
+        .filter((d) => d.toolKey === def.toolKey && (d.modelId === def.modelId || (byCatalog.get(`${d.toolKey}:${d.modelId}`)?.enabled ?? d.enabled)))
+        .map((d) => d.modelId)
+    );
+    const willAppearIn = [...resolveToolEnablement(def.toolKey, offeredIds, input.featureRows)]
+      .filter(([, u]) => u.enabledTiers.includes(def.modelId))
+      .map(([key, u]) => ({ key, label: u.label }));
 
     const guard = (change: "enable" | "disable") =>
       summarize(
@@ -150,6 +166,8 @@ export function buildModelRegistry(input: {
         (Object.entries(REELS_ENGINE_CATALOG_MODEL_ID).find(([, id]) => id === def.modelId)?.[0] as ReelsEngine | undefined) ??
         null,
       pricing: { ready: notReady.size === 0, keys: pricingKeys },
+      shipsDark: !def.enabled,
+      willAppearIn,
       provider,
       availableToAdd: !enabled && enableCheck.ok,
       enableCheck,
