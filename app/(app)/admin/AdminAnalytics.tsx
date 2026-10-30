@@ -1,21 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { formatIdr } from "@/lib/credit-packs";
 import {
   AdminPagination,
   AdminTable,
   AdminTableSkeleton,
+  Bone,
   SectionHeading,
   StatCard,
   type AdminColumn,
 } from "./admin-ui";
 
 /**
- * Business analytics block on the admin Overview: sales, users, and the seven
- * paginated breakdowns. Loads and fails independently of the operational
- * summary above it, so a missing migration or a slow aggregate never blanks the
- * whole page.
+ * Business analytics block on the admin Overview: users first, then `children`
+ * (the operational summary), then sales and the seven paginated breakdowns.
+ * Loads and fails independently of that summary, so a missing migration or a
+ * slow aggregate never blanks the whole page.
  */
 
 const PAGE_SIZE = 10;
@@ -194,7 +195,7 @@ function PagedSection<T>({
   );
 }
 
-export default function AdminAnalytics() {
+export default function AdminAnalytics({ children }: { children?: ReactNode }) {
   const [data, setData] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -231,30 +232,59 @@ export default function AdminAnalytics() {
 
   if (loading) {
     return (
-      <section>
-        <SectionHeading>Sales</SectionHeading>
-        <AdminTableSkeleton rows={4} />
-      </section>
+      <>
+        <section className="space-y-3">
+          <Bone className="h-3 w-16" />
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Bone key={i} className="h-24" />
+            ))}
+          </div>
+        </section>
+        {children}
+        <section>
+          <SectionHeading>Sales</SectionHeading>
+          <AdminTableSkeleton rows={4} />
+        </section>
+      </>
     );
   }
 
   if (error) {
     return (
-      <section>
-        <SectionHeading>Sales</SectionHeading>
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">
-          {error}
-        </div>
-      </section>
+      <>
+        {children}
+        <section>
+          <SectionHeading>Sales</SectionHeading>
+          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">
+            {error}
+          </div>
+        </section>
+      </>
     );
   }
 
-  if (!data) return null;
+  if (!data) return <>{children}</>;
 
   const h = data.headline;
 
   return (
     <>
+      <section>
+        <SectionHeading>Users</SectionHeading>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+          <StatCard label="Total users" value={num(h.totalUsers)} />
+          <StatCard label="New (30 days)" value={num(h.newUsersLast30Days)} />
+          <StatCard
+            label="Active today"
+            value={num(h.dauToday)}
+            sub="ran at least one job"
+          />
+        </div>
+      </section>
+
+      {children}
+
       <section>
         <SectionHeading>Sales</SectionHeading>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -287,19 +317,6 @@ export default function AdminAnalytics() {
           generation. Welcome and bonus credits are free, so consumption
           exceeding revenue is giveaway burn rather than a loss.
         </p>
-      </section>
-
-      <section>
-        <SectionHeading>Users</SectionHeading>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-          <StatCard label="Total users" value={num(h.totalUsers)} />
-          <StatCard label="New (30 days)" value={num(h.newUsersLast30Days)} />
-          <StatCard
-            label="Active today"
-            value={num(h.dauToday)}
-            sub="ran at least one job"
-          />
-        </div>
       </section>
 
       <section>

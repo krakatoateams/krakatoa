@@ -118,15 +118,16 @@ export default function AdminOverviewPage() {
   }, []);
 
   return (
-    // Cards first (jobs, credits, then sales and users from AdminAnalytics),
-    // then every breakdown table, with the failed-job tail last. AdminAnalytics
-    // stays mounted while the summary loads so both requests run in parallel.
+    // Cards first (users from AdminAnalytics, then jobs and credits passed in as
+    // children, then sales), then every breakdown table, with the failed-job
+    // tail last. AdminAnalytics stays mounted while the summary loads so both
+    // requests run in parallel.
     <div className="space-y-8">
-      {loading ? <AdminOverviewSkeleton /> : null}
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
-      {data ? <SummaryStats data={data} /> : null}
-
-      <AdminAnalytics />
+      <AdminAnalytics>
+        {loading ? <AdminOverviewSkeleton /> : null}
+        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        {data ? <SummaryStats data={data} /> : null}
+      </AdminAnalytics>
 
       {data ? (
         <section>
