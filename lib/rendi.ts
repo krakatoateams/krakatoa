@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isCancellation } from "@/lib/replicate-server";
+import { isGenerationCancelled } from "@/lib/replicate-server";
 
 /**
  * Shared client for Rendi (cloud FFmpeg API: https://rendi.dev).
@@ -163,7 +163,7 @@ export async function runRendiCommandWithRetry(
     try {
       return await runRendiCommand(ffmpegCommand, inputFiles, outputFiles, options);
     } catch (e) {
-      if (isCancellation(e)) throw e;
+      if (isGenerationCancelled(e)) throw e;
       if (!retryOnCommandFailure && e instanceof RendiCommandError) {
         throw e;
       }

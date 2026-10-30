@@ -1,6 +1,6 @@
 import type Replicate from "replicate";
 import {
-  ReplicateCancellationError,
+  GenerationCancelledError,
   type ReplicateRunHooks,
 } from "@/lib/replicate-server";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
@@ -192,7 +192,7 @@ export async function assertNotCancelled(
   generationRequestId: string
 ): Promise<void> {
   if (await isCancelRequested(profileId, generationRequestId)) {
-    throw new ReplicateCancellationError();
+    throw new GenerationCancelledError();
   }
 }
 

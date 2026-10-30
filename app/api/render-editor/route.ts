@@ -14,7 +14,7 @@ import {
 } from "@/lib/generation-idempotency";
 import { start } from "workflow/api";
 import { isRefundableUserCancellation } from "@/lib/generation-commit";
-import { isCancellation } from "@/lib/replicate-server";
+import { isGenerationCancelled } from "@/lib/replicate-server";
 import { assertPathOwnedByUser } from "@/lib/storage-signed-url";
 import { videosUserTempRefPath } from "@/lib/storage-buckets";
 import { createProcessingAsset, markAssetFailed } from "@/lib/assets-db";
@@ -321,7 +321,7 @@ export async function POST(req: Request) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
-        : isCancellation(error);
+        : isGenerationCancelled(error);
     if (cancelled) console.log("[render-editor] Cancelled by user.");
     else {
       console.error("[render-editor] Error:", generationErrorLogSafe(error));

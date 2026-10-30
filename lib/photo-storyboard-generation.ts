@@ -15,7 +15,7 @@ import {
   flattenReplicateTextChunks,
   runReplicateWithRetry,
   stripMarkdownFences,
-  isCancellation,
+  isGenerationCancelled,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
@@ -888,7 +888,7 @@ export async function handlePhotoStoryboardGeneration(
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
-        : isCancellation(error);
+        : isGenerationCancelled(error);
     const pricingMissing = error instanceof PricingConfigError;
     const rawMessage =
       error instanceof Error ? error.message : String(error ?? "Unknown error");

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createReplicateClient, runWithRetry } from "@/lib/replicate-utils";
 import {
   flattenReplicateTextChunks,
-  isCancellation,
+  isGenerationCancelled,
   stripMarkdownFences,
 } from "@/lib/replicate-server";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -428,7 +428,7 @@ export async function POST(req: Request) {
     const cancelled =
       profileId && generationRequestId
         ? await isRefundableUserCancellation(profileId, generationRequestId, error)
-        : isCancellation(error);
+        : isGenerationCancelled(error);
     if (cancelled) console.log("[canvas-text] Cancelled by user.");
     else {
       console.error("[canvas-text] Error:", generationErrorLogSafe(error));
