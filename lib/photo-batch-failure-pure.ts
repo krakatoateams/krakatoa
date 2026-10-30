@@ -24,3 +24,17 @@ export function planBatchFailures(p: {
     ambiguous: p.rejections.find((r) => !definitiveOrRemoved(r)),
   };
 }
+
+/**
+ * What the route does when a batch delivered 0 images: refund the refundable images first (only when an
+ * ambiguous one keeps the job held) and which reason to throw to the outer catch. Order independent:
+ * ambiguous wins (held, reconcile), then a definitive one (outer refunds the whole spend), else the first.
+ * A fully cancelled batch throws the cancel so the outer cancel path refunds once.
+ */
+export function settleZeroSuccessBatch(p: Parameters<typeof planBatchFailures>[0]): { refundFirst: boolean; reason: unknown } {
+  const plan = planBatchFailures(p);
+  const first = p.rejections.length > 0 ? p.rejections[0] : new Error("Image generation failed");
+  if (plan.fullyCancelled || !p.commitsOnSubmit) return { refundFirst: false, reason: first };
+  if (plan.ambiguous !== undefined) return { refundFirst: true, reason: plan.ambiguous };
+  return { refundFirst: false, reason: p.rejections.find(p.isDefinitive) ?? first };
+}

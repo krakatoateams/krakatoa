@@ -35,7 +35,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
     resumeStillFailingMessage,
   } = config;
 
-  const { begin, cancel: cancelRequest, cancelling, activeKey } = useIdempotentSubmit(idempotencyScope);
+  const { begin, cancel: cancelRequest, cancelling, activeKey, deliveredAfterCancelNotice } = useIdempotentSubmit(idempotencyScope);
   const { cancelAllowed: pollCancelAllowed, phase } = useGenerationStatusPoll(activeKey);
   // A 409 on Cancel means the run already started: show "Finalizing…" now instead of waiting for the poll.
   const [cancelRefused, setCancelRefused] = useState(false);
@@ -119,7 +119,13 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
           if (mountedRef.current) setError(result.message);
           return false;
         }
-        return result.kind === "success";
+        if (result.kind === "success") {
+          // Accepted cancel but the image arrived (unconfirmed Fal cancel): say so, credits are used.
+          const notice = deliveredAfterCancelNotice();
+          if (notice && mountedRef.current) setError(notice);
+          return true;
+        }
+        return false;
       } catch (err: unknown) {
         if (isStudioGenerationPendingError(err)) {
           if (mountedRef.current) setError(err.message);
@@ -144,7 +150,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
         if (mountedRef.current) setLoading(false);
       }
     },
-    [begin, effects],
+    [begin, effects, deliveredAfterCancelNotice],
   );
 
   const resumeRecoverable = useCallback(async () => {

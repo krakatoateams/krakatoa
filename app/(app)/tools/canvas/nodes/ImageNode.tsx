@@ -1,5 +1,6 @@
 "use client";
 
+import { cancelWithNotice } from "@/lib/generation-cancel-client-pure";
 import { useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { AlertCircle, Clock, Cpu, Crop, ImageIcon, Sparkles } from "lucide-react";
@@ -92,7 +93,7 @@ export default function ImageNode({
   const edges = useStore((s) => s.edges) as unknown as CanvasGraphEdge[];
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } =
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey, deliveredAfterCancelNotice } =
     useIdempotentSubmit(`canvas:image:${id}`);
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -275,7 +276,7 @@ export default function ImageNode({
       const storagePath = pickGenerateStoragePath(result);
       patch({
         loading: false,
-        error: null,
+        error: deliveredAfterCancelNotice(),
         imported: false,
         resultUrl: result.imageUrl ?? null,
         resultStoragePath: storagePath,
@@ -516,7 +517,7 @@ export default function ImageNode({
               visible={data.loading}
               cancelling={cancelling}
               cancelAllowed={cancelAllowed}
-              onCancel={() => void cancelSubmit()}
+              onCancel={() => void cancelWithNotice(cancelSubmit, (notice) => patch({ error: notice }))}
             />
           </div>
         </CanvasOmniForm>

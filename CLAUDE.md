@@ -64,7 +64,7 @@ keeps only the rules needed on most engineering tasks.
 - `cancel_allowed=false` after provider commit. For Fal photo, submit is not a commit while
   queued: commit is Fal `IN_PROGRESS`, an ambiguous status, an unconfirmed cancel, or any
   output. A queued Fal request can be cancelled only when Fal confirms removal (200 `OK`); the
-  generate route then refunds once. Otherwise cancel is 409 `CANCEL_NOT_ALLOWED` and the run is
+  generate route then refunds once. Otherwise cancel is 409 `CANCEL_NOT_ALLOWED` (a cancel the API accepted but Fal could not confirm ends the same way: the image arrives and the UI shows the refused message) and the run is
   charged. Cancel-vs-commit is one atomic compare-and-set; the cancel endpoint never calls Fal.
 - Recoverable jobs retain credits for retry. Delegate terminal refund decisions
   to `shouldRefundRecoverableTerminal()`.

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
-import { postGenerationCancel, type CancelResult } from "@/lib/generation-cancel-client-pure";
+import { CANCEL_NOT_ALLOWED_MESSAGE, postGenerationCancel, type CancelResult } from "@/lib/generation-cancel-client-pure";
 import {
   clearPersistedIdempotentAttempt,
   readPersistedIdempotentAttempt,
@@ -73,6 +73,8 @@ export function useIdempotentSubmit(scope: string) {
   // in flight, and disable it once a cancel request has been sent.
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // A cancel the server accepted for the attempt in flight: if the run then delivers anyway, the cancel was refused.
+  const cancelAcceptedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -105,6 +107,7 @@ export function useIdempotentSubmit(scope: string) {
     const key = attemptState.key;
     setActiveKey(key);
     setCancelling(false);
+    cancelAcceptedRef.current = false;
     emitGenerationChanged();
     let settled = false;
     const settle = (succeeded: boolean, options?: { rotate?: boolean }) => {
@@ -138,11 +141,18 @@ export function useIdempotentSubmit(scope: string) {
     if (!key || !inFlightRef.current) return "idle";
     if (mountedRef.current) setCancelling(true);
     const result = await postGenerationCancel((url, init) => fetch(url, init), key);
+    if (result === "cancelling") cancelAcceptedRef.current = true;
     // Accepted: keep `cancelling` true, the in-flight generate fetch settles shortly and resets it.
     // Refused or failed: let the user act again; the generate request is still running.
     if (result !== "cancelling" && mountedRef.current) setCancelling(false);
     return result;
   }, []);
 
-  return { begin, cancel, activeKey, cancelling };
+  /** After a delivered run: the refused-cancel notice when a cancel was accepted but the output arrived anyway (credits used). */
+  const deliveredAfterCancelNotice = useCallback(
+    () => (cancelAcceptedRef.current ? CANCEL_NOT_ALLOWED_MESSAGE : null),
+    [],
+  );
+
+  return { begin, cancel, activeKey, cancelling, deliveredAfterCancelNotice };
 }

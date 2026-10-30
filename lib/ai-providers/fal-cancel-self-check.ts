@@ -6,7 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { ApiError } from "@fal-ai/client";
-import { GenerationCancelledError, isGenerationCancelled, isProviderDefinitiveFailure } from "./errors";
+import { GenerationCancelledError, ProviderDefinitiveFailureError, isGenerationCancelled, isProviderDefinitiveFailure } from "./errors";
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
 import { classifyFalCancel, type FalCancelResult } from "./fal-cancel-pure";
 import { finishMeteredAttemptWithOps, type MeteredLifecycleOps } from "../metered-generation/lifecycle-core";
@@ -18,11 +18,12 @@ import {
   isRefundableUserCancellationPure,
   type CancelRow,
 } from "../generation-commit-pure";
-import { planBatchFailures } from "../photo-batch-failure-pure";
+import { planBatchFailures, settleZeroSuccessBatch } from "../photo-batch-failure-pure";
 import {
   CANCEL_FAILED_MESSAGE,
   CANCEL_NOT_ALLOWED_MESSAGE,
   cancelUiState,
+  cancelWithNotice,
   postGenerationCancel,
 } from "../generation-cancel-client-pure";
 
@@ -127,6 +128,22 @@ class Attempt {
 
 type Outcome = { delivered: number; cancelled: boolean; ledger: Ledger; attempt: Attempt };
 
+/** Settlement of a batch with 0 delivered images: the route's settleZeroSuccessBatch reason into the metered terminal. */
+async function settleZero(
+  rejections: unknown[], attempt: { locked: boolean }, handle: Parameters<typeof finishMeteredAttemptWithOps>[0],
+  metered: MeteredLifecycleOps, settleTwice?: boolean,
+): Promise<boolean> {
+  const settlement = settleZeroSuccessBatch({ rejections, commitsOnSubmit: true, cancelWhileQueued: true, isDefinitive: isProviderDefinitiveFailure, isCancelled: isGenerationCancelled }); const reason = settlement.reason; // the route's own function
+  const cancelled = isGenerationCancelled(reason) && isRefundableUserCancellationPure(true, attempt.locked, true);
+  const terminal = {
+    kind: "terminal" as const, cancelled, rawMessage: "failed",
+    definitiveProviderFailure: !cancelled && isProviderDefinitiveFailure(reason), commitsOnSubmit: true,
+  };
+  await finishMeteredAttemptWithOps(handle, terminal, metered);
+  if (settleTwice) await finishMeteredAttemptWithOps(handle, terminal, metered);
+  return cancelled;
+}
+
 /** One request with `fal.scripts.length` images, settled through the real settlement path. */
 async function generate(scripts: Phase[][], cancel: Cancel, userCancelAtTick: number | null, opts: { log?: string[]; settleTwice?: boolean } = {}): Promise<Outcome> {
   const log = opts.log ?? [];
@@ -152,15 +169,7 @@ async function generate(scripts: Phase[][], cancel: Cancel, userCancelAtTick: nu
     await finishMeteredAttemptWithOps(handle, { kind: "success", responseJson: {} }, metered);
     return { delivered: successes, cancelled: false, ledger, attempt };
   }
-  const plan = planBatchFailures({ rejections, commitsOnSubmit: true, cancelWhileQueued: true, isDefinitive: isProviderDefinitiveFailure, isCancelled: isGenerationCancelled });
-  const reason = plan.fullyCancelled ? rejections[0] : (plan.ambiguous ?? rejections[0]);
-  const cancelled = isGenerationCancelled(reason) && isRefundableUserCancellationPure(true, attempt.locked, true);
-  const terminal = {
-    kind: "terminal" as const, cancelled, rawMessage: "failed",
-    definitiveProviderFailure: !cancelled && isProviderDefinitiveFailure(reason), commitsOnSubmit: true,
-  };
-  await finishMeteredAttemptWithOps(handle, terminal, metered);
-  if (opts.settleTwice) await finishMeteredAttemptWithOps(handle, terminal, metered);
+  const cancelled = await settleZero(rejections, attempt, handle, metered, opts.settleTwice);
   return { delivered: 0, cancelled, ledger, attempt };
 }
 
@@ -258,6 +267,39 @@ async function main(): Promise<void> {
     assert(mixed.delivered === 1 && mixed.ledger.balance === 95 && mixed.ledger.events.join() === "spend,partial-refund", "6c: raced batch: the removed image is refunded, the delivered one charged, never charged without an image");
   }
 
+  // 6d. 0 delivered, mixed rejections, BOTH orders: the outcome never depends on rejection order.
+  {
+    const removed = () => new GenerationCancelledError();
+    const definitive = () => new ProviderDefinitiveFailureError();
+    const ambiguous = () => new Error("fetch failed");
+    const settle = async (rejections: unknown[], locked: boolean) => {
+      const ledger: Ledger = { events: ["spend"], balance: 100 - COST * rejections.length, refundKeys: new Set() };
+      const handle = { profileId: "p", userId: "u", jobId: "job-1", generationRequestId: "req-1", creditsSpent: true, creditsAmount: COST * rejections.length, assetIds: [], refundJobType: "product_photo" };
+      const settlement = settleZeroSuccessBatch({ rejections, commitsOnSubmit: true, cancelWhileQueued: true, isDefinitive: isProviderDefinitiveFailure, isCancelled: isGenerationCancelled });
+      const cancelled = await settleZero(rejections, { locked }, handle, ops(ledger, () => locked, COST * rejections.length), true);
+      return { ledger, reason: settlement, cancelled };
+    };
+    for (const [name, rs] of [["removed,definitive", [removed(), definitive()]], ["definitive,removed", [definitive(), removed()]]] as const) {
+      const r = await settle([...rs], true); // lock held (a committed image)
+      assert(isProviderDefinitiveFailure(r.reason.reason) && !r.reason.refundFirst, `6d ${name}: throws the definitive failure`);
+      assert(r.ledger.events.join() === "spend,refund" && r.ledger.balance === 100, `6d ${name}: whole spend refunded once`);
+    }
+    for (const [name, rs] of [["removed,ambiguous", [removed(), ambiguous()]], ["ambiguous,removed", [ambiguous(), removed()]]] as const) {
+      const r = await settle([...rs], true);
+      assert(r.reason.refundFirst && r.reason.reason instanceof Error && !isGenerationCancelled(r.reason.reason), `6d ${name}: ambiguous reason, removed image refunded first`);
+      assert(r.ledger.events.join() === "spend" && !r.cancelled, `6d ${name}: outer refund held for reconcile`);
+    }
+    const allRemoved = await settle([removed(), removed()], false);
+    assert(allRemoved.cancelled && allRemoved.ledger.events.join() === "spend,refund" && allRemoved.ledger.balance === 100, "6d all removed: refunded once");
+    const allDefinitive = await settle([definitive(), definitive()], true);
+    assert(allDefinitive.ledger.events.join() === "spend,refund" && allDefinitive.ledger.balance === 100, "6d all definitive: refunded once");
+    const ambDef = await settle([definitive(), ambiguous()], true);
+    assert(ambDef.reason.refundFirst && ambDef.ledger.events.join() === "spend", "6d definitive+ambiguous: held (definitive image refunded by the route's partial refund)");
+    // Replicate (no commit on submit): unchanged, first rejection, outer refunds everything.
+    const rep = settleZeroSuccessBatch({ rejections: [removed(), definitive()], commitsOnSubmit: false, cancelWhileQueued: false, isDefinitive: isProviderDefinitiveFailure, isCancelled: isGenerationCancelled });
+    assert(!rep.refundFirst && isGenerationCancelled(rep.reason), "6d replicate: first rejection, no pre-refund");
+  }
+
   // 7. Client cancel(): result classification + English copy.
   {
     const mk = (status: number, body: unknown, ok = status < 300) => async () => ({ ok, status, json: async () => body });
@@ -270,6 +312,10 @@ async function main(): Promise<void> {
       const u = cancelUiState(failed);
       assert(failed === "failed" && !u.refused && u.notice === CANCEL_FAILED_MESSAGE, "7: other failures show the retry notice");
     }
+    const shown: string[] = [];
+    assert((await cancelWithNotice(async () => "not_allowed", (n) => shown.push(n))) === "not_allowed" && shown[0] === CANCEL_NOT_ALLOWED_MESSAGE, "7: canvas cancel shows the refused notice");
+    await cancelWithNotice(async () => "cancelling", (n) => shown.push(n));
+    assert(shown.length === 1, "7: accepted cancel shows nothing at click time");
     assert(cancelUiState("cancelling").notice === null && cancelUiState("idle").notice === null, "7: success path shows no notice");
   }
 

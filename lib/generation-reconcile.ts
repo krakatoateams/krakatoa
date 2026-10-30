@@ -76,6 +76,17 @@ async function hasRefundForJob(jobId: string): Promise<boolean> {
   return ((data as { id: string }[] | null) ?? []).length > 0;
 }
 
+async function refundedAmountForJob(jobId: string): Promise<number> {
+  const { data, error } = await supabaseServer
+    .from("credit_transactions")
+    .select("amount")
+    .eq("job_id", jobId)
+    .eq("type", "refund")
+    .eq("status", "succeeded");
+  if (error) throw new Error(error.message);
+  return ((data as { amount?: number }[] | null) ?? []).reduce((sum, r) => sum + Math.abs(r.amount ?? 0), 0);
+}
+
 /**
  * A commit-on-submit provider (Fal) run is refundable at reconcile only when Fal's queue status
  * confirms EVERY recorded prediction failed. Unknown, pending, succeeded or unreachable => false.
@@ -264,7 +275,7 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
   // leftovers wait for the next (overlapping) run. Past the window, one last attempt then "unresolved".
   const windows = settledWindows(Date.now());
   const settledOps: SettledFailureOps = {
-    hasRefund: hasRefundForJob,
+    refundedAmount: refundedAmountForJob,
     spendAmount: spendAmountForJob,
     getRequestId: async (profileId, jobId) => (await getGenerationRequestForJob(profileId, jobId))?.id ?? null,
     isCommitLocked: isProviderCommitLocked,

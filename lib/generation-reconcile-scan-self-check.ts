@@ -31,7 +31,7 @@ function world(rows: Row[]) {
   const refunds = new Map<string, number>(); // idempotency key -> count of ledger applications
   const falCalls = { n: 0 };
   const ops: SettledFailureOps = {
-    hasRefund: async (id) => refunds.has(photoRefundIdempotencyKey(id)),
+    refundedAmount: async (id) => (refunds.has(photoRefundIdempotencyKey(id)) ? 5 : 0),
     spendAmount: async () => 5,
     getRequestId: async (_p, id) => `req-${id}`,
     isCommitLocked: async () => true,
@@ -170,6 +170,26 @@ async function main() {
     assert((await withTimeout(slow, 10, false)) === false, "slow call times out to fallback");
     assert((await withTimeout(Promise.resolve(true), 50, false)) === true, "fast call passes through");
     assert((await withTimeout(Promise.reject(new Error("x")), 50, false)) === false, "rejection maps to fallback");
+  }
+
+  // 9. Held job that already got a batch partial refund: reconcile refunds only the remainder, once.
+  {
+    const ledger = { refunded: 5, keys: new Set<string>() }; // spent 10 (2 images), 1 removed image refunded earlier
+    const ops9: SettledFailureOps = {
+      refundedAmount: async () => ledger.refunded,
+      spendAmount: async () => 10,
+      getRequestId: async () => "req",
+      isCommitLocked: async () => true,
+      confirmsFailure: async () => true,
+      refund: async (p) => { if (!ledger.keys.has(p.idempotencyKey)) { ledger.keys.add(p.idempotencyKey); ledger.refunded += p.amount; } },
+    };
+    const job = { id: "b1", profileId: "p", costCredits: 10 };
+    assert((await reconcileSettledProviderFailure(ops9, job)) === "refunded" && ledger.refunded === 10, "remainder refunded");
+    assert((await reconcileSettledProviderFailure(ops9, job)) === "already_refunded" && ledger.refunded === 10 && ledger.keys.size === 1, "double run refunds once");
+    assert(ledger.keys.has(`${photoRefundIdempotencyKey("b1")}:remainder`), "remainder uses its own stable key");
+    ops9.confirmsFailure = async () => false;
+    ledger.refunded = 5; ledger.keys.clear();
+    assert((await reconcileSettledProviderFailure(ops9, job)) === "skipped" && ledger.refunded === 5, "unconfirmed remainder stays held");
   }
 
   console.log("reconcileScanSelfCheck: ok");

@@ -1,5 +1,6 @@
 "use client";
 
+import { cancelWithNotice } from "@/lib/generation-cancel-client-pure";
 import { useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { AlertCircle, Cpu } from "lucide-react";
 import {
@@ -322,7 +323,7 @@ export default function PromptNode({
               visible={data.loading}
               cancelling={cancelling}
               cancelAllowed={cancelAllowed}
-              onCancel={() => void cancelSubmit()}
+              onCancel={() => void cancelWithNotice(cancelSubmit, (notice) => patch({ error: notice }))}
             />
           </div>
         </CanvasOmniForm>

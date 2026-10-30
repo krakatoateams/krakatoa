@@ -188,12 +188,12 @@ export function createFalPhotoProvider(
       if (status === "COMPLETED" && error) return { id: raw, status: "failed", error: "Fal reported the run failed." };
       if (status === "COMPLETED") {
         // Fal documents `error` on a failed COMPLETED status but it is unverified live, so also ask for
-        // the result: a 4xx ApiError is a definitive failure. 5xx/408/429 and network loss stay
+        // the result: a 4xx ApiError is a definitive failure. 404 (expired result: the run may have delivered), 5xx/408/429 and network loss stay
         // ambiguous (rethrown), so reconcile never refunds on them.
         try {
           await fal.queue.result(parsed.endpoint, { requestId: parsed.requestId });
         } catch (e) {
-          if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
+          if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 404 && e.status !== 408 && e.status !== 429) {
             return { id: raw, status: "failed", error: "Fal reported the run failed." };
           }
           throw e;
