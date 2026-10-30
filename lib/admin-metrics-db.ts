@@ -1,7 +1,13 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { getBillingSettings } from "@/lib/billing-settings-db";
 import type { BillingSettings } from "@/lib/pricing-math";
-import { clampAdminListLimit } from "@/lib/admin-metrics-pure";
+import {
+  aggregateUsageEvents,
+  clampAdminListLimit,
+  type UsageAggregateRow,
+  type UsageEventRow,
+} from "@/lib/admin-metrics-pure";
+import { listProviderModelCosts } from "@/lib/provider-model-costs-db";
 
 /**
  * Read-only admin metrics (service-role, cross-profile).
@@ -212,29 +218,14 @@ export async function getAdminSummary(): Promise<AdminSummary> {
   };
 }
 
-export type UsageAggregate = {
-  tool: string;
-  provider: string | null;
-  model: string | null;
-  events: number;
-  units: number;
-  creditsCharged: number;
-  /** Real money value of the consumed credits in USD (credits × IDR/credit ÷ USD→IDR). */
-  estimatedCostUsd: number;
-  /** Real money value of the consumed credits in IDR (credits × credit_value_idr). */
-  estimatedCostIdr: number;
-};
+export type UsageAggregate = UsageAggregateRow;
 
 /**
  * Usage events aggregated by tool/provider/model.
  *
- * Est. USD / Est. IDR are derived from the REAL credits charged and the live
- * billing settings (credit_value_idr, usd_to_idr) — i.e. the actual money value
- * of the credits consumed at the current provider-cost-based rates:
- *   est_idr = credits × credit_value_idr
- *   est_usd = est_idr ÷ usd_to_idr
- * (The legacy usage_events.estimated_cost_usd column is never populated, so we
- * compute from credits, which are themselves derived from real provider USD cost.)
+ * Cost uses provider_model_costs × units where a row matches the event's
+ * provider + model + metadata.pricingKey; otherwise it falls back per event to
+ * credits × credit_value_idr ÷ usd_to_idr. `costSource` says which was used.
  */
 export async function getAdminUsage(): Promise<{
   aggregates: UsageAggregate[];
@@ -242,53 +233,21 @@ export async function getAdminUsage(): Promise<{
   capped: boolean;
   billingSettings: BillingSettings;
 }> {
-  const [totalEvents, billingSettings] = await Promise.all([
+  const [totalEvents, billingSettings, costs] = await Promise.all([
     countRows("usage_events"),
     getBillingSettings(),
+    // Analytics only: an unreadable cost table means every event uses the estimate.
+    listProviderModelCosts().catch(() => []),
   ]);
 
   const { data, error } = await supabaseServer
     .from("usage_events")
-    .select("tool, provider, model, units, credits_charged, estimated_cost_usd, created_at")
+    .select("tool, provider, model, units, credits_charged, metadata, created_at")
     .order("created_at", { ascending: false })
     .limit(ROW_CAP);
   if (error) throw new Error(error.message);
 
-  const map = new Map<string, UsageAggregate>();
-  for (const r of (data as {
-    tool: string;
-    provider: string | null;
-    model: string | null;
-    units: number | null;
-    credits_charged: number | null;
-    estimated_cost_usd: number | null;
-  }[] | null) ?? []) {
-    const key = `${r.tool}||${r.provider ?? ""}||${r.model ?? ""}`;
-    const agg = map.get(key) ?? {
-      tool: r.tool,
-      provider: r.provider,
-      model: r.model,
-      events: 0,
-      units: 0,
-      creditsCharged: 0,
-      estimatedCostUsd: 0,
-      estimatedCostIdr: 0,
-    };
-    agg.events += 1;
-    agg.units += r.units ?? 0;
-    agg.creditsCharged += r.credits_charged ?? 0;
-    map.set(key, agg);
-  }
-
-  // Derive money values from the summed credits using the live billing settings.
-  const aggregates = Array.from(map.values())
-    .map((agg) => {
-      const estimatedCostIdr = agg.creditsCharged * billingSettings.creditValueIdr;
-      const estimatedCostUsd =
-        billingSettings.usdToIdr > 0 ? estimatedCostIdr / billingSettings.usdToIdr : 0;
-      return { ...agg, estimatedCostIdr, estimatedCostUsd };
-    })
-    .sort((a, b) => b.events - a.events);
+  const aggregates = aggregateUsageEvents((data as UsageEventRow[] | null) ?? [], costs, billingSettings);
   return { aggregates, totalEvents, capped: totalEvents > ROW_CAP, billingSettings };
 }
 
