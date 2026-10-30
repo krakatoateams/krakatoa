@@ -101,6 +101,9 @@ export type PhotoProviderFamily =
 /** Shared Replicate slug for GPT Image 2 (Product Photo, Canvas and Storyboard fallbacks). */
 export const GPT_IMAGE_2_MODEL = "openai/gpt-image-2";
 
+/** Replicate slug for the Photo GPT Image tier only (storyboard stays on GPT_IMAGE_2_MODEL). */
+export const GPT_IMAGE_2_5_FLARE_MODEL = "openai/gpt-image-2.5-flare";
+
 export const DEFAULT_PRODUCT_PHOTO_TIER: ProductPhotoModelTier = "basic";
 export const DEFAULT_PRODUCT_PHOTO_RESOLUTION: ProductPhotoResolution = "1k";
 export const DEFAULT_PRODUCT_PHOTO_QUALITY: ProductPhotoQuality = "medium";
@@ -370,11 +373,11 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
   },
   {
     id: "gpt_image_2",
-    label: "GPT Image 2",
+    label: "GPT Image 2.5 Flare",
     subtitle: "Reference + text-to-image",
-    modelLabel: "GPT Image 2",
+    modelLabel: "GPT Image 2.5 Flare",
     modelRole: "image_gpt_image_2",
-    providerModel: GPT_IMAGE_2_MODEL,
+    providerModel: GPT_IMAGE_2_5_FLARE_MODEL,
     hasResolution: false,
     // No resolution input on the provider and no fixed-size claim: no read-only chip.
     resolutions: [],
