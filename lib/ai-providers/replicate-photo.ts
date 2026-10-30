@@ -10,6 +10,7 @@ export function createReplicatePhotoProvider(): PhotoProvider {
   const replicate = createReplicateClient();
   return {
     id: "replicate",
+    commitsOnSubmit: false,
     uploadReference: (file) => uploadProductImageToReplicate(replicate, file),
     run: async ({ model, input, hooks, maxRetries = 10 }) =>
       extractMediaUrl(await runWithRetry(replicate, model, { input }, maxRetries, hooks)),

@@ -787,7 +787,7 @@ export async function POST(req: Request) {
       await endStep({ devBlank: true });
     } else {
       // Provider client is created only after the spend has succeeded.
-      provider = getPhotoProvider();
+      provider = getPhotoProvider(photoModel.provider);
       // Predictions are recorded with the provider that created them so cancel routes by it.
       photoHooks = makeReplicateCancelHooks({
         generationRequestId,
@@ -808,7 +808,7 @@ export async function POST(req: Request) {
       if (filesToUpload.length > 0) {
         await beginStep(
           "reference_upload",
-          `Upload ${filesToUpload.length} reference image(s) to Replicate`
+          `Upload ${filesToUpload.length} reference image(s) to ${provider.id === "fal" ? "Fal" : "Replicate"}`
         );
         console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
         for (const f of filesToUpload) {
@@ -864,11 +864,21 @@ export async function POST(req: Request) {
           blankImageBuffer.byteOffset + blankImageBuffer.byteLength
         ) as ArrayBuffer;
       } else {
+        // A provider whose cancel is only a request (Fal) is committed at submit: cancel locks and no refund after.
+        const runHooks = provider!.commitsOnSubmit
+          ? {
+              ...photoHooks,
+              onPrediction: (tick: { id: string; status: string }) => {
+                photoHooks?.onPrediction?.(tick);
+                void commitProviderOnce().catch(() => undefined); // awaited again below, which rethrows
+              },
+            }
+          : photoHooks;
         const generatedImageUrl = await provider!.run({
           model: photoModelRef,
           input: providerInput!,
           maxRetries: 10,
-          hooks: photoHooks,
+          hooks: runHooks,
         });
         if (!generatedImageUrl.startsWith("http")) {
           throw new Error("Nano Banana did not return a valid image URL");

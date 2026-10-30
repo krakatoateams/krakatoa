@@ -156,7 +156,7 @@ const replicateUtils = readFileSync(
 );
 assert.doesNotMatch(
   replicateUtils,
-  /REPLICATE_API_TOKEN is not set/,
+  /REPLICATE_API_TOKEN is not set|FAL_KEY is not (?:set|configured)/,
   "provider configuration errors must not expose environment variable names"
 );
 
@@ -247,7 +247,7 @@ for (const source of secondarySources) {
   );
   assert.doesNotMatch(
     source,
-    /REPLICATE_API_TOKEN is not configured|RENDI_API_KEY is not set/,
+    /REPLICATE_API_TOKEN is not configured|FAL_KEY is not (?:set|configured)|RENDI_API_KEY is not set/,
     "secondary responses must not expose environment variable names"
   );
 }
