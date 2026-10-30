@@ -73,9 +73,12 @@ parameters together). Effective within 60 s. SQL fallback:
 update model_configs set provider='replicate', model='<replicate model>', parameters='{}' where tool_key='photo' and config_key='<config_key>';
 ```
 
-Migrations: 113-114 (`provider` columns for model config and `generation_predictions`) are applied in
-prod and required. 115-117 (Fal Nano Banana cost rows, Fal GPT Flare cost rows, admin config audit log) are optional and are
-NOT applied in prod; the app tolerates their absence (margin figures stay unknown, config audit rows are skipped).
+Migrations: 113-117 are ALL applied in prod as of 2026-10-31. 113-114 (`provider` columns for model config and
+`generation_predictions`) are required; 115-117 (Fal Nano Banana cost rows, Fal GPT Flare cost rows, admin config
+audit log) are optional and now applied. The app tolerates their absence in other environments (margin figures stay
+unknown, config audit rows are skipped). Check what an environment has: `select provider from model_configs limit 1`
+(113), `select count(*) from provider_model_costs` (115/116), `select count(*) from admin_config_audit_log` (117),
+or compare `supabase/migrations/` against the environment's applied list.
 
 Replicate models: `google/nano-banana`, `google/nano-banana-2`, `google/nano-banana-pro`,
 `openai/gpt-image-2.5-flare`.
@@ -122,8 +125,24 @@ reference. Margin figures for GPT on Fal are therefore approximate; they never a
 |---|---|
 | Cancel billing (cancel mid-run, is the run billed?) | _not yet observed_ |
 | Concurrency limit of our account | _not yet observed_ |
-| Output host of real results | _not yet observed (expected `*.fal.media`)_ |
-| Signed Supabase URLs accepted as inputs | _not yet observed_ |
+| Output host of real results | `*.fal.media` (2026-10-31) |
+| Signed Supabase URLs accepted as inputs | yes (2026-10-31) |
+
+## Verified live (2026-10-31)
+
+Nano Banana (basic) on Fal WITH a reference image, in prod, end to end:
+
+- Endpoint `fal-ai/nano-banana/edit` was selected because of the reference image.
+- Fal billed 0.0398 USD, matching `provider_model_costs`.
+- A Supabase signed URL worked as a Fal input.
+- The output passed the `*.fal.media` host allowlist and was copied to Storage under `{userId}/...` with the
+  `MEDIA_CACHE_CONTROL` header.
+- One spend of 4 credits, no refund; `usage_events.provider = 'fal'`.
+- `admin_config_audit_log` recorded `provider_switch` rows; anon REST reads of that table and of
+  `provider_model_costs` return nothing (RLS verified).
+
+Still NOT verified live: other tiers on Fal, the text-to-image endpoint, GPT Flare on Fal (including 16:9 / 9:16),
+failure behavior and Fal billing of failed runs, cancel behavior.
 
 ## Backlog (separate issues)
 
