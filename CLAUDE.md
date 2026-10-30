@@ -46,8 +46,10 @@ keeps only the rules needed on most engineering tasks.
   The one post-commit exception is a definitive provider failure (Fal reports an
   explicit failed status, no output): `shouldRefundSpentCreditsAfterFailure()`.
   Ambiguous outcomes (timeout, network loss, abort) stay locked; the job is
-  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and reconcile refunds it
-  (same idempotency key as the route) only on a Fal-confirmed failure.
+  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and the daily reconcile
+  (72 h window, paged, time-budgeted) refunds it (same idempotency key as the
+  route) only on a Fal-confirmed failure; still unconfirmed after the window it
+  becomes `PROVIDER_OUTCOME_UNRESOLVED` and needs manual review.
 - Keep spend and refund idempotency keys stable.
 - Client generation keys are scoped per composer and persist across navigation;
   reuse them for identical retries, rotating only after success or input changes.

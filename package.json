@@ -41,7 +41,7 @@
     "test:auth": "tsx lib/auth-session-self-check.ts",
     "test:public-auth-flow": "tsx lib/public-route-policy-self-check.ts && tsx lib/public-auth-flow-self-check.ts && tsx lib/auth-session-self-check.ts && tsx lib/pending-form-draft-self-check.ts",
     "test:dependency-security": "tsx lib/dependency-security-self-check.ts",
-    "test:ai-provider-guard": "tsx lib/ai-provider-guard-self-check.ts && tsx lib/ai-providers/cancel-by-provider-self-check.ts && tsx lib/ai-providers/fal-photo-self-check.ts && tsx lib/ai-providers/photo-e2e-self-check.ts && tsx lib/admin-fal-health.ts && tsx lib/admin-provider-switch-self-check.ts",
+    "test:ai-provider-guard": "tsx lib/ai-provider-guard-self-check.ts && tsx lib/ai-providers/cancel-by-provider-self-check.ts && tsx lib/ai-providers/fal-photo-self-check.ts && tsx lib/ai-providers/photo-e2e-self-check.ts && tsx lib/generation-reconcile-scan-self-check.ts && tsx lib/admin-fal-health.ts && tsx lib/admin-provider-switch-self-check.ts",
     "test:client-secret-boundary": "tsx lib/client-secret-boundary-self-check.ts",
     "test:internal-routes": "tsx lib/internal-route-obscurity-self-check.ts && tsx lib/dev-blank-generation-self-check.ts",
     "test:scheduler-carousel": "tsx lib/scheduler-carousel-pure.ts",
