@@ -128,6 +128,7 @@ export async function POST(req: Request) {
   // refund when generation fails after a successful spend. `creditsSpent` is
   // the gate; without it the catch block must NOT refund (no spend = no debt).
   let creditsSpent = false;
+  let provider: PhotoProvider | null = null;
   let creditsAmount = 0;
   // Request-level idempotency row id (Double-Charge Protection v1).
   let generationRequestId: string | null = null;
@@ -779,7 +780,6 @@ export async function POST(req: Request) {
 
     let blankImageBuffer: Buffer | null = null;
     let providerInput: Record<string, unknown> | null = null;
-    let provider: PhotoProvider | null = null;
     let photoHooks: ReturnType<typeof makeReplicateCancelHooks>;
 
     if (devBlank) {
@@ -1117,6 +1117,7 @@ export async function POST(req: Request) {
         pricingMissing,
         // A definitive provider failure refunds even after a commit-on-submit lock (policy: generation-commit-pure).
         definitiveProviderFailure: !cancelled && isProviderDefinitiveFailure(error),
+        commitsOnSubmit: !!provider?.commitsOnSubmit,
         rawMessage,
         currentStepId,
         clearCurrentStep: () => {

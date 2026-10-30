@@ -1,6 +1,9 @@
 import { buildRecoverableGenerationJson } from "@/lib/generation-idempotency-pure";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
-import { RECOVERABLE_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
+import {
+  PROVIDER_OUTCOME_UNKNOWN_CODE,
+  RECOVERABLE_GENERATION_CLIENT_ERROR,
+} from "@/lib/generation-client-error";
 import { resolveMeteredSettlement } from "./settlement-pure";
 import type { MeteredSettlementLegacyOpts } from "./settlement";
 import type { MeteredSettlementOptions } from "./types";
@@ -117,6 +120,8 @@ export type FinishMeteredTerminalInput = {
   pricingMissing?: boolean;
   /** Provider explicitly reported failure (no output): refund despite the commit lock. */
   definitiveProviderFailure?: boolean;
+  /** Provider commits on submit (Fal): unconfirmed failures stay held and are tagged for reconcile. */
+  commitsOnSubmit?: boolean;
   rawMessage: string;
   currentStepId?: string | null;
   clearCurrentStep?: () => void;
@@ -530,6 +535,7 @@ export async function finishMeteredAttemptWithOps(
     creditsSpent: handle.creditsSpent,
     commitLocked,
     definitiveProviderFailure: terminal ? !!outcome.definitiveProviderFailure : false,
+    commitsOnSubmit: terminal ? !!outcome.commitsOnSubmit : false,
     creditsAmount: handle.creditsAmount,
     hasProfileId: true,
     hasJobId: !!handle.jobId,
@@ -563,7 +569,8 @@ export async function finishMeteredAttemptWithOps(
     terminal &&
     outcome.clientErrorOverride &&
     plan.kind !== "cancelled" &&
-    plan.kind !== "recoverable"
+    plan.kind !== "recoverable" &&
+    plan.errorJson.code !== PROVIDER_OUTCOME_UNKNOWN_CODE
   ) {
     httpBody = outcome.pricingMissing
       ? { error: outcome.clientErrorOverride, code: "PRICING_CONFIG_MISSING" }

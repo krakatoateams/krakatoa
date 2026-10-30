@@ -7,6 +7,8 @@ import type {
 import {
   CANCELLED_GENERATION_CLIENT_ERROR,
   GENERIC_GENERATION_CLIENT_ERROR,
+  PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR,
+  PROVIDER_OUTCOME_UNKNOWN_CODE,
   PRICING_GENERATION_CLIENT_ERROR,
   RECOVERABLE_GENERATION_CLIENT_ERROR,
 } from "@/lib/generation-client-error";
@@ -128,12 +130,18 @@ export function resolveMeteredSettlement(
     input.hasJobId &&
     !recoverable &&
     (!opts.requireJobTypeForRefund || !!input.hasJobType);
-  const { httpStatus, httpBody } = resolveHttp(
-    kind,
-    message,
-    input,
-    refundEligible
-  );
+  const outcomeUnknown =
+    kind === "generic_failure" &&
+    !!input.commitsOnSubmit &&
+    !refundEligible &&
+    input.creditsSpent &&
+    input.creditsAmount > 0 &&
+    input.commitLocked &&
+    input.hasProfileId &&
+    input.hasJobId;
+  const { httpStatus, httpBody } = outcomeUnknown
+    ? { httpStatus: 500 as const, httpBody: { error: PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR, code: PROVIDER_OUTCOME_UNKNOWN_CODE } }
+    : resolveHttp(kind, message, input, refundEligible);
 
   const failureReason = opts.failureRefundReason ?? "generation_failed";
 
@@ -146,7 +154,9 @@ export function resolveMeteredSettlement(
   return {
     kind,
     message,
-    errorJson,
+    errorJson: outcomeUnknown
+      ? { message: PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR, code: PROVIDER_OUTCOME_UNKNOWN_CODE }
+      : errorJson,
     httpStatus,
     httpBody,
     failAsset: !!input.hasAsset && !recoverable && !input.skipFailAsset,

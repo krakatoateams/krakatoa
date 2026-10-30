@@ -20,6 +20,8 @@ import {
 } from "../generation-commit-pure";
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
 import { FAL_PRESET_DIMENSIONS, isValidFalCustomSize, mapFalPhotoInput } from "./fal-photo-catalog";
+import { PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR, PROVIDER_OUTCOME_UNKNOWN_CODE } from "../generation-client-error";
+import { photoRefundIdempotencyKey, reconcileSettledProviderFailure, type SettledFailureOps } from "../generation-reconcile-settled";
 import { cancelByRecordedProvider } from "./cancel-by-provider";
 import type { PhotoProvider } from "./photo-provider";
 import {
@@ -43,7 +45,7 @@ const FAL_MODEL: Record<string, string> = {
 const RATIOS: PhotoAspectRatio[] = ["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"];
 const HOST_OK = "https://v3.fal.media/files/out.png";
 
-type Ledger = { events: string[]; balance: number; refundKeys?: Set<string> };
+type Ledger = { events: string[]; balance: number; refundKeys?: Set<string>; errorCode?: string; clientError?: string };
 
 type RunResult = { status: 200 | 402 | 409 | 500; url?: string; error?: string; locked: boolean };
 
@@ -53,7 +55,8 @@ function settlementOps(ledger: Ledger, cost: number, isLocked: () => boolean): M
   return {
     isProviderCommitLocked: async () => isLocked(),
     resolveMeteredSettlement,
-    persistMeteredSettlementLegacy: async (plan: { refundEligible: boolean }, ctx: Record<string, unknown>) => {
+    persistMeteredSettlementLegacy: async (plan: { refundEligible: boolean; errorJson: { code?: string } }, ctx: Record<string, unknown>) => {
+      ledger.errorCode = plan.errorJson.code; // what failJob would persist on the job row
       if (!plan.refundEligible) return { refunded: false };
       const key = `refund:${String(ctx.refundJobType)}:${String(ctx.jobId)}`;
       ledger.refundKeys ??= new Set();
@@ -116,9 +119,11 @@ async function chargedRun(
       cancelled,
       rawMessage: e instanceof Error ? e.message : "failed",
       definitiveProviderFailure: !cancelled && isProviderDefinitiveFailure(e),
+      commitsOnSubmit: provider.commitsOnSubmit,
     };
     const finished = await finishMeteredAttemptWithOps(handle, outcome, ops);
     if (settleTwice) await finishMeteredAttemptWithOps(handle, outcome, ops);
+    ledger.clientError = String((finished.http?.body as { error?: unknown } | undefined)?.error);
     return { status: (finished.http?.status ?? 500) as 409 | 500, error: outcome.rawMessage, locked };
   }
 }
@@ -245,6 +250,40 @@ async function main(): Promise<void> {
       for (const [name, go, ledger] of ambiguous) {
         const r = await go();
         assert(r.locked && r.status !== 200 && ledger.events.join() === "spend" && ledger.balance === 45, `${tier.id}/${name}: ambiguous Fal outcome keeps credits and stays locked`);
+        // The route settled the job failed: it is tagged for reconcile and the user is not told it was refunded.
+        assert(ledger.errorCode === PROVIDER_OUTCOME_UNKNOWN_CODE && ledger.clientError === PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR, `${tier.id}/${name}: held failure is tagged and honestly worded`);
+        // Reconcile of that failed job, real decision fn: only a Fal-confirmed failure refunds, exactly once.
+        for (const [fate, falStatus, expectRefund] of [
+          ["confirmed", "status_error", true],
+          ["succeeded", "none", false],
+          ["unreachable", "network", false],
+        ] as const) {
+          const l: Ledger = { events: ["spend"], balance: 45, refundKeys: new Set() };
+          const fal = fakeFal([], HOST_OK, falStatus === "network" ? "none" : falStatus);
+          if (falStatus === "network") fal.queue.status = async () => { throw new Error("fetch failed"); };
+          const provider = createFalPhotoProvider(fal, 0);
+          const reconcileOps: SettledFailureOps = {
+            hasRefund: async () => l.events.includes("refund"),
+            spendAmount: async () => 5,
+            getRequestId: async () => "req-1",
+            isCommitLocked: async () => true,
+            confirmsFailure: async () => { try { return (await provider.getPredictionStatus("r1@fal-ai/nano-banana")).status === "failed"; } catch { return false; } },
+            refund: async (p) => {
+              if (l.refundKeys!.has(p.idempotencyKey)) return;
+              l.refundKeys!.add(p.idempotencyKey);
+              l.balance += p.amount;
+              l.events.push("refund");
+            },
+          };
+          const job = { id: "job-1", profileId: "p", costCredits: 5 };
+          await reconcileSettledProviderFailure(reconcileOps, job);
+          await reconcileSettledProviderFailure(reconcileOps, job); // cron re-runs
+          assert(l.events.join() === (expectRefund ? "spend,refund" : "spend") && l.balance === (expectRefund ? 50 : 45), `${tier.id}/${name}/${fate}: reconcile of settled failed job`);
+          if (expectRefund) {
+            // The route (or a late duplicate) refunding with its own key after reconcile cannot double refund.
+            assert(l.refundKeys!.has(`refund:product_photo:job-1`) && photoRefundIdempotencyKey("job-1") === `refund:product_photo:job-1`, `${tier.id}/${name}: reconcile shares the route refund key`);
+          }
+        }
       }
     }
     // Output produced but untrusted host: output exists => never refunded here.
@@ -263,6 +302,20 @@ async function main(): Promise<void> {
       const failedStatus = await createFalPhotoProvider(fakeFal([], HOST_OK, "status_error"), 0).getPredictionStatus("r1@fal-ai/nano-banana");
       const okStatus = await createFalPhotoProvider(fakeFal([]), 0).getPredictionStatus("r1@fal-ai/nano-banana");
       assert(failedStatus.status === "failed" && okStatus.status === "succeeded", `${tier.id}: getPredictionStatus surfaces Fal failure`);
+      // COMPLETED without `error` (unverified live): result() ApiError 4xx is definitive; 5xx/429/network never are.
+      for (const [label, err, definitive] of [
+        ["422", new ApiError({ message: "bad", status: 422, body: {} }), true],
+        ["500", new ApiError({ message: "x", status: 500, body: {} }), false],
+        ["504", new ApiError({ message: "x", status: 504, body: {} }), false],
+        ["429", new ApiError({ message: "x", status: 429, body: {} }), false],
+        ["network", new Error("fetch failed"), false],
+      ] as const) {
+        const fal = fakeFal([]);
+        fal.queue.result = async () => { throw err; };
+        let st = "threw";
+        try { st = (await createFalPhotoProvider(fal, 0).getPredictionStatus("r1@fal-ai/nano-banana")).status; } catch { /* ambiguous */ }
+        assert((st === "failed") === definitive && (definitive || st === "threw"), `${tier.id}: reconcile status for result() ${label}`);
+      }
     }
     // Batch partial refunds follow the same policy.
     assert(shouldRefundFailedBatchImage({ commitsOnSubmit: false, definitiveProviderFailure: false }), "replicate batch image refunds");

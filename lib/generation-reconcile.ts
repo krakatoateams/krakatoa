@@ -16,9 +16,13 @@ import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 import { listPredictionIdsByProvider } from "@/lib/generation-cancel";
 import { getPhotoProviderById } from "@/lib/ai-providers";
+import { PROVIDER_OUTCOME_UNKNOWN_CODE } from "@/lib/generation-client-error";
+import { reconcileSettledProviderFailure } from "@/lib/generation-reconcile-settled";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
+/** How long a route-settled ambiguous Fal failure stays eligible for a reconcile refund. */
+const SETTLED_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 export type GenerationReconcileResult = {
   /** Rows past the stale cutoff that were examined, acted on or not. */
@@ -218,6 +222,39 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
         });
       } catch (e) {
         result.errors.push(`job ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  // Fal runs the route settled as failed with credits held (ambiguous outcome): refund only on a
+  // Fal-confirmed failure. Bounded: tagged code, 24h lookback, limited.
+  const { data: settledJobs, error: settledError } = await supabaseServer
+    .from("jobs")
+    .select("id, profile_id, cost_credits")
+    .eq("status", "failed")
+    .eq("error->>code", PROVIDER_OUTCOME_UNKNOWN_CODE)
+    .lt("updated_at", new Date(Date.now() - RECONCILE_BUFFER_MS).toISOString())
+    .gt("updated_at", new Date(Date.now() - SETTLED_LOOKBACK_MS).toISOString())
+    .limit(50);
+  if (settledError) {
+    result.errors.push(`settled jobs query: ${settledError.message}`);
+  } else {
+    for (const row of (settledJobs as { id: string; profile_id: string; cost_credits?: number }[] | null) ?? []) {
+      try {
+        const outcome = await reconcileSettledProviderFailure(
+          {
+            hasRefund: hasRefundForJob,
+            spendAmount: spendAmountForJob,
+            getRequestId: async (profileId, jobId) => (await getGenerationRequestForJob(profileId, jobId))?.id ?? null,
+            isCommitLocked: isProviderCommitLocked,
+            confirmsFailure: providerConfirmsDefinitiveFailure,
+            refund: refundCredits,
+          },
+          { id: row.id, profileId: row.profile_id, costCredits: row.cost_credits ?? 0 },
+        );
+        if (outcome === "refunded") result.refundedJobs += 1;
+      } catch (e) {
+        result.errors.push(`settled job ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }

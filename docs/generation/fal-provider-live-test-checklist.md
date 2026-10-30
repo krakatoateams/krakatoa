@@ -33,3 +33,13 @@ Switch one tier at a time in Admin → Config v2 (see [runbook](fal-provider-run
 - [ ] Monitoring shows the provider per job; forced Fal failure shows the amber banner.
 - [ ] Fal dashboard cost per call is in line with `provider_model_costs` (edits cost more).
 - [ ] `FAL_KEY` does not appear in client bundles or logs.
+
+## Verify live: failed requests
+
+- [ ] What does a failed Fal request return: queue status `COMPLETED` + `error`/`error_type` (the
+      adapter's primary signal, not in the `@fal-ai/client` `QueueStatus` type), or only a `result()`
+      ApiError? Record status code and body shape; reconcile treats a 4xx ApiError as failed and
+      5xx/408/429/network as ambiguous.
+- [ ] Is a failed Fal run billed by Fal? (Check the billing dashboard after a forced failure.)
+- [ ] Force an ambiguous route failure (kill network mid-poll): job shows the "verifying" message, credits
+      stay held, and one reconcile run refunds exactly once if Fal reports failure.

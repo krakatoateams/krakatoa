@@ -7,10 +7,16 @@ export const RECOVERABLE_GENERATION_CLIENT_ERROR =
 export const PRICING_GENERATION_CLIENT_ERROR =
   "Pricing configuration is unavailable.";
 
+/** Fal run settled in the route with credits held; reconcile refunds if Fal confirms the failure. */
+export const PROVIDER_OUTCOME_UNKNOWN_CODE = "PROVIDER_OUTCOME_UNKNOWN";
+export const PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR =
+  "We couldn't confirm the result with the provider. We're verifying it; credits are returned automatically if the run failed.";
+
 const CLIENT_ERROR_BY_CODE: Record<string, string> = {
   GENERATION_CANCELLED: CANCELLED_GENERATION_CLIENT_ERROR,
   PIPELINE_RECOVERABLE: RECOVERABLE_GENERATION_CLIENT_ERROR,
   PRICING_CONFIG_MISSING: PRICING_GENERATION_CLIENT_ERROR,
+  [PROVIDER_OUTCOME_UNKNOWN_CODE]: PROVIDER_OUTCOME_UNKNOWN_CLIENT_ERROR,
   INSUFFICIENT_CREDITS: "Insufficient credits.",
   // Editor export failure reasons are sanitized and fixed, so they are safe to show verbatim.
   ...EDITOR_EXPORT_ERRORS,

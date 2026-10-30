@@ -40,6 +40,8 @@ export type MeteredSettlementInput = {
   commitLocked: boolean;
   /** Provider explicitly reported failure with no output: refunds even when commitLocked. */
   definitiveProviderFailure?: boolean;
+  /** Commit-on-submit provider (Fal): an ambiguous failure that keeps credits held is tagged for reconcile. */
+  commitsOnSubmit?: boolean;
   creditsAmount: number;
   hasProfileId: boolean;
   hasJobId: boolean;
