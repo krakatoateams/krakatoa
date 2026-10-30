@@ -13,8 +13,9 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   Cancel and status polling use the RECORDED provider, never the current config.
 - Credit price per feature stays one `credit_amount`. Per-provider cost
   (`provider_model_costs`, migrations 115/116) is for margin and analytics only.
-- Fal is treated as a provider commit at submit: a Fal cancel is only a request, so cancel locks
-  (`cancel_allowed=false`) and a cancel after submit is rejected.
+- Fal cancel is best-effort, see "Photo cancel on Fal" below: submit is NOT a commit while the request is queued;
+  the attempt locks (`cancel_allowed=false`) when Fal reports IN_PROGRESS, the status is ambiguous, a cancel is not
+  confirmed, or output arrives.
 - Refund policy after submit (one place: `shouldRefundSpentCreditsAfterFailure` in
   `lib/generation-commit-pure.ts`): a DEFINITIVE Fal failure refunds exactly once (Fal queue status
   `COMPLETED` with `error`, or `queue.result()` throws a Fal `ApiError`). An AMBIGUOUS outcome (timeout
@@ -119,11 +120,87 @@ has text-to-image rows only (keyed to the t2i endpoint, 1024x1024). Edit calls (
 cost more: roughly $0.014 / $0.022 / $0.061 for low / medium / high plus about $0.008-0.012 per
 reference. Margin figures for GPT on Fal are therefore approximate; they never affect what users pay.
 
+## Photo cancel on Fal (best-effort, #421)
+
+### Fal facts (read from Fal's official docs and OpenAPI on 2026-10-31; nothing here was exercised live)
+
+Sources: [Queue docs](https://fal.ai/docs/model-apis/model-endpoints/queue) and the
+[queue OpenAPI](https://fal.ai/docs/api-reference/inference-api/openapi/queue.json).
+
+| Item | Status |
+|---|---|
+| `PUT https://queue.fal.run/{owner}/{app}/requests/{id}/cancel` on a request IN_QUEUE: HTTP 200 `{"status":"OK"}`, "fal removed it, and it does not run" | VERIFIED (docs) |
+| Cancel on IN_PROGRESS: HTTP 202 `{"status":"CANCELLATION_REQUESTED"}`, a signal to the runner, "the request can still complete" | VERIFIED (docs) |
+| Cancel on a finished request: HTTP 400 `{"status":"ALREADY_COMPLETED"}`; unknown id or other account: 404 `NOT_FOUND` | VERIFIED (docs) |
+| Queue status values `IN_QUEUE`, `IN_PROGRESS`, `COMPLETED`; "A failed or cancelled request also has the status COMPLETED" (no distinct cancelled status) | VERIFIED (OpenAPI) |
+| Result of a cancelled request: HTTP 499 "The request was cancelled" (only in the OpenAPI, not on the Queue page) | VERIFIED (OpenAPI), UNVERIFIED live |
+| What the status endpoint returns right after a queued request was removed (still IN_QUEUE? COMPLETED? 404?) | UNVERIFIED (not documented) |
+| Whether a cancelled request is billed | UNVERIFIED (not documented; the Serverless pricing page was not read) |
+| `@fal-ai/client` 1.10.1 `queue.cancel()` returns `Promise<void>`: it discards the body, succeeds on 200/202 and throws `ApiError` on 400/404 | VERIFIED (client source, docs). 200 vs 202 cannot be told apart through the client |
+
+Consequences: our adapter reads the raw cancel answer through a capturing `fetch` (`createFalPhotoProvider`), treats ONLY
+200 `OK` as a removal, and still requires a follow-up read that shows no output before refunding. Everything unverified
+is designed for the worst case: a cancel that is not honored behaves like before (run completes, user charged) plus a
+message.
+
+### Definition of "commit" for Fal
+
+Submit is NOT a commit while the request is queued. The attempt commits (`cancel_allowed=false`) when Fal reports
+`IN_PROGRESS`, when a status read fails (ambiguous), when a cancel is not confirmed (202, 400, error, unknown, or an
+output exists after a 200), or on COMPLETED/any output. `PhotoProvider.cancelWhileQueued` (Fal true, Replicate false)
+says the adapter owns cancel and the lock timing. `commitsOnSubmit` keeps only its settlement meaning: a failure after
+submit is ambiguous, so only a definitive Fal failure refunds (`shouldRefundFailedBatchImage`, reconcile,
+`settlement-pure`, unchanged #411-#416 policy). Replicate behavior is unchanged.
+
+### State machine (per attempt, one `generation_requests` row)
+
+```
+QUEUED (cancel_allowed=true)
+  -- user Cancel (requestCancel: sets cancel_requested only where cancel_allowed) --> CANCEL_REQUESTED
+  -- poll sees IN_PROGRESS / COMPLETED / status error (lock CAS: cancel_allowed=false only where
+     NOT cancel_requested) --> COMMITTED
+CANCEL_REQUESTED  (the generate route polls; the adapter is the ONLY caller of Fal cancel)
+  -- Fal 200 OK + follow-up shows no output --> CANCELLED_CONFIRMED: GenerationCancelledError, the route refunds the
+     spend once (stable `refund:product_photo:{jobId}`), job `cancelled`, no asset
+  -- 202 / 400 / error / unknown / output exists anyway --> COMMITTED (markProviderCommitted clears cancel_requested)
+COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRefundSpentCreditsAfterFailure)
+           | FAILED_AMBIGUOUS (stays locked, PROVIDER_OUTCOME_UNKNOWN, daily reconcile)
+```
+
+- The cancel-vs-commit race is decided by one atomic statement each (`requestCancel` and
+  `lockProviderUnlessCancelRequested`, mirrored by the pure `casRequestCancel` / `casLockUnlessCancelRequested`). First
+  writer wins: a cancel after the lock gets 409 `CANCEL_NOT_ALLOWED`; a lock attempt after a cancel fails and the route
+  follows the cancel outcome. No migration or RPC is involved.
+- The cancel endpoint never refunds and never calls Fal for the legacy photo path (it skips provider `fal`); a second
+  click returns `already_cancelling` with no second Fal call.
+- Never both refund and deliver; never charge without delivering (except ambiguous, which reconcile settles).
+- Batch (`imageCount > 1`): one request-level lock. Any image leaving the queue locks the whole request (cancel is
+  409, all images are charged). Cancel while every image is queued cancels all and refunds the whole spend once. If the
+  cancel races an image that just started, that image commits and delivers; the images Fal already removed are refunded
+  per image (`planBatchFailures`), so the user is never charged for a missing image.
+- Trace: every attempt is kept as a finished job step (admin job timeline): `cancel_requested`, `cancel_refused`
+  (reason `committed` / `raced_with_commit`) from the cancel endpoint, and `cancel_outcome` (`result`, `confirmed`,
+  Fal status) from the generate route, plus a log line. No new column.
+- UI: a 409 `CANCEL_NOT_ALLOWED` shows "Generation already started and can't be cancelled. Credits are used." in the
+  form's error banner and the button becomes "Finalizing…" at once; other cancel failures show "Couldn't cancel. Please
+  try again."
+
+### Live test steps for the cancel (run by hand, record results in the table below)
+
+1. Queued cancel: submit a Photo job and press Cancel within the first second or two (before Fal reports IN_PROGRESS;
+   a busy model or a batch of 4 helps). Expect: job `cancelled`, credits refunded once, no asset, `cancel_outcome` step
+   with `result: removed, confirmed: true`. Record what Fal's status/result returned afterwards and whether Fal billed.
+2. Running cancel: press Cancel after the job is processing. Expect: the notice, "Finalizing…", the image arrives,
+   one spend and no refund, `cancel_refused` step. Check Fal usage to see whether the run was billed (normal).
+3. Race: spam Cancel around the moment the run starts. Expect exactly one of: refund and no image, or image and charge;
+   never both and never neither. Look at the job's `cancel_*` steps and the credit ledger.
+4. Batch of 2+ images: cancel while queued (full refund) and after one started (409, charged for all).
+
 ## Observed behavior (fill in during the live run)
 
 | Fact | Observed |
 |---|---|
-| Cancel billing (cancel mid-run, is the run billed?) | _not yet observed_ |
+| Cancel billing (cancel mid-run, is the run billed?) | _not yet observed_ (see "Photo cancel on Fal", live tests 2 and 3) |
 | Concurrency limit of our account | _not yet observed_ |
 | Output host of real results | `*.fal.media` (2026-10-31) |
 | Signed Supabase URLs accepted as inputs | yes (2026-10-31) |
@@ -148,9 +225,8 @@ no `PROVIDER_OUTCOME_*` codes.
   high, 2 at low), including one 16:9 GPT job.
 - Runs were done with and without a reference image, per the tester (no per-job endpoint split claimed).
 - Exactly one spend per job, no refunds. Fal latency 18-43 s.
-- Cancel after Fal submit returns 409 `CANCEL_NOT_ALLOWED` (by design: `cancel_allowed=false` from submit). The UI
-  swaps Cancel for "Finalizing..." once locked, but a click before the poll flips it is silently ignored (known UX gap,
-  follow-up planned).
+- (Historical, before #421) Cancel after Fal submit returned 409 `CANCEL_NOT_ALLOWED` because `cancel_allowed=false`
+  was set at submit, and the click was silently ignored in the UI. Superseded by "Photo cancel on Fal".
 - `assets.file_size_bytes` / `width` / `height` are NULL for ALL photo assets on both providers (normal; nothing reads
   them for photos).
 

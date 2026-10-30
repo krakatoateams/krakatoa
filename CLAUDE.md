@@ -61,7 +61,11 @@ keeps only the rules needed on most engineering tasks.
 ### Cancellation and recovery
 
 - The generate route owns in-flight refunds; the cancel endpoint does not.
-- `cancel_allowed=false` after provider commit.
+- `cancel_allowed=false` after provider commit. For Fal photo, submit is not a commit while
+  queued: commit is Fal `IN_PROGRESS`, an ambiguous status, an unconfirmed cancel, or any
+  output. A queued Fal request can be cancelled only when Fal confirms removal (200 `OK`); the
+  generate route then refunds once. Otherwise cancel is 409 `CANCEL_NOT_ALLOWED` and the run is
+  charged. Cancel-vs-commit is one atomic compare-and-set; the cancel endpoint never calls Fal.
 - Recoverable jobs retain credits for retry. Delegate terminal refund decisions
   to `shouldRefundRecoverableTerminal()`.
 - Durable jobs choose legacy or workflow execution once and never switch.

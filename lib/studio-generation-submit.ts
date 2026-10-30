@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGenerationStatusPoll } from "@/lib/use-generation-status-poll";
 import { useIdempotentSubmit } from "@/lib/use-idempotent-submit";
+import { cancelUiState } from "@/lib/generation-cancel-client-pure";
 import {
   createStudioGenerationSubmitLock,
   guardStudioGenerationSubmitEffects,
@@ -34,8 +35,11 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
     resumeStillFailingMessage,
   } = config;
 
-  const { begin, cancel, cancelling, activeKey } = useIdempotentSubmit(idempotencyScope);
-  const { cancelAllowed, phase } = useGenerationStatusPoll(activeKey);
+  const { begin, cancel: cancelRequest, cancelling, activeKey } = useIdempotentSubmit(idempotencyScope);
+  const { cancelAllowed: pollCancelAllowed, phase } = useGenerationStatusPoll(activeKey);
+  // A 409 on Cancel means the run already started: show "Finalizing…" now instead of waiting for the poll.
+  const [cancelRefused, setCancelRefused] = useState(false);
+  const cancelAllowed = pollCancelAllowed && !cancelRefused;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +69,16 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
     [clearError, refetchCredits, refreshHistory, openPreviewFromResponse],
   );
 
+  // The notice reuses the form's inline error banner (role="alert"), which the run's outcome clears.
+  const cancel = useCallback(async () => {
+    const result = await cancelRequest();
+    const { refused, notice } = cancelUiState(result);
+    if (!mountedRef.current) return result;
+    if (refused) setCancelRefused(true);
+    if (notice) setError(notice);
+    return result;
+  }, [cancelRequest]);
+
   const submit: StudioGenerationSubmitFn = useCallback(
     async (signature, execute, options = {}) => {
       const attempt = begin(signature);
@@ -72,6 +86,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
       setLoading(true);
       setError(null);
+      setCancelRefused(false);
       setRecoverableJobId(null);
 
       try {

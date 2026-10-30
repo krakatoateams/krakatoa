@@ -37,7 +37,7 @@ export type CanvasRunOutcome = "done" | "failed" | "cancelled" | "insufficient" 
 
 export type CanvasNodeRunner = {
   run: (options: { chain: boolean }) => Promise<CanvasRunOutcome>;
-  cancel: () => Promise<boolean>;
+  cancel: () => Promise<unknown>;
   /** Credits this node's Generate would spend right now. */
   cost: () => number;
   /** Reason the node can't run once `pending` nodes have produced output, or null. */

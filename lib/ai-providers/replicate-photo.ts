@@ -11,6 +11,7 @@ export function createReplicatePhotoProvider(): PhotoProvider {
   return {
     id: "replicate",
     commitsOnSubmit: false,
+    cancelWhileQueued: false,
     uploadReference: (file) => uploadProductImageToReplicate(replicate, file),
     run: async ({ model, input, hooks, maxRetries = 10 }) =>
       extractMediaUrl(await runWithRetry(replicate, model, { input }, maxRetries, hooks)),
