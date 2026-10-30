@@ -1,5 +1,6 @@
 import { createFalClient } from "@fal-ai/client";
-import { GenerationCancelledError } from "./errors";
+import { ApiError } from "@fal-ai/client";
+import { GenerationCancelledError, ProviderDefinitiveFailureError } from "./errors";
 import {
   decodeFalPredictionId,
   encodeFalPredictionId,
@@ -12,7 +13,7 @@ import type { PhotoProvider } from "./photo-provider";
 export type FalQueueLike = {
   queue: {
     submit(endpoint: string, o: { input: Record<string, unknown> }): Promise<{ request_id: string }>;
-    status(endpoint: string, o: { requestId: string }): Promise<{ status: string }>;
+    status(endpoint: string, o: { requestId: string }): Promise<{ status: string; error?: string }>;
     result(endpoint: string, o: { requestId: string }): Promise<{ data: unknown }>;
     cancel(endpoint: string, o: { requestId: string }): Promise<void>;
   };
@@ -57,7 +58,9 @@ export function createFalPhotoProvider(
       hooks?.onPrediction?.({ id, status: "starting" });
       // ponytail: no overall deadline; the route's maxDuration bounds the wait. Add one if Fal queues stall.
       for (;;) {
-        const { status } = await fal.queue.status(endpoint, { requestId });
+        const { status, error } = await fal.queue.status(endpoint, { requestId });
+        // Fal reports a failed request as COMPLETED + error: a definitive failure, no output.
+        if (status === "COMPLETED" && error) throw new ProviderDefinitiveFailureError();
         hooks?.onPrediction?.({ id, status: TICK_STATUS[status] ?? "processing" });
         if (status === "COMPLETED") break;
         if (hooks?.abortCheck) {
@@ -72,8 +75,16 @@ export function createFalPhotoProvider(
         }
         await new Promise((r) => setTimeout(r, pollMs));
       }
-      // result() throws when the run failed.
-      return normalizeFalOutput((await fal.queue.result(endpoint, { requestId })).data);
+      // result() throws an ApiError when Fal answered that the run failed; any other throw
+      // (network loss) is ambiguous and keeps the attempt locked.
+      let data: unknown;
+      try {
+        data = (await fal.queue.result(endpoint, { requestId })).data;
+      } catch (e) {
+        if (e instanceof ApiError) throw new ProviderDefinitiveFailureError();
+        throw e;
+      }
+      return normalizeFalOutput(data);
     },
     cancelPredictions: async (ids) => {
       let cancelled = 0;
@@ -94,7 +105,8 @@ export function createFalPhotoProvider(
     getPredictionStatus: async (raw) => {
       const parsed = decodeFalPredictionId(raw);
       if (!parsed) throw new Error("Unrecognized Fal prediction id.");
-      const { status } = await fal.queue.status(parsed.endpoint, { requestId: parsed.requestId });
+      const { status, error } = await fal.queue.status(parsed.endpoint, { requestId: parsed.requestId });
+      if (status === "COMPLETED" && error) return { id: raw, status: "failed", error: "Fal reported the run failed." };
       return { id: raw, status: TICK_STATUS[status] ?? "processing" };
     },
   };

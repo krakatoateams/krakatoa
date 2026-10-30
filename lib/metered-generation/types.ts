@@ -38,6 +38,8 @@ export type MeteredSettlementInput = {
   creditsSpent: boolean;
   /** Provider output already committed; terminal failures must not refund. */
   commitLocked: boolean;
+  /** Provider explicitly reported failure with no output: refunds even when commitLocked. */
+  definitiveProviderFailure?: boolean;
   creditsAmount: number;
   hasProfileId: boolean;
   hasJobId: boolean;

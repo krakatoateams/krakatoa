@@ -26,6 +26,7 @@ assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nan
 assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { provider: "replicate", model: "google/nano-banana" }).ok, true, "rollback unit allowed");
 assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { model: "fal-ai/other" }).ok, false, "off-catalog fal model rejected");
 assert.deepEqual(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { model: "google/nano-banana-x" }), { ok: true }, "replicate model edit stays free");
+assert.deepEqual(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { parameters: { x: 1 } }), { ok: true, parameters: {} }, "free-form PATCH params on a Fal row reset to catalog");
 assert.deepEqual(photoPatchUnit("image_seedream4", { provider: "replicate", model: "a" }, { model: "b" }), { ok: true }, "non-switchable tier unconstrained");
 assert.equal(activePhotoProvider("image_basic", null), "replicate", "missing row is replicate");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "fal-ai/nano-banana", enabled: true }), "fal");

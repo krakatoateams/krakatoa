@@ -4,7 +4,7 @@ import type { PhotoProvider } from "./photo-provider";
 import { createFalPhotoProvider } from "./fal-photo";
 import { createReplicatePhotoProvider } from "./replicate-photo";
 
-export { GenerationCancelledError, isGenerationCancelled } from "./errors";
+export { GenerationCancelledError, isGenerationCancelled, isProviderDefinitiveFailure } from "./errors";
 export type { PhotoProvider, PhotoRunHooks } from "./photo-provider";
 
 /** Adapter for the resolved provider (default Replicate); throws if it is not configured. */

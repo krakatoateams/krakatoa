@@ -18,3 +18,22 @@ export function isGenerationCancelled(e: unknown): e is GenerationCancelledError
     (e instanceof Error && (e as { code?: unknown }).code === "GENERATION_CANCELLED")
   );
 }
+
+/**
+ * The provider explicitly reported this request as failed (no output produced). The only
+ * post-commit failure that still refunds; timeouts, network loss and aborts stay ambiguous.
+ */
+export class ProviderDefinitiveFailureError extends Error {
+  readonly code = "PROVIDER_DEFINITIVE_FAILURE";
+  constructor(message = "The AI provider reported that the run failed.") {
+    super(message);
+    this.name = "ProviderDefinitiveFailureError";
+  }
+}
+
+export function isProviderDefinitiveFailure(e: unknown): boolean {
+  return (
+    e instanceof ProviderDefinitiveFailureError ||
+    (e instanceof Error && (e as { code?: unknown }).code === "PROVIDER_DEFINITIVE_FAILURE")
+  );
+}

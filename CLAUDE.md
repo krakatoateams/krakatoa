@@ -43,6 +43,10 @@ keeps only the rules needed on most engineering tasks.
 - Insufficient balance returns HTTP 402 and creates no processing asset.
 - Refund post-spend terminal failures best-effort without masking the original
   error. Never refund after provider commit unless the canonical policy says so.
+  The one post-commit exception is a definitive provider failure (Fal reports an
+  explicit failed status, no output): `shouldRefundSpentCreditsAfterFailure()`.
+  Ambiguous outcomes (timeout, network loss, abort) stay locked; reconcile
+  refunds only on a Fal-confirmed failure.
 - Keep spend and refund idempotency keys stable.
 - Client generation keys are scoped per composer and persist across navigation;
   reuse them for identical retries, rotating only after success or input changes.

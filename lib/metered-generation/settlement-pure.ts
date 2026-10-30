@@ -10,6 +10,7 @@ import {
   PRICING_GENERATION_CLIENT_ERROR,
   RECOVERABLE_GENERATION_CLIENT_ERROR,
 } from "@/lib/generation-client-error";
+import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 
 const CANCELLED_MESSAGE = CANCELLED_GENERATION_CLIENT_ERROR;
 
@@ -117,11 +118,14 @@ export function resolveMeteredSettlement(
     opts.resumablePurge && (kind === "cancelled" || terminalFail) ? "purge" : "none";
 
   const refundEligible =
-    input.creditsSpent &&
-    !input.commitLocked &&
+    shouldRefundSpentCreditsAfterFailure({
+      creditsSpent: input.creditsSpent,
+      creditsAmount: input.creditsAmount,
+      commitLocked: input.commitLocked,
+      definitiveProviderFailure: input.definitiveProviderFailure,
+    }) &&
     input.hasProfileId &&
     input.hasJobId &&
-    input.creditsAmount > 0 &&
     !recoverable &&
     (!opts.requireJobTypeForRefund || !!input.hasJobType);
   const { httpStatus, httpBody } = resolveHttp(
