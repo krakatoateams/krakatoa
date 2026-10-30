@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import Replicate from "replicate";
 import { start } from "workflow/api";
+import { cancelByRecordedProvider, getPhotoProviderById } from "@/lib/ai-providers";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { getJob } from "@/lib/jobs-db";
 import {
@@ -12,8 +12,7 @@ import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { commitLockedFromCancelAllowed } from "@/lib/generation-commit-pure";
 import {
   requestCancel,
-  listPredictionIds,
-  cancelReplicatePredictions,
+  listPredictionIdsByProvider,
 } from "@/lib/generation-cancel";
 import {
   abandonRecoverableJob,
@@ -40,23 +39,17 @@ async function cancelRecordedPredictions(
   profileId: string,
   generationRequestId: string,
 ): Promise<{ predictions: number; cancelled: number }> {
-  let ids: string[] = [];
+  let idsByProvider: Record<string, string[]> = {};
   try {
-    ids = await listPredictionIds(profileId, generationRequestId);
+    idsByProvider = await listPredictionIdsByProvider(profileId, generationRequestId);
   } catch (e) {
     console.warn(
-      "[generations/cancel] listPredictionIds failed:",
+      "[generations/cancel] listPredictionIdsByProvider failed:",
       generationErrorLogSafe(e)
     );
   }
-
-  let cancelled = 0;
-  if (ids.length > 0 && process.env.REPLICATE_API_TOKEN?.trim()) {
-    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-    const res = await cancelReplicatePredictions(replicate, ids);
-    cancelled = res.cancelled;
-  }
-  return { predictions: ids.length, cancelled };
+  // Each group is cancelled by the provider recorded at submit time, never by current config.
+  return cancelByRecordedProvider(idsByProvider, getPhotoProviderById);
 }
 
 /**

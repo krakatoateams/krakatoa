@@ -3,6 +3,7 @@ import {
   GenerationCancelledError,
   type ReplicateRunHooks,
 } from "@/lib/replicate-server";
+import { groupPredictionIdsByProvider } from "@/lib/generation-cancel-pure";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -48,6 +49,8 @@ export async function recordPrediction(params: {
   jobId?: string | null;
   kind?: string;
   status?: string;
+  /** Provider that created the prediction; cancel routes by this, never by current config. */
+  provider?: string;
 }): Promise<void> {
   try {
     const { error } = await supabaseServer
@@ -60,6 +63,7 @@ export async function recordPrediction(params: {
           prediction_id: params.predictionId,
           kind: params.kind ?? null,
           status: params.status ?? "starting",
+          provider: params.provider ?? "replicate",
         },
         { onConflict: "generation_request_id,prediction_id" }
       );
@@ -87,6 +91,7 @@ export function makePredictionRecorder(params: {
   profileId: string | null;
   jobId?: string | null;
   kind?: string;
+  provider?: string;
 }): ((tick: { id: string; status: string }) => void) | undefined {
   const { generationRequestId, profileId } = params;
   if (!generationRequestId || !profileId) return undefined;
@@ -98,6 +103,7 @@ export function makePredictionRecorder(params: {
       predictionId: tick.id,
       kind: params.kind,
       status: tick.status,
+      provider: params.provider,
     });
   };
 }
@@ -112,6 +118,7 @@ export function makeReplicateCancelHooks(params: {
   profileId: string | null;
   jobId?: string | null;
   kind?: string;
+  provider?: string;
 }): ReplicateRunHooks | undefined {
   const { generationRequestId, profileId } = params;
   if (!generationRequestId || !profileId) return undefined;
@@ -196,14 +203,14 @@ export async function assertNotCancelled(
   }
 }
 
-/** List every recorded Replicate prediction id for an attempt (ownership-checked). */
-export async function listPredictionIds(
+/** Prediction ids for an attempt grouped by the provider recorded at creation (ownership-checked). */
+export async function listPredictionIdsByProvider(
   profileId: string,
   generationRequestId: string
-): Promise<string[]> {
+): Promise<Record<string, string[]>> {
   const { data, error } = await supabaseServer
     .from(PREDICTIONS_TABLE)
-    .select("prediction_id")
+    .select("prediction_id, provider")
     .eq("generation_request_id", generationRequestId)
     .eq("profile_id", profileId);
 
@@ -211,9 +218,17 @@ export async function listPredictionIds(
     if (isMissingDbObject(error.message, PREDICTIONS_TABLE)) throw missingHint();
     throw new Error(error.message || "Failed to list predictions.");
   }
-  return ((data as { prediction_id: string }[] | null) ?? [])
-    .map((r) => r.prediction_id)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  return groupPredictionIdsByProvider(
+    (data as { prediction_id: string; provider?: string | null }[] | null) ?? []
+  );
+}
+
+/** Every recorded prediction id for an attempt, any provider (ownership-checked). */
+export async function listPredictionIds(
+  profileId: string,
+  generationRequestId: string
+): Promise<string[]> {
+  return Object.values(await listPredictionIdsByProvider(profileId, generationRequestId)).flat();
 }
 
 /**

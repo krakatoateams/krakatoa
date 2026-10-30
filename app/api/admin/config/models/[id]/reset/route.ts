@@ -32,7 +32,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       enabled: def.enabled,
       is_default: def.is_default,
       parameters: def.parameters,
-    });
+    }, row);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }

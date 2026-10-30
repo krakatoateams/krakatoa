@@ -731,13 +731,6 @@ export async function POST(req: Request) {
     photoAssetIds.push(...metered.assetIds);
     photoAssetId = photoAssetIds[0] ?? null;
 
-    const replicateHooks = makeReplicateCancelHooks({
-      generationRequestId,
-      profileId,
-      jobId,
-      kind: "product_photo",
-    });
-
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
     }
@@ -786,6 +779,7 @@ export async function POST(req: Request) {
     let blankImageBuffer: Buffer | null = null;
     let providerInput: Record<string, unknown> | null = null;
     let provider: PhotoProvider | null = null;
+    let photoHooks: ReturnType<typeof makeReplicateCancelHooks>;
 
     if (devBlank) {
       await beginStep("dev_blank", "Deliver blank placeholder image (admin test)");
@@ -794,6 +788,14 @@ export async function POST(req: Request) {
     } else {
       // Provider client is created only after the spend has succeeded.
       provider = getPhotoProvider();
+      // Predictions are recorded with the provider that created them so cancel routes by it.
+      photoHooks = makeReplicateCancelHooks({
+        generationRequestId,
+        profileId,
+        jobId,
+        kind: "product_photo",
+        provider: provider.id,
+      });
 
       // Upload all reference images. Product mode leads with the required product
       // image, then any optional character image. Image mode uploads only an optional
@@ -866,7 +868,7 @@ export async function POST(req: Request) {
           model: photoModelRef,
           input: providerInput!,
           maxRetries: 10,
-          hooks: replicateHooks,
+          hooks: photoHooks,
         });
         if (!generatedImageUrl.startsWith("http")) {
           throw new Error("Nano Banana did not return a valid image URL");

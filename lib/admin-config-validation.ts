@@ -1,6 +1,7 @@
 import type { CostUnit, PricingConfigPatch, PricingType } from "@/lib/pricing-configs-db";
 import type { ModelConfigPatch } from "@/lib/model-configs-db";
 import type { ToolConfigPatch } from "@/lib/tool-configs-db";
+import { SUPPORTED_PROVIDERS, isSupportedProviderModel } from "@/lib/ai-provider-catalog";
 
 /**
  * Shared, pure validators for the Admin Config PATCH + reset endpoints
@@ -23,8 +24,6 @@ const PROVIDER_COST_USD_MAX = 1_000;
 // Currency is locked to USD for Pricing Config v2.1 (provider prices are in USD).
 const ALLOWED_CURRENCIES = new Set(["USD"]);
 
-/** Providers we currently expect. Used for a WARNING only — never a hard reject. */
-const KNOWN_PROVIDERS = new Set(["replicate", "rendi", "openai"]);
 
 /** Defense-in-depth: reject anything that looks like a secret in parameters. */
 export const SECRET_KEY_RE =
@@ -57,6 +56,18 @@ export function adminConfigValidationSelfCheck(): void {
   assert(!meta.ok, "secret keys in metadata must be rejected");
   const ok = validateModelPatch({ parameters: { guidance: 7 } });
   assert(ok.ok, "non-secret parameters must still save");
+
+  assert(!isSupportedProviderModel("fal", "x/y") && isSupportedProviderModel("replicate", "x/y"), "catalog must support replicate only for now");
+  const fal = validateModelPatch({ provider: "fal" });
+  assert(!fal.ok && /not supported/.test(fal.error), "unsupported provider must be rejected");
+  assert(validateModelPatch({ provider: "replicate", model: "google/nano-banana" }).ok, "replicate pair must save");
+  assert(!validateModelPatch({ model: "x/y" }, { provider: "fal", model: "a/b" }).ok, "partial patch is checked against the stored provider");
+  assert(validateModelPatch({ model: "x/y" }, { provider: "replicate", model: "a/b" }).ok, "model-only patch on replicate must save");
+  assert(providerSwitchPricingError("replicate", "replicate", null) === null, "same provider needs no pricing check");
+  assert(providerSwitchPricingError("replicate", "fal", [4, null]) !== null, "null credit_amount must block a switch");
+  assert(providerSwitchPricingError("replicate", "fal", []) !== null, "no pricing rows must block a switch");
+  assert(providerSwitchPricingError("replicate", "fal", null) !== null, "undeterminable pricing must block a switch");
+  assert(providerSwitchPricingError("replicate", "fal", [4, 7]) === null, "fixed credit_amount allows a switch");
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +227,9 @@ export function validatePricingPatch(
 // Model
 // ---------------------------------------------------------------------------
 export function validateModelPatch(
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  // The stored row, so a partial patch (model only / provider only) is checked as a pair.
+  current?: { provider: string; model: string }
 ): Validated<ModelConfigPatch> {
   const patch: ModelConfigPatch = {};
   const warnings: string[] = [];
@@ -226,10 +239,11 @@ export function validateModelPatch(
       return { ok: false, error: "provider must be a non-empty string." };
     }
     patch.provider = body.provider.trim();
-    if (!KNOWN_PROVIDERS.has(patch.provider)) {
-      warnings.push(
-        `provider "${patch.provider}" is not a known provider (replicate, rendi, openai); double-check it.`
-      );
+    if (!SUPPORTED_PROVIDERS.includes(patch.provider)) {
+      return {
+        ok: false,
+        error: `provider "${patch.provider}" is not supported. Supported providers: ${SUPPORTED_PROVIDERS.join(", ")}.`,
+      };
     }
   }
 
@@ -245,6 +259,17 @@ export function validateModelPatch(
     const providerForShape = patch.provider ?? (typeof body.provider === "string" ? body.provider : undefined);
     if (providerForShape === "replicate" && !body.model.includes("/")) {
       warnings.push('model does not look like a Replicate id (expected "owner/name").');
+    }
+  }
+
+  if (patch.provider !== undefined || patch.model !== undefined) {
+    const provider = patch.provider ?? current?.provider;
+    const model = patch.model ?? current?.model;
+    if (provider !== undefined && model !== undefined && !isSupportedProviderModel(provider, model)) {
+      return {
+        ok: false,
+        error: `The provider/model pair "${provider}" + "${model}" is not supported by this app.`,
+      };
     }
   }
 
@@ -350,4 +375,25 @@ export function validateToolPatch(
 if (require.main === module) {
   adminConfigValidationSelfCheck();
   console.log("admin-config-validation self-check passed");
+}
+
+/**
+ * Switching a model row to a different provider must not change what users pay:
+ * lib/pricing-math.ts falls back to provider_cost_usd when credit_amount is null.
+ * `creditAmounts` are the credit_amount values of every pricing row the model
+ * bills through, or null when they cannot be determined (reject to stay safe).
+ */
+export function providerSwitchPricingError(
+  fromProvider: string,
+  toProvider: string | undefined,
+  creditAmounts: (number | null)[] | null
+): string | null {
+  if (toProvider === undefined || toProvider === fromProvider) return null;
+  if (creditAmounts === null) {
+    return "Switching provider is only supported for Photo model tiers.";
+  }
+  if (creditAmounts.length === 0 || creditAmounts.some((c) => c === null)) {
+    return "Set a fixed credit_amount on every pricing row of this model before switching its provider, so the user price does not change.";
+  }
+  return null;
 }

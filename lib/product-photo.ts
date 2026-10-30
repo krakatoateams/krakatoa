@@ -468,6 +468,17 @@ export function photoTierPricingKey(
 }
 
 /** Lowest-priced key for a tier (model-list "from" hint). `multi` = has a picker, so show "+". */
+/** Every pricing key a photo model role bills through (basic, resolution and quality variants). */
+export function photoTierPricingKeys(modelRole: string): string[] | null {
+  const tier = PRODUCT_PHOTO_TIERS.find((t) => t.modelRole === modelRole);
+  if (!tier) return null;
+  return [
+    ...(tier.basicPricingKey ? [tier.basicPricingKey] : []),
+    ...tier.resolutions.map((r) => r.pricingKey),
+    ...(tier.qualities ?? []).map((q) => q.pricingKey),
+  ];
+}
+
 export function photoTierEntryPricing(tier: ProductPhotoTier): { pricingKey: string; multi: boolean } {
   if (tier.qualities?.length) return { pricingKey: tier.qualities[0].pricingKey, multi: true };
   if (tier.hasResolution) return { pricingKey: tier.resolutions[0].pricingKey, multi: true };

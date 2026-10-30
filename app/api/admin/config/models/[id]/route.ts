@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updateModelConfig } from "@/lib/model-configs-db";
-import { validateModelPatch } from "@/lib/admin-config-validation";
+import { getModelConfigById, updateModelConfig } from "@/lib/model-configs-db";
+import { listPricingConfigs } from "@/lib/pricing-configs-db";
+import { photoTierPricingKeys } from "@/lib/product-photo";
+import { providerSwitchPricingError, validateModelPatch } from "@/lib/admin-config-validation";
 
 // Update a model config by id (admin only). Only safe fields are accepted
 // (provider, model, enabled, is_default, parameters, metadata). There is no
@@ -25,12 +27,27 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
     }
 
-    const result = validateModelPatch(body);
+    const row = await getModelConfigById(params.id);
+    if (!row) {
+      return NextResponse.json({ error: "Model config not found." }, { status: 404 });
+    }
+
+    const result = validateModelPatch(body, row);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     if (Object.keys(result.patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
+    }
+
+    // User price stays ONE per feature: a provider switch needs fixed credit_amounts.
+    if (result.patch.provider !== undefined && result.patch.provider !== row.provider) {
+      const keys = row.tool_key === "photo" ? photoTierPricingKeys(row.config_key) : null;
+      const amounts = keys
+        ? (await listPricingConfigs()).filter((p) => keys.includes(p.pricing_key)).map((p) => p.credit_amount ?? null)
+        : null;
+      const switchError = providerSwitchPricingError(row.provider, result.patch.provider, amounts);
+      if (switchError) return NextResponse.json({ error: switchError }, { status: 400 });
     }
 
     const model = await updateModelConfig(params.id, result.patch, ctx.profile.id);

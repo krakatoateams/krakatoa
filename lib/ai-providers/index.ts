@@ -10,3 +10,15 @@ export type { PhotoProvider, PhotoRunHooks } from "./photo-provider";
 export function getPhotoProvider(): PhotoProvider {
   return createReplicatePhotoProvider();
 }
+
+/** Provider adapter for a RECORDED provider id (cancel/poll); null if unknown or not configured. */
+export function getPhotoProviderById(id: string): PhotoProvider | null {
+  if (id !== "replicate") return null;
+  try {
+    return createReplicatePhotoProvider();
+  } catch {
+    return null;
+  }
+}
+
+export { cancelByRecordedProvider } from "./cancel-by-provider";

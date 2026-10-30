@@ -1,4 +1,5 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
+import { isSupportedProviderModel } from "@/lib/ai-provider-catalog";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import {
   GPT_IMAGE_2_5_FLARE_MODEL,
@@ -93,7 +94,12 @@ export async function resolveModel(params: {
   try {
     const map = await getModelMap();
     const cfg = map?.get(key(params.toolKey, params.configKey)) ?? null;
-    if (isUsable(cfg)) {
+    if (isUsable(cfg) && !isSupportedProviderModel(cfg.provider, cfg.model)) {
+      // An unsupported DB pair (e.g. a mistyped provider) must never reach a provider call.
+      console.warn(
+        `[model-resolver] '${params.toolKey}.${params.configKey}' has unsupported pair ${cfg.provider}/${cfg.model}; using the code default.`
+      );
+    } else if (isUsable(cfg)) {
       return {
         provider: cfg.provider,
         model: cfg.model,
