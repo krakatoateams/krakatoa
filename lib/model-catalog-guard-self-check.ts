@@ -13,7 +13,11 @@ import {
 } from "./video-composer-features";
 import { FAL_PHOTO_MODELS } from "./ai-providers/fal-photo-catalog";
 import { resolveFeatureEnablement } from "./feature-enablement";
-import { modelPricingKeys } from "./model-pricing-keys";
+import { modelPricingKeys, videoPricingContexts } from "./model-pricing-keys";
+import { photoTierPricingKey } from "./product-photo";
+import { VIDEO_MODELS } from "./video-models";
+import { MOTION_CONTROL_MODELS } from "./motion-control-models";
+import { REELS_ENGINE_CATALOG_MODEL_ID, reelsPricingKey, SEEDANCE_RESOLUTIONS, VEO_RESOLUTIONS } from "./reels-models";
 import {
   checkModelCatalogChange,
   type GuardCatalogRow,
@@ -136,6 +140,52 @@ assert.ok(missing.reasons[0].includes(keys[0]));
 for (const patch of [{ enabled: false }, { is_deprecated: true }, { credit_amount: -1 }, { credit_amount: 1.5 }]) {
   const rows = readyPricing.map((r) => (r.pricing_key === keys[0] ? { ...r, ...patch } : r));
   assert.equal(fail(enable(rows)).code, "PRICING_NOT_READY", JSON.stringify(patch));
+}
+
+// Reels Creator engines bill reelsPricingKey(): their keys must be required, not only the video model's own.
+for (const [engine, resolutions] of [["veo", VEO_RESOLUTIONS], ["seedance", SEEDANCE_RESOLUTIONS]] as const) {
+  const modelId = REELS_ENGINE_CATALOG_MODEL_ID[engine];
+  const engineKeys = resolutions.map((r) => reelsPricingKey(engine, r));
+  const required = modelPricingKeys("reels", modelId);
+  for (const k of engineKeys) assert.ok(required.includes(k), `${modelId} requires ${k}`);
+  assert.equal(new Set(required).size, required.length, "deduped");
+  const offModel = off("reels", [modelId]);
+  // Realistic fixture: every other pricing row exists, only the engine keys are absent.
+  const rows = readyPricing.filter((r) => !engineKeys.includes(r.pricing_key));
+  const res = fail(
+    checkModelCatalogChange(
+      base({ toolKey: "reels", modelId, change: "enable", catalogRows: offModel, pricingRows: rows })
+    )
+  );
+  assert.equal(res.code, "PRICING_NOT_READY");
+  assert.ok(engineKeys.every((k) => res.reasons[0].includes(k)), res.reasons[0]);
+  assert.equal(
+    checkModelCatalogChange(
+      base({ toolKey: "reels", modelId, change: "enable", catalogRows: offModel, pricingRows: readyPricing })
+    ).ok,
+    true
+  );
+}
+
+// Every key a generation route can bill is covered by modelPricingKeys (photo, video, storyboard, motion control).
+for (const t of PRODUCT_PHOTO_TIERS) {
+  const covered = new Set(modelPricingKeys("photo", t.id));
+  for (const res of [null, ...t.resolutions.map((r) => r.id)])
+    for (const q of [null, ...(t.qualities ?? []).map((x) => x.id)]) {
+      const key = photoTierPricingKey(t, res as never, q as never);
+      assert.ok(covered.has(key), `photo ${t.id}: billed key ${key} is covered`);
+    }
+}
+for (const m of VIDEO_MODELS) {
+  const covered = new Set(modelPricingKeys("reels", m.id));
+  for (const ctx of videoPricingContexts(m)) assert.ok(covered.has(m.pricingKey(ctx)), `video ${m.id}`);
+  // generate-storyboard-video bills { resolution, hasReferenceVideo: false } with the default audio flag.
+  for (const resolution of m.resolutions.length ? m.resolutions : [m.defaultResolution])
+    assert.ok(covered.has(m.pricingKey({ resolution, hasReferenceVideo: false })), `storyboard ${m.id}`);
+}
+for (const m of MOTION_CONTROL_MODELS) {
+  const covered = new Set(modelPricingKeys("reels", m.id));
+  for (const mode of m.modes) assert.ok(covered.has(m.pricingKey(mode)), `motion ${m.id}`);
 }
 
 // Provider: a Fal-bound tier without FAL_KEY.
