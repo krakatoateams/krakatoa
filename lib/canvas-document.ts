@@ -20,7 +20,15 @@ export const DEFAULT_CANVAS_TITLE = "Untitled canvas";
 
 export type SavedCanvasViewport = { x: number; y: number; zoom: number };
 
-export type SavedPromptData = {
+/** Chain-run bookkeeping kept on generated nodes (never prompts or provider payloads). */
+export type SavedRunState = {
+  /** Input fingerprint of the last successful generate. */
+  runFingerprint?: string;
+  /** Short message of the last failed generate and the inputs it failed with. */
+  lastRunError?: { message: string; fingerprint: string };
+};
+
+export type SavedPromptData = SavedRunState & {
   kind: "prompt";
   label: string;
   prompt: string;
@@ -28,19 +36,20 @@ export type SavedPromptData = {
   modelId: string;
 };
 
-export type SavedImageData = {
+export type SavedImageData = SavedRunState & {
   kind: "image";
   label: string;
   prompt: string;
   modelTier: string;
   resolution: string;
+  quality?: string;
   aspectRatio: string;
   resultStoragePath: string | null;
   creationId: string | null;
   imported: boolean;
 };
 
-export type SavedVideoData = {
+export type SavedVideoData = SavedRunState & {
   kind: "video";
   label: string;
   prompt: string;
@@ -195,15 +204,30 @@ function persistLabel(data: Record<string, unknown>): string {
   return asTrimmed(data.label, 40);
 }
 
+const RUN_ERROR_MAX = 160;
+
+function persistRunState(data: Record<string, unknown>): SavedRunState {
+  const out: SavedRunState = {};
+  const fingerprint = asTrimmed(data.runFingerprint, ID_MAX);
+  if (fingerprint) out.runFingerprint = fingerprint;
+  const failure = data.lastRunError as { message?: unknown; fingerprint?: unknown } | null | undefined;
+  const message = asTrimmed(failure?.message, RUN_ERROR_MAX);
+  const failedAt = asTrimmed(failure?.fingerprint, ID_MAX);
+  if (message && failedAt) out.lastRunError = { message, fingerprint: failedAt };
+  return out;
+}
+
 function persistPrompt(data: Record<string, unknown>): SavedPromptData {
   const text = asTrimmed(data.text, TEXT_MAX);
-  const prompt = asTrimmed(data.prompt, TEXT_MAX) || text;
+  // Only text-only nodes saved before the instruction field existed copy their text in.
+  const prompt = typeof data.prompt === "string" ? asTrimmed(data.prompt, TEXT_MAX) : text;
   return {
     kind: "prompt",
     label: persistLabel(data),
     prompt,
     text,
     modelId: asTrimmed(data.modelId, 40) || "gpt5",
+    ...persistRunState(data),
   };
 }
 
@@ -214,10 +238,12 @@ function persistImage(data: Record<string, unknown>): SavedImageData {
     prompt: asTrimmed(data.prompt, TEXT_MAX),
     modelTier: asTrimmed(data.modelTier, 40) || "basic",
     resolution: asTrimmed(data.resolution, 8) || "1k",
+    ...(asTrimmed(data.quality, 16) ? { quality: asTrimmed(data.quality, 16) } : {}),
     aspectRatio: asTrimmed(data.aspectRatio, 8) || "1:1",
     resultStoragePath: asNullablePath(data.resultStoragePath),
     creationId: asNullableId(data.creationId),
     imported: data.imported === true,
+    ...persistRunState(data),
   };
 }
 
@@ -235,6 +261,7 @@ function persistVideo(data: Record<string, unknown>): SavedVideoData {
     creationId: asNullableId(data.creationId),
     imported: data.imported === true,
     ...(typeof data.generateAudio === "boolean" ? { generateAudio: data.generateAudio } : {}),
+    ...persistRunState(data),
   };
 }
 
@@ -379,6 +406,9 @@ export function canvasDocumentSelfCheck(): void {
           resultUrl: "blob:http://localhost/x",
           resultStoragePath: "u/photos/a.jpg",
           creationId: "c1",
+          quality: "high",
+          runFingerprint: "12:abc",
+          lastRunError: { message: "Boom.", fingerprint: "12:def", raw: { secret: true } },
           loading: true,
           uploading: false,
           error: "nope",
@@ -425,6 +455,20 @@ export function canvasDocumentSelfCheck(): void {
   assert(image?.kind === "image" && image.resultStoragePath === "u/photos/a.jpg", "storage path is kept");
   assert(image?.kind === "image" && !("resultUrl" in image), "blob and signed URLs are not persisted");
   assert(image?.kind === "image" && !("loading" in image) && !("error" in image), "ephemeral UI flags are stripped");
+  assert(image?.kind === "image" && image.quality === "high", "image quality is persisted");
+  assert(image?.kind === "image" && image.runFingerprint === "12:abc", "run fingerprint is persisted");
+  assert(
+    JSON.stringify(image?.kind === "image" && image.lastRunError) === '{"message":"Boom.","fingerprint":"12:def"}',
+    "last run error keeps only its message and fingerprint"
+  );
+  const blankInstruction = serializeCanvasGraph({
+    nodes: [{ id: "p2", type: "prompt", position: { x: 0, y: 0 }, data: { kind: "prompt", prompt: "", text: "output" } }],
+    edges: [],
+  }).nodes[0]?.data;
+  assert(
+    blankInstruction?.kind === "prompt" && blankInstruction.prompt === "",
+    "an empty instruction is not replaced by the node's output"
+  );
   const sound = saved.nodes[2]?.data;
   assert(sound?.kind === "sound" && !("loading" in sound), "sound is an empty asset");
   assert(sound?.kind === "sound" && sound.imported === false, "missing imported flags stay false");

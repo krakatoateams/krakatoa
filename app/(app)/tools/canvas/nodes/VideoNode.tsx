@@ -68,8 +68,30 @@ import { useCanvasPreview } from "../CanvasPreview";
 import { useCanvasLibrary } from "../CanvasLibraryPicker";
 import type { VideoNodeData } from "../node-data";
 import { useCanvasVideoFeatures } from "../use-canvas-features";
+import { canvasNodeFingerprint, canvasRunDeps } from "@/lib/canvas-run-plan";
+import {
+  canvasRunFailure,
+  useCanvasNodeRunner,
+  useFreshCanvasGraph,
+  type CanvasRunOutcome,
+} from "../canvas-run";
 
 export type VideoFlowNode = Node<VideoNodeData, "video">;
+
+/** Why `model` can't take `count` connected stills, or null when it can. */
+function videoReferenceError(model: ReturnType<typeof getVideoModel>, count: number): string | null {
+  if (count === 0) return null;
+  const refCap = model.references.referenceImages;
+  if (refCap > 0) {
+    return count > refCap ? `${model.modelLabel} can use up to ${refCap} reference images.` : null;
+  }
+  if (model.references.firstFrame) {
+    return count > 1
+      ? `${model.modelLabel} can only use one start-frame image. Pick a model that accepts reference images to send every still.`
+      : null;
+  }
+  return `${model.modelLabel} can't use reference images. Pick a reference-capable model.`;
+}
 
 export default function VideoNode({
   id,
@@ -92,6 +114,7 @@ export default function VideoNode({
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
   const { videoCredits } = usePricing();
+  const freshGraph = useFreshCanvasGraph(id, data);
 
   const { url: signedUrl, failed: mediaFailed } = useSignedMediaUrlState(
     data.resultStoragePath,
@@ -100,16 +123,38 @@ export default function VideoNode({
   const previewUrl = localPreview ?? signedUrl ?? data.resultUrl;
   const origin = useCanvasAssetOrigin(data.resultStoragePath, data.creationId, "video");
 
+  // What Generate sends. Render, Generate and a chain run all resolve inputs here.
+  const resolveInputs = (
+    graphNodes: CanvasGraphNode[],
+    graphEdges: CanvasGraphEdge[],
+    nodeData: VideoNodeData
+  ) => {
+    const connectedPrompt =
+      findUpstreamPromptTexts(graphNodes, graphEdges, id).join("\n\n") || null;
+    const refImages = usableCanvasRefImages(
+      mergeCanvasImages(
+        findUpstreamImages(graphNodes, graphEdges, id),
+        mentionedCanvasImages(nodeData.prompt, graphNodes)
+      )
+    ).slice(0, MAX_CANVAS_REF_IMAGES);
+    const prompt =
+      resolveCanvasMentionPrompt(nodeData.prompt.trim(), graphNodes) || connectedPrompt || "";
+    const model = getVideoModel(nodeData.modelId);
+    const generateAudio = model.supportsAudio ? nodeData.generateAudio : model.defaultGenerateAudio;
+    const cost = videoCredits(
+      model.pricingKey({ resolution: nodeData.resolution, generateAudio }),
+      nodeData.duration
+    );
+    const limitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
+    const modelValid = canvasVideoModelOptions(refImages.length > 0, features.data).some(
+      (m) => m.id === nodeData.modelId
+    );
+    const canGenerate = prompt.length > 0 && !limitError && modelValid;
+    return { refImages, prompt, model, generateAudio, cost, limitError, canGenerate };
+  };
+
   const connectedPromptSources = findUpstreamPrompts(nodes, edges, id);
-  const connectedPrompts = findUpstreamPromptTexts(nodes, edges, id);
-  const connectedImages = findUpstreamImages(nodes, edges, id);
-  const refImages = usableCanvasRefImages(
-    mergeCanvasImages(connectedImages, mentionedCanvasImages(data.prompt, nodes))
-  ).slice(0, MAX_CANVAS_REF_IMAGES);
-  const connectedPrompt = connectedPrompts.join("\n\n") || null;
-  const prompt =
-    resolveCanvasMentionPrompt(data.prompt.trim(), nodes) || connectedPrompt || "";
-  const model = getVideoModel(data.modelId);
+  const { refImages, model, cost, limitError, canGenerate } = resolveInputs(nodes, edges, data);
   const allowedDurations = getAllowedDurations(model, data.resolution);
 
   useEffect(() => {
@@ -118,13 +163,6 @@ export default function VideoNode({
     }
   }, [allowedDurations, data.duration, id, updateNodeData]);
 
-  const generateAudio = model.supportsAudio ? data.generateAudio : model.defaultGenerateAudio;
-  const videoPricingKey = model.pricingKey({
-    resolution: data.resolution,
-    generateAudio,
-  });
-  const cost = videoCredits(videoPricingKey, data.duration);
-  const limitError = videoPromptLimitError(prompt, videoPromptMaxChars(model));
   const hasRef = refImages.length > 0;
   const modelOptions = useMemo(
     () => canvasVideoModelOptions(hasRef, features.data),
@@ -133,7 +171,6 @@ export default function VideoNode({
   // Unknown enablement is "not ready", never "everything is enabled".
   const modelsReady = features.data !== null;
   const modelValid = modelOptions.some((m) => m.id === data.modelId);
-  const canGenerate = prompt.length > 0 && !limitError && modelValid;
 
   const patch = (next: Partial<VideoNodeData>) => updateNodeData(id, next);
 
@@ -172,56 +209,53 @@ export default function VideoNode({
     [modelOptions, videoCredits, data.duration]
   );
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
+  const handleGenerate = async (options: { chain?: boolean } = {}): Promise<CanvasRunOutcome> => {
+    const graph = freshGraph();
+    const input = resolveInputs(graph.nodes, graph.edges, graph.data);
+    const fingerprint = canvasNodeFingerprint(id, graph.nodes, graph.edges);
+    if (!input.canGenerate) {
+      if (options.chain) {
+        patch(canvasRunFailure(input.limitError ?? "This node isn't ready to run.", fingerprint));
+      }
+      return "failed";
+    }
     if (status !== "authenticated") {
       openSignInModal();
-      return;
+      return "auth";
     }
 
+    const { model, prompt, generateAudio } = input;
+    const nodeData = graph.data;
     let firstFrame: { url: string; path: string } | null = null;
     let referenceImages: { url: string; path: string }[] = [];
-    if (refImages.length > 0) {
+    if (input.refImages.length > 0) {
       try {
-        const frames = await resolveCanvasRefFrames(refImages);
-        const refCap = model.references.referenceImages;
-        if (refCap > 0) {
-          if (frames.length > refCap) {
-            patch({
-              error: `${model.modelLabel} can use up to ${refCap} reference images.`,
-            });
-            return;
-          }
-          referenceImages = frames;
-        } else if (model.references.firstFrame) {
-          if (frames.length > 1) {
-            patch({
-              error: `${model.modelLabel} can only use one start-frame image. Pick a model that accepts reference images to send every still.`,
-            });
-            return;
-          }
-          firstFrame = frames[0] ?? null;
-        } else {
-          patch({
-            error: `${model.modelLabel} can't use reference images. Pick a reference-capable model.`,
-          });
-          return;
+        const frames = await resolveCanvasRefFrames(input.refImages);
+        const refError = videoReferenceError(model, frames.length);
+        if (refError) {
+          patch(canvasRunFailure(refError, fingerprint));
+          return "failed";
         }
+        if (model.references.referenceImages > 0) referenceImages = frames;
+        else firstFrame = frames[0] ?? null;
       } catch (err) {
-        patch({
-          error: err instanceof Error ? err.message : "Couldn't use the connected image.",
-        });
-        return;
+        patch(
+          canvasRunFailure(
+            err instanceof Error ? err.message : "Couldn't use the connected image.",
+            fingerprint
+          )
+        );
+        return "failed";
       }
     }
 
     const body = {
-      composerKey: canvasVideoComposerKey(data.modelId),
-      modelId: data.modelId,
+      composerKey: canvasVideoComposerKey(nodeData.modelId),
+      modelId: nodeData.modelId,
       prompt,
-      duration: data.duration,
-      resolution: data.resolution,
-      aspectRatio: data.aspectRatio,
+      duration: nodeData.duration,
+      resolution: nodeData.resolution,
+      aspectRatio: nodeData.aspectRatio,
       generateAudio,
       references: { firstFrame, referenceImages },
     };
@@ -235,9 +269,10 @@ export default function VideoNode({
         },
       }),
     );
-    if (!attempt) return;
+    if (!attempt) return "busy";
 
     let rotateKey = false;
+    let outcome: CanvasRunOutcome = "failed";
     patch({ loading: true, error: null });
     try {
       const response = await fetch("/api/generate-video", {
@@ -254,13 +289,15 @@ export default function VideoNode({
           attempt.settle(false);
           refetchCredits();
           patch({ loading: false });
-          return;
+          return "cancelled";
         }
         if (response.status === 402) {
+          outcome = "insufficient";
           throw new Error(
-            `Insufficient credits. Required: ${result.requiredCredits ?? cost}, current: ${result.currentBalance ?? 0}.`
+            `Insufficient credits. Required: ${result.requiredCredits ?? input.cost}, current: ${result.currentBalance ?? 0}.`
           );
         }
+        if (response.status === 409 && result.code === "GENERATION_IN_PROGRESS") outcome = "busy";
         rotateKey = isIdempotencyConflict(response.status, result);
         const idemMsg = describeCanvasIdempotencyError(response.status, result);
         if (idemMsg) throw new Error(idemMsg);
@@ -281,20 +318,62 @@ export default function VideoNode({
         resultUrl: saved.videoUrl ?? null,
         resultStoragePath: pickGenerateStoragePath(saved),
         creationId: pickGenerateCreationId(saved),
+        runFingerprint: fingerprint,
+        lastRunError: undefined,
       });
+      return "done";
     } catch (err) {
       attempt.settle(false, { rotate: rotateKey });
       if ((err as { code?: string })?.code === "GENERATION_CANCELLED") {
         refetchCredits();
         patch({ loading: false });
-        return;
+        return "cancelled";
       }
-      patch({
-        loading: false,
-        error: err instanceof Error ? err.message : "Generation failed",
-      });
+      const message = err instanceof Error ? err.message : "Generation failed";
+      // Credits and a run already in progress are not a failure of this node's inputs.
+      patch(
+        outcome === "failed"
+          ? { loading: false, ...canvasRunFailure(message, fingerprint) }
+          : { loading: false, error: message }
+      );
+      return outcome;
     }
   };
+
+  useCanvasNodeRunner(id, {
+    run: handleGenerate,
+    cancel: cancelSubmit,
+    cost: () => {
+      const graph = freshGraph();
+      return resolveInputs(graph.nodes, graph.edges, graph.data).cost;
+    },
+    check: (pending) => {
+      const graph = freshGraph();
+      const input = resolveInputs(graph.nodes, graph.edges, graph.data);
+      const deps = canvasRunDeps(id, graph.nodes, graph.edges)
+        .map((depId) => graph.nodes.find((node) => node.id === depId))
+        .filter((node) => node !== undefined);
+      const textComing = deps.some((node) => node.data.kind === "prompt" && pending.has(node.id));
+      const refIds = new Set(input.refImages.map((image) => image.id));
+      for (const node of deps) {
+        if (node.data.kind === "image" && pending.has(node.id)) refIds.add(node.id);
+      }
+      const refCount = Math.min(refIds.size, MAX_CANVAS_REF_IMAGES);
+      if (deps.some((node) => node.data.uploading)) return "A connected image is still uploading.";
+      if (!input.prompt && !textComing) return "Add a prompt or connect a Text node.";
+      if (input.limitError && !textComing) return input.limitError;
+      if (features.data === null) return "Models are still loading. Try again in a moment.";
+      const fits = canvasVideoModelOptions(refCount > 0, features.data).some(
+        (m) => m.id === graph.data.modelId
+      );
+      if (!fits) {
+        return refCount > 0
+          ? `${input.model.modelLabel} can't use reference images. Pick a reference-capable model.`
+          : `${input.model.modelLabel} needs a reference image. Connect an Image node or pick another model.`;
+      }
+      return videoReferenceError(input.model, refCount);
+    },
+  });
 
   const selectModel = (nextId: string, note: string | null = null) => {
     setModelNote(note);

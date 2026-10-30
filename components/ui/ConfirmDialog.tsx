@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
-import { Button } from "./Button";
+import { Button, type ButtonVariant } from "./Button";
 
 // Native <dialog> + showModal(): top layer (stacks above any z-index), inert
 // background, focus moved inside and restored to the opener on close.
@@ -11,14 +11,19 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Confirm",
+  confirmVariant = "danger",
   busy = false,
   onConfirm,
   onCancel,
+  children,
 }: {
   open: boolean;
   title: ReactNode;
   description?: ReactNode;
   confirmLabel?: string;
+  confirmVariant?: ButtonVariant;
+  /** Extra content between the description and the actions. */
+  children?: ReactNode;
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -66,11 +71,12 @@ export function ConfirmDialog({
             {description}
           </p>
         ) : null}
+        {children}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" size="sm" autoFocus disabled={busy} onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="danger" size="sm" loading={busy} onClick={onConfirm}>
+          <Button variant={confirmVariant} size="sm" loading={busy} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </div>
