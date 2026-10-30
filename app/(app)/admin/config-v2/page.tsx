@@ -95,6 +95,21 @@ type ProviderAdmin = {
   costs: Record<string, number>;
   onSwitched: (configKey: string, provider: PhotoProviderId) => void;
 };
+/** Inline "why this was refused / what changed" messages per model id (rendered next to the model). */
+const ModelNoticeContext = createContext<Record<string, string[]>>({});
+
+class AdminApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: Record<string, unknown>
+  ) {
+    super(message);
+  }
+}
+
+const STALE_MODEL_MESSAGE = "Someone else changed this model. Review and try again.";
+
 const ProviderAdminContext = createContext<ProviderAdmin>({
   falConfigured: false,
   costs: {},
@@ -746,6 +761,7 @@ function ModelSection({
   onCommitCatalog: (modelId: string, enabled: boolean) => void;
 }) {
   const { falConfigured } = useContext(ProviderAdminContext);
+  const notice = useContext(ModelNoticeContext)[model.id];
   const [open, setOpen] = useState(defaultOpen ?? false);
   const showModes = model.features.length > 0;
   const modeSummary = model.features.map((f) => f.label).join(" · ");
@@ -792,6 +808,9 @@ function ModelSection({
           On
         </label>
       </div>
+      <p aria-live="polite" className={notice ? "pb-2 text-xs text-amber-300/90" : "sr-only"}>
+        {notice ? notice.join(" ") : ""}
+      </p>
 
       {open ? (
         <div className="space-y-4 pb-3 pl-5">
@@ -1172,9 +1191,11 @@ export default function AdminConfigV2Page() {
   const savingCountRef = useRef(0);
   const saveBatchErroredRef = useRef(false);
   const catalogPendingRef = useRef(new Map<string, boolean>());
+  const [modelNotices, setModelNotices] = useState<Record<string, string[]>>({});
+  const [registryRefresh, setRegistryRefresh] = useState(0);
   const autosaveInflightRef = useRef(new Map<string, Promise<void>>());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {
     if (
       debouncersRef.current.size > 0 ||
       savingCountRef.current > 0 ||
@@ -1183,7 +1204,7 @@ export default function AdminConfigV2Page() {
       setLoadError("Wait for pending changes to finish saving before refreshing.");
       return;
     }
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setLoadError(null);
     try {
       const [toolsRes, pricingRes, fmRes, catalogRes, modelsRes, billingRes] = await Promise.all([
@@ -1261,6 +1282,7 @@ export default function AdminConfigV2Page() {
         model_tier: String(row.model_tier),
         enabled: Boolean(row.enabled),
         is_default: Boolean(row.is_default),
+        updated_at: row.updated_at ? String(row.updated_at) : undefined,
       }));
       const modelConfigs = requireAdminConfigRows(modelsData, "models", "model configs").map(
         (row) => ({
@@ -1282,6 +1304,7 @@ export default function AdminConfigV2Page() {
         tool_key: String(row.tool_key),
         model_id: String(row.model_id),
         enabled: Boolean(row.enabled),
+        updated_at: row.updated_at ? String(row.updated_at) : undefined,
       }));
 
       const tree = buildAdminConfigTree({
@@ -1341,9 +1364,63 @@ export default function AdminConfigV2Page() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok) throw new AdminApiError(String(data.error ?? `Request failed (${res.status})`), res.status, data);
+    return data;
   };
+
+  const setNotice = useCallback((modelId: string, reasons: string[] | null) => {
+    setModelNotices((prev) => {
+      const next = { ...prev };
+      if (reasons && reasons.length > 0) next[modelId] = reasons;
+      else delete next[modelId];
+      return next;
+    });
+  }, []);
+
+  // Tree updates from a server row: keeps the compare-and-set token (updated_at) current.
+  const applyCatalogRow = useCallback((row: { id: string; enabled: boolean; updated_at: string }) => {
+    setTools((prev) => {
+      const next = prev.map((t) => ({
+        ...t,
+        models: t.models.map((m) =>
+          m.catalogConfigId === row.id ? { ...m, enabled: row.enabled, catalogUpdatedAt: row.updated_at } : m
+        ),
+      }));
+      toolsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const applyFeatureRow = useCallback(
+    (row: { id: string; enabled: boolean; is_default: boolean; updated_at: string }) => {
+      setTools((prev) => {
+        const next = prev.map((t) => ({
+          ...t,
+          models: t.models.map((m) => ({
+            ...m,
+            features: m.features.map((f) =>
+              f.featureModelId === row.id
+                ? { ...f, enabled: row.enabled, isDefault: row.is_default, updatedAt: row.updated_at }
+                : f
+            ),
+          })),
+        }));
+        toolsRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  // Other rows' tokens may have moved (setting a default clears the old one) and the registry
+  // view should follow: resync once the autosave batch has settled.
+  const resyncSoon = useCallback(() => {
+    setTimeout(() => {
+      void load(true);
+      setRegistryRefresh((n) => n + 1);
+    }, 500);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const executeAutosave = useCallback(async (fn: () => Promise<void>) => {
     const isFirst = savingCountRef.current === 0;
@@ -1492,24 +1569,44 @@ export default function AdminConfigV2Page() {
   const commitModelCatalog = useCallback(
     (modelId: string, enabled: boolean) => {
       catalogPendingRef.current.set(modelId, enabled);
+      setNotice(modelId, null);
       scheduleAutosave(`catalog:${modelId}`, async () => {
-        const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
-        if (!live?.catalogConfigId) {
-          throw new Error("Catalog row missing — click Refresh, then try again.");
-        }
         do {
+          const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
+          if (!live?.catalogConfigId || !live.catalogUpdatedAt) {
+            throw new Error("Catalog row missing — click Refresh, then try again.");
+          }
           const targetEnabled = catalogPendingRef.current.get(modelId);
           if (targetEnabled === undefined) {
             throw new Error("Catalog save cancelled — toggle On again.");
           }
-          await patchApi(`/api/admin/config/model-catalog/${live.catalogConfigId}`, {
-            enabled: targetEnabled,
-          });
+          try {
+            const data = await patchApi(`/api/admin/config/model-catalog/${live.catalogConfigId}`, {
+              enabled: targetEnabled,
+              expectedUpdatedAt: live.catalogUpdatedAt,
+            });
+            applyCatalogRow(data.modelCatalog as { id: string; enabled: boolean; updated_at: string });
+          } catch (e) {
+            catalogPendingRef.current.delete(modelId);
+            if (e instanceof AdminApiError && e.status === 409) {
+              // Roll the optimistic toggle back to the server's row and say why.
+              const current = e.body.modelCatalog as { id: string; enabled: boolean; updated_at: string } | null;
+              if (current) applyCatalogRow(current);
+              const stale = e.body.code === "STALE_MODEL_CONFIG";
+              const reasons = stale ? [STALE_MODEL_MESSAGE] : ((e.body.reasons as string[] | undefined) ?? [e.message]);
+              setNotice(modelId, reasons);
+              if (stale) resyncSoon();
+              throw new Error(reasons.join(" "));
+            }
+            throw e;
+          }
           if (catalogPendingRef.current.get(modelId) === targetEnabled) break;
         } while (true);
+        catalogPendingRef.current.delete(modelId);
+        setRegistryRefresh((n) => n + 1);
       });
     },
-    [scheduleAutosave]
+    [scheduleAutosave, setNotice, applyCatalogRow, resyncSoon]
   );
 
   const commitFeatureMode = useCallback(
@@ -1519,21 +1616,41 @@ export default function AdminConfigV2Page() {
           throw new Error("Mode row missing — click Refresh, then try again.");
         }
         const feature = findFeatureByModelId(toolsRef.current, featureModelId);
-        if (!feature?.featureModelId) {
+        if (!feature?.featureModelId || !feature.updatedAt) {
           throw new Error("Mode row missing — click Refresh, then try again.");
         }
-        await patchApi(`/api/admin/config/feature-models/${featureModelId}`, {
-          enabled: feature.enabled,
-          is_default: feature.isDefault,
-        });
+        const owner = toolsRef.current.flatMap((t) => t.models).find((m) => m.features.some((f) => f.featureModelId === featureModelId));
+        if (owner) setNotice(owner.id, null);
+        try {
+          const data = await patchApi(`/api/admin/config/feature-models/${featureModelId}`, {
+            enabled: feature.enabled,
+            is_default: feature.isDefault,
+            expectedUpdatedAt: feature.updatedAt,
+          });
+          applyFeatureRow(data.featureModel as { id: string; enabled: boolean; is_default: boolean; updated_at: string });
+          if (feature.isDefault) resyncSoon();
+          setRegistryRefresh((n) => n + 1);
+        } catch (e) {
+          if (e instanceof AdminApiError && e.status === 409) {
+            const current = e.body.featureModel as { id: string; enabled: boolean; is_default: boolean; updated_at: string } | null;
+            if (current) applyFeatureRow(current);
+            const stale = e.body.code === "STALE_MODEL_CONFIG";
+            const reasons = stale ? [STALE_MODEL_MESSAGE] : ((e.body.reasons as string[] | undefined) ?? [e.message]);
+            if (owner) setNotice(owner.id, reasons);
+            if (stale) resyncSoon();
+            throw new Error(reasons.join(" "));
+          }
+          throw e;
+        }
       });
     },
-    [scheduleAutosave]
+    [scheduleAutosave, setNotice, applyFeatureRow, resyncSoon]
   );
 
   if (loading) return <AdminConfigSkeleton />;
 
   return (
+    <ModelNoticeContext.Provider value={modelNotices}>
     <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, onSwitched: onProviderSwitched }}>
       {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
       <div className="mx-auto max-w-5xl space-y-3">
@@ -1548,7 +1665,7 @@ export default function AdminConfigV2Page() {
 
       {loadError ? <p className="text-xs text-red-400">{loadError}</p> : null}
 
-      <ModelRegistrySection />
+      <ModelRegistrySection refreshKey={registryRefresh} onChanged={() => void load(true)} />
 
       <div className="space-y-2">
           {tools.map((tool) => (
@@ -1579,5 +1696,6 @@ export default function AdminConfigV2Page() {
       </div>
       </div>
     </ProviderAdminContext.Provider>
+    </ModelNoticeContext.Provider>
   );
 }

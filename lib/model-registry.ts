@@ -64,6 +64,22 @@ function labelsFor(toolKey: "photo" | "reels", modelId: string): { label: string
   return { label: m?.modelLabel ?? modelId, providerModel: m?.providerModel ?? "", modelRole: m?.modelRole ?? "" };
 }
 
+/** Provider a model runs on today (label + boolean configured flag, never a key). */
+export function resolveModelProvider(
+  toolKey: string,
+  modelId: string,
+  modelConfigs: readonly RegistryModelConfigRow[],
+  configured: (provider: string) => boolean = isProviderConfigured
+): { id: string; label: string; configured: boolean } {
+  const { modelRole } = labelsFor(toolKey as "photo" | "reels", modelId);
+  // Reels models bind to Replicate today; only Photo tiers can be switched to Fal.
+  const id =
+    toolKey === "photo"
+      ? activePhotoProvider(modelRole, modelConfigs.find((r) => r.tool_key === "photo" && r.config_key === modelRole))
+      : "replicate";
+  return { id, label: PROVIDER_LABEL[id as keyof typeof PROVIDER_LABEL] ?? id, configured: configured(id) };
+}
+
 export function buildModelRegistry(input: {
   catalogRows: readonly RegistryCatalogRow[];
   featureRows: readonly GuardFeatureRow[];
@@ -78,21 +94,9 @@ export function buildModelRegistry(input: {
   for (const def of defaultModelCatalogRows()) {
     const row = byCatalog.get(`${def.toolKey}:${def.modelId}`);
     const enabled = row?.enabled ?? def.enabled;
-    const { label, providerModel, modelRole } = labelsFor(def.toolKey, def.modelId);
+    const { label, providerModel } = labelsFor(def.toolKey, def.modelId);
 
-    // Reels models bind to Replicate today; only Photo tiers can be switched to Fal.
-    const providerId =
-      def.toolKey === "photo"
-        ? activePhotoProvider(
-            modelRole,
-            input.modelConfigs.find((r) => r.tool_key === "photo" && r.config_key === modelRole)
-          )
-        : "replicate";
-    const provider = {
-      id: providerId,
-      label: PROVIDER_LABEL[providerId as keyof typeof PROVIDER_LABEL] ?? providerId,
-      configured: configured(providerId),
-    };
+    const provider = resolveModelProvider(def.toolKey, def.modelId, input.modelConfigs, configured);
 
     const units = resolveToolEnablement(def.toolKey, new Set(
       defaultModelCatalogRows()

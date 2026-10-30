@@ -91,7 +91,7 @@ function unitsFor(toolKey: string): Unit[] {
 }
 
 /** Catalog-enabled model ids of a tool; a missing row falls back to the shipped default. */
-function catalogEnabledSet(toolKey: string, rows: readonly GuardCatalogRow[]): Set<string> {
+export function catalogEnabledSet(toolKey: string, rows: readonly GuardCatalogRow[]): Set<string> {
   const byId = new Map(rows.filter((r) => r.tool_key === toolKey).map((r) => [r.model_id, r.enabled]));
   const out = new Set<string>();
   for (const def of defaultModelCatalogRows()) {
