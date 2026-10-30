@@ -7,7 +7,7 @@ import { FAL_PHOTO_MODELS } from "@/lib/ai-providers/fal-photo-catalog";
  * runner accepts (Replicate runs arbitrary models; Rendi has a single config).
  * An entry with `toolKey` / `configKey` only applies to that model_configs row, so a
  * provider can never be set on a feature it has no adapter for. Fal pairs are exact:
- * the three Nano Banana photo tiers (GPT Image 2.5 Flare on Fal is phase 5).
+ * the three Nano Banana photo tiers and GPT Image 2.5 Flare (text-to-image id).
  */
 export type ProviderCatalogEntry = { provider: string; model: string; toolKey?: string; configKey?: string };
 

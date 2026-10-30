@@ -810,7 +810,7 @@ export async function POST(req: Request) {
           "reference_upload",
           `Upload ${filesToUpload.length} reference image(s) to ${provider.id === "fal" ? "Fal" : "Replicate"}`
         );
-        console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to Replicate...`);
+        console.log(`[Product Photo] Uploading ${filesToUpload.length} reference image(s) to ${provider.id}...`);
         for (const f of filesToUpload) {
           referenceUrls.push(await provider.uploadReference(f));
         }
