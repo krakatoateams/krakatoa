@@ -37,8 +37,8 @@ assert.deepEqual(
 );
 assert.equal(
   getModelDefault("photo", "image_gpt_image_2")?.model,
-  "openai/gpt-image-2",
-  "GPT Image 2 role must support admin reset"
+  "openai/gpt-image-2.5-flare",
+  "GPT Image 2.5 Flare role must support admin reset"
 );
 assert.equal(
   getModelDefault("schedule", "llm")?.model,

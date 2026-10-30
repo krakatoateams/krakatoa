@@ -150,8 +150,8 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   product_photo_ideogram_v3_turbo_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "ideogram3" },
   product_photo_seedream_3_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "seedream3" },
   product_photo_flux_schnell_per_image: { providerCostUsd: 0.003, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "flux_schnell" },
-  // GPT Image 2 (openai/gpt-image-2): priced per output image by quality only.
-  // Source: https://replicate.com/openai/gpt-image-2 (checked 2026-10-09).
+  // GPT Image 2.5 Flare (openai/gpt-image-2.5-flare): priced per output image by quality only.
+  // Source: https://replicate.com/openai/gpt-image-2.5-flare (same costs as gpt-image-2).
   product_photo_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "low" },
   product_photo_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "medium" },
   product_photo_gpt_image_2_high_per_image: { providerCostUsd: 0.128, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "high" },

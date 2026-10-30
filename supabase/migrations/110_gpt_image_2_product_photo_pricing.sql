@@ -1,5 +1,5 @@
 -- 110_gpt_image_2_product_photo_pricing.sql
--- GPT Image 2 (openai/gpt-image-2) for Product Photo / Canvas, priced per output image by quality.
+-- GPT Image 2 (openai/gpt-image-2; the Photo tier now runs openai/gpt-image-2.5-flare at the same costs) for Product Photo / Canvas, priced per output image by quality.
 -- Replicate source: https://replicate.com/openai/gpt-image-2 (checked 2026-10-09): low $0.012, medium $0.047, high $0.128.
 -- Additive + idempotent (safe to re-run via `npm run db:setup`). credit_amount is only the DB fallback;
 -- runtime credits are resolved from provider_cost_usd and the admin billing settings.

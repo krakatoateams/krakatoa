@@ -14,7 +14,7 @@ import {
 
 const tier = getProductPhotoTier("gpt_image_2");
 assert.equal(PRODUCT_PHOTO_TIERS.at(-1)?.id, "gpt_image_2", "appended at the end");
-assert.equal(tier.providerModel, "openai/gpt-image-2");
+assert.equal(tier.providerModel, "openai/gpt-image-2.5-flare");
 assert.equal(tier.modelRole, "image_gpt_image_2");
 for (const f of ["product", "image", "character", "social"] as const) {
   assert.ok(eligibleTiersForFeature(f).includes("gpt_image_2"), `eligible for ${f}`);
