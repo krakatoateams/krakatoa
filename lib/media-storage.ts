@@ -119,7 +119,13 @@ function xmlValues(xml: string, tag: string): string[] {
 
 async function r2Request(url: string, init: RequestInit): Promise<Response> {
   const { client } = r2Settings();
-  return client.fetch(url, init);
+  if (init.body == null) return client.fetch(url, init);
+  // Next's patched fetch rebuilds a Request input with its body as a stream,
+  // dropping Content-Length, and R2 rejects chunked uploads with 411. Sign
+  // only, then send the original sized body.
+  // ponytail: uploads skip aws4fetch's 5xx retries; add a loop if R2 flakes.
+  const signed = await client.sign(url, init);
+  return fetch(signed.url, { method: signed.method, headers: signed.headers, body: init.body });
 }
 
 async function r2Head(path: string): Promise<{ size: number; sha256: string | null } | null> {
@@ -386,6 +392,8 @@ export async function mediaExists(
   try {
     if (r2On() && (await r2Exists(path))) return { data: true, error: null };
     const { data, error } = await bucket().exists(path);
+    // supabase-js reports a missing object as { data: false, error: "Bad Request" }.
+    if (data === false) return { data: false, error: null };
     if (error) return { data: null, error: { message: error.message } };
     return { data: data ?? null, error: null };
   } catch (e) {

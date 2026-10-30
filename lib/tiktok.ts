@@ -5,8 +5,7 @@ import {
   MEDIA_CACHE_CONTROL,
   isStorageRelativePath,
   photoStoragePathToProxyRest,
-  storagePathFromPublicUrl,
-  storagePathFromSignedUrl,
+  storagePathFromStorageUrl,
 } from "@/lib/storage-buckets";
 import { redactPublishMediaRef } from "@/lib/tiktok-publish-pure";
 
@@ -577,7 +576,7 @@ async function initPhotoPost(params: {
 function resolvePhotoStoragePath(urlOrPath: string): string {
   const path = isStorageRelativePath(urlOrPath)
     ? urlOrPath
-    : storagePathFromPublicUrl(urlOrPath) ?? storagePathFromSignedUrl(urlOrPath);
+    : storagePathFromStorageUrl(urlOrPath);
   if (!path) {
     throw new Error(
       `Photo URL is not a recognized user photo storage path — cannot proxy for TikTok: ${redactPublishMediaRef(urlOrPath)}`,

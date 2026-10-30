@@ -20,6 +20,8 @@ import {
   historyItemFromPath,
 } from "@/lib/product-photo";
 
+export const GENERATED_PHOTO_MIME = "image/jpeg";
+
 function wrapStorageError(action: string, error: { message: string }) {
   const hint =
     error.message === "fetch failed"
@@ -59,7 +61,6 @@ export async function saveGeneratedProductPhoto(params: {
   imageBuffer: ArrayBuffer;
   poseId: ModelPoseId;
   styleId: PhotoStyleId;
-  contentType?: string;
   prompt?: string;
   title?: string;
   creationKind?: string;
@@ -71,8 +72,16 @@ export async function saveGeneratedProductPhoto(params: {
 }): Promise<{ storagePath: string; publicUrl: string; historyItem: ProductPhotoHistoryItem }> {
   const storagePath = photosGeneratedPath(params.userId, params.photoMode, params.filename);
 
-  const { error } = await uploadMedia(storagePath, params.imageBuffer, {
-    contentType: params.contentType ?? "image/png",
+  // Stored as JPEG: ~90% smaller than the provider's PNG, downloads are a
+  // standard .jpg, and every consumer accepts it (Kling start frames don't take WebP).
+  const { default: sharp } = await import("sharp");
+  const jpeg = await sharp(Buffer.from(params.imageBuffer))
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+
+  const { error } = await uploadMedia(storagePath, jpeg, {
+    contentType: GENERATED_PHOTO_MIME,
     cacheControl: MEDIA_CACHE_CONTROL,
     upsert: false,
   });
