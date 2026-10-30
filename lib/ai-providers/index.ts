@@ -1,21 +1,24 @@
 import "server-only";
 
 import type { PhotoProvider } from "./photo-provider";
+import { createFalPhotoProvider } from "./fal-photo";
 import { createReplicatePhotoProvider } from "./replicate-photo";
 
 export { GenerationCancelledError, isGenerationCancelled } from "./errors";
 export type { PhotoProvider, PhotoRunHooks } from "./photo-provider";
 
-/** Default (and only) provider is Replicate; throws if it is not configured. */
-export function getPhotoProvider(): PhotoProvider {
-  return createReplicatePhotoProvider();
+/** Adapter for the resolved provider (default Replicate); throws if it is not configured. */
+export function getPhotoProvider(id = "replicate"): PhotoProvider {
+  if (id === "fal") return createFalPhotoProvider();
+  if (id === "replicate") return createReplicatePhotoProvider();
+  throw new Error(`No photo provider adapter for "${id}".`);
 }
 
 /** Provider adapter for a RECORDED provider id (cancel/poll); null if unknown or not configured. */
 export function getPhotoProviderById(id: string): PhotoProvider | null {
-  if (id !== "replicate") return null;
+  if (id !== "replicate" && id !== "fal") return null;
   try {
-    return createReplicatePhotoProvider();
+    return getPhotoProvider(id);
   } catch {
     return null;
   }

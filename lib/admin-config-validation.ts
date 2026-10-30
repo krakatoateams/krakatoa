@@ -57,17 +57,31 @@ export function adminConfigValidationSelfCheck(): void {
   const ok = validateModelPatch({ parameters: { guidance: 7 } });
   assert(ok.ok, "non-secret parameters must still save");
 
-  assert(!isSupportedProviderModel("fal", "x/y") && isSupportedProviderModel("replicate", "x/y"), "catalog must support replicate only for now");
-  const fal = validateModelPatch({ provider: "fal" });
+  const basic = { toolKey: "photo", configKey: "image_basic" };
+  assert(!isSupportedProviderModel("fal", "x/y", basic) && isSupportedProviderModel("replicate", "x/y"), "unknown fal model must be rejected");
+  assert(isSupportedProviderModel("fal", "fal-ai/nano-banana", basic), "fal nano banana must be supported on its photo tier");
+  assert(!isSupportedProviderModel("fal", "fal-ai/nano-banana-pro", basic), "fal pair must match its own tier");
+  assert(!isSupportedProviderModel("fal", "fal-ai/nano-banana", { toolKey: "reels", configKey: "image_basic" }), "fal pair must match its tool");
+  assert(!isSupportedProviderModel("fal", "fal-ai/nano-banana"), "scoped pair needs a scope (fail closed)");
+  assert(!isSupportedProviderModel("rendi", "default", basic), "rendi must not be allowed on a photo row");
+  assert(isSupportedProviderModel("rendi", "default", { toolKey: "render", configKey: "rendi" }), "rendi stays valid on render");
+  const fal = validateModelPatch({ provider: "bogus" });
   assert(!fal.ok && /not supported/.test(fal.error), "unsupported provider must be rejected");
+  const row = { provider: "replicate", model: "google/nano-banana", tool_key: "photo", config_key: "image_basic" };
+  assert(validateModelPatch({ provider: "fal", model: "fal-ai/nano-banana" }, row).ok, "fal pair on its photo row must save");
+  assert(!validateModelPatch({ provider: "fal", model: "fal-ai/nano-banana-pro" }, row).ok, "fal pair for another tier must be rejected");
+  assert(!validateModelPatch({ provider: "rendi" }, row).ok, "photo row must not accept rendi");
   assert(validateModelPatch({ provider: "replicate", model: "google/nano-banana" }).ok, "replicate pair must save");
-  assert(!validateModelPatch({ model: "x/y" }, { provider: "fal", model: "a/b" }).ok, "partial patch is checked against the stored provider");
+  assert(!validateModelPatch({ model: "x/y" }, { provider: "fal", model: "a/b", tool_key: "photo", config_key: "image_basic" }).ok, "partial patch is checked against the stored provider");
   assert(validateModelPatch({ model: "x/y" }, { provider: "replicate", model: "a/b" }).ok, "model-only patch on replicate must save");
   assert(providerSwitchPricingError("replicate", "replicate", null) === null, "same provider needs no pricing check");
   assert(providerSwitchPricingError("replicate", "fal", [4, null]) !== null, "null credit_amount must block a switch");
   assert(providerSwitchPricingError("replicate", "fal", []) !== null, "no pricing rows must block a switch");
   assert(providerSwitchPricingError("replicate", "fal", null) !== null, "undeterminable pricing must block a switch");
   assert(providerSwitchPricingError("replicate", "fal", [4, 7]) === null, "fixed credit_amount allows a switch");
+  const missing = creditAmountsForKeys(["a", "b"], [{ pricing_key: "a", credit_amount: 4 }]);
+  assert(providerSwitchPricingError("replicate", "fal", missing) !== null, "a tier pricing key missing from pricing_configs must block a switch");
+  assert(providerSwitchPricingError("replicate", "fal", creditAmountsForKeys(["a"], [{ pricing_key: "a", credit_amount: 4 }])) === null, "all keys priced allows a switch");
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +243,7 @@ export function validatePricingPatch(
 export function validateModelPatch(
   body: Record<string, unknown>,
   // The stored row, so a partial patch (model only / provider only) is checked as a pair.
-  current?: { provider: string; model: string }
+  current?: { provider: string; model: string; tool_key?: string; config_key?: string }
 ): Validated<ModelConfigPatch> {
   const patch: ModelConfigPatch = {};
   const warnings: string[] = [];
@@ -265,7 +279,8 @@ export function validateModelPatch(
   if (patch.provider !== undefined || patch.model !== undefined) {
     const provider = patch.provider ?? current?.provider;
     const model = patch.model ?? current?.model;
-    if (provider !== undefined && model !== undefined && !isSupportedProviderModel(provider, model)) {
+    const scope = current?.tool_key && current.config_key ? { toolKey: current.tool_key, configKey: current.config_key } : undefined;
+    if (provider !== undefined && model !== undefined && !isSupportedProviderModel(provider, model, scope)) {
       return {
         ok: false,
         error: `The provider/model pair "${provider}" + "${model}" is not supported by this app.`,
@@ -383,6 +398,14 @@ if (require.main === module) {
  * `creditAmounts` are the credit_amount values of every pricing row the model
  * bills through, or null when they cannot be determined (reject to stay safe).
  */
+export function creditAmountsForKeys(
+  keys: string[],
+  rows: { pricing_key: string; credit_amount: number | null }[]
+): (number | null)[] {
+  // A key with no pricing row is null, so the switch check fails closed.
+  return keys.map((k) => rows.find((r) => r.pricing_key === k)?.credit_amount ?? null);
+}
+
 export function providerSwitchPricingError(
   fromProvider: string,
   toProvider: string | undefined,

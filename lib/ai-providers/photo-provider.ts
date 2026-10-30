@@ -11,7 +11,9 @@ export type PhotoRunHooks = {
 export type PhotoPredictionStatus = { id: string; status: string; error?: string };
 
 export interface PhotoProvider {
-  readonly id: "replicate";
+  readonly id: "replicate" | "fal";
+  /** True when a cancel is only a request (the run may still finish and bill): the route locks cancel at submit. */
+  readonly commitsOnSubmit: boolean;
   /** Upload a user reference image so the model can fetch it; returns a provider-readable URL. */
   uploadReference(file: File): Promise<string>;
   /** Create + wait (with 429 backoff, abort check, prediction hooks); returns the media URL. */

@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, "..");
 const SCAN_DIRS = ["app", "lib", "scripts", "components"];
 const PROVIDER_DIR = "lib/ai-providers/";
 const PATTERN =
-  /from\s*["']replicate["']|import\(\s*["']replicate["']\s*\)|require\(\s*["']replicate["']\s*\)|\bcreateReplicateClient\b|\bpredictions\.|\brunReplicateWithRetry\b|\brunWithRetry\b|replicate-utils|\buploadProductImageToReplicate\b|\bcancelReplicatePredictions\b|\bextractMediaUrl\b/;
+  /from\s*["'](?:replicate|@fal-ai\/client)["']|import\(\s*["']replicate["']\s*\)|require\(\s*["']replicate["']\s*\)|\bcreateReplicateClient\b|\bpredictions\.|\brunReplicateWithRetry\b|\brunWithRetry\b|replicate-utils|\buploadProductImageToReplicate\b|\bcancelReplicatePredictions\b|\bextractMediaUrl\b/;
 
 /** Self-checks that legitimately name provider APIs. Explicit entries only; never a glob. */
 const SELF_CHECK_EXEMPT: readonly string[] = [
@@ -96,6 +96,7 @@ function assert(cond: boolean, msg: string): void {
 // The guard must fail on a new violation, and on a stale allowlist entry.
 assert(providerGuardErrors({ "app/api/new/route.ts": 'import Replicate from "replicate";' }, []).length === 1, "new SDK import not flagged");
 assert(providerGuardErrors({ "lib/x.ts": "createReplicateClient()" }, []).length === 1, "createReplicateClient not flagged");
+assert(providerGuardErrors({ "app/api/x/route.ts": 'import { fal } from "@fal-ai/client";' }, []).length === 1, "Fal SDK import not flagged");
 assert(providerGuardErrors({ "lib/ai-providers/a.ts": "createReplicateClient()" }, []).length === 0, "provider dir must be exempt");
 assert(providerGuardErrors({ "lib/x.ts": "const a = 1;" }, ["lib/x.ts"]).length === 1, "stale allowlist entry not flagged");
 assert(providerGuardErrors({ "lib/foo-self-check.ts": "createReplicateClient()" }, []).length === 1, "self-check files must not be blanket-exempt");
