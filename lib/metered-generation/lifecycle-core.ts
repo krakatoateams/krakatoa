@@ -115,6 +115,8 @@ export type FinishMeteredTerminalInput = {
   cancelled: boolean;
   recoverable?: boolean;
   pricingMissing?: boolean;
+  /** Provider explicitly reported failure (no output): refund despite the commit lock. */
+  definitiveProviderFailure?: boolean;
   rawMessage: string;
   currentStepId?: string | null;
   clearCurrentStep?: () => void;
@@ -527,6 +529,7 @@ export async function finishMeteredAttemptWithOps(
     rawMessage: outcome.rawMessage,
     creditsSpent: handle.creditsSpent,
     commitLocked,
+    definitiveProviderFailure: terminal ? !!outcome.definitiveProviderFailure : false,
     creditsAmount: handle.creditsAmount,
     hasProfileId: true,
     hasJobId: !!handle.jobId,

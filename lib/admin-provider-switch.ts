@@ -40,12 +40,16 @@ export function photoSwitchTarget(
 export function photoPatchUnit(
   configKey: string,
   row: { provider: string; model: string },
-  patch: { provider?: string; model?: string }
+  patch: { provider?: string; model?: string; parameters?: unknown }
 ): { ok: true; parameters?: Record<string, unknown> } | { ok: false; error: string } {
   const options = photoProviderOptions(configKey);
   if (options.length < 2) return { ok: true };
   const provider = patch.provider ?? row.provider;
   const model = patch.model ?? row.model;
+  // The Fal mapper ignores row parameters, so a free-form PATCH on a Fal row is reset to catalog (empty).
+  if (provider === "fal" && patch.parameters !== undefined && provider === row.provider && model === row.model) {
+    return { ok: true, parameters: {} };
+  }
   const providerChanged = provider !== row.provider;
   if (!providerChanged && !(provider === "fal" && model !== row.model)) return { ok: true };
   if (!options.some((o) => o.provider === provider && o.model === model)) {

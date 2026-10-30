@@ -14,6 +14,8 @@ import { settleWorkflowFailure } from "@/lib/generation-workflows/stop-settlemen
 import { getGenerationRequestForJob } from "@/lib/generation-workflows/workflow-db";
 import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
+import { listPredictionIdsByProvider } from "@/lib/generation-cancel";
+import { getPhotoProviderById } from "@/lib/ai-providers";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
@@ -52,6 +54,31 @@ async function hasRefundForJob(jobId: string): Promise<boolean> {
     .limit(1);
   if (error) throw new Error(error.message);
   return ((data as { id: string }[] | null) ?? []).length > 0;
+}
+
+/**
+ * A commit-on-submit provider (Fal) run is refundable at reconcile only when Fal's queue status
+ * confirms EVERY recorded prediction failed. Unknown, pending, succeeded or unreachable => false.
+ */
+async function providerConfirmsDefinitiveFailure(
+  profileId: string,
+  generationRequestId: string,
+): Promise<boolean> {
+  try {
+    const byProvider = await listPredictionIdsByProvider(profileId, generationRequestId);
+    let checked = 0;
+    for (const [providerId, ids] of Object.entries(byProvider)) {
+      const provider = getPhotoProviderById(providerId);
+      if (!provider?.commitsOnSubmit) return false;
+      for (const id of ids) {
+        if ((await provider.getPredictionStatus(id)).status !== "failed") return false;
+        checked += 1;
+      }
+    }
+    return checked > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function spendAmountForJob(jobId: string): Promise<number> {
@@ -168,6 +195,10 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
               creditsSpent: true,
               creditsAmount: refundAmount,
               commitLocked,
+              definitiveProviderFailure:
+                commitLocked && request
+                  ? await providerConfirmsDefinitiveFailure(row.profile_id, request.id)
+                  : false,
             })
           ) {
             await refundCredits({

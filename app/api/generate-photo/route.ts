@@ -30,7 +30,7 @@ import {
   DEFAULT_CHARACTER_AGE,
 } from "@/lib/product-photo";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
-import { getPhotoProvider, isGenerationCancelled, type PhotoProvider } from "@/lib/ai-providers";
+import { getPhotoProvider, isGenerationCancelled, isProviderDefinitiveFailure, type PhotoProvider } from "@/lib/ai-providers";
 import { requireCurrentProfile } from "@/lib/profiles-db";
 import { finishJob } from "@/lib/jobs-db";
 import { createJobStep, finishJobStep } from "@/lib/job-steps-db";
@@ -62,6 +62,7 @@ import {
   makeReplicateCancelHooks,
 } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation } from "@/lib/generation-commit";
+import { shouldRefundFailedBatchImage } from "@/lib/generation-commit-pure";
 import {
   DevBlankForbiddenError,
   DEV_BLANK_REQUEST_KEY,
@@ -940,12 +941,45 @@ export async function POST(req: Request) {
     );
     const successes = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
     const failureCount = outcomes.length - successes.length;
+    // Refund policy per failed image (shouldRefundFailedBatchImage): providers that commit on
+    // submit (Fal) refund only definitive failures; ambiguous ones stay charged for reconcile.
+    const rejections = outcomes.flatMap((o) => (o.status === "rejected" ? [o.reason] : []));
+    const refundableFailures = rejections.filter((reason) =>
+      shouldRefundFailedBatchImage({
+        commitsOnSubmit: !!provider?.commitsOnSubmit,
+        definitiveProviderFailure: isProviderDefinitiveFailure(reason),
+      }),
+    ).length;
+    const refundFailedImages = async () => {
+      if (refundableFailures === 0) return;
+      if (!jobId) {
+        throw new Error("Missing generation job for partial batch refund.");
+      }
+      const failedCredits = perImageCredits * refundableFailures;
+      console.warn(`[Product Photo] ${refundableFailures}/${imageCount} batch image(s) refundable — refunding ${failedCredits} credits`);
+      await safe("refundFailedBatchImages", () => refundCredits({
+        profileId: profileId!,
+        amount: failedCredits,
+        idempotencyKey: `refund:product_photo:${jobId}:partial`,
+        jobId,
+        description: "Refund for failed batch images",
+        metadata: { reason: "batch_image_failed", failureCount: refundableFailures, imageCount, perImageCredits },
+      }));
+      // Display snapshots (and any later catch-block refund) follow what is still charged.
+      creditsAmount = perImageCredits * (imageCount - refundableFailures);
+    };
     if (successes.length === 0) {
-      // Every image failed: rethrow so the outer catch refunds the whole spend.
-      const firstRejection = outcomes.find((o) => o.status === "rejected");
-      throw firstRejection && firstRejection.status === "rejected"
-        ? firstRejection.reason
-        : new Error("Image generation failed");
+      // Every image failed. Providers that did not commit: the outer catch refunds the whole
+      // spend. Fal (commit on submit): the outer catch refunds only when the thrown reason is
+      // definitive, so a mixed batch refunds its definitive images here and rethrows an
+      // ambiguous reason (no further refund) — and an all-definitive batch rethrows a definitive one.
+      const ambiguous = rejections.find((r) => !isProviderDefinitiveFailure(r));
+      if (provider?.commitsOnSubmit && ambiguous !== undefined) await refundFailedImages();
+      throw ambiguous !== undefined && provider?.commitsOnSubmit
+        ? ambiguous
+        : rejections.length > 0
+          ? rejections[0]
+          : new Error("Image generation failed");
     }
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
@@ -959,22 +993,7 @@ export async function POST(req: Request) {
     // Refund the images that never materialized, so the wallet only pays for
     // what the user actually got. `creditsAmount` follows so the display
     // snapshots below (and any later catch-block refund) stay honest.
-    if (failureCount > 0) {
-      if (!jobId) {
-        throw new Error("Missing generation job for partial batch refund.");
-      }
-      const failedCredits = perImageCredits * failureCount;
-      console.warn(`[Product Photo] ${failureCount}/${imageCount} batch image(s) failed — refunding ${failedCredits} credits`);
-      await safe("refundFailedBatchImages", () => refundCredits({
-        profileId: profileId!,
-        amount: failedCredits,
-        idempotencyKey: `refund:product_photo:${jobId}:partial`,
-        jobId,
-        description: "Refund for failed batch images",
-        metadata: { reason: "batch_image_failed", failureCount, imageCount, perImageCredits },
-      }));
-      creditsAmount = perImageCredits * successes.length;
-    }
+    if (failureCount > 0) await refundFailedImages();
 
     // Platform: mark each asset ready (or failed), then finish the job.
     // `costCredits` is a display snapshot only — the ledger rows written by
@@ -1096,6 +1115,8 @@ export async function POST(req: Request) {
         kind: "terminal",
         cancelled,
         pricingMissing,
+        // A definitive provider failure refunds even after a commit-on-submit lock (policy: generation-commit-pure).
+        definitiveProviderFailure: !cancelled && isProviderDefinitiveFailure(error),
         rawMessage,
         currentStepId,
         clearCurrentStep: () => {

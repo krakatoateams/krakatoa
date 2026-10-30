@@ -14,9 +14,9 @@ Switch one tier at a time in Admin → Config v2 (see [runbook](fal-provider-run
       the Fal input: confirms Fal can fetch it).
 - [ ] Credits spent once at the usual price; `generation_predictions.provider = 'fal'`.
 - [ ] Output URL host is `*.fal.media` (note the exact host).
-- [ ] Cancel mid-run: cancel locks after submit (409), result is delivered, no refund. Note whether
+- [ ] Cancel mid-run: cancel locks after submit (409), result is delivered, no refund (cancel is rejected). Note whether
       Fal billed the run.
-- [ ] Failure path (e.g. temporarily bad `FAL_KEY` on a preview): job fails, credits refunded.
+- [ ] Failure path (e.g. a request Fal reports as failed): job fails, credits refunded exactly once. An ambiguous outcome (timeout/network) is NOT refunded until reconcile sees a Fal failed status. Note whether Fal billed the failed run (unverified).
 - [ ] 402: user with too few credits gets 402 and no Fal request appears in the Fal dashboard.
 
 ## Extra for resolution/quality tiers

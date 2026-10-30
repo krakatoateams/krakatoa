@@ -14,7 +14,16 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
 - Credit price per feature stays one `credit_amount`. Per-provider cost
   (`provider_model_costs`, migrations 115/116) is for margin and analytics only.
 - Fal is treated as a provider commit at submit: a Fal cancel is only a request, so cancel locks
-  and there is no refund after submit.
+  (`cancel_allowed=false`) and a cancel after submit is rejected.
+- Refund policy after submit (one place: `shouldRefundSpentCreditsAfterFailure` in
+  `lib/generation-commit-pure.ts`): a DEFINITIVE Fal failure refunds exactly once (Fal queue status
+  `COMPLETED` with `error`, or `queue.result()` throws a Fal `ApiError`). An AMBIGUOUS outcome (timeout
+  past `maxDuration`, network loss, abort after submit) does not refund; the attempt stays locked
+  and the reconcile cron refunds it only if Fal's queue status confirms every recorded request failed.
+  A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
+- Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`
+  + `error`/`error_type`) but do not say whether they are billed. Check the Fal billing dashboard
+  after a failed run and record the answer here.
 - Fal outputs must come from `*.fal.media` (HTTPS) and are copied to Storage under `{userId}/`.
 - `FAL_KEY` is server-only. Without it Fal cannot be selected (admin save returns 400) or resolved
   (the resolver falls back to the code default, Replicate).
@@ -32,8 +41,12 @@ Same dropdown → Replicate → save (or the tier's reset-to-default, which rese
 parameters together). Effective within 60 s. SQL fallback:
 
 ```sql
-update model_configs set provider='replicate', model='<replicate model>' where tool_key='photo' and config_key='<config_key>';
+update model_configs set provider='replicate', model='<replicate model>', parameters='{}' where tool_key='photo' and config_key='<config_key>';
 ```
+
+Migrations: 113-114 (`provider` columns for model config and `generation_predictions`) are applied in
+prod and required. 115-117 (Fal Nano Banana cost rows, Fal GPT Flare cost rows, admin config audit log) are optional and are
+NOT applied in prod; the app tolerates their absence (margin figures stay unknown, config audit rows are skipped).
 
 Replicate models: `google/nano-banana`, `google/nano-banana-2`, `google/nano-banana-pro`,
 `openai/gpt-image-2.5-flare`.
@@ -48,10 +61,10 @@ Replicate models: `google/nano-banana`, `google/nano-banana-2`, `google/nano-ban
 ## Fal outage playbook
 
 Signs: monitoring shows the amber "Fal jobs failed" banner, users report photo failures, Fal status
-page. A failed Fal run refunds like any failed run.
+page. A definitive Fal failure refunds; an ambiguous one (timeout, network loss) is held for reconcile (see Refund policy above).
 
 1. Switch every Fal tier back to Replicate (above). This stops new traffic to Fal.
-2. Leave in-flight jobs alone; they finish or fail and refund on their own.
+2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones wait for reconcile.
 3. After Fal recovers, switch one tier back and run the checklist before the rest.
 4. There is no automatic fallback between providers (deliberately: backlog item).
 
@@ -64,8 +77,8 @@ page. A failed Fal run refunds like any failed run.
   does not return 429). Check the account's tier in the Fal dashboard before switching a busy tier.
   Queued time counts against the route's `maxDuration` (300 s).
 - Deadline: the Fal adapter has no deadline of its own. The wait is bounded by the route's
-  `maxDuration`; a run that outlasts it fails the request and is refunded by the stuck-run reconcile
-  cron. Do not add a shorter adapter timeout without a policy for runs that still finish and bill.
+  `maxDuration`; a run that outlasts it fails the request with an ambiguous outcome. The reconcile
+  cron refunds it only if Fal's queue status then reports failure; a run that finished is not refunded. Do not add a shorter adapter timeout without a policy for runs that still finish and bill.
 
 ## Cost approximation
 

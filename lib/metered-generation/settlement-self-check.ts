@@ -233,6 +233,25 @@ export function meteredSettlementSelfCheck(): void {
     "post-commit terminal failures must not refund"
   );
 
+  const definitiveAfterCommit = resolveMeteredSettlement({
+    cancelled: false,
+    recoverable: false,
+    pricingMissing: false,
+    rawMessage: "provider reported failure",
+    creditsSpent: true,
+    commitLocked: true,
+    definitiveProviderFailure: true,
+    creditsAmount: 10,
+    hasProfileId: true,
+    hasJobId: true,
+    hasJobType: true,
+    hasGenerationRequestId: true,
+  });
+  assert(
+    definitiveAfterCommit.refundEligible,
+    "definitive provider failure refunds despite the commit lock"
+  );
+
   const missingJobFailure = resolveMeteredSettlement({
     cancelled: false,
     recoverable: false,
