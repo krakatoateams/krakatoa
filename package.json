@@ -104,7 +104,7 @@
     "aws4fetch": "^1.0.20",
     "googleapis": "^171.4.0",
     "lucide-react": "^1.14.0",
-    "next": "15.5.24",
+    "next": "15.5.28",
     "ogl": "^1.0.11",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -120,7 +120,7 @@
     "@types/react-dom": "19.3.0",
     "autoprefixer": "^10.5.0",
     "eslint": "^8",
-    "eslint-config-next": "15.5.24",
+    "eslint-config-next": "15.5.28",
     "pg": "^8.21.0",
     "png-to-ico": "^3.0.2",
     "postcss": "8.5.28",
@@ -130,17 +130,20 @@
     "typescript": "^5"
   },
   "overrides": {
+    "body-parser": "2.4.0",
     "nanoid": "3.3.18",
     "postcss": "8.5.28",
+    "qs": "6.17.1",
+    "zod": "4.6.7",
     "@workflow/core": {
       "nanoid": "5.1.16",
       "devalue": "5.9.4"
     },
     "@workflow/world-local": {
-      "undici": "7.30.0"
+      "undici": "7.30.1"
     },
     "@workflow/world-vercel": {
-      "undici": "7.30.0"
+      "undici": "7.30.1"
     }
   }
 }
