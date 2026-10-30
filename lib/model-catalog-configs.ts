@@ -19,22 +19,40 @@ export type ModelCatalogDefault = {
   sortOrder: number;
 };
 
+type CatalogSource = { id: string; offeredByDefault?: false };
+
+/** Pure core of defaultModelCatalogRows(): `offeredByDefault: false` ships a model dark. */
+export function catalogRowsFrom(
+  photo: readonly CatalogSource[],
+  video: readonly CatalogSource[],
+  motion: readonly CatalogSource[]
+): ModelCatalogDefault[] {
+  const row = (toolKey: ModelCatalogToolKey, m: CatalogSource, sortOrder: number): ModelCatalogDefault => ({
+    toolKey,
+    modelId: m.id,
+    enabled: m.offeredByDefault !== false,
+    sortOrder,
+  });
+  return [
+    ...photo.map((m, i) => row("photo", m, i)),
+    ...video.map((m, i) => row("reels", m, i)),
+    ...motion.map((m, i) => row("reels", m, video.length + i)),
+  ];
+}
+
 /** All generation models in catalog order (photo tiers + video + motion control). */
 export function defaultModelCatalogRows(): ModelCatalogDefault[] {
-  const rows: ModelCatalogDefault[] = [];
-  PRODUCT_PHOTO_TIERS.forEach((tier, i) => {
-    rows.push({ toolKey: "photo", modelId: tier.id, enabled: true, sortOrder: i });
-  });
-  VIDEO_MODELS.forEach((model, i) => {
-    rows.push({ toolKey: "reels", modelId: model.id, enabled: true, sortOrder: i });
-  });
-  MOTION_CONTROL_MODELS.forEach((model, i) => {
-    rows.push({
-      toolKey: "reels",
-      modelId: model.id,
-      enabled: true,
-      sortOrder: VIDEO_MODELS.length + i,
-    });
-  });
-  return rows;
+  return catalogRowsFrom(PRODUCT_PHOTO_TIERS, VIDEO_MODELS, MOTION_CONTROL_MODELS);
+}
+
+/** Offered model ids for a tool: a DB row wins, a missing row falls back to the code default. */
+export function enabledIdsFromRows(
+  toolKey: ModelCatalogToolKey,
+  rows: readonly { tool_key: string; model_id: string; enabled: boolean }[],
+  defaults: readonly ModelCatalogDefault[] = defaultModelCatalogRows()
+): Set<string> {
+  const byId = new Map(rows.filter((r) => r.tool_key === toolKey).map((r) => [r.model_id, r.enabled]));
+  return new Set(
+    defaults.filter((d) => d.toolKey === toolKey && (byId.get(d.modelId) ?? d.enabled)).map((d) => d.modelId)
+  );
 }

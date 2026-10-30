@@ -256,3 +256,5 @@ Known gap: the margin dashboard does not yet use `provider_model_costs` (planned
   `request_id\nuser_id\ntimestamp\nsha256hex(body)`, JWKS `https://rest.fal.ai/.well-known/jwks.json`,
   ±300 s window, retries without dedup) plus a submission fence.
 - Provider fallback: definitive failures only, same model on the other provider.
+
+Adding a new model (ship dark, then add in Admin Config): [`docs/admin/adding-a-generation-model.md`](../admin/adding-a-generation-model.md).

@@ -6,6 +6,7 @@ import {
   type GuardFeatureRow,
   type GuardPricingRow,
 } from "@/lib/model-catalog-guard";
+import { defaultModelCatalogRows } from "@/lib/model-catalog-configs";
 import { resolveModelProvider, type RegistryModelConfigRow } from "@/lib/model-registry";
 
 /**
@@ -21,7 +22,7 @@ export type FeaturePatch = { enabled?: boolean; is_default?: boolean };
 
 export type ModelAuditEntry = {
   actorProfileId: string;
-  action: "model_enable" | "model_disable" | "feature_model_update";
+  action: "model_enable" | "model_add" | "model_disable" | "feature_model_update";
   toolKey: string;
   /** modelId, or featureKey:modelId for feature rows. */
   configKey: string;
@@ -38,11 +39,16 @@ export type ModelChangeStore = {
   /** Atomic `update ... where id = :id and updated_at = :expected`; null when nothing matched. */
   casCatalog(id: string, enabled: boolean, expectedUpdatedAt: string, actor: string): Promise<CatalogRowFull | null>;
   casFeature(id: string, patch: FeaturePatch, expectedUpdatedAt: string, actor: string): Promise<FeatureRowFull | null>;
+  /** True when an enable/add audit row exists; null when that cannot be determined (then `model_enable` is used). */
+  everOffered?(toolKey: string, modelId: string): Promise<boolean | null>;
   /** Best-effort: must never throw into the change. */
   audit(entry: ModelAuditEntry): Promise<void>;
 };
 
 export type ChangeResponse = { status: number; body: Record<string, unknown> };
+
+const shippedDark = (toolKey: string, modelId: string) =>
+  defaultModelCatalogRows().some((d) => d.toolKey === toolKey && d.modelId === modelId && !d.enabled);
 
 const STALE_MESSAGE = "Someone else changed this model. Review and try again.";
 
@@ -89,9 +95,15 @@ export async function applyCatalogToggle(
     const current = (await store.listCatalog()).find((r) => r.id === row.id) ?? null;
     return reject("STALE_MODEL_CONFIG", [STALE_MESSAGE], { modelCatalog: current });
   }
+  // First offer of a model shipped dark is an "add"; anything else (or anything unknown) is an enable.
+  let action: ModelAuditEntry["action"] = input.enabled ? "model_enable" : "model_disable";
+  if (input.enabled && shippedDark(row.tool_key, row.model_id)) {
+    const offered = await store.everOffered?.(row.tool_key, row.model_id).catch(() => null);
+    if (offered === false) action = "model_add";
+  }
   await store.audit({
     actorProfileId: input.actorProfileId,
-    action: input.enabled ? "model_enable" : "model_disable",
+    action,
     toolKey: row.tool_key,
     configKey: row.model_id,
     before: { enabled: row.enabled },

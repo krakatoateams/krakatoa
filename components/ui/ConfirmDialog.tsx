@@ -13,6 +13,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   confirmVariant = "danger",
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
   children,
@@ -25,6 +26,8 @@ export function ConfirmDialog({
   /** Extra content between the description and the actions. */
   children?: ReactNode;
   busy?: boolean;
+  /** Keeps the confirm button inert (e.g. while a guard blocks the action). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -76,7 +79,7 @@ export function ConfirmDialog({
           <Button variant="secondary" size="sm" autoFocus disabled={busy} onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant={confirmVariant} size="sm" loading={busy} onClick={onConfirm}>
+          <Button variant={confirmVariant} size="sm" loading={busy} disabled={confirmDisabled} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </div>

@@ -1667,7 +1667,7 @@ export default function AdminConfigV2Page() {
 
       <ModelRegistrySection refreshKey={registryRefresh} onChanged={() => void load(true)} />
 
-      <div className="space-y-2">
+      <div id="admin-config-tools" className="space-y-2">
           {tools.map((tool) => (
             <>
               <ToolSection

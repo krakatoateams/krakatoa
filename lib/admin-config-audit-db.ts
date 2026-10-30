@@ -31,7 +31,7 @@ export async function recordProviderChange(params: {
 /** Model enable/disable and per-feature model changes. Same best-effort contract as above. */
 export async function recordModelConfigChange(params: {
   actorProfileId: string;
-  action: "model_enable" | "model_disable" | "feature_model_update";
+  action: "model_enable" | "model_add" | "model_disable" | "feature_model_update";
   toolKey: string;
   /** modelId, or featureKey:modelId for feature rows. */
   modelId: string;
@@ -50,5 +50,23 @@ export async function recordModelConfigChange(params: {
     if (error) throw new Error(error.message);
   } catch (e) {
     console.warn("[admin-audit] model change not recorded:", errorLogSafe(e));
+  }
+}
+
+/** True when the model was ever offered through Admin Config; null when the log cannot be read. */
+export async function modelEverOffered(toolKey: string, modelId: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await supabaseServer
+      .from("admin_config_audit_log")
+      .select("id")
+      .eq("tool_key", toolKey)
+      .eq("config_key", modelId)
+      .in("action", ["model_enable", "model_add"])
+      .limit(1);
+    if (error) throw new Error(error.message);
+    return (data?.length ?? 0) > 0;
+  } catch (e) {
+    console.warn("[admin-audit] model history not readable:", errorLogSafe(e));
+    return null;
   }
 }

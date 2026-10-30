@@ -375,6 +375,7 @@ Manual QA paths:
 - `docs/billing/pricing-config-v2-plan.md` — Pricing Option A (implemented)
 - `docs/billing/pricing-config-v2-ringkasan.md` — Indonesian summary
 - `openspec/changes/admin-config-v2-unified/` — OpenSpec change (proposal, design, tasks, spec)
+- `docs/admin/adding-a-generation-model.md` — developer checklist for adding a model (ship dark, then add in Admin Config)
 - `CLAUDE.md` — Monorepo overview (link to this doc)
 
 ---
