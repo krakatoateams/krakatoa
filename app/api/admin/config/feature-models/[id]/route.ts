@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updateFeatureModelConfig } from "@/lib/feature-model-configs-db";
+import { applyFeatureModelChange } from "@/lib/model-config-change";
+import { dbModelChangeStore } from "@/lib/model-config-change-db";
 
 // Update a per-feature model row by id (admin only). Accepts only `enabled` and
 // `is_default` booleans. Setting is_default=true clears the previous default for
 // the same feature (single default per feature is enforced in the DB layer).
-// Runtime reads are cached ~60s, so changes may take up to a minute to apply.
+// Guarded: the last enabled model of a feature and an unreplaced default are refused (409), and
+// `expectedUpdatedAt` is compare-and-set (409 STALE_MODEL_CONFIG). Changes are audited.
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -41,10 +43,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       warnings.push("A disabled model cannot be the default; enable it to use as default.");
     }
 
-    const featureModel = await updateFeatureModelConfig(params.id, patch, ctx.profile.id);
-    if (!featureModel) {
-      return NextResponse.json({ error: "Feature model config not found." }, { status: 404 });
-    }
-    return NextResponse.json({ featureModel, warnings });
+    const { status, body: out } = await applyFeatureModelChange(dbModelChangeStore, {
+      id: params.id,
+      patch,
+      expectedUpdatedAt: body.expectedUpdatedAt,
+      actorProfileId: ctx.profile.id,
+    });
+    return NextResponse.json(status === 200 ? { ...out, warnings } : out, { status });
   });
 }

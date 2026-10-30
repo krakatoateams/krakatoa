@@ -226,6 +226,38 @@ Tasks:
 - [ ] Prefer minimal: single `enabled` flag per `(tool, model_id)` without per-mode explosion
 - [ ] Tree builder filters disabled models from studio APIs (not from admin tree)
 
+#### Guarded enable/disable (issue #426)
+
+`PATCH /api/admin/config/model-catalog/[id]` (body `{ enabled, expectedUpdatedAt }`) and
+`PATCH /api/admin/config/feature-models/[id]` (`expectedUpdatedAt` plus `enabled` / `is_default`) are
+admin-only and run `lib/model-config-change.ts` on the server; the UI never decides.
+
+- **Guard rules** (`checkModelCatalogChange`, 409 `{ code, reasons }`): `UNKNOWN_MODEL` (not in the code
+  catalog), `LAST_ENABLED_MODEL` (last offered model of the tool or of a feature/composer), `IS_DEFAULT`
+  (pick another default first), `REELS_ENGINE_LAST`, and, when enabling, `PRICING_NOT_READY` and
+  `PROVIDER_NOT_CONFIGURED`. Feature rows: disabling the last enabled model of a feature
+  (`LAST_ENABLED_MODEL`) or unsetting/disabling its default without a replacement (`IS_DEFAULT`) is refused;
+  setting a new default is always allowed and is how `IS_DEFAULT` is cleared.
+- **Compare-and-set:** `update ... where id = :id and updated_at = :expectedUpdatedAt`. Missing token is 400;
+  zero rows updated is 409 `STALE_MODEL_CONFIG` with the current row. A request that already matches the
+  current state returns 200 `noop` (no write, no audit), so double submits and retries are idempotent even
+  when their token is stale. For feature rows the target row is compare-and-set first and the previous default
+  is cleared afterwards; a failure between the two surfaces as a 500 and leaves two flagged defaults until the
+  next save (the resolver takes the first, so users see one).
+- **Audit:** `admin_config_audit_log` actions `model_enable`, `model_disable` (`config_key` = model id) and
+  `feature_model_update` (`config_key` = `featureKey:modelId`); `from_value`/`to_value` are JSON of
+  `{ enabled }` / `{ enabled, is_default }`. Best-effort: a missing table or failed insert is logged
+  (`errorLogSafe`) and never blocks the change.
+- **Known race:** the guard read and the CAS write are not one transaction. The CAS rejects two admins editing
+  the same row, but two admins disabling two different last models at the same instant can both pass. Add a
+  per-tool advisory-lock RPC if it is ever seen in practice.
+- **When it applies:** enablement caches have TTL 0, so a change applies to the next generation request (the
+  UI says "up to a minute"). In-flight jobs are untouched: the generate routes check enablement only at
+  request start.
+- **Retries:** the photo generate route checks enablement before its idempotency gate, so an identical retry
+  of an already-charged attempt sent after its model was disabled gets the existing 400 and no new charge.
+  Retained credits settle through the canonical terminal-refund policy; nothing here refunds.
+
 ### Phase 4 — Provider binding UI (P1, blocked on schema)
 
 **Goal:** Edit provider/model/parameters without raw text fields.

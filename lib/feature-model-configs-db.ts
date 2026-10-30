@@ -166,6 +166,45 @@ export async function updateFeatureModelConfig(
   return (data as FeatureModelConfig | null) ?? null;
 }
 
+/**
+ * Compare-and-set variant of updateFeatureModelConfig: the target row changes only while its
+ * updated_at still equals what the admin saw (null = no row matched, nothing written). Other
+ * defaults of the feature are cleared only after the target row won.
+ */
+export async function casFeatureModelConfig(
+  id: string,
+  patch: FeatureModelConfigPatch,
+  expectedUpdatedAt: string,
+  updatedByProfileId: string | null
+): Promise<FeatureModelConfig | null> {
+  const update: Record<string, unknown> = { updated_by_profile_id: updatedByProfileId };
+  if (patch.enabled !== undefined) update.enabled = patch.enabled;
+  if (patch.is_default !== undefined) update.is_default = patch.is_default;
+
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .update(update)
+    .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("*")
+    .maybeSingle();
+  handleError(error, "Failed to update feature model config.");
+  const row = (data as FeatureModelConfig | null) ?? null;
+
+  if (row && patch.is_default === true) {
+    const { error: clearErr } = await supabaseServer
+      .from(TABLE)
+      .update({ is_default: false, updated_by_profile_id: updatedByProfileId })
+      .eq("tool_key", row.tool_key)
+      .eq("feature_key", row.feature_key)
+      .neq("id", id);
+    handleError(clearErr, "Failed to clear previous default.");
+  }
+  cache = { map: null, expiresAt: 0 };
+  videoCache = { map: null, expiresAt: 0 };
+  return row;
+}
+
 /** Reset a row to its shipped code default (enabled=true; default per code catalog). */
 export async function resetFeatureModelConfig(
   id: string,

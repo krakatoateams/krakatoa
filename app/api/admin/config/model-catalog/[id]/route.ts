@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { updateModelCatalogConfig } from "@/lib/model-catalog-configs-db";
+import { applyCatalogToggle } from "@/lib/model-config-change";
+import { dbModelChangeStore } from "@/lib/model-config-change-db";
 
+// Turn a catalog model on/off (admin only). Runs the server-side guard (last model, default,
+// last Reels engine, pricing, provider), compare-and-sets on `expectedUpdatedAt` and audits.
+// Runtime reads of enablement are uncached; in-flight jobs are never affected.
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -18,14 +22,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       return NextResponse.json({ error: "`enabled` must be a boolean." }, { status: 400 });
     }
 
-    const modelCatalog = await updateModelCatalogConfig(
-      params.id,
-      { enabled: body.enabled },
-      ctx.profile.id
-    );
-    if (!modelCatalog) {
-      return NextResponse.json({ error: "Model catalog config not found." }, { status: 404 });
-    }
-    return NextResponse.json({ modelCatalog });
+    const { status, body: out } = await applyCatalogToggle(dbModelChangeStore, {
+      id: params.id,
+      enabled: body.enabled,
+      expectedUpdatedAt: body.expectedUpdatedAt,
+      actorProfileId: ctx.profile.id,
+    });
+    return NextResponse.json(out, { status });
   });
 }

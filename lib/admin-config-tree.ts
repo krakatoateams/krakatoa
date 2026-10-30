@@ -57,6 +57,8 @@ export type AdminFeatureToggle = {
   isDefault: boolean;
   /** Present when persisted (Photo + Video composers). */
   featureModelId?: string;
+  /** updated_at of the persisted row: the compare-and-set token for saves. */
+  updatedAt?: string;
   /** Hard capability gate — cannot enable even if admin tries. */
   eligible: boolean;
 };
@@ -87,6 +89,8 @@ export type AdminModelNode = {
   /** Catalog on/off — hides model from studio when false. */
   enabled: boolean;
   catalogConfigId?: string;
+  /** updated_at of the catalog row: the compare-and-set token for on/off saves. */
+  catalogUpdatedAt?: string;
   features: AdminFeatureToggle[];
   variants: AdminCostVariant[];
   providerChoice?: AdminProviderChoice;
@@ -152,6 +156,7 @@ export type FeatureModelInput = {
   model_tier: string;
   enabled: boolean;
   is_default: boolean;
+  updated_at?: string;
 };
 
 export type ModelCatalogInput = {
@@ -159,6 +164,7 @@ export type ModelCatalogInput = {
   tool_key: string;
   model_id: string;
   enabled: boolean;
+  updated_at?: string;
 };
 
 export type ModelConfigInput = {
@@ -283,6 +289,7 @@ function buildVideoFeatures(
       enabled: dbRow?.enabled ?? def?.enabled ?? true,
       isDefault: dbRow?.is_default ?? def?.isDefault ?? false,
       featureModelId: dbRow?.id,
+      updatedAt: dbRow?.updated_at,
       eligible: true,
     };
   });
@@ -352,6 +359,7 @@ function buildPhotoFeatures(
         enabled: dbRow?.enabled ?? def?.enabled ?? true,
         isDefault: dbRow?.is_default ?? def?.isDefault ?? tierId === defaultTierForFeature(feature.key),
         featureModelId: dbRow?.id,
+      updatedAt: dbRow?.updated_at,
         eligible: true,
       };
     }
@@ -372,11 +380,12 @@ function resolveCatalogModel(
   toolKey: string,
   modelId: string,
   modelCatalog: ModelCatalogInput[]
-): { enabled: boolean; catalogConfigId?: string } {
+): { enabled: boolean; catalogConfigId?: string; catalogUpdatedAt?: string } {
   const row = modelCatalog.find((r) => r.tool_key === toolKey && r.model_id === modelId);
   return {
     enabled: row?.enabled ?? true,
     catalogConfigId: row?.id,
+    catalogUpdatedAt: row?.updated_at,
   };
 }
 

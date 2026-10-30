@@ -113,6 +113,26 @@ export async function updateModelCatalogConfig(
   return (data as ModelCatalogConfig | null) ?? null;
 }
 
+/** Compare-and-set: applies only while updated_at still equals what the admin saw; null = no row matched. */
+export async function casModelCatalogEnabled(
+  id: string,
+  enabled: boolean,
+  expectedUpdatedAt: string,
+  updatedByProfileId: string | null
+): Promise<ModelCatalogConfig | null> {
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .update({ enabled, updated_by_profile_id: updatedByProfileId })
+    .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("*")
+    .maybeSingle();
+
+  handleError(error, "Failed to update model catalog config.");
+  cache = { byTool: null, expiresAt: 0 };
+  return (data as ModelCatalogConfig | null) ?? null;
+}
+
 function codeDefaultEnabledIds(toolKey: ModelCatalogToolKey): Set<string> {
   return new Set(
     defaultModelCatalogRows()

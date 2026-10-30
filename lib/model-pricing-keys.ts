@@ -1,6 +1,12 @@
 import { PRODUCT_PHOTO_TIERS, type ProductPhotoTier } from "@/lib/product-photo";
 import { MOTION_CONTROL_MODELS } from "@/lib/motion-control-models";
 import {
+  reelsPricingKey,
+  REELS_ENGINE_CATALOG_MODEL_ID,
+  SEEDANCE_RESOLUTIONS,
+  VEO_RESOLUTIONS,
+} from "@/lib/reels-models";
+import {
   VIDEO_MODELS,
   type VideoModel,
   type VideoPricingContext,
@@ -48,7 +54,18 @@ export function modelPricingKeys(toolKey: string, modelId: string): string[] {
   }
   if (toolKey !== "reels") return [];
   const video = VIDEO_MODELS.find((m) => m.id === modelId);
-  if (video) return [...new Set(videoPricingContexts(video).map((ctx) => video.pricingKey(ctx)))];
+  if (video) {
+    const keys = videoPricingContexts(video).map((ctx) => video.pricingKey(ctx));
+    // The Reels Creator engines bill reelsPricingKey() (seedance_* / veo_*), not the video model's own keys.
+    const engine = (Object.keys(REELS_ENGINE_CATALOG_MODEL_ID) as (keyof typeof REELS_ENGINE_CATALOG_MODEL_ID)[]).find(
+      (e) => REELS_ENGINE_CATALOG_MODEL_ID[e] === modelId
+    );
+    if (engine) {
+      const resolutions = engine === "veo" ? VEO_RESOLUTIONS : SEEDANCE_RESOLUTIONS;
+      keys.push(...resolutions.map((r) => reelsPricingKey(engine, r)));
+    }
+    return [...new Set(keys)];
+  }
   const motion = MOTION_CONTROL_MODELS.find((m) => m.id === modelId);
   return motion ? [...new Set(motion.modes.map((mode) => motion.pricingKey(mode)))] : [];
 }
