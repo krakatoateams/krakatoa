@@ -6,7 +6,7 @@ import {
   VIDEO_CREDITS_PER_SECOND,
 } from "@/lib/credit-costs";
 import type { CostUnit, PricingType } from "@/lib/pricing-configs-db";
-import { GPT_IMAGE_2_MODEL } from "@/lib/product-photo";
+import { GPT_IMAGE_2_5_FLARE_MODEL } from "@/lib/product-photo";
 
 /**
  * Canonical reset-to-default values for the Admin Config panel (Admin Phase 2.5).
@@ -451,7 +451,7 @@ export const MODEL_DEFAULTS: Record<string, ModelDefault> = {
   "veo.tts": { provider: "replicate", model: "minimax/speech-02-turbo", parameters: {}, enabled: true, is_default: true },
   "veo.whisper": { provider: "replicate", model: "vaibhavs10/incredibly-fast-whisper", parameters: { version: WHISPER_VERSION }, enabled: true, is_default: true },
   "storyboard.scene_llm": { provider: "replicate", model: "openai/gpt-5", parameters: {}, enabled: true, is_default: true },
-  "storyboard.image": { provider: "replicate", model: GPT_IMAGE_2_MODEL, parameters: {}, enabled: true, is_default: true },
+  "storyboard.image": { provider: "replicate", model: GPT_IMAGE_2_5_FLARE_MODEL, parameters: {}, enabled: true, is_default: true },
   "storyboard.video": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance2_mini": { provider: "replicate", model: "bytedance/seedance-2.0-mini", parameters: {}, enabled: true, is_default: true },
   "reels.video_seedance2": { provider: "replicate", model: "bytedance/seedance-2.0", parameters: {}, enabled: true, is_default: true },

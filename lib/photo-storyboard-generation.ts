@@ -72,7 +72,7 @@ export type PhotoStoryboardGenerationOptions = {
 
 // Max @-mentioned assets (saved characters / storyboards) used as references.
 const MAX_MENTIONS = 8;
-// gpt-image-2 input_images cap — uploaded theme reference uses one slot.
+// Conservative input_images cap (Flare schema declares none) — uploaded theme reference uses one slot.
 const MAX_INPUT_IMAGES = 8;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -707,7 +707,7 @@ export async function handlePhotoStoryboardGeneration(
           aspect_ratio: "3:2",
           output_format: "png",
           number_of_images: 1,
-          quality: "auto",
+          quality: "high",
           background: "opaque",
           moderation: "auto",
           ...(inputImages.length ? { input_images: inputImages } : {}),

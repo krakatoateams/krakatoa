@@ -1,5 +1,7 @@
 ## Why
 
+> Superseded: storyboard sheets now run on `openai/gpt-image-2.5-flare` (#403).
+
 ReelsGen today offers two long pipelines (Seedance multi-scene with captions and Veo). Creators who want a **fast, visual-first** path—approve a six-panel storyboard, then get one **15s cinematic clip with native audio**—have no dedicated flow. A Storyboard tab closes that gap by pairing GPT Image 2 (structured board) with GPT-5 (Seedance-ready prompt) and Seedance 2.0 Fast with multimodal reference.
 
 ## What Changes

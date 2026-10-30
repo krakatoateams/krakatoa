@@ -39,7 +39,7 @@ export type ImageNodeData = SavedRunState & {
   prompt: string;
   modelTier: ProductPhotoModelTier;
   resolution: ProductPhotoResolution;
-  /** GPT Image 2 quality; absent on older canvases (treated as Medium). */
+  /** GPT Image 2.5 Flare quality; absent on older canvases (treated as Medium). */
   quality?: ProductPhotoQuality;
   aspectRatio: PhotoAspectRatio;
   resultUrl: string | null;

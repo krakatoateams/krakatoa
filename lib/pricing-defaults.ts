@@ -118,7 +118,7 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   kling3mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling3mc", variantKey: "pro" },
   kling26mc_std_per_second: { providerCostUsd: 0.07, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "std" },
   kling26mc_pro_per_second: { providerCostUsd: 0.12, costUnit: "per_second", pricingGroup: "kling26mc", variantKey: "pro" },
-  // Storyboard image / GPT Image 2 (per image).
+  // Storyboard image (per image). Source: GPT Image 2.5 Flare page; the default sheet runs at Flare `high` (key `auto`).
   storyboard_gpt_image_2_low_per_image: { providerCostUsd: 0.012, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "low" },
   storyboard_gpt_image_2_medium_per_image: { providerCostUsd: 0.047, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "medium" },
   storyboard_gpt_image_2_auto_per_image: { providerCostUsd: 0.128, costUnit: "per_image", pricingGroup: "storyboard_image", variantKey: "auto" },

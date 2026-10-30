@@ -70,7 +70,7 @@ export const PIPELINE_GROUP_SPECS: PipelineGroupSpec[] = [
         modelConfigToolKey: "storyboard",
         configKey: "image",
         label: "Storyboard image",
-        description: "Renders the six-panel sheet (GPT Image 2).",
+        description: "Renders the six-panel sheet (GPT Image 2.5 Flare).",
       },
     ],
     pricingKeys: [
