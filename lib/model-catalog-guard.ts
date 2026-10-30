@@ -23,9 +23,10 @@ import { modelPricingKeys } from "@/lib/model-pricing-keys";
 
 export { modelPricingKeys };
 
-export type ModelCatalogChange = "enable" | "disable";
+export type ModelCatalogChange = "enable" | "disable" | "archive" | "restore";
 
-export type GuardCatalogRow = { tool_key: string; model_id: string; enabled: boolean };
+/** `archived_at` exists only once migration 118 is applied; absent = not archived. */
+export type GuardCatalogRow = { tool_key: string; model_id: string; enabled: boolean; archived_at?: string | null };
 export type GuardFeatureRow = {
   tool_key: string;
   feature_key: string;
@@ -56,6 +57,7 @@ export type ModelCatalogGuardCode =
   | "LAST_ENABLED_MODEL"
   | "IS_DEFAULT"
   | "REELS_ENGINE_LAST"
+  | "ARCHIVED"
   | "PRICING_NOT_READY"
   | "PROVIDER_NOT_CONFIGURED";
 
@@ -145,6 +147,7 @@ const PRIORITY: ModelCatalogGuardCode[] = [
   "LAST_ENABLED_MODEL",
   "IS_DEFAULT",
   "REELS_ENGINE_LAST",
+  "ARCHIVED",
   "PRICING_NOT_READY",
   "PROVIDER_NOT_CONFIGURED",
 ];
@@ -164,9 +167,19 @@ export function checkModelCatalogChange(input: ModelCatalogGuardInput): ModelCat
   const known = defaultModelCatalogRows().some((r) => r.toolKey === toolKey && r.modelId === modelId);
   if (!known) return fail([{ code: "UNKNOWN_MODEL", reason: "This model is not in the code catalog." }]);
 
+  const archived = input.catalogRows.some((r) => r.tool_key === toolKey && r.model_id === modelId && !!r.archived_at);
+  // Restore only clears the archive flag; the model stays not offered (adding it again re-checks pricing/provider).
+  if (change === "restore") return { ok: true, noop: !archived, warnings: [] };
+  if (change === "enable" && archived) {
+    return fail([{ code: "ARCHIVED", reason: "This model is removed. Restore it first, then add it again." }]);
+  }
+  if (change === "archive" && archived) return { ok: true, noop: true, warnings: [] };
+
   const before = catalogEnabledSet(toolKey, input.catalogRows);
   const wantEnabled = change === "enable";
-  if (before.has(modelId) === wantEnabled) return { ok: true, noop: true, warnings: [] };
+  // Archiving a model that is not offered hides nothing, so no hide rule applies; it only sets the flag.
+  if (change === "archive" && !before.has(modelId)) return { ok: true, noop: false, warnings: [] };
+  if (change !== "archive" && before.has(modelId) === wantEnabled) return { ok: true, noop: true, warnings: [] };
 
   const violations: { code: ModelCatalogGuardCode; reason: string }[] = [];
 

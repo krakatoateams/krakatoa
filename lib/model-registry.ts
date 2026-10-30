@@ -34,6 +34,9 @@ export type RegistryModel = {
   providerModel: string;
   catalogConfigId: string | null;
   enabled: boolean;
+  /** Removed (soft archive, migration 118). Always `enabled: false`; absent column = never archived. */
+  archived: boolean;
+  archivedAt: string | null;
   updatedAt: string | null;
   /** Composers / features where the model is currently offered. */
   enabledIn: { key: string; label: string }[];
@@ -52,6 +55,8 @@ export type RegistryModel = {
   availableToAdd: boolean;
   enableCheck: RegistryCheck;
   disableCheck: RegistryCheck;
+  /** Guard result for Remove (same rules as hiding the model). */
+  archiveCheck: RegistryCheck;
 };
 
 function summarize(r: ModelCatalogGuardResult): RegistryCheck {
@@ -60,7 +65,7 @@ function summarize(r: ModelCatalogGuardResult): RegistryCheck {
     : { ok: false, noop: false, code: r.code, reasons: r.reasons };
 }
 
-function labelsFor(toolKey: "photo" | "reels", modelId: string): { label: string; providerModel: string; modelRole: string } {
+export function labelsFor(toolKey: "photo" | "reels", modelId: string): { label: string; providerModel: string; modelRole: string } {
   const m =
     toolKey === "photo"
       ? PRODUCT_PHOTO_TIERS.find((t) => t.id === modelId)
@@ -137,7 +142,7 @@ export function buildModelRegistry(input: {
       .filter(([, u]) => u.enabledTiers.includes(def.modelId))
       .map(([key, u]) => ({ key, label: u.label }));
 
-    const guard = (change: "enable" | "disable") =>
+    const guard = (change: "enable" | "disable" | "archive") =>
       summarize(
         checkModelCatalogChange({
           toolKey: def.toolKey,
@@ -158,6 +163,8 @@ export function buildModelRegistry(input: {
       providerModel,
       catalogConfigId: row?.id ?? null,
       enabled,
+      archived: !!row?.archived_at,
+      archivedAt: row?.archived_at ?? null,
       updatedAt: row?.updated_at ?? null,
       enabledIn,
       defaultIn,
@@ -169,9 +176,10 @@ export function buildModelRegistry(input: {
       shipsDark: !def.enabled,
       willAppearIn,
       provider,
-      availableToAdd: !enabled && enableCheck.ok,
+      availableToAdd: !enabled && !row?.archived_at && enableCheck.ok,
       enableCheck,
       disableCheck: guard("disable"),
+      archiveCheck: guard("archive"),
     });
   }
   return out;

@@ -56,3 +56,11 @@ export function enabledIdsFromRows(
     defaults.filter((d) => d.toolKey === toolKey && (byId.get(d.modelId) ?? d.enabled)).map((d) => d.modelId)
   );
 }
+
+/** True when the error says the 118 columns do not exist (Postgres 42703 / PostgREST schema cache). */
+export function isArchiveColumnMissing(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const msg = error.message ?? "";
+  if (!msg.includes("archived_at") && !msg.includes("archived_by_profile_id")) return false;
+  return error.code === "42703" || error.code === "PGRST204" || /does not exist|schema cache|Could not find/i.test(msg);
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { catalogRowsFrom, defaultModelCatalogRows, enabledIdsFromRows } from "./model-catalog-configs";
+import { isArchiveColumnMissing, catalogRowsFrom, defaultModelCatalogRows, enabledIdsFromRows } from "./model-catalog-configs";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
 import { buildModelRegistry } from "./model-registry";
 import { DEFAULT_PRODUCT_PHOTO_TIER } from "./product-photo";
@@ -8,8 +8,10 @@ import { defaultTierForFeature, eligibleTiersForFeature, PHOTO_FEATURE_KEYS } fr
 import { modelPricingKeys } from "./model-pricing-keys";
 import { classifyAdminError, NotAdminError } from "./admin-auth-pure";
 import {
+  applyCatalogArchive,
   applyCatalogToggle,
   applyFeatureModelChange,
+  applyFeatureModelReset,
   type CatalogRowFull,
   type FeatureRowFull,
   type ModelAuditEntry,
@@ -21,7 +23,7 @@ const all = defaultModelCatalogRows();
 let clock = 0;
 const stamp = () => `2026-01-01T00:00:${String(++clock).padStart(2, "0")}Z`;
 
-function makeStore(opts: { falConfigured?: boolean; auditFails?: boolean; pricingMissing?: string[]; everOffered?: boolean | null } = {}) {
+function makeStore(opts: { archiveAvailable?: boolean; inFlight?: number | null; falConfigured?: boolean; auditFails?: boolean; pricingMissing?: string[]; everOffered?: boolean | null } = {}) {
   const catalog: CatalogRowFull[] = defaultModelCatalogRows().map((d, i) => ({
     id: `c${i}`,
     tool_key: d.toolKey,
@@ -57,6 +59,15 @@ function makeStore(opts: { falConfigured?: boolean; auditFails?: boolean; pricin
       Object.assign(r, patch, { updated_at: stamp() });
       return { ...r };
     },
+    archiveAvailable: async () => opts.archiveAvailable ?? true,
+    casArchive: async (id, archive, expected, actor) => {
+      const r = catalog.find((x) => x.id === id);
+      if (!r || r.updated_at !== expected) return null;
+      writes++;
+      Object.assign(r, archive ? { enabled: false, archived_at: "2026-02-01T00:00:00Z", archived_by_profile_id: actor } : { archived_at: null }, { updated_at: stamp() });
+      return { ...r };
+    },
+    inFlightJobs: async () => opts.inFlight ?? null,
     everOffered: async () => (opts.everOffered === undefined ? false : opts.everOffered),
     audit: async (e) => {
       // A failing audit insert is swallowed by the real recorder; model that here.
@@ -163,7 +174,10 @@ async function main() {
     const r = await toggle(t.store, row.id, false, row.updated_at);
     assert.equal(r.status, 409);
     assert.ok((r.body.reasons as string[]).some((x) => x.includes("last offered Reels Creator engine")));
-    assert.equal((r.body.code as string) === "REELS_ENGINE_LAST" || r.body.code === "LAST_ENABLED_MODEL" || r.body.code === "IS_DEFAULT", true);
+    assert.ok((r.body.codes as string[]).includes("REELS_ENGINE_LAST"));
+    // seedance2_fast is also the Reels default, and IS_DEFAULT outranks REELS_ENGINE_LAST.
+    assert.equal(r.body.code, "IS_DEFAULT");
+    assert.deepEqual(r.body.codes, ["IS_DEFAULT", "REELS_ENGINE_LAST"]);
   }
 
   // Enabling needs pricing ready.
@@ -333,6 +347,189 @@ async function main() {
     assert.equal((await apply(only.id, { enabled: true }, "stale")).body.noop, true);
     assert.equal((await applyFeatureModelChange(t.store, { id: only.id, patch: { enabled: true }, expectedUpdatedAt: undefined, actorProfileId })).status, 400);
     assert.equal(t.writes(), 0);
+  }
+
+  // ---- Remove (archive) / Restore, migration 118 ----
+  // Missing-column detection (Postgres 42703 and the PostgREST schema cache) vs. unrelated errors.
+  assert.equal(isArchiveColumnMissing({ code: "42703", message: "column model_catalog_configs.archived_at does not exist" }), true);
+  assert.equal(isArchiveColumnMissing({ code: "PGRST204", message: "Could not find the 'archived_at' column of 'model_catalog_configs' in the schema cache" }), true);
+  assert.equal(isArchiveColumnMissing({ message: "connection reset" }), false);
+  assert.equal(isArchiveColumnMissing(null), false);
+  const archive = (s: ModelChangeStore, id: string, expectedUpdatedAt: unknown, on = true) =>
+    applyCatalogArchive(s, { id, archive: on, expectedUpdatedAt, actorProfileId });
+
+  // Happy path: archive hides the model, one audit row with before/after, in-flight jobs only warn.
+  {
+    const t = makeStore({ inFlight: 3 });
+    const row = t.catalog.find((r) => r.model_id === plain)!;
+    const r = await archive(t.store, row.id, row.updated_at);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(row.enabled, false);
+    assert.ok(row.archived_at);
+    assert.deepEqual((r.body.warnings as string[]).length, 1);
+    assert.match((r.body.warnings as string[])[0], /3 jobs are still running/);
+    assert.equal(t.audits.length, 1);
+    assert.deepEqual(
+      { a: t.audits[0].action, k: t.audits[0].configKey, b: t.audits[0].before, f: t.audits[0].after },
+      { a: "model_archive", k: plain, b: { enabled: true, archived: false }, f: { enabled: false, archived: true } }
+    );
+    // Idempotent: repeating (even with a stale token) is a no-op without a write or audit row.
+    const w = t.writes();
+    const again = await archive(t.store, row.id, "stale");
+    assert.equal(again.status, 200);
+    assert.equal(again.body.noop, true);
+    assert.equal(t.writes(), w);
+    assert.equal(t.audits.length, 1);
+    // An archived model cannot be offered through the toggle: restore first.
+    const enable = await toggle(t.store, row.id, true, row.updated_at);
+    assert.equal(enable.status, 409);
+    assert.equal(enable.body.code, "ARCHIVED");
+    assert.equal(row.enabled, false);
+    // The registry keeps it (label resolves for history) but never offers it or lists it as addable.
+    const reg = buildModelRegistry({
+      catalogRows: await t.store.listCatalog(),
+      featureRows: [],
+      pricingRows: await t.store.listPricing(),
+      modelConfigs: [],
+      providerConfigured: () => true,
+    }).find((m) => m.modelId === plain)!;
+    assert.equal(reg.archived, true);
+    assert.equal(reg.enabled, false);
+    assert.equal(reg.availableToAdd, false);
+    assert.ok(reg.label.length > 0 && reg.label !== "");
+    assert.ok(!enabledIdsFromRows("photo", await t.store.listCatalog()).has(plain));
+    // Restore: flag cleared, still not offered, one audit row; repeat is a no-op.
+    const back = await archive(t.store, row.id, row.updated_at, false);
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    assert.equal(row.archived_at, null);
+    assert.equal(row.enabled, false);
+    assert.equal(t.audits.at(-1)!.action, "model_restore");
+    const n = t.audits.length;
+    assert.equal((await archive(t.store, row.id, "stale", false)).body.noop, true);
+    assert.equal(t.audits.length, n);
+    // After restore the normal add flow works again.
+    assert.equal((await toggle(t.store, row.id, true, row.updated_at)).status, 200);
+  }
+
+  // Blocked by each guard rule; nothing is written.
+  {
+    const t = makeStore();
+    const dflt = [...defaults][0];
+    const d = t.catalog.find((r) => r.model_id === dflt)!;
+    const isDef = await archive(t.store, d.id, d.updated_at);
+    assert.equal(isDef.status, 409);
+    assert.equal(isDef.body.code, "IS_DEFAULT");
+
+    const reels = makeStore();
+    reels.catalog.find((r) => r.model_id === "veo31_lite")!.enabled = false;
+    const eng = reels.catalog.find((r) => r.model_id === "seedance2_fast")!;
+    const lastEngine = await archive(reels.store, eng.id, eng.updated_at);
+    assert.equal(lastEngine.status, 409);
+    assert.ok((lastEngine.body.codes as string[]).includes("REELS_ENGINE_LAST"));
+
+    const last = makeStore();
+    for (const r of last.catalog) if (r.tool_key === "photo" && r.model_id !== plain) r.enabled = false;
+    const only = last.catalog.find((r) => r.model_id === plain)!;
+    const lastModel = await archive(last.store, only.id, only.updated_at);
+    assert.equal(lastModel.status, 409);
+    assert.ok((lastModel.body.codes as string[]).includes("LAST_ENABLED_MODEL"));
+    assert.equal(t.writes() + reels.writes() + last.writes(), 0);
+  }
+
+  // Archiving a model that is not offered only sets the flag (nothing to hide).
+  {
+    const t = makeStore();
+    const row = t.catalog.find((r) => r.model_id === plain)!;
+    row.enabled = false;
+    assert.equal((await archive(t.store, row.id, row.updated_at)).status, 200);
+    assert.ok(row.archived_at);
+  }
+
+  // Stale token -> 409, 404, 400; audit failure never blocks.
+  {
+    const t = makeStore({ auditFails: true });
+    const row = t.catalog.find((r) => r.model_id === plain)!;
+    const stale = await archive(t.store, row.id, "old");
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, "STALE_MODEL_CONFIG");
+    assert.equal(row.archived_at, undefined);
+    assert.equal((await archive(t.store, "nope", "x")).status, 404);
+    assert.equal((await archive(t.store, row.id, undefined)).status, 400);
+    assert.equal((await archive(t.store, row.id, row.updated_at)).status, 200);
+    assert.equal(t.audits.length, 0);
+  }
+
+  // Migration 118 NOT applied: inert. Remove/Restore -> 409 MIGRATION_REQUIRED, nothing written,
+  // and the existing toggle keeps working exactly as before.
+  {
+    const t = makeStore({ archiveAvailable: false });
+    const row = t.catalog.find((r) => r.model_id === plain)!;
+    for (const on of [true, false]) {
+      const r = await archive(t.store, row.id, row.updated_at, on);
+      assert.equal(r.status, 409);
+      assert.equal(r.body.code, "MIGRATION_REQUIRED");
+      assert.equal(r.body.error, "Run migration 118 to enable archiving");
+    }
+    assert.equal(t.writes(), 0);
+    assert.equal((await toggle(t.store, row.id, false, row.updated_at)).status, 200);
+    assert.equal((await toggle(t.store, row.id, true, row.updated_at)).status, 200);
+    // Registry without the column: nothing archived, every archive check still computed.
+    const reg = buildModelRegistry({ catalogRows: await t.store.listCatalog(), featureRows: [], pricingRows: [], modelConfigs: [] });
+    assert.ok(reg.every((m) => m.archived === false));
+    // The probe can race the migration: a missing column at write time maps to the same 409.
+    const racy = makeStore();
+    racy.store.casArchive = async () => {
+      throw Object.assign(new Error("x"), { name: "ArchiveMigrationRequiredError" });
+    };
+    const rr = racy.catalog.find((r) => r.model_id === plain)!;
+    assert.equal((await archive(racy.store, rr.id, rr.updated_at)).body.code, "MIGRATION_REQUIRED");
+  }
+
+  // L1: feature-row reset goes through the same guard, CAS and audit.
+  {
+    const t = makeStore();
+    const tiers = eligibleTiersForFeature("image");
+    const dflt = defaultTierForFeature("image");
+    const other = tiers.find((x) => x !== dflt)!;
+    const mk = (tier: string, enabled: boolean, is_default: boolean): FeatureRowFull => ({
+      id: `r-${tier}`, tool_key: "photo", feature_key: "image", model_tier: tier, enabled, is_default, updated_at: stamp(),
+    });
+    // An admin made `other` the default; the shipped default is `dflt`.
+    const o = mk(other, true, true);
+    const d = mk(dflt, true, false);
+    t.features.push(o, d);
+    const reset = (id: string, exp: unknown) => applyFeatureModelReset(t.store, { id, expectedUpdatedAt: exp, actorProfileId });
+    // Resetting `other` would clear the DB default without a replacement -> blocked.
+    const blocked = await reset(o.id, o.updated_at);
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, "IS_DEFAULT");
+    assert.equal(o.is_default, true);
+    assert.equal((await reset(o.id, undefined)).status, 400);
+    assert.equal((await reset(d.id, "stale")).body.code, "STALE_MODEL_CONFIG");
+    // Resetting the shipped default restores it as the single default, audited once.
+    const ok = await reset(d.id, d.updated_at);
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(d.is_default, true);
+    assert.equal(o.is_default, false);
+    assert.equal(t.audits.at(-1)!.action, "feature_model_reset");
+    assert.equal(t.audits.length, 1);
+    // Repeat is a no-op.
+    assert.equal((await reset(d.id, d.updated_at)).body.noop, true);
+    assert.equal(t.audits.length, 1);
+  }
+
+  // L2: hiding the last Reels Creator engine row is refused even though other (non-engine) models remain.
+  {
+    const t = makeStore();
+    const veo = { id: "e-veo", tool_key: "reels", feature_key: "reels-creator", model_tier: "veo31_lite", enabled: true, is_default: false, updated_at: stamp() };
+    const seed = { id: "e-seed", tool_key: "reels", feature_key: "reels-creator", model_tier: "seedance2_fast", enabled: true, is_default: false, updated_at: stamp() };
+    t.features.push(veo, seed);
+    const off = (id: string, exp: string) => applyFeatureModelChange(t.store, { id, patch: { enabled: false }, expectedUpdatedAt: exp, actorProfileId });
+    assert.equal((await off(veo.id, veo.updated_at)).status, 200);
+    const last = await off(seed.id, seed.updated_at);
+    assert.equal(last.status, 409);
+    assert.equal(last.body.code, "REELS_ENGINE_LAST");
+    assert.equal(seed.enabled, true);
   }
 
   // Authorization: routes are admin-gated and a non-admin maps to 403.

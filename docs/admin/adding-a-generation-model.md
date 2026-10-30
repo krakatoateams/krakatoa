@@ -24,7 +24,9 @@ but cannot run or be billed. The admin list is therefore built from the code cat
 3. **Pricing keys.** Keys come from `modelPricingKeys()` (`lib/model-pricing-keys.ts`). Add them to
    `V2_PRICING_DEFAULTS` and ship an additive, idempotent pricing migration with a fixed
    `credit_amount` (pattern: `supabase/migrations/026_seedance15_pro_pricing.sql`). Do not hardcode
-   prices elsewhere.
+   prices elsewhere. A new billing path (a new key a route bills through) must also extend
+   `modelPricingKeys()`: `test:model-catalog-guard` asserts every route-billed key is covered, so an
+   uncovered key fails CI instead of slipping past the "pricing ready" check.
 4. **Margin data.** Add a `provider_model_costs` row (analytics only; the user price stays one
    `credit_amount` per key).
 5. **Eligibility.** Composer/feature eligibility is code-only (`eligibleTiersForFeature` in
@@ -35,7 +37,9 @@ but cannot run or be billed. The admin list is therefore built from the code cat
    `providerModel` correctly.
 7. **Ship dark.** Set `offeredByDefault: false` on the entry. `defaultModelCatalogRows()` then returns
    `enabled: false`, so the model stays hidden whether or not its DB row exists. Omit the flag and the
-   model is offered on deploy (today's behavior for every existing model).
+   model is offered on deploy (today's behavior for every existing model). The flag is for NEW models
+   only: flipping it on a model that is already offered does not hide it, because its DB row stays
+   enabled. Hide an existing model from Admin Config (Hide or Remove).
 8. **Self-checks.** Run `npm run test:model-catalog-guard` and the checks for the touched provider,
    then `npm run ci:checks`.
 
@@ -49,3 +53,11 @@ but cannot run or be billed. The admin list is therefore built from the code cat
 4. Adding goes through the same guarded `PATCH /api/admin/config/model-catalog/[id]` as enable/disable
    (guard, compare-and-set, audit). The first offer of a ship-dark model is audited as `model_add`;
    otherwise `model_enable`. Pricing and billing are never written by this flow.
+
+## Removing a model later
+
+Admin Config → Models → **Remove** archives a model (migration 118): it is hidden from users, past
+creations keep their label and prices are kept, and **Restore** brings it back as not offered. Removing
+never edits the code registry; retiring a model from code is a separate developer task.
+The `model_add` vs `model_enable` audit label is derived from earlier audit rows, so a model enabled
+before the audit table existed (117) is labelled `model_enable`; the label is informational only.

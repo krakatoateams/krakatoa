@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { ensureModelCatalogRows } from "@/lib/model-catalog-configs-db";
+import { archiveColumnAvailable, ensureModelCatalogRows } from "@/lib/model-catalog-configs-db";
 import { ensureFeatureModelRows } from "@/lib/feature-model-configs-db";
 import { listPricingConfigs } from "@/lib/pricing-configs-db";
 import { listModelConfigs } from "@/lib/model-configs-db";
@@ -24,13 +24,14 @@ async function tolerant<T>(label: string, read: () => Promise<T>, fallback: T, n
 export async function GET() {
   return withAdmin(async () => {
     const notes: string[] = [];
-    const [catalogRows, featureRows, pricingRows, modelConfigs] = await Promise.all([
+    const [catalogRows, featureRows, pricingRows, modelConfigs, archiveAvailable] = await Promise.all([
       tolerant("Model catalog", ensureModelCatalogRows, [], notes),
       tolerant("Feature model settings", ensureFeatureModelRows, [], notes),
       tolerant("Pricing", () => listPricingConfigs(), [], notes),
       tolerant("Provider settings", listModelConfigs, [], notes),
+      archiveColumnAvailable(),
     ]);
     const models = buildModelRegistry({ catalogRows, featureRows, pricingRows, modelConfigs });
-    return NextResponse.json({ models, notes });
+    return NextResponse.json({ models, notes, archiveAvailable });
   });
 }

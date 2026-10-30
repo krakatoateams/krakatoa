@@ -2,6 +2,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import {
   defaultModelCatalogRows,
   enabledIdsFromRows,
+  isArchiveColumnMissing,
   type ModelCatalogToolKey,
 } from "@/lib/model-catalog-configs";
 
@@ -20,6 +21,9 @@ export type ModelCatalogConfig = {
   updated_by_profile_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Present only after migration 118; absent/null = not archived. */
+  archived_at?: string | null;
+  archived_by_profile_id?: string | null;
 };
 
 const TABLE = "model_catalog_configs";
@@ -170,4 +174,67 @@ export async function isCatalogModelEnabled(
 ): Promise<boolean> {
   const enabled = await getEnabledCatalogModelIds(toolKey);
   return enabled.has(modelId);
+}
+
+// ---------------------------------------------------------------------------
+// Archive (migration 118). Everything here tolerates the columns being absent.
+// ---------------------------------------------------------------------------
+
+export class ArchiveMigrationRequiredError extends Error {
+  constructor() {
+    super("Run migration 118 to enable archiving");
+    this.name = "ArchiveMigrationRequiredError";
+  }
+}
+
+const ARCHIVE_PROBE_TTL_MS = 5_000;
+let archiveProbe: { available: boolean; expiresAt: number } | null = null;
+
+/**
+ * Column-existence probe, cached for a few seconds so applying the migration takes effect without a
+ * redeploy. Never throws: any failure reads as "not available" (the inert, safe state).
+ */
+export async function archiveColumnAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (archiveProbe && now < archiveProbe.expiresAt) return archiveProbe.available;
+  let available = false;
+  try {
+    const { error } = await supabaseServer.from(TABLE).select("archived_at").limit(1);
+    available = !error;
+  } catch {
+    available = false;
+  }
+  archiveProbe = { available, expiresAt: now + ARCHIVE_PROBE_TTL_MS };
+  return available;
+}
+
+/** Compare-and-set archive/restore. Archive also turns the model off (the DB check requires it). */
+export async function casModelCatalogArchive(
+  id: string,
+  archive: boolean,
+  expectedUpdatedAt: string,
+  updatedByProfileId: string | null
+): Promise<ModelCatalogConfig | null> {
+  const update: Record<string, unknown> = archive
+    ? {
+        enabled: false,
+        archived_at: new Date().toISOString(),
+        archived_by_profile_id: updatedByProfileId,
+        updated_by_profile_id: updatedByProfileId,
+      }
+    : { archived_at: null, archived_by_profile_id: null, updated_by_profile_id: updatedByProfileId };
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .update(update)
+    .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt)
+    .select("*")
+    .maybeSingle();
+  if (isArchiveColumnMissing(error)) {
+    archiveProbe = { available: false, expiresAt: Date.now() + ARCHIVE_PROBE_TTL_MS };
+    throw new ArchiveMigrationRequiredError();
+  }
+  handleError(error, "Failed to archive model catalog config.");
+  cache = { byTool: null, expiresAt: 0 };
+  return (data as ModelCatalogConfig | null) ?? null;
 }
