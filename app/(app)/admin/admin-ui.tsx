@@ -73,7 +73,7 @@ export function useAdminToast() {
   return { toast, dismiss, show };
 }
 
-function Bone({ className }: { className?: string }) {
+export function Bone({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-lg bg-white/10 ${className ?? ""}`} />;
 }
 
