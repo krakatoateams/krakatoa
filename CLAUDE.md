@@ -90,6 +90,7 @@ keeps only the rules needed on most engineering tasks.
 - Keep Reels caption preview positioning aligned with `lib/reels-pipeline/ass.ts`.
 - Normalize FPS, dimensions, SAR, and pixel format before FFmpeg concat.
 - Interpolate concrete prompt values and validate parsed model output.
+- Photo tiers may run on Replicate or Fal: provider is recorded per prediction and cancel/poll use the recorded provider; Fal outputs must be `*.fal.media`; `FAL_KEY` is server-only. See `docs/generation/fal-provider-runbook.md`.
 - Keep heavy Vercel routes within the current plan's supported duration.
 - Deployed cron routes must fail closed when `CRON_SECRET` is absent.
 - Keep browser allowlists in `lib/security-headers.mjs`; run `test:security-headers`.

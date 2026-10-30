@@ -78,6 +78,8 @@ export function adminConfigValidationSelfCheck(): void {
   assert(providerSwitchPricingError("replicate", "fal", [4, null]) !== null, "null credit_amount must block a switch");
   assert(providerSwitchPricingError("replicate", "fal", []) !== null, "no pricing rows must block a switch");
   assert(providerSwitchPricingError("replicate", "fal", null) !== null, "undeterminable pricing must block a switch");
+  assert(providerSwitchPricingError("fal", "replicate", [4, null]) === null, "rollback to replicate is never blocked by pricing");
+  assert(providerSwitchPricingError("fal", "replicate", null) === null, "rollback is not blocked when pricing is undeterminable");
   assert(providerSwitchPricingError("replicate", "fal", [4, 7]) === null, "fixed credit_amount allows a switch");
   const missing = creditAmountsForKeys(["a", "b"], [{ pricing_key: "a", credit_amount: 4 }]);
   assert(providerSwitchPricingError("replicate", "fal", missing) !== null, "a tier pricing key missing from pricing_configs must block a switch");
@@ -412,6 +414,8 @@ export function providerSwitchPricingError(
   creditAmounts: (number | null)[] | null
 ): string | null {
   if (toProvider === undefined || toProvider === fromProvider) return null;
+  // Rollback to Replicate must never be blocked, whatever the pricing rows look like.
+  if (toProvider === "replicate") return null;
   if (creditAmounts === null) {
     return "Switching provider is only supported for Photo model tiers.";
   }

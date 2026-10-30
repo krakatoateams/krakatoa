@@ -75,6 +75,8 @@ export type AdminProviderChoice = {
   configKey: string;
   modelConfigId?: string;
   provider: PhotoProviderId;
+  /** False when the model_configs row is disabled: the resolver ignores it, so a switch has no effect. */
+  rowEnabled?: boolean;
   options: PhotoProviderOption[];
 };
 
@@ -447,6 +449,7 @@ function buildProviderChoice(configKey: string, modelConfigs: ModelConfigInput[]
     configKey,
     modelConfigId: row?.id,
     provider: activePhotoProvider(configKey, row),
+    rowEnabled: row ? row.enabled : true,
     options: photoProviderOptions(configKey),
   };
 }

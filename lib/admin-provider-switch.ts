@@ -32,6 +32,31 @@ export function photoSwitchTarget(
   return option ? { ...option, parameters: {} } : null;
 }
 
+/**
+ * Generic PATCH guard: a provider change, or any model change while on Fal, must land on a catalog
+ * unit (and then parameters are reset to the catalog's), so provider + model + params only change
+ * together. Replicate-to-Replicate model edits stay free. Non-switchable rows are not constrained here.
+ */
+export function photoPatchUnit(
+  configKey: string,
+  row: { provider: string; model: string },
+  patch: { provider?: string; model?: string }
+): { ok: true; parameters?: Record<string, unknown> } | { ok: false; error: string } {
+  const options = photoProviderOptions(configKey);
+  if (options.length < 2) return { ok: true };
+  const provider = patch.provider ?? row.provider;
+  const model = patch.model ?? row.model;
+  const providerChanged = provider !== row.provider;
+  if (!providerChanged && !(provider === "fal" && model !== row.model)) return { ok: true };
+  if (!options.some((o) => o.provider === provider && o.model === model)) {
+    return {
+      ok: false,
+      error: "Provider and model change together as a catalog unit. Use the provider switch for this model.",
+    };
+  }
+  return { ok: true, parameters: {} };
+}
+
 /** Provider of a stored row, falling back to Replicate when the row is missing or off-catalog. */
 export function activePhotoProvider(
   configKey: string,

@@ -10,6 +10,7 @@ import {
   Play,
   RefreshCw,
 } from "lucide-react";
+import { summarizeFalFailures } from "@/lib/admin-fal-health";
 import { AdminTableSkeleton } from "../admin-ui";
 
 /**
@@ -574,6 +575,7 @@ export default function AdminMonitoringPage() {
   const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
 
   const anomalyRows = rows.filter((r) => r.flags.length > 0);
+  const falFailures = summarizeFalFailures(rows);
   const totalAnomalies = counts
     ? counts.anomalies.stuck +
       counts.anomalies.cancel_not_honored +
@@ -639,6 +641,19 @@ export default function AdminMonitoringPage() {
       </div>
 
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
+
+      {falFailures.balanceSuspect > 0 ? (
+        <p className="rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3 text-sm text-red-300">
+          {falFailures.balanceSuspect} Fal job{falFailures.balanceSuspect === 1 ? "" : "s"} failed
+          with a balance error. Top up the Fal account, or switch the affected photo tiers back to
+          Replicate (see docs/generation/fal-provider-runbook.md).
+        </p>
+      ) : falFailures.failed > 0 ? (
+        <p className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-300">
+          {falFailures.failed} Fal job{falFailures.failed === 1 ? "" : "s"} failed in this view.
+          Several in a row suggest a Fal outage: follow the runbook.
+        </p>
+      ) : null}
 
       {counts ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
