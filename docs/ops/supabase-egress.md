@@ -131,5 +131,9 @@ cache row, and that a conditional GET on the result is 304 with zero bytes. Need
   post cards, the 12.7 MB of trending-template video (2 MB files rendered into 176 px
   cards, worth re-encoding), and server-side pulls during publish and Rendi stitching.
   All are first-fetch costs that 304 handles on repeat, so none are urgent.
-- If media traffic ever outgrows the free plan for real, Cloudflare R2 charges nothing
-  for egress and would remove this constraint permanently rather than manage it.
+- New generations can be written to Cloudflare R2 (`MEDIA_STORAGE_PROVIDER=r2`) so
+  egress is not billed. `R2_KEY_PREFIX` puts them in one folder of a shared bucket. Reads still fall back to Supabase until
+  `npm run storage:copy-to-r2 -- --execute` has copied every object. R2 presigned
+  URLs cap at 7 days, so a UI URL is stable for the current day and stays valid
+  for a week. The signed-URL cache still refuses to hand out a URL with under a
+  day of life left.

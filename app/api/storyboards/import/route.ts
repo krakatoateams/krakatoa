@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
 import { getSupabase } from "@/lib/supabase";
+import { moveMedia, removeMedia } from "@/lib/media-storage";
 import {
-  STORAGE_BUCKET,
   STORYBOARDS_TABLE,
   isVideosTempRefPath,
 } from "@/lib/storage-buckets";
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     const path = movedToPermanent ? permanentPath : tempPath;
     if (!path) return;
     try {
-      await supabase.storage.from(STORAGE_BUCKET).remove([path]);
+      await removeMedia([path]);
     } catch (e) {
       console.warn(
         "[storyboard-import] storage cleanup failed:",
@@ -370,9 +370,7 @@ export async function POST(req: Request) {
     const filename = `image_uploaded_${Date.now()}.${ext}`;
     const destPath = storyboardSheetPath(userId!, filename);
     permanentPath = destPath;
-    const { error: moveErr } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .move(rawPath, destPath);
+    const { error: moveErr } = await moveMedia(rawPath, destPath);
     if (moveErr) {
       throw new Error(`Failed to move uploaded storyboard: ${moveErr.message}`);
     }

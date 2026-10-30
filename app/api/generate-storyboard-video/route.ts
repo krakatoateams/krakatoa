@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
 import { getSupabase } from "@/lib/supabase";
+import { uploadMedia } from "@/lib/media-storage";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   STORYBOARDS_TABLE,
   videosStoryboardVideoPath,
 } from "@/lib/storage-buckets";
@@ -580,9 +580,7 @@ export async function POST(req: Request) {
       await assertNotCancelled(profileId, generationRequestId);
     }
 
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, videoBuffer, {
+    const { error: uploadError } = await uploadMedia(storagePath, videoBuffer, {
         contentType: "video/mp4",
         cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false,

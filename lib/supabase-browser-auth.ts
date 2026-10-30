@@ -10,8 +10,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * The same instance is shared across the app so onAuthStateChange listeners
  * and imperative auth calls always see the same session state.
  *
- * Do NOT use this for Storage signed-URL uploads — keep using
- * lib/supabase-browser.ts for that (it has persistSession: false).
+ * Storage uploads do not use this client. The browser PUTs the signed URL
+ * from the upload sign API and sends only the headers that response returns.
  */
 let client: SupabaseClient | null = null;
 

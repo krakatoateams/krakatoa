@@ -1,5 +1,7 @@
 /**
- * Kelolako uses one **private** Supabase Storage bucket (`krakatoa`) with signed read URLs.
+ * Kelolako uses one private media bucket with signed read URLs.
+ * New writes go to Supabase until `MEDIA_STORAGE_PROVIDER=r2`; reads then try
+ * Cloudflare R2 first and fall back to Supabase. See `lib/media-storage.ts`.
  * User media lives under `{userId}/photos/` and `{userId}/videos/` so deleting one user is a
  * single top-level folder. Platform job outputs use `profiles/{profileId}/…` separately.
  *

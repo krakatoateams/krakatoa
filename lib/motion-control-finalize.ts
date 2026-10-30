@@ -4,10 +4,9 @@ import { finishJobStep, failJobStep } from "@/lib/job-steps-db";
 import { markAssetReady, markAssetFailed } from "@/lib/assets-db";
 import { refundCredits } from "@/lib/credits-db";
 import { recordUsageEvent } from "@/lib/usage-events-db";
-import { supabaseServer } from "@/lib/supabase-server";
+import { removeMedia, uploadMedia } from "@/lib/media-storage";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
@@ -66,7 +65,7 @@ const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> =
 export async function cleanupMotionControlTempRefs(paths: string[] | undefined): Promise<void> {
   if (!paths?.length) return;
   try {
-    await supabaseServer.storage.from(STORAGE_BUCKET).remove(paths);
+    await removeMedia(paths);
   } catch (e) {
     console.warn(
       "[motion-control] temp reference cleanup failed:",
@@ -115,9 +114,7 @@ export async function finalizeMotionControlSuccess(
     `video_${Date.now()}.mp4`,
   );
 
-  const { error: uploadError } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, videoBuffer, {
+  const { error: uploadError } = await uploadMedia(storagePath, videoBuffer, {
       contentType: "video/mp4",
       cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,

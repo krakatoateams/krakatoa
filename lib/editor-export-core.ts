@@ -1,10 +1,10 @@
 import "server-only";
 import { Sandbox, Snapshot, type Command } from "@vercel/sandbox";
 import { supabaseServer } from "@/lib/supabase-server";
+import { createMediaUploadUrl, removeMedia } from "@/lib/media-storage";
 import { signStoragePathForPipeline } from "@/lib/storage-signed-url";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   videosGeneratedVideoPath,
 } from "@/lib/storage-buckets";
 import { createJobStep, finishJobStep, failJobStep, reportJobStepProgress } from "@/lib/job-steps-db";
@@ -334,12 +334,15 @@ export async function startUploadCore(
 ): Promise<{ ok: true; cmdId: string; storagePath: string } | { ok: false; code: EditorExportErrorCode }> {
   try {
     const storagePath = videosGeneratedVideoPath(p.userId, "editor", `video_${Date.now()}.${EXPORT_FORMAT_SPEC[p.settings.format].ext}`);
-    const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).createSignedUploadUrl(storagePath);
+    const { data, error } = await createMediaUploadUrl(storagePath, {
+      contentType: EXPORT_FORMAT_SPEC[p.settings.format].mime,
+      cacheControl: MEDIA_CACHE_CONTROL,
+    });
     if (error || !data) throw new Error("signed upload url failed");
     const sandbox = await Sandbox.get({ name });
     const cmd = await sandbox.runCommand({
       cmd: "curl",
-      args: signedUploadArgs({ url: data.signedUrl, file: outFile(p), contentType: EXPORT_FORMAT_SPEC[p.settings.format].mime, cacheControl: MEDIA_CACHE_CONTROL }),
+      args: signedUploadArgs({ url: data.signedUrl, file: outFile(p), headers: data.headers }),
       detached: true,
     });
     return { ok: true, cmdId: cmd.cmdId, storagePath };
@@ -366,7 +369,7 @@ export async function stopSandboxCore(name: string | null): Promise<void> {
 
 export async function removeExportUploadsCore(paths: string[]): Promise<void> {
   if (paths.length === 0) return;
-  const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove(paths).catch((e: unknown) => ({ error: e }));
+  const { error } = await removeMedia(paths).catch((e: unknown) => ({ error: e }));
   if (error) logSafe("export upload cleanup failed", error);
 }
 

@@ -172,20 +172,23 @@ export function classifySandboxCreateError(e: unknown): EditorExportErrorCode {
 }
 
 /**
- * `curl` argv that PUTs the file to a Supabase signed upload URL (mirrors storage-js raw-body upload). No `--fail`:
- * stdout is the response body then the HTTP status, read only by `uploadHttpStatus` (never logged or stored).
+ * `curl` argv that PUTs the file to the signed upload URL. Headers come from
+ * `createMediaUploadUrl` so a Supabase token URL gets `x-upsert` and an R2
+ * presign sends only the headers that were signed. No `--fail`: stdout is the
+ * response body then the HTTP status, read only by `uploadHttpStatus`.
  */
-export function signedUploadArgs(p: { url: string; file: string; contentType: string; cacheControl: string }): string[] {
-  return [
+export function signedUploadArgs(p: { url: string; file: string; headers: Record<string, string> }): string[] {
+  const args = [
     "--silent", "--show-error",
     "--write-out", "\\n%{http_code}",
     "--request", "PUT",
     "--upload-file", p.file,
-    "--header", `content-type: ${p.contentType}`,
-    "--header", `cache-control: max-age=${p.cacheControl}`,
-    "--header", "x-upsert: false",
-    p.url,
   ];
+  for (const [key, value] of Object.entries(p.headers)) {
+    args.push("--header", `${key}: ${value}`);
+  }
+  args.push(p.url);
+  return args;
 }
 
 /**

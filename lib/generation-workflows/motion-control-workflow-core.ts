@@ -12,7 +12,8 @@ import {
 } from "@/lib/motion-control-models";
 import { recordUsageEvent } from "@/lib/usage-events-db";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
-import { MEDIA_CACHE_CONTROL, STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { uploadMedia } from "@/lib/media-storage";
+import { MEDIA_CACHE_CONTROL } from "@/lib/storage-buckets";
 import { supabaseServer } from "@/lib/supabase-server";
 import { assertTrustedReplicateOutputUrl } from "@/lib/replicate-output-url";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
@@ -351,9 +352,7 @@ export async function deliverAndFinalizeCore(
   }
   const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
 
-  const { error: uploadError } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, videoBuffer, {
+  const { error: uploadError } = await uploadMedia(storagePath, videoBuffer, {
       contentType: "video/mp4",
       cacheControl: MEDIA_CACHE_CONTROL,
       upsert: true,

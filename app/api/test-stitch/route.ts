@@ -4,7 +4,8 @@ import Replicate from 'replicate';
 import { withAdmin } from '@/lib/admin-api';
 import { supabase } from '@/lib/supabase';
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
-import { STORAGE_BUCKET, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
+import { MEDIA_CACHE_CONTROL, STORAGE_BUCKET, TEMP_REF_CACHE_CONTROL, videosStoragePath, videosTempStoragePath } from '@/lib/storage-buckets';
+import { removeMedia, uploadMedia } from '@/lib/media-storage';
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
 import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 
@@ -267,12 +268,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     const srtFilename = videosTempStoragePath(`captions_${Date.now()}.ass`);
-    const { error: uploadError } = await supabase
-      .storage
-      .from(STORAGE_BUCKET)
-      .upload(srtFilename, assContent, {
+    const { error: uploadError } = await uploadMedia(srtFilename, assContent, {
         contentType: 'text/plain',
-        cacheControl: '3600',
+        cacheControl: TEMP_REF_CACHE_CONTROL,
         upsert: false
       });
 
@@ -333,12 +331,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const videoBuffer = await videoResponse.arrayBuffer();
     
     const finalFilename = videosStoragePath(`reels_${Date.now()}.mp4`);
-    const { error: finalUploadError } = await supabase
-      .storage
-      .from(STORAGE_BUCKET)
-      .upload(finalFilename, videoBuffer, {
+    const { error: finalUploadError } = await uploadMedia(finalFilename, videoBuffer, {
         contentType: 'video/mp4',
-        cacheControl: '3600',
+        cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false
       });
 
@@ -352,7 +347,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // Step 7: Cleanup intermediate SRT file
     console.log('[Test Step 7] Cleaning up intermediate files...');
     try {
-      await supabase.storage.from(STORAGE_BUCKET).remove([srtFilename]);
+      await removeMedia([srtFilename]);
     } catch (cleanupErr) {
       console.warn(
         'Cleanup warning (non-fatal):',

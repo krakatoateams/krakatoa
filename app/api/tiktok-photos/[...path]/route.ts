@@ -1,9 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { supabaseServer } from "@/lib/supabase-server";
-import {
-  STORAGE_BUCKET,
-  photoProxyStorageCandidates,
-} from "@/lib/storage-buckets";
+import { downloadMedia } from "@/lib/media-storage";
+import { photoProxyStorageCandidates } from "@/lib/storage-buckets";
 
 /**
  * GET /api/tiktok-photos/<userId>/…rest
@@ -30,9 +27,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ path: st
   }
 
   for (const storagePath of candidates) {
-    const { data, error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .download(storagePath);
+    const { data, error } = await downloadMedia(storagePath);
 
     if (error || !data) continue;
 

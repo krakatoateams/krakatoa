@@ -1,6 +1,6 @@
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { supabaseServer } from "@/lib/supabase-server";
-import { STORAGE_BUCKET } from "@/lib/storage-buckets";
+import { removeMedia } from "@/lib/media-storage";
 import {
   parseWorkflowFinalizeResult,
   type WorkflowFinalizeResult,
@@ -81,7 +81,7 @@ export async function deleteStoragePathIfPresent(
   if (!storagePath.startsWith(`${safeUser}/`)) {
     throw new Error("deleteStoragePathIfPresent: path is outside user scope");
   }
-  const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).remove([storagePath]);
+  const { error } = await removeMedia([storagePath]);
   if (error) {
     throw new Error(error.message || "deleteStoragePathIfPresent failed");
   }

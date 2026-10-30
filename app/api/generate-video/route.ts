@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { removeMedia, uploadMedia } from "@/lib/media-storage";
 import { createReplicateClient, extractMediaUrl, runWithRetry } from "@/lib/replicate-utils";
 import { isCancellation } from "@/lib/replicate-server";
 import { makeReplicateCancelHooks, assertNotCancelled } from "@/lib/generation-cancel";
@@ -33,10 +34,8 @@ import {
   mapVideoComposerEnablement,
   videoComposerModelEnabled,
 } from "@/lib/video-composer-features";
-import { supabaseServer } from "@/lib/supabase-server";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   videosGeneratedVideoPath,
   isVideosTempRefPath,
 } from "@/lib/storage-buckets";
@@ -851,9 +850,7 @@ export async function POST(req: Request) {
     } else {
       await beginStep("storage_upload", "Save blank placeholder video to Supabase");
     }
-    const { error: uploadError } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, videoBuffer, {
+    const { error: uploadError } = await uploadMedia(storagePath, videoBuffer, {
         contentType: "video/mp4",
         cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false,
@@ -1064,7 +1061,7 @@ export async function POST(req: Request) {
     // the backstop for abandoned or killed requests. Path-guarded above.
     if (tempRefPaths.length > 0) {
       try {
-        await supabaseServer.storage.from(STORAGE_BUCKET).remove(tempRefPaths);
+        await removeMedia(tempRefPaths);
       } catch (e) {
         console.warn(
           "[video] temp reference cleanup failed:",

@@ -3,8 +3,8 @@
  * Server-only — uses service role via supabaseServer.
  */
 import { supabaseServer } from "@/lib/supabase-server";
+import { mediaExists, signMediaGet } from "@/lib/media-storage";
 import {
-  STORAGE_BUCKET,
   isStorageRelativePath,
   isVideosTempRefPath,
   storagePathFromPublicUrl,
@@ -201,15 +201,13 @@ export async function createSignedStorageUrl(
     if (cached) return cached;
   }
 
-  const { data, error } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(storagePath, expiresIn);
+  const { data, error } = await signMediaGet(storagePath, expiresIn);
   if (error || !data?.signedUrl) {
     throw new Error(error?.message ?? "Failed to create signed URL.");
   }
   const signed: SignedStorageUrl = {
     url: data.signedUrl,
-    expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + data.expiresIn * 1000).toISOString(),
     storagePath,
   };
 
@@ -266,7 +264,7 @@ export async function resolveRefForPipeline(
     // missing object; the provider would then answer 400 on the signed URL.
     if (isVideosTempRefPath(path)) {
       await assertPathOwnedByUser(path, userId);
-      const { data } = await supabaseServer.storage.from(STORAGE_BUCKET).exists(path);
+      const { data } = await mediaExists(path);
       if (data === false) throw new Error(REF_MISSING_MESSAGE);
     }
     try {

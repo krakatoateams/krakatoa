@@ -3,9 +3,9 @@ import Replicate from "replicate";
 import { insertUserCreation } from "@/lib/creations-db";
 import { resolveMentionCreations } from "@/lib/mention-assets-server";
 import { getSupabase } from "@/lib/supabase";
+import { uploadMedia } from "@/lib/media-storage";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   STORYBOARDS_TABLE,
 } from "@/lib/storage-buckets";
 import { signStoragePathForUser } from "@/lib/storage-signed-url";
@@ -755,9 +755,7 @@ export async function handlePhotoStoryboardGeneration(
     const supabase = getSupabase();
 
     console.log("[Storyboard] Uploading output to storage.");
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(storagePath, imageBuffer, {
+    const { error: uploadError } = await uploadMedia(storagePath, imageBuffer, {
         contentType: "image/png",
         cacheControl: MEDIA_CACHE_CONTROL,
         upsert: false,

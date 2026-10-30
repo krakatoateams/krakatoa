@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/admin-api";
-import { supabaseServer } from "@/lib/supabase-server";
+import { uploadMedia } from "@/lib/media-storage";
 import {
   MEDIA_CACHE_CONTROL,
-  STORAGE_BUCKET,
   platformSkillThumbPath,
 } from "@/lib/storage-buckets";
 import { createSignedStorageUrl } from "@/lib/storage-signed-url";
@@ -51,7 +50,7 @@ export async function POST(req: Request, props: { params: Promise<{ skillId: str
 
     const storagePath = platformSkillThumbPath(params.skillId, ext);
     const buffer = Buffer.from(await file.arrayBuffer());
-    const { error } = await supabaseServer.storage.from(STORAGE_BUCKET).upload(storagePath, buffer, {
+    const { error } = await uploadMedia(storagePath, buffer, {
       contentType: file.type,
       cacheControl: MEDIA_CACHE_CONTROL,
       upsert: false,

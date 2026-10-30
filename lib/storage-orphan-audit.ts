@@ -3,11 +3,11 @@
  * Read-only audit — use `runStorageSweep` to delete videos/ only.
  */
 import { supabaseServer } from "@/lib/supabase-server";
+import { listMedia } from "@/lib/media-storage";
 import {
   PHOTOS_FOLDER,
   PROFILES_FOLDER,
   RESUMABLE_SEGMENT,
-  STORAGE_BUCKET,
   VIDEOS_FOLDER,
   isUserMediaRootFolder,
   isVideosTempPath,
@@ -69,9 +69,7 @@ export async function listAllObjects(
     let offset = 0;
     const limit = 1000;
     for (;;) {
-      const { data, error } = await supabaseServer.storage
-        .from(STORAGE_BUCKET)
-        .list(p, { limit, offset, sortBy: { column: "name", order: "asc" } });
+      const { data, error } = await listMedia(p, { limit, offset, sortBy: { column: "name", order: "asc" } });
       if (error) throw new Error(`storage.list failed at "${p}": ${error.message}`);
       const entries = (data ?? []) as StorageListEntry[];
       for (const e of entries) {
@@ -113,9 +111,7 @@ export async function listAllUserMediaObjects(): Promise<StorageObjectRow[]> {
   let offset = 0;
   const limit = 1000;
   for (;;) {
-    const { data, error } = await supabaseServer.storage
-      .from(STORAGE_BUCKET)
-      .list("", { limit, offset, sortBy: { column: "name", order: "asc" } });
+    const { data, error } = await listMedia("", { limit, offset, sortBy: { column: "name", order: "asc" } });
     if (error) throw new Error(`storage.list failed at bucket root: ${error.message}`);
     const entries = (data ?? []) as StorageListEntry[];
     for (const e of entries) {

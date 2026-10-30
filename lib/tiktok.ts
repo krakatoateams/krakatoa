@@ -1,8 +1,8 @@
 import "server-only";
 
-import { supabaseServer } from "@/lib/supabase-server";
+import { downloadMedia, uploadMedia } from "@/lib/media-storage";
 import {
-  STORAGE_BUCKET,
+  MEDIA_CACHE_CONTROL,
   isStorageRelativePath,
   photoStoragePathToProxyRest,
   storagePathFromPublicUrl,
@@ -647,7 +647,7 @@ function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "webp" | "unknown
  * actually proxy — the original path if no conversion was needed.
  */
 async function ensureTikTokCompatiblePhoto(storagePath: string): Promise<string> {
-  const { data, error } = await supabaseServer.storage.from(STORAGE_BUCKET).download(storagePath);
+  const { data, error } = await downloadMedia(storagePath);
   if (error || !data) {
     throw new Error(
       `Could not read photo from storage for TikTok format check: ${redactPublishMediaRef(storagePath)}`,
@@ -664,9 +664,11 @@ async function ensureTikTokCompatiblePhoto(storagePath: string): Promise<string>
   // used elsewhere (Product Photo history, other posts) — is untouched.
   const convertedPath = `${storagePath.replace(/\.[^./]+$/, "")}.tiktok.jpg`;
 
-  const { error: uploadError } = await supabaseServer.storage
-    .from(STORAGE_BUCKET)
-    .upload(convertedPath, jpegBuffer, { contentType: "image/jpeg", upsert: true });
+  const { error: uploadError } = await uploadMedia(convertedPath, jpegBuffer, {
+    contentType: "image/jpeg",
+    cacheControl: MEDIA_CACHE_CONTROL,
+    upsert: true,
+  });
   if (uploadError) {
     throw new Error(`Failed to upload converted JPEG for TikTok: ${uploadError.message}`);
   }
