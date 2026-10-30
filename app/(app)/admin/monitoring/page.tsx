@@ -642,6 +642,14 @@ export default function AdminMonitoringPage() {
 
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
+      {falFailures.unresolved > 0 ? (
+        <p className="rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3 text-sm text-red-300">
+          {falFailures.unresolved} Fal job{falFailures.unresolved === 1 ? "" : "s"} kept credits and
+          could not be confirmed within the reconcile window. Unresolved, needs manual review: check
+          the Fal dashboard, then refund if the run failed (see docs/generation/fal-provider-runbook.md).
+        </p>
+      ) : null}
+
       {falFailures.balanceSuspect > 0 ? (
         <p className="rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3 text-sm text-red-300">
           {falFailures.balanceSuspect} Fal job{falFailures.balanceSuspect === 1 ? "" : "s"} failed

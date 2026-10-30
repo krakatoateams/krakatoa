@@ -20,12 +20,35 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   `COMPLETED` with `error`, or `queue.result()` throws a Fal `ApiError`). An AMBIGUOUS outcome (timeout
   past `maxDuration`, network loss, abort after submit) does not refund; the attempt stays locked
   and the reconcile cron refunds it only if Fal confirms every recorded request failed. The route
-  settles such a job `failed` with code `PROVIDER_OUTCOME_UNKNOWN` (user sees "we're verifying it;
-  credits are returned automatically if the run failed", not a refund claim); reconcile scans those
-  jobs for 24 h and refunds with the route's own idempotency key (`refund:product_photo:{jobId}`), so
-  route + reconcile can never double refund. Reconcile confirms failure via queue status `COMPLETED` +
-  `error`, or, when status has no `error`, a `result()` 4xx ApiError. An ApiError 5xx/408/429 or
-  network loss from `result()` is AMBIGUOUS in reconcile (no refund; the route's own rule is unchanged).
+  settles such a job `failed` with code `PROVIDER_OUTCOME_UNKNOWN` (user sees "we're re-checking it
+  for a few days; credits are returned automatically once the provider confirms the run failed", not
+  a refund claim). The reconcile cron (`/api/cron/generation-reconcile`, ONCE A DAY at 05:00 UTC,
+  `vercel.json`) re-checks those jobs: window = `updated_at` in (now-72 h, now-5 min)
+  (`SETTLED_LOOKBACK_MS`), so a job gets about three daily attempts and a job that failed minutes
+  before a run is picked up by the next one. The scan is keyset-paged (`updated_at`, `id` ascending,
+  50 per page) over ALL candidates, 4 jobs in parallel, each Fal check capped at 15 s, and stops
+  starting new batches after 45 s (`SETTLED_BUDGET_MS`; route `maxDuration` is 120 s); anything left is
+  counted in the run's `settledLeft` log/response and handled next run. Refunds use the route's own
+  idempotency key (`refund:product_photo:{jobId}`) plus a `hasRefundForJob` check, so route + reconcile
+  + overlapping runs can never double refund. Reconcile confirms failure via queue status `COMPLETED` +
+  `error`, or, when status has no `error`, a `result()` 4xx ApiError. An ApiError 5xx/408/429, timeout or
+  network loss is AMBIGUOUS in reconcile (no refund; the route's own rule is unchanged).
+  **After 72 h** (a 7-day band beyond the window is still visited): reconcile makes one last confirm
+  attempt; if Fal still does not confirm failure the job is rewritten to code
+  `PROVIDER_OUTCOME_UNRESOLVED` (user sees "…credits were not returned automatically. Contact support…";
+  monitoring shows a red "Unresolved, needs manual review" banner and `unresolved` in the cron log).
+  Manual resolution (no admin UI exists for refunding a user job; `/api/admin/credits/*` only touches
+  admin wallets): check the Fal dashboard for the request; only if the run failed, a developer calls
+  `refundCredits({ profileId, amount, jobId, idempotencyKey: "refund:product_photo:{jobId}", ... })`
+  (RPC `krakatoa_apply_credit_transaction`, type `refund`) with that SAME key so a late route/reconcile
+  refund cannot double it. Never refund a run that produced output.
+  Cadence: if a daily check is too slow after an outage, a more frequent cron is the lever (needs plan
+  support for sub-daily crons; not changed here).
+  Known limitation (batches, no per-image tracking): a Fal batch of several images where every image
+  failed but only some definitively is partial-refunded by the route and tagged `UNKNOWN`; reconcile
+  skips it because a refund already exists, so the ambiguous remainder is never revisited. A batch with
+  some images saved and some ambiguous failures is `succeeded`, so reconcile never sees it. Both need
+  per-image outcome records and per-image refund keys (schema change) and are left for a follow-up.
   A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
 - Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`
   + `error`/`error_type`) but do not say whether they are billed. Check the Fal billing dashboard
@@ -70,7 +93,7 @@ Signs: monitoring shows the amber "Fal jobs failed" banner, users report photo f
 page. A definitive Fal failure refunds; an ambiguous one (timeout, network loss) is held for reconcile (see Refund policy above).
 
 1. Switch every Fal tier back to Replicate (above). This stops new traffic to Fal.
-2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones are held and refunded by reconcile only if Fal confirms the failure.
+2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones are held and refunded by reconcile (daily, 72 h window) only if Fal confirms the failure; after that they are marked unresolved for manual review.
 3. After Fal recovers, switch one tier back and run the checklist before the rest.
 4. There is no automatic fallback between providers (deliberately: backlog item).
 

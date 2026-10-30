@@ -16,13 +16,25 @@ import { isProviderCommitLocked } from "@/lib/generation-commit";
 import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pure";
 import { listPredictionIdsByProvider } from "@/lib/generation-cancel";
 import { getPhotoProviderById } from "@/lib/ai-providers";
-import { PROVIDER_OUTCOME_UNKNOWN_CODE } from "@/lib/generation-client-error";
-import { reconcileSettledProviderFailure } from "@/lib/generation-reconcile-settled";
+import {
+  PROVIDER_OUTCOME_UNKNOWN_CODE,
+  PROVIDER_OUTCOME_UNRESOLVED_CLIENT_ERROR,
+  PROVIDER_OUTCOME_UNRESOLVED_CODE,
+} from "@/lib/generation-client-error";
+import {
+  SETTLED_CONFIRM_TIMEOUT_MS,
+  expireSettledJob,
+  reconcileSettledProviderFailure,
+  scanSettledJobs,
+  settledWindows,
+  withTimeout,
+  type SettledCursor,
+  type SettledFailureOps,
+} from "@/lib/generation-reconcile-settled";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
-/** How long a route-settled ambiguous Fal failure stays eligible for a reconcile refund. */
-const SETTLED_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+type SettledRow = { id: string; profile_id: string; cost_credits?: number; updated_at: string };
 
 export type GenerationReconcileResult = {
   /** Rows past the stale cutoff that were examined, acted on or not. */
@@ -35,6 +47,10 @@ export type GenerationReconcileResult = {
   staleRequests: number;
   expiredRecoverable: number;
   sweptResumableFolders: number;
+  /** Held Fal jobs not visited this run (budget spent); picked up next run. */
+  settledLeft: number;
+  /** Held Fal jobs past the lookback with no confirmation, marked unresolved this run. */
+  unresolvedJobs: number;
   errors: string[];
 };
 
@@ -64,10 +80,11 @@ async function hasRefundForJob(jobId: string): Promise<boolean> {
  * A commit-on-submit provider (Fal) run is refundable at reconcile only when Fal's queue status
  * confirms EVERY recorded prediction failed. Unknown, pending, succeeded or unreachable => false.
  */
-async function providerConfirmsDefinitiveFailure(
-  profileId: string,
-  generationRequestId: string,
-): Promise<boolean> {
+function providerConfirmsDefinitiveFailure(profileId: string, generationRequestId: string): Promise<boolean> {
+  return withTimeout(confirmDefinitiveFailure(profileId, generationRequestId), SETTLED_CONFIRM_TIMEOUT_MS, false);
+}
+
+async function confirmDefinitiveFailure(profileId: string, generationRequestId: string): Promise<boolean> {
   try {
     const byProvider = await listPredictionIdsByProvider(profileId, generationRequestId);
     let checked = 0;
@@ -83,6 +100,20 @@ async function providerConfirmsDefinitiveFailure(
   } catch {
     return false;
   }
+}
+
+/** Honest final state for a held job Fal never confirmed: keeps the failed status, drops the refund promise. */
+async function markSettledJobUnresolved(job: { id: string; profileId: string }): Promise<void> {
+  const { error } = await supabaseServer
+    .from("jobs")
+    .update({
+      error: { code: PROVIDER_OUTCOME_UNRESOLVED_CODE, message: PROVIDER_OUTCOME_UNRESOLVED_CLIENT_ERROR },
+    })
+    .eq("id", job.id)
+    .eq("profile_id", job.profileId)
+    .eq("status", "failed")
+    .eq("error->>code", PROVIDER_OUTCOME_UNKNOWN_CODE);
+  if (error) throw new Error(error.message);
 }
 
 async function spendAmountForJob(jobId: string): Promise<number> {
@@ -114,6 +145,8 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
     staleRequests: 0,
     expiredRecoverable: 0,
     sweptResumableFolders: 0,
+    settledLeft: 0,
+    unresolvedJobs: 0,
     errors: [],
   };
 
@@ -227,36 +260,61 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
   }
 
   // Fal runs the route settled as failed with credits held (ambiguous outcome): refund only on a
-  // Fal-confirmed failure. Bounded: tagged code, 24h lookback, limited.
-  const { data: settledJobs, error: settledError } = await supabaseServer
-    .from("jobs")
-    .select("id, profile_id, cost_credits")
-    .eq("status", "failed")
-    .eq("error->>code", PROVIDER_OUTCOME_UNKNOWN_CODE)
-    .lt("updated_at", new Date(Date.now() - RECONCILE_BUFFER_MS).toISOString())
-    .gt("updated_at", new Date(Date.now() - SETTLED_LOOKBACK_MS).toISOString())
-    .limit(50);
-  if (settledError) {
-    result.errors.push(`settled jobs query: ${settledError.message}`);
-  } else {
-    for (const row of (settledJobs as { id: string; profile_id: string; cost_credits?: number }[] | null) ?? []) {
-      try {
-        const outcome = await reconcileSettledProviderFailure(
-          {
-            hasRefund: hasRefundForJob,
-            spendAmount: spendAmountForJob,
-            getRequestId: async (profileId, jobId) => (await getGenerationRequestForJob(profileId, jobId))?.id ?? null,
-            isCommitLocked: isProviderCommitLocked,
-            confirmsFailure: providerConfirmsDefinitiveFailure,
-            refund: refundCredits,
-          },
-          { id: row.id, profileId: row.profile_id, costCredits: row.cost_credits ?? 0 },
-        );
-        if (outcome === "refunded") result.refundedJobs += 1;
-      } catch (e) {
-        result.errors.push(`settled job ${row.id}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
+  // Fal-confirmed failure. Every candidate in the 72 h window is visited, paged and time-budgeted;
+  // leftovers wait for the next (overlapping) run. Past the window, one last attempt then "unresolved".
+  const windows = settledWindows(Date.now());
+  const settledOps: SettledFailureOps = {
+    hasRefund: hasRefundForJob,
+    spendAmount: spendAmountForJob,
+    getRequestId: async (profileId, jobId) => (await getGenerationRequestForJob(profileId, jobId))?.id ?? null,
+    isCommitLocked: isProviderCommitLocked,
+    confirmsFailure: providerConfirmsDefinitiveFailure,
+    refund: refundCredits,
+  };
+  const toJob = (r: SettledRow) => ({ id: r.id, profileId: r.profile_id, costCredits: r.cost_credits ?? 0, updatedAt: r.updated_at });
+  const settledQuery = (w: { after: string; before: string }, code: string, cursor: SettledCursor, head: boolean) => {
+    let q = supabaseServer
+      .from("jobs")
+      .select("id, profile_id, cost_credits, updated_at", head ? { count: "exact", head: true } : undefined)
+      .eq("status", "failed")
+      .eq("error->>code", code)
+      .gt("updated_at", w.after)
+      .lt("updated_at", w.before);
+    if (cursor) q = q.or(`updated_at.gt.${cursor.updatedAt},and(updated_at.eq.${cursor.updatedAt},id.gt.${cursor.id})`);
+    return q;
+  };
+  const scanSettled = (w: { after: string; before: string }, processJob: (j: ReturnType<typeof toJob>) => Promise<string>) =>
+    scanSettledJobs({
+      fetchPage: async (cursor, limit) => {
+        const { data, error } = await settledQuery(w, PROVIDER_OUTCOME_UNKNOWN_CODE, cursor, false)
+          .order("updated_at", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (error) throw new Error(error.message);
+        return ((data as SettledRow[] | null) ?? []).map(toJob);
+      },
+      countFrom: async (cursor) => {
+        const { count } = await settledQuery(w, PROVIDER_OUTCOME_UNKNOWN_CODE, cursor, true);
+        return count ?? 0;
+      },
+      process: processJob,
+    });
+  const collect = (label: string, r: Awaited<ReturnType<typeof scanSettled>>) => {
+    result.refundedJobs += r.outcomes.refunded ?? 0;
+    result.errors.push(...r.errors);
+    return `${label}: scanned=${r.scanned} ${JSON.stringify(r.outcomes)} left=${r.left}`;
+  };
+  try {
+    const active = await scanSettled(windows.active, (j) => reconcileSettledProviderFailure(settledOps, j));
+    result.settledLeft = active.left;
+    console.log(`[generation-reconcile] ${collect("settled", active)}`);
+    const expired = await scanSettled(windows.expired, (j) =>
+      expireSettledJob(settledOps, markSettledJobUnresolved, j),
+    );
+    result.unresolvedJobs = expired.outcomes.unresolved ?? 0;
+    console.log(`[generation-reconcile] ${collect("settled-expired", expired)}`);
+  } catch (e) {
+    result.errors.push(`settled jobs query: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const { data: staleRequests, error: reqError } = await supabaseServer
