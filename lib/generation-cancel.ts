@@ -53,20 +53,24 @@ export async function recordPrediction(params: {
   provider?: string;
 }): Promise<void> {
   try {
-    const { error } = await supabaseServer
-      .from(PREDICTIONS_TABLE)
-      .upsert(
-        {
-          generation_request_id: params.generationRequestId,
-          job_id: params.jobId ?? null,
-          profile_id: params.profileId,
-          prediction_id: params.predictionId,
-          kind: params.kind ?? null,
-          status: params.status ?? "starting",
-          provider: params.provider ?? "replicate",
-        },
-        { onConflict: "generation_request_id,prediction_id" }
-      );
+    const provider = params.provider ?? "replicate";
+    const row = {
+      generation_request_id: params.generationRequestId,
+      job_id: params.jobId ?? null,
+      profile_id: params.profileId,
+      prediction_id: params.predictionId,
+      kind: params.kind ?? null,
+      status: params.status ?? "starting",
+    };
+    const upsert = (r: Record<string, unknown>) =>
+      supabaseServer
+        .from(PREDICTIONS_TABLE)
+        .upsert(r, { onConflict: "generation_request_id,prediction_id" });
+    let { error } = await upsert({ ...row, provider });
+    // Before migration 114 the column is missing; a row without it reads back as Replicate.
+    if (error && provider === "replicate" && isMissingDbObject(error.message, "provider")) {
+      ({ error } = await upsert(row));
+    }
     if (error) {
       console.warn(
         "[generation-cancel] recordPrediction failed:",
@@ -208,11 +212,17 @@ export async function listPredictionIdsByProvider(
   profileId: string,
   generationRequestId: string
 ): Promise<Record<string, string[]>> {
-  const { data, error } = await supabaseServer
-    .from(PREDICTIONS_TABLE)
-    .select("prediction_id, provider")
-    .eq("generation_request_id", generationRequestId)
-    .eq("profile_id", profileId);
+  const select = (columns: string) =>
+    supabaseServer
+      .from(PREDICTIONS_TABLE)
+      .select(columns)
+      .eq("generation_request_id", generationRequestId)
+      .eq("profile_id", profileId);
+  let { data, error } = await select("prediction_id, provider");
+  // Before migration 114 the column is missing; every pre-114 prediction is Replicate.
+  if (error && isMissingDbObject(error.message, "provider")) {
+    ({ data, error } = await select("prediction_id"));
+  }
 
   if (error) {
     if (isMissingDbObject(error.message, PREDICTIONS_TABLE)) throw missingHint();
