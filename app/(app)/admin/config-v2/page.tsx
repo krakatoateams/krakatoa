@@ -32,6 +32,7 @@ import {
 import { PROVIDER_LABEL, marginForCost, type PhotoProviderId } from "@/lib/admin-provider-switch";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
+import { ModelRegistrySection } from "./ModelRegistrySection";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 import type { Platform } from "@/lib/platform-availability-pure";
 
@@ -1546,6 +1547,8 @@ export default function AdminConfigV2Page() {
       </div>
 
       {loadError ? <p className="text-xs text-red-400">{loadError}</p> : null}
+
+      <ModelRegistrySection />
 
       <div className="space-y-2">
           {tools.map((tool) => (
