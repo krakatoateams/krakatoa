@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Filter } from "lucide-react";
 import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import {
@@ -9,6 +9,7 @@ import {
   type AdminModelNode,
   type AdminPipelineGroup,
   type AdminPipelineRole,
+  type AdminProviderChoice,
   type AdminToolNode,
   buildAdminConfigTree,
   suggestCreditsFromProvider,
@@ -28,6 +29,7 @@ import {
   AdminToast,
   useAdminToast,
 } from "../admin-ui";
+import { PROVIDER_LABEL, marginForCost, type PhotoProviderId } from "@/lib/admin-provider-switch";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
@@ -83,6 +85,93 @@ function PricingNumberInput({
 
 const TH =
   "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
+
+
+/** Provider-switch data shared by the Photo model sections (fetched once by the page). */
+type ProviderAdmin = {
+  falConfigured: boolean;
+  /** `${provider}|${model}|${pricing_key}` -> cost_usd, from provider_model_costs. */
+  costs: Record<string, number>;
+  onSwitched: (configKey: string, provider: PhotoProviderId) => void;
+};
+const ProviderAdminContext = createContext<ProviderAdmin>({
+  falConfigured: false,
+  costs: {},
+  onSwitched: () => {},
+});
+
+function providerCostKey(provider: string, model: string, pricingKey: string): string {
+  return `${provider}|${model}|${pricingKey}`;
+}
+
+function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
+  const { falConfigured, onSwitched } = useContext(ProviderAdminContext);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (choice.options.length < 2) {
+    return <p className="text-xs text-gray-500">Provider: Replicate only</p>;
+  }
+
+  const switchTo = async (provider: PhotoProviderId) => {
+    if (provider === choice.provider || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/config/photo-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_key: choice.configKey, provider }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      onSwitched(choice.configKey, provider);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to switch provider.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs text-gray-400" htmlFor={`provider-${choice.configKey}`}>
+          Provider
+        </label>
+        <select
+          id={`provider-${choice.configKey}`}
+          value={choice.provider}
+          disabled={busy}
+          onChange={(e) => void switchTo(e.target.value as PhotoProviderId)}
+          className={`${INPUT} !w-auto min-w-[140px] disabled:opacity-60`}
+        >
+          {choice.options.map((o) => (
+            <option key={o.provider} value={o.provider} disabled={o.provider === "fal" && !falConfigured}>
+              {PROVIDER_LABEL[o.provider]}
+              {o.provider === "fal" && !falConfigured ? " (not configured)" : ""}
+            </option>
+          ))}
+        </select>
+        {choice.provider !== "replicate" ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void switchTo("replicate")}
+            className="rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white disabled:opacity-60"
+          >
+            Reset to Replicate
+          </button>
+        ) : null}
+      </div>
+      <p className="text-[11px] text-gray-500">
+        Switches the model and its settings together. Applies to new generations within about 60 seconds.
+        Users pay the same credits on either provider.
+      </p>
+      {error ? <p className="text-[11px] text-red-400">{error}</p> : null}
+    </div>
+  );
+}
 
 type ToolCommitFields = { enabled?: boolean; visibleInSidebar?: boolean; comingSoon?: boolean };
 
@@ -289,7 +378,10 @@ function VariantTable({
   onChange,
   onSave,
   onToggle,
+  activeProvider,
 }: {
+  /** Photo tiers: the provider in use, so cost and margin follow it. */
+  activeProvider?: { provider: PhotoProviderId; model: string };
   variants: AdminCostVariant[];
   billingSettings: BillingSettings;
   saving: boolean;
@@ -298,14 +390,17 @@ function VariantTable({
   onSave: (variant: AdminCostVariant) => void;
   onToggle: (variant: AdminCostVariant) => void;
 }) {
+  const { costs } = useContext(ProviderAdminContext);
+  const onFal = activeProvider?.provider === "fal";
   return (
     <div className="overflow-x-auto rounded-lg border border-white/10">
       <table className="w-full text-sm">
         <thead className="border-b border-white/10 bg-white/[0.03]">
           <tr>
             <th className={TH}>Variant</th>
-            <th className={`${TH} w-24`}>Replicate $</th>
+            <th className={`${TH} w-24`}>{onFal ? "fal.ai $" : "Replicate $"}</th>
             <th className={`${TH} w-20`}>Credits</th>
+            {activeProvider ? <th className={`${TH} w-20`}>Margin</th> : null}
             <th className={`${TH} w-16`}></th>
             <th className={`${TH} w-10`}>On</th>
             <th className={`${TH} w-16`}></th>
@@ -316,6 +411,12 @@ function VariantTable({
             const suggested = suggestCreditsFromProvider(v.providerReferenceUsd, billingSettings);
             const custom = v.credits !== suggested;
             const dirty = isPricingDirty(v, savedPricing);
+            // Fal cost comes from provider_model_costs; a missing row shows "not set", never a guess.
+            const falCost = activeProvider
+              ? (costs[providerCostKey("fal", activeProvider.model, v.pricingKey)] ?? null)
+              : null;
+            const activeCost = onFal ? falCost : v.providerReferenceUsd;
+            const margin = activeProvider ? marginForCost(v.credits, activeCost, billingSettings) : null;
             return (
               <tr key={v.pricingKey} className={v.enabled ? "text-gray-300" : "text-gray-600"}>
                 <td className="px-2 py-2 font-medium text-white">
@@ -328,11 +429,17 @@ function VariantTable({
                   ) : null}
                 </td>
                 <td className="px-2 py-1.5">
-                  <PricingNumberInput
-                    decimals
-                    value={v.providerReferenceUsd}
-                    onChange={(next) => onChange(v.pricingKey, { providerReferenceUsd: next })}
-                  />
+                  {onFal ? (
+                    <span className="font-mono text-xs text-gray-300" title="Set in provider_model_costs">
+                      {falCost === null ? "cost not set" : `$${falCost}`}
+                    </span>
+                  ) : (
+                    <PricingNumberInput
+                      decimals
+                      value={v.providerReferenceUsd}
+                      onChange={(next) => onChange(v.pricingKey, { providerReferenceUsd: next })}
+                    />
+                  )}
                 </td>
                 <td className="px-2 py-1.5">
                   <PricingNumberInput
@@ -341,15 +448,22 @@ function VariantTable({
                     className={`${INPUT} font-mono text-emerald-300`}
                   />
                 </td>
+                {activeProvider ? (
+                  <td className="px-2 py-1.5 font-mono text-xs text-gray-300">
+                    {margin ? `${margin.pct.toFixed(0)}%` : "—"}
+                  </td>
+                ) : null}
                 <td className="px-2 py-1.5">
-                  <button
-                    type="button"
-                    title={`Suggest ${suggested} credits from Replicate price`}
-                    onClick={() => onChange(v.pricingKey, { credits: suggested })}
-                    className="whitespace-nowrap rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white"
-                  >
-                    → {suggested}
-                  </button>
+                  {onFal ? null : (
+                    <button
+                      type="button"
+                      title={`Suggest ${suggested} credits from Replicate price`}
+                      onClick={() => onChange(v.pricingKey, { credits: suggested })}
+                      className="whitespace-nowrap rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white"
+                    >
+                      → {suggested}
+                    </button>
+                  )}
                 </td>
                 <td className="px-2 py-2 text-center">
                   <input
@@ -668,6 +782,7 @@ function ModelSection({
 
       {open ? (
         <div className="space-y-4 pb-3 pl-5">
+          {model.providerChoice ? <PhotoProviderSwitch choice={model.providerChoice} /> : null}
           {showModes ? (
             <ModesTable
               features={model.features}
@@ -679,6 +794,16 @@ function ModelSection({
           ) : null}
 
           <VariantTable
+            activeProvider={
+              model.providerChoice
+                ? {
+                    provider: model.providerChoice.provider,
+                    model:
+                      model.providerChoice.options.find((o) => o.provider === model.providerChoice!.provider)
+                        ?.model ?? "",
+                  }
+                : undefined
+            }
             variants={model.variants}
             billingSettings={billingSettings}
             saving={saving}
@@ -1024,6 +1149,8 @@ export default function AdminConfigV2Page() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
+  const [falConfigured, setFalConfigured] = useState(false);
+  const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
   const { toast, dismiss, show: showToast } = useAdminToast();
   const debouncersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const savingCountRef = useRef(0);
@@ -1060,6 +1187,20 @@ export default function AdminConfigV2Page() {
           readRequiredAdminConfigJson(catalogRes, "model catalog"),
           readRequiredAdminConfigJson(modelsRes, "model configs"),
         ]);
+      setFalConfigured(
+        (modelsData as { configuredProviders?: { fal?: boolean } }).configuredProviders?.fal === true
+      );
+      // Costs are optional: a missing table or fetch failure leaves "cost not set", never an error.
+      const costsData = await fetch("/api/admin/config/provider-costs")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      setProviderCosts(
+        Object.fromEntries(
+          ((costsData?.costs ?? []) as { provider: string; model: string; pricing_key: string; cost_usd: number }[]).map(
+            (c) => [providerCostKey(c.provider, c.model, c.pricing_key), Number(c.cost_usd)]
+          )
+        )
+      );
       const billingResData = billingRes.ok
         ? await billingRes.json().catch(() => null)
         : null;
@@ -1161,6 +1302,22 @@ export default function AdminConfigV2Page() {
       return next;
     });
   };
+
+  const onProviderSwitched = useCallback((configKey: string, provider: PhotoProviderId) => {
+    setTools((prev) => {
+      const next = prev.map((t) => ({
+        ...t,
+        models: t.models.map((m) =>
+          m.providerChoice?.configKey === configKey
+            ? { ...m, providerChoice: { ...m.providerChoice, provider } }
+            : m
+        ),
+      }));
+      toolsRef.current = next;
+      return next;
+    });
+    showToast({ type: "success", message: `Switched to ${PROVIDER_LABEL[provider]}.` });
+  }, [showToast]);
 
   const patchApi = async (url: string, body: Record<string, unknown>) => {
     const res = await fetch(url, {
@@ -1361,7 +1518,7 @@ export default function AdminConfigV2Page() {
   if (loading) return <AdminConfigSkeleton />;
 
   return (
-    <>
+    <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, onSwitched: onProviderSwitched }}>
       {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
       <div className="mx-auto max-w-5xl space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
@@ -1403,6 +1560,6 @@ export default function AdminConfigV2Page() {
           ))}
       </div>
       </div>
-    </>
+    </ProviderAdminContext.Provider>
   );
 }

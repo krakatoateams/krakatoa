@@ -24,6 +24,12 @@ import {
   type CostUnit,
   calculateCredits,
 } from "@/lib/pricing-math";
+import {
+  activePhotoProvider,
+  photoProviderOptions,
+  type PhotoProviderId,
+  type PhotoProviderOption,
+} from "@/lib/admin-provider-switch";
 import { getModelDefault } from "@/lib/admin-config-resolved-defaults";
 import { PIPELINE_GROUP_SPECS, type PipelineRoleSpec } from "@/lib/admin-pipeline-config";
 import { getV2PricingDefault } from "@/lib/pricing-defaults";
@@ -64,6 +70,14 @@ export type AdminCostVariant = {
   enabled: boolean;
 };
 
+/** Photo tiers only: the provider this tier runs on and the catalog choices for it. */
+export type AdminProviderChoice = {
+  configKey: string;
+  modelConfigId?: string;
+  provider: PhotoProviderId;
+  options: PhotoProviderOption[];
+};
+
 export type AdminModelNode = {
   id: string;
   label: string;
@@ -73,6 +87,7 @@ export type AdminModelNode = {
   catalogConfigId?: string;
   features: AdminFeatureToggle[];
   variants: AdminCostVariant[];
+  providerChoice?: AdminProviderChoice;
 };
 
 export type AdminPipelineRole = {
@@ -426,14 +441,26 @@ function buildVideoModels(
   return normalizeDefaultsPerMode(models);
 }
 
+function buildProviderChoice(configKey: string, modelConfigs: ModelConfigInput[]): AdminProviderChoice {
+  const row = modelConfigs.find((r) => r.tool_key === "photo" && r.config_key === configKey);
+  return {
+    configKey,
+    modelConfigId: row?.id,
+    provider: activePhotoProvider(configKey, row),
+    options: photoProviderOptions(configKey),
+  };
+}
+
 function buildPhotoModels(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings,
   featureModels: FeatureModelInput[],
-  modelCatalog: ModelCatalogInput[]
+  modelCatalog: ModelCatalogInput[],
+  modelConfigs: ModelConfigInput[]
 ): AdminModelNode[] {
   return normalizeDefaultsPerMode(
     PRODUCT_PHOTO_TIERS.map((tier) => ({
+      providerChoice: buildProviderChoice(tier.modelRole, modelConfigs),
       id: tier.id,
       label: tier.modelLabel,
       subtitle: tier.providerModel,
@@ -494,13 +521,14 @@ const MODEL_BUILDERS: Record<
     map: Map<string, PricingConfigInput>,
     settings: BillingSettings,
     featureModels: FeatureModelInput[],
-    modelCatalog: ModelCatalogInput[]
+    modelCatalog: ModelCatalogInput[],
+    modelConfigs: ModelConfigInput[]
   ) => AdminModelNode[]
 > = {
   reels: (map, settings, featureModels, modelCatalog) =>
     buildVideoModels(map, settings, featureModels, modelCatalog),
-  photo: (map, settings, featureModels, modelCatalog) =>
-    buildPhotoModels(map, settings, featureModels, modelCatalog),
+  photo: (map, settings, featureModels, modelCatalog, modelConfigs) =>
+    buildPhotoModels(map, settings, featureModels, modelCatalog, modelConfigs),
 };
 
 export function buildAdminConfigTree(params: {
@@ -519,7 +547,7 @@ export function buildAdminConfigTree(params: {
       const toolKey = tool.tool_key;
       const buildModels = MODEL_BUILDERS[toolKey];
       const models = buildModels
-        ? buildModels(pmap, params.billingSettings, params.featureModels, params.modelCatalog)
+        ? buildModels(pmap, params.billingSettings, params.featureModels, params.modelCatalog, params.modelConfigs)
         : [];
 
       const pipelines =

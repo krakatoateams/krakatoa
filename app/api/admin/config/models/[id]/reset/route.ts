@@ -3,6 +3,7 @@ import { withAdmin } from "@/lib/admin-api";
 import { getModelConfigById, updateModelConfig } from "@/lib/model-configs-db";
 import { getModelDefault } from "@/lib/admin-config-resolved-defaults";
 import { validateModelPatch } from "@/lib/admin-config-validation";
+import { recordProviderChange } from "@/lib/admin-config-audit-db";
 
 // Reset a model config to its canonical default (Admin Phase 2.5).
 // Admin-gated. Resolves the row id -> (tool_key, config_key) to pick the default,
@@ -41,6 +42,13 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     if (!model) {
       return NextResponse.json({ error: "Model config not found." }, { status: 404 });
     }
+    await recordProviderChange({
+      actorProfileId: ctx.profile.id,
+      toolKey: row.tool_key,
+      configKey: row.config_key,
+      from: row.provider,
+      to: model.provider,
+    });
     return NextResponse.json({ model, warnings: result.warnings, reset: true });
   });
 }

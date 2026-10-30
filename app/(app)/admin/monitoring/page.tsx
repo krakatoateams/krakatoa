@@ -772,7 +772,10 @@ export default function AdminMonitoringPage() {
                               {r.featureLabel ?? r.job_type}
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-xs text-gray-400">{r.model ?? "—"}</td>
+                          <td className="px-3 py-2 text-xs text-gray-400">
+                            {r.model ?? "—"}
+                            {r.provider ? <span className="block text-[10px] text-gray-600">{r.provider}</span> : null}
+                          </td>
                           <td className="px-3 py-2">
                             <StatusPill status={r.status} />
                             {r.errorCode ? (
