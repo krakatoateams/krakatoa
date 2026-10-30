@@ -141,8 +141,27 @@ Nano Banana (basic) on Fal WITH a reference image, in prod, end to end:
 - `admin_config_audit_log` recorded `provider_switch` rows; anon REST reads of that table and of
   `provider_model_costs` return nothing (RLS verified).
 
-Still NOT verified live: other tiers on Fal, the text-to-image endpoint, GPT Flare on Fal (including 16:9 / 9:16),
-failure behavior and Fal billing of failed runs, cancel behavior.
+Broader prod evidence (2026-10-31, read-only DB check): 7 Fal photo jobs in 3 hours, ALL succeeded, 0 failed or stuck,
+no `PROVIDER_OUTCOME_*` codes.
+
+- Tiers covered: Nano Banana (4 credits), Nano Banana 2 (7), Nano Banana Pro (14), GPT Image 2.5 Flare (12 credits at
+  high, 2 at low), including one 16:9 GPT job.
+- Runs were done with and without a reference image, per the tester (no per-job endpoint split claimed).
+- Exactly one spend per job, no refunds. Fal latency 18-43 s.
+- Cancel after Fal submit returns 409 `CANCEL_NOT_ALLOWED` (by design: `cancel_allowed=false` from submit). The UI
+  swaps Cancel for "Finalizing..." once locked, but a click before the poll flips it is silently ignored (known UX gap,
+  follow-up planned).
+- `assets.file_size_bytes` / `width` / `height` are NULL for ALL photo assets on both providers (normal; nothing reads
+  them for photos).
+
+Still NOT verified live:
+
+- Failure behavior, and whether Fal bills failed runs.
+- GPT 9:16 and other explicit sizes (only 16:9 seen).
+- Nano Banana 2 / Pro resolutions other than the one used (resolution coverage not itemized).
+- Cancel billing on Fal.
+
+Known gap: the margin dashboard does not yet use `provider_model_costs` (planned fix).
 
 ## Backlog (separate issues)
 
