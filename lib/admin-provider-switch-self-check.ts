@@ -3,7 +3,7 @@ import { DEFAULT_BILLING_SETTINGS } from "./pricing-math";
 import { isSupportedProviderModel } from "./ai-provider-catalog";
 import { getModelDefault } from "./admin-config-resolved-defaults";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
-import { activePhotoProvider, marginForCost, photoProviderOptions, photoSwitchTarget } from "./admin-provider-switch";
+import { activePhotoProvider, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget } from "./admin-provider-switch";
 
 const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2"];
 for (const tier of PRODUCT_PHOTO_TIERS) {
@@ -19,6 +19,14 @@ assert.equal(photoSwitchTarget("image_seedream4", "fal"), null, "no fal entry, n
 assert.equal(photoSwitchTarget("image_basic", "fal")?.model, "fal-ai/nano-banana");
 assert.equal(photoSwitchTarget("image_basic", "replicate")?.model, "google/nano-banana");
 assert.deepEqual(photoSwitchTarget("image_basic", "replicate")?.parameters, {});
+assert.equal(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { provider: "fal" }).ok, false, "provider change keeping the old model is rejected");
+assert.equal(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { provider: "fal", model: "fal-ai/nano-banana" }).ok, true);
+assert.deepEqual(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { provider: "fal", model: "fal-ai/nano-banana" }), { ok: true, parameters: {} }, "catalog unit forces catalog params");
+assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { provider: "replicate" }).ok, false, "rollback by PATCH needs the catalog model too");
+assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { provider: "replicate", model: "google/nano-banana" }).ok, true, "rollback unit allowed");
+assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { model: "fal-ai/other" }).ok, false, "off-catalog fal model rejected");
+assert.deepEqual(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { model: "google/nano-banana-x" }), { ok: true }, "replicate model edit stays free");
+assert.deepEqual(photoPatchUnit("image_seedream4", { provider: "replicate", model: "a" }, { model: "b" }), { ok: true }, "non-switchable tier unconstrained");
 assert.equal(activePhotoProvider("image_basic", null), "replicate", "missing row is replicate");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "fal-ai/nano-banana", enabled: true }), "fal");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "bogus", enabled: true }), "replicate", "off-catalog is replicate");

@@ -4,6 +4,7 @@ import { getModelConfigById, updateModelConfig } from "@/lib/model-configs-db";
 import { listPricingConfigs } from "@/lib/pricing-configs-db";
 import { photoTierPricingKeys } from "@/lib/product-photo";
 import { creditAmountsForKeys, providerSwitchPricingError, validateModelPatch } from "@/lib/admin-config-validation";
+import { photoPatchUnit } from "@/lib/admin-provider-switch";
 import { isProviderConfigured } from "@/lib/ai-provider-catalog";
 import { recordProviderChange } from "@/lib/admin-config-audit-db";
 
@@ -40,6 +41,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     }
     if (Object.keys(result.patch).length === 0) {
       return NextResponse.json({ error: "No valid fields to update." }, { status: 400 });
+    }
+
+    if (row.tool_key === "photo") {
+      const unit = photoPatchUnit(row.config_key, row, result.patch);
+      if (!unit.ok) return NextResponse.json({ error: unit.error }, { status: 400 });
+      if (unit.parameters) result.patch.parameters = unit.parameters;
     }
 
     if (result.patch.provider && !isProviderConfigured(result.patch.provider)) {

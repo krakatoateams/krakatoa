@@ -84,6 +84,16 @@ export function isValidFalCustomSize(width: number, height: number): boolean {
 }
 
 /**
+ * Pixel dimensions of the Fal presets we use (vendor docs). Fal's 16:9 presets are 1024x576 =
+ * 589,824 px, below the 655,360 minimum, so 16:9 and 9:16 use explicit sizes instead.
+ */
+export const FAL_PRESET_DIMENSIONS: Readonly<Record<string, { width: number; height: number }>> = {
+  square_hd: { width: 1024, height: 1024 },
+  landscape_4_3: { width: 1024, height: 768 },
+  portrait_4_3: { width: 768, height: 1024 },
+};
+
+/**
  * Fixed `image_size` per Photo aspect ratio (about 1 MP each, so cost stays predictable).
  * Presets where Fal has one; custom sizes for the rest. 4:5 and 21:9 are clamped to 3:4 / 16:9
  * before this runs (same as on Replicate), so they only matter if that clamp is ever lifted.
@@ -94,8 +104,8 @@ export const FAL_GPT_IMAGE_SIZES: Readonly<
   "1:1": "square_hd",
   "4:3": "landscape_4_3",
   "3:4": "portrait_4_3",
-  "16:9": "landscape_16_9",
-  "9:16": "portrait_16_9",
+  "16:9": { width: 1280, height: 720 },
+  "9:16": { width: 720, height: 1280 },
   "3:2": { width: 1248, height: 832 },
   "2:3": { width: 832, height: 1248 },
   "4:5": { width: 896, height: 1120 },

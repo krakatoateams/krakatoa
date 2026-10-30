@@ -153,6 +153,7 @@ function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
             </option>
           ))}
         </select>
+        {busy ? <span className="text-[11px] text-gray-400">Saving…</span> : null}
         {choice.provider !== "replicate" ? (
           <button
             type="button"
@@ -168,6 +169,16 @@ function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
         Switches the model and its settings together. Applies to new generations within about 60 seconds.
         Users pay the same credits on either provider.
       </p>
+      {choice.provider === "fal" && !falConfigured ? (
+        <p className="text-[11px] text-amber-400">
+          fal.ai is selected but not configured on this server (FAL_KEY missing): this model is running on Replicate.
+        </p>
+      ) : null}
+      {choice.rowEnabled === false ? (
+        <p className="text-[11px] text-amber-400">
+          This model config is disabled, so a provider switch has no effect until it is enabled.
+        </p>
+      ) : null}
       {error ? <p className="text-[11px] text-red-400">{error}</p> : null}
     </div>
   );
@@ -733,6 +744,7 @@ function ModelSection({
   onToggleVariant: (variant: AdminCostVariant) => void;
   onCommitCatalog: (modelId: string, enabled: boolean) => void;
 }) {
+  const { falConfigured } = useContext(ProviderAdminContext);
   const [open, setOpen] = useState(defaultOpen ?? false);
   const showModes = model.features.length > 0;
   const modeSummary = model.features.map((f) => f.label).join(" · ");
@@ -796,12 +808,15 @@ function ModelSection({
           <VariantTable
             activeProvider={
               model.providerChoice
-                ? {
-                    provider: model.providerChoice.provider,
-                    model:
-                      model.providerChoice.options.find((o) => o.provider === model.providerChoice!.provider)
-                        ?.model ?? "",
-                  }
+                ? (() => {
+                    // Fal selected without FAL_KEY actually runs on Replicate: show that margin.
+                    const effective =
+                      model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider;
+                    return {
+                      provider: effective,
+                      model: model.providerChoice.options.find((o) => o.provider === effective)?.model ?? "",
+                    };
+                  })()
                 : undefined
             }
             variants={model.variants}
