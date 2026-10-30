@@ -125,8 +125,8 @@ reference. Margin figures for GPT on Fal are therefore approximate; they never a
 |---|---|
 | Cancel billing (cancel mid-run, is the run billed?) | _not yet observed_ |
 | Concurrency limit of our account | _not yet observed_ |
-| Output host of real results | _not yet observed (expected `*.fal.media`)_ |
-| Signed Supabase URLs accepted as inputs | _not yet observed_ |
+| Output host of real results | `*.fal.media` (2026-10-31) |
+| Signed Supabase URLs accepted as inputs | yes (2026-10-31) |
 
 ## Verified live (2026-10-31)
 
