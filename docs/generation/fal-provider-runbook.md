@@ -65,7 +65,12 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   (zero-success batches stay on the `:remainder` path), marks a row with no `prediction_id` `unresolved`,
   and refunds exactly `credits` under `refund:product_photo:{jobId}:item:{batchIndex}` only when
   `getPredictionStatus` for THAT prediction is `failed` and the job's refunds stay within its spend
-  (`ambiguous` -> `refunded`, compare-and-set). Processing / succeeded / 404 / 5xx / timeout leave it
+  (the key is written on the still-`ambiguous` row first, compare-and-set on the state, then the ledger
+  refund runs, then `ambiguous` -> `refunded`). Late delivery never claims a row that carries a refund key,
+  so overlapping runs with contradictory Fal answers never both refund and deliver an image. A refund call
+  that errors or a run that dies mid-refund leaves the row `ambiguous` with its key; the next confirmed
+  failure retries the same key (the ledger dedupes it). Such a row that Fal later calls finished is not
+  delivered: at 72 h it becomes `unresolved` with the key set (check the ledger for that key first). Processing / succeeded / 404 / 5xx / timeout leave it
   `ambiguous`; past 72 h one last check, then `unresolved`. A delivered image is never refunded. Cron log:
   `itemsRefunded`, `itemsDeliveredLate`, `itemsUnresolved`, `itemsLeft`, `itemsSkipped`. Manual review:
   `select * from generation_batch_items where state = 'unresolved' order by created_at desc;` (refund only

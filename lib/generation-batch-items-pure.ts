@@ -130,8 +130,9 @@ export const isStorageAlreadyExists = (e: unknown) => /already exists/i.test(e i
 /** Late delivery (phase 3). Every write is a compare-and-set scoped to the row's profile. */
 export type LateDeliveryOps = {
   /**
-   * `ambiguous -> delivering`, or reclaim a `delivering` row whose `updated_at` is before `staleBefore`.
-   * Resolves the new lease token (the row's new `updated_at`), or null when another run holds the row.
+   * `ambiguous -> delivering`, or reclaim a `delivering` row whose `updated_at` is before `staleBefore`;
+   * never a row with a refund key (a refund may have been paid). Resolves the new lease token (the row's
+   * new `updated_at`), or null when another run holds the row.
    */
   claim: (item: BatchItemCandidate, staleBefore: string) => Promise<string | null>;
   /** Trusted output URL, read fresh from the provider (`*.fal.media` enforced); throws when unavailable. */
@@ -166,6 +167,11 @@ export type BatchItemOps = {
   }) => Promise<unknown>;
   /** Compare-and-set `ambiguous -> to` scoped to the row's profile; false when another run won. */
   settle: (item: BatchItemCandidate, to: "refunded" | "unresolved", refundKey: string | null) => Promise<boolean>;
+  /**
+   * Record the refund key on a still-`ambiguous` row before money moves (compare-and-set on the state).
+   * Late delivery never claims a row that carries a key; false when another run already took the row.
+   */
+  markRefund: (item: BatchItemCandidate, refundKey: string) => Promise<boolean>;
   /** Absent: a finished image stays ambiguous (phase 2 behavior). */
   late?: LateDeliveryOps;
 };
@@ -212,10 +218,13 @@ export async function settleBatchItem(
     definitiveProviderFailure: status === "failed",
   });
   if (refundable) {
-    // A replay of this key after a lost CAS still fits: a delivered image always keeps >= credits of headroom.
+    // A retry after a failed refund call fits even if the ledger did commit: a delivered image always keeps >= credits of headroom.
     const [spent, refunded] = await Promise.all([ops.spendAmount(item.jobId), ops.refundedAmount(item.jobId)]);
     if (refunded + item.credits <= spent) {
       const key = batchItemRefundKey(item.jobId, item.batchIndex);
+      // Mark the row before money moves: an overlapping run that saw "finished" can no longer deliver it
+      // (I1). A crash or a refund error leaves it ambiguous with the key; the next run retries the same key.
+      if (!(await ops.markRefund(item, key))) return "raced";
       await ops.refund({
         profileId: item.profileId,
         amount: item.credits,

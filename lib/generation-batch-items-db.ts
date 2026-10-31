@@ -133,6 +133,7 @@ export async function settleAmbiguousBatchItem(
 /**
  * Late delivery claim (compare-and-set, owner-scoped): `ambiguous -> delivering`, or reclaim a
  * `delivering` row whose lease (`updated_at`, bumped by the trigger) is older than `staleBefore`.
+ * A row carrying a refund key is never claimed.
  * Resolves the new `updated_at` as the lease token, or null when another run holds the row.
  */
 export async function claimBatchItemDelivery(
@@ -144,7 +145,8 @@ export async function claimBatchItemDelivery(
     .update({ state: "delivering" })
     .eq("id", item.id)
     .eq("profile_id", item.profileId)
-    .eq("state", item.state);
+    .eq("state", item.state)
+    .is("refund_idempotency_key", null); // a refund may have been paid: never deliver it too (I1)
   if (item.state === "delivering") q = q.lt("updated_at", staleBefore);
   const { data, error } = await q.select("updated_at");
   if (error) throw new Error(error.message);
@@ -165,6 +167,19 @@ export async function finishBatchItemDelivery(
     .eq("state", "delivering");
   if (to === "ambiguous") q = q.eq("updated_at", lease);
   const { data, error } = await q.select("id");
+  if (error) throw new Error(error.message);
+  return ((data as { id: string }[] | null) ?? []).length > 0;
+}
+
+/** Refund key on a still-`ambiguous` row before the ledger call (compare-and-set on the state, owner-scoped). */
+export async function markBatchItemRefund(item: { id: string; profileId: string }, refundKey: string): Promise<boolean> {
+  const { data, error } = await supabaseServer
+    .from(TABLE)
+    .update({ refund_idempotency_key: refundKey })
+    .eq("id", item.id)
+    .eq("profile_id", item.profileId)
+    .eq("state", "ambiguous")
+    .select("id");
   if (error) throw new Error(error.message);
   return ((data as { id: string }[] | null) ?? []).length > 0;
 }

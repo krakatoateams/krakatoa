@@ -123,12 +123,15 @@ type Fate =
   | "untrusted_output"
   | "gone_after_status"
   | "download_fails"
-  | "save_fails";
+  | "save_fails"
+  // Overlapping runs get contradictory answers: odd status reads say failed, even ones say finished.
+  | "contradictory";
 const OUT_URL = "https://v3.fal.media/files/out.png";
 const BROKEN_URL = "https://v3.fal.media/files/broken.png";
-function fakeFal(fates: Map<string, Fate>, calls: { n: number }): FalQueueLike {
+function fakeFal(fates: { get(requestId: string): Fate | undefined }, calls: { n: number }): FalQueueLike {
   const fate = (id: string) => fates.get(id) ?? "processing";
   const results = new Map<string, number>();
+  const statuses = new Map<string, number>();
   return {
     queue: {
       submit: async () => ({ request_id: "unused" }),
@@ -138,7 +141,9 @@ function fakeFal(fates: Map<string, Fate>, calls: { n: number }): FalQueueLike {
         if (f === "timeout") return new Promise(() => {});
         if (f === "server_5xx") throw new ApiError({ message: "unavailable", status: 503, body: {} });
         if (f === "processing") return { status: "IN_PROGRESS" };
-        if (f === "failed") return { status: "COMPLETED", error: "runner failed" };
+        const n = (statuses.get(o.requestId) ?? 0) + 1;
+        statuses.set(o.requestId, n);
+        if (f === "failed" || (f === "contradictory" && n % 2 === 1)) return { status: "COMPLETED", error: "runner failed" };
         return { status: "COMPLETED" };
       },
       result: async (_e, o) => {
@@ -161,11 +166,13 @@ type Item = Omit<BatchItemCandidate, "state"> & { state: BatchItemState; fate?: 
 const isOpen = (s: BatchItemState): s is "ambiguous" | "delivering" => s === "ambiguous" || s === "delivering";
 
 function world(items: Item[], jobs: Record<string, { status: string; spend: number; refunded?: number }>) {
-  const fates = new Map(items.filter((i) => i.fate).map((i) => [`req-${i.id}`, i.fate!]));
+  // Read live, so a test can change what Fal answers between runs.
+  const fates = { get: (requestId: string) => items.find((i) => `req-${i.id}` === requestId)?.fate };
   const falCalls = { n: 0 };
   const provider = createFalPhotoProvider(fakeFal(fates, falCalls), 0);
   const ledger = new Map<string, { jobId: string; amount: number }>(); // idempotency_key unique
   const refundCalls = { n: 0 };
+  const refundFaults: ("error" | "commit_then_error" | "hang")[] = [];
   const clock = { now: T0, tick: 0 };
   const storage = new Map<string, ArrayBuffer>(); // upsert: false
   const creations = new Set<string>(); // user_creations, unique storage_path
@@ -182,7 +189,12 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
     refund: async (p) => {
       refundCalls.n += 1;
       await Promise.resolve(); // let overlapping runs interleave
+      await Promise.resolve();
+      const mode = refundFaults.shift();
+      if (mode === "hang") return new Promise<never>(() => {}); // run killed before the ledger call returned
+      if (mode === "error") throw new Error("credit RPC unavailable");
       if (!ledger.has(p.idempotencyKey)) ledger.set(p.idempotencyKey, { jobId: p.jobId, amount: p.amount });
+      if (mode === "commit_then_error") throw new Error("credit RPC response lost");
     },
     settle: async (item, to, key) => {
       await Promise.resolve();
@@ -192,11 +204,18 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
       row.refundKey = key;
       return true;
     },
+    markRefund: async (item, key) => {
+      await Promise.resolve();
+      const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
+      if (row.state !== "ambiguous") return false;
+      row.refundKey = key;
+      return true;
+    },
     late: {
       claim: async (item, staleBefore) => {
         await Promise.resolve();
         const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
-        if (row.state !== item.state) return null;
+        if (row.state !== item.state || row.refundKey) return null;
         if (row.state === "delivering" && !(row.lease! < staleBefore)) return null;
         row.state = "delivering";
         row.lease = new Date(clock.now + ++clock.tick).toISOString(); // like the updated_at trigger
@@ -269,7 +288,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
       budgetMs === undefined ? {} : { budgetMs },
     );
   };
-  return { items, ledger, refundCalls, falCalls, run, ops, storage, creations, assets, downloads, save, clock };
+  return { items, ledger, refundCalls, refundFaults, falCalls, run, ops, storage, creations, assets, downloads, save, clock };
 }
 
 const item = (id: string, over: Partial<Item> = {}): Item => ({
@@ -574,14 +593,60 @@ async function main() {
     assert(!readFileSync("lib/ai-providers/replicate-photo.ts", "utf8").includes("getPredictionOutput"), "Replicate does not implement late delivery");
   }
 
+  // 23. Overlapping runs with contradictory Fal answers for the same image (one failed, one finished):
+  // the row is taken before any money or media moves, so at most ONE of refund / delivery happens (I1).
+  {
+    for (let stagger = 0; stagger < 6; stagger += 1) {
+      const w = world([item("y1", { fate: "contradictory" })], { "job-1": { status: "succeeded", spend: 10 } });
+      const later = async () => {
+        for (let i = 0; i < stagger; i += 1) await Promise.resolve();
+        return w.run(T0);
+      };
+      await Promise.all([w.run(T0), later()]);
+      const refunded = w.ledger.has(batchItemRefundKey("job-1", 1));
+      const delivered = w.storage.size > 0;
+      assert(!(refunded && delivered), `stagger ${stagger}: image both refunded and delivered`);
+      assert(refunded || delivered, `stagger ${stagger}: one of the two settles it`);
+      assert(refunded ? w.items[0].state === "refunded" && w.ledger.size === 1 : w.items[0].state === "delivered_late" && w.storage.size === 1, `stagger ${stagger}: row matches what happened (${w.items[0].state})`);
+    }
+  }
+
+  // 24. The refund call errors (before or after the ledger committed) or the run dies during it: the row
+  // stays ambiguous carrying its refund key, late delivery never claims it even when Fal then says finished,
+  // and a later failed answer refunds with the same key: exactly one ledger row, never a delivery (I1, I2).
+  {
+    for (const fault of ["error", "commit_then_error", "hang"] as const) {
+      const w = world([item("z9", { fate: "failed" })], { "job-1": { status: "succeeded", spend: 10 } });
+      w.refundFaults.push(fault);
+      const first = w.run(T0);
+      if (fault === "hang") {
+        while (w.refundCalls.n === 0) await new Promise((r) => setTimeout(r, 1));
+      } else {
+        assert((await first).errors.length === 1, `${fault}: error recorded`);
+      }
+      const key = batchItemRefundKey("job-1", 9);
+      assert(w.items[0].state === "ambiguous" && w.items[0].refundKey === key, `${fault}: row stays ambiguous with its key`);
+      assert(w.ledger.size === (fault === "commit_then_error" ? 1 : 0), `${fault}: ledger as the fault left it`);
+      w.items[0].fate = "succeeded"; // contradictory answer on the next run
+      await w.run(T0 + HOUR);
+      assert(w.storage.size === 0 && w.downloads.n === 0 && w.items[0].state === "ambiguous", `${fault}: a marked row is never delivered`);
+      w.items[0].fate = "failed";
+      const r = await w.run(T0 + 2 * HOUR);
+      assert(r.outcomes.refunded === 1 && w.items[0].state === "refunded", `${fault}: retried and settled (${JSON.stringify(r)})`);
+      assert(w.ledger.size === 1 && w.ledger.get(key)?.amount === 5 && w.storage.size === 0, `${fault}: exactly one refund, no delivery`);
+    }
+  }
+
   // 22. Reconcile wiring: the real save helper, owner-scoped asset update, provider seam, counter.
   {
     const rec = readFileSync("lib/generation-reconcile.ts", "utf8");
     assert(rec.includes("saveGeneratedProductPhoto({ ...rest, poseId: poseId as ModelPoseId, styleId: styleId as PhotoStyleId })"), "reconcile: saves with saveGeneratedProductPhoto and the stored params");
     assert(rec.includes("markAssetReady(profileId, assetId, {") && rec.includes("claim: claimBatchItemDelivery") && rec.includes("finish: finishBatchItemDelivery"), "reconcile: owner-scoped asset + CAS ops");
+    assert(rec.includes("markRefund: markBatchItemRefund"), "reconcile: refund key marked before the ledger call");
     assert(rec.includes("await insertProductPhotoGeneration({") && rec.includes("/duplicate key|unique constraint/i"), "reconcile: conflict path writes the library row, duplicate is a no-op");
     assert(rec.includes("provider.getPredictionOutput(predictionId)") && rec.includes("result.itemsDeliveredLate = items.outcomes.delivered_late ?? 0;"), "reconcile: provider seam + itemsDeliveredLate");
     const db = readFileSync("lib/generation-batch-items-db.ts", "utf8");
+    assert(db.includes('.is("refund_idempotency_key", null); // a refund may have been paid'), "db: late delivery never claims a row with a refund key");
     assert(db.includes('.in("state", ["ambiguous", "delivering"])') && db.includes('q = q.lt("updated_at", staleBefore)') && db.includes('q = q.eq("updated_at", lease)'), "db: open scan, lease reclaim, own-lease release");
   }
 

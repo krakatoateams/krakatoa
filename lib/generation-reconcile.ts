@@ -40,6 +40,7 @@ import {
   countOpenBatchItems,
   fetchOpenBatchItems,
   finishBatchItemDelivery,
+  markBatchItemRefund,
   settleAmbiguousBatchItem,
 } from "@/lib/generation-batch-items-db";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
@@ -378,6 +379,7 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
         spendAmount: spendAmountForJob,
         refund: refundCredits,
         settle: settleAmbiguousBatchItem,
+        markRefund: markBatchItemRefund,
         late: {
           claim: claimBatchItemDelivery,
           outputUrl: async (providerId, predictionId) => {
