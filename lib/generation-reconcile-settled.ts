@@ -3,7 +3,7 @@ import { shouldRefundSpentCreditsAfterFailure } from "@/lib/generation-commit-pu
 /** Photo route's terminal refund key (`refund:${refundJobType}:${jobId}`): shared so route + reconcile can never both refund. */
 export const photoRefundIdempotencyKey = (jobId: string) => `refund:product_photo:${jobId}`;
 
-/** Route-settled ambiguous Fal failures stay eligible for reconcile this long (reconcile runs every ~10 min; the daily Vercel cron is a backup). */
+/** Route-settled ambiguous Fal failures stay eligible for reconcile this long (reconcile runs every 10 min via cron-job.org; GitHub Actions and the daily Vercel cron are backups). */
 export const SETTLED_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 /** Failures this fresh are left to the next run (the route may still be finishing its own settlement). */
 export const SETTLED_MIN_AGE_MS = 5 * 60 * 1000;

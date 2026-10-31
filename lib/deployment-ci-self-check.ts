@@ -136,7 +136,8 @@ export function deploymentCiSelfCheck(): void {
       reconcileWorkflow.includes("--retry 0") &&
       reconcileWorkflow.includes("-H @-") &&
       !/echo[^\n]*\$\{?CRON_SECRET/.test(reconcileWorkflow) &&
-      reconcileWorkflow.includes("RECONCILE_CRON_SECRET") &&
+      reconcileWorkflow.includes("${{ secrets.CRON_SECRET }}") &&
+      reconcileWorkflow.includes("${{ secrets.CRON_TARGET_URL }}") &&
       reconcileWorkflow.includes("exit 0"),
     "the reconcile workflow must fail on HTTP errors, never echo or pass the secret on argv, and skip when unset",
   );
@@ -154,6 +155,14 @@ export function deploymentCiSelfCheck(): void {
     maxTime > 0 && maxTime < maxDuration,
     "the reconcile workflow curl max-time must stay below the route maxDuration",
   );
+  // Docs stay honest: GitHub schedules are best-effort, cron-job.org is the 10-minute trigger.
+  for (const doc of ["CLAUDE.md", "AGENTS.md", "docs/generation/fal-provider-runbook.md"]) {
+    const text = read(doc);
+    assert(
+      text.includes("cron-job.org") && !/(~|every )10 min[^\n]*via GitHub/.test(text),
+      `${doc} must name cron-job.org as the reconcile trigger, not GitHub Actions`,
+    );
+  }
   assert(
     read("vercel.json").includes('"/api/cron/generation-reconcile"'),
     "the daily Vercel reconcile cron stays as backup",
