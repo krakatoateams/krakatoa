@@ -18,7 +18,7 @@ import {
 } from "@/lib/model-catalog-guard";
 
 /**
- * Read-only view model for Admin Config → Models. Pure: rows in, JSON-safe payload out.
+ * Read-only model view for the Admin Config tool cards (Add model picker guard results). Pure: rows in, JSON-safe payload out.
  * Provider is reported as a label + a boolean "configured" flag, never a key or env value.
  */
 
@@ -51,9 +51,11 @@ export type RegistryModel = {
   /** Where it would appear if added now (eligible composers / features that are enabled or have no row). */
   willAppearIn: { key: string; label: string }[];
   provider: { id: string; label: string; configured: boolean };
-  /** Not offered and nothing blocks offering it: phase 3 will act on this. */
+  /** Not offered, not removed, and nothing blocks offering it. */
   availableToAdd: boolean;
   enableCheck: RegistryCheck;
+  /** Guard for "Add model" in a tool card: restore (if removed) then offer. Same rules as enable, minus ARCHIVED. */
+  addCheck: RegistryCheck;
   disableCheck: RegistryCheck;
   /** Guard result for Remove (same rules as hiding the model). */
   archiveCheck: RegistryCheck;
@@ -142,19 +144,26 @@ export function buildModelRegistry(input: {
       .filter(([, u]) => u.enabledTiers.includes(def.modelId))
       .map(([key, u]) => ({ key, label: u.label }));
 
-    const guard = (change: "enable" | "disable" | "archive") =>
+    const guard = (change: "enable" | "disable" | "archive", catalogRows = input.catalogRows) =>
       summarize(
         checkModelCatalogChange({
           toolKey: def.toolKey,
           modelId: def.modelId,
           change,
-          catalogRows: input.catalogRows,
+          catalogRows,
           featureRows: input.featureRows,
           pricingRows: input.pricingRows,
           provider: { id: provider.id, configured: provider.configured },
         })
       );
     const enableCheck = guard("enable");
+    // Adding a removed model restores it first: judge the offer as if the archive flag were already cleared.
+    const addCheck = row?.archived_at
+      ? guard(
+          "enable",
+          input.catalogRows.map((r) => (r === row ? { ...r, archived_at: null } : r))
+        )
+      : enableCheck;
 
     out.push({
       toolKey: def.toolKey,
@@ -178,6 +187,7 @@ export function buildModelRegistry(input: {
       provider,
       availableToAdd: !enabled && !row?.archived_at && enableCheck.ok,
       enableCheck,
+      addCheck,
       disableCheck: guard("disable"),
       archiveCheck: guard("archive"),
     });

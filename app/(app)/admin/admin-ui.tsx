@@ -304,23 +304,23 @@ export function AdminUsageSkeleton() {
 }
 
 export function AdminConfigSkeleton() {
+  // Matches the page: a Refresh link, then collapsed tool cards (name + On / Sidebar / Coming soon).
   return (
     <div className="mx-auto max-w-5xl space-y-3">
-      <Bone className="h-4 w-full max-w-xl" />
-      {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="space-y-3 rounded-lg border border-white/10 p-3">
-          <div className="flex items-center gap-3">
+      <div className="flex justify-end">
+        <Bone className="h-3.5 w-14" />
+      </div>
+      <div className="space-y-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 rounded-lg border border-white/10 px-3 py-2.5">
             <Bone className="h-4 w-4" />
-            <Bone className="h-5 w-28" />
-            <Bone className="ml-auto h-4 w-10" />
-            <Bone className="h-4 w-14" />
+            <Bone className="h-4 w-28" />
+            <Bone className="ml-auto h-3.5 w-10" />
+            <Bone className="h-3.5 w-16" />
+            <Bone className="h-3.5 w-24" />
           </div>
-          <div className="space-y-2 pl-6">
-            <Bone className="h-10 w-full" />
-            <Bone className="h-32 w-full" />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

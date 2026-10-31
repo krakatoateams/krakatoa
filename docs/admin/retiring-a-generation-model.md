@@ -3,7 +3,7 @@
 Use this when a catalog model (photo tier, video model, motion control model) should stop being offered
 for good. Retiring never touches users' past creations, jobs or charges. The short version:
 
-- **Archive first** (Admin Config → Models → **Remove**). Do code changes after.
+- **Archive first** (Admin Config → the model's tool card → **Remove**). Do code changes after.
 - **Never delete** the registry entry, the `model_catalog_configs` row, the `feature_model_configs` rows
   or the pricing rows.
 - **Never reuse** a retired model id, provider slug or pricing key for a different model.
@@ -13,15 +13,16 @@ ignored by the runtime, and keeping them is the safer state (see "Why rows are n
 
 ## Steps
 
-1. **Archive it in Admin Config.** Admin Config → Models → **Remove** (migration 118). The impact
-   preview shows in-flight jobs, history counts, where it is offered or default, the Reels engine and the
-   price keys that are kept. The server guard (`checkModelCatalogChange()`) refuses while the model is
+1. **Archive it in Admin Config.** Expand the model's tool card and press **Remove** in its row
+   (migration 118). The confirmation shows the features that lose it, the Reels engine it runs, the skills
+   that use it, jobs still running and how many creations used it. The server guard (`checkModelCatalogChange()`) refuses while the model is
    the default of a composer (`IS_DEFAULT`: pick another default first), the last offered model of a
    tool (`LAST_ENABLED_MODEL`), or the model behind the last offered Reels engine (`REELS_ENGINE_LAST`).
    Archiving sets `archived_at` and `enabled = false`; the catalog read has no cache, so users stop seeing
    it on the next request and generate routes reject it.
-   **Restore** works at any time while the entry stays in code; after step 5 adding it back is
-   blocked by `PRICING_NOT_READY` until a price exists again.
+   **Add model** in the same card brings it back (restore, then turn on) at any time while the entry
+   stays in code; after step 5 it is listed there as "Needs a price before it can be added"
+   (`PRICING_NOT_READY`) until a price exists again.
 2. **Wait.** No in-flight jobs on the model (the impact preview's count is 0), and at least 72 h since
    its last job, so reconcile has settled every held Fal job and per-image row
    (`docs/generation/fal-provider-runbook.md`).
@@ -81,7 +82,7 @@ ignored by the runtime, and keeping them is the safer state (see "Why rows are n
 
 ## Verify
 
-1. Admin Config → Models: the model is under **Removed models**.
+1. Admin Config: the model is gone from its tool card and appears under that card's **Add model**.
 2. SQL: `select enabled, archived_at from model_catalog_configs where model_id = '<id>';` returns
    `false` and a timestamp. `select is_deprecated, enabled from pricing_configs where pricing_key in
    ('<key>', …);` returns `true, false`.
