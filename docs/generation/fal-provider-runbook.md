@@ -67,15 +67,33 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   `getPredictionStatus` for THAT prediction is `failed` and the job's refunds stay within its spend
   (`ambiguous` -> `refunded`, compare-and-set). Processing / succeeded / 404 / 5xx / timeout leave it
   `ambiguous`; past 72 h one last check, then `unresolved`. A delivered image is never refunded. Cron log:
-  `itemsRefunded`, `itemsUnresolved`, `itemsLeft`, `itemsSkipped`. Manual review:
+  `itemsRefunded`, `itemsDeliveredLate`, `itemsUnresolved`, `itemsLeft`, `itemsSkipped`. Manual review:
   `select * from generation_batch_items where state = 'unresolved' order by created_at desc;` (refund only
-  a Fal-confirmed failure, with that row's `:item:{batchIndex}` key). Images Fal finished but we failed to
-  download stay `ambiguous` until late delivery (#442) or expiry.
+  a Fal-confirmed failure, with that row's `:item:{batchIndex}` key). An image Fal finished is delivered
+  late (below); it reaches manual review only when Fal no longer has it or it still cannot be saved at 72 h.
+  Late delivery (#442): when `getPredictionStatus` says `succeeded`, reconcile claims the row with a
+  compare-and-set `ambiguous -> delivering` (a `delivering` row whose `updated_at` is older than 10 minutes
+  may be reclaimed by another run; `updated_at` is the lease token), reads the output URL fresh from Fal
+  (`getPredictionOutput` = `result()` + `normalizeFalOutput`, trusted `*.fal.media` only), downloads it and
+  saves it with `saveGeneratedProductPhoto` using the stored `delivery` params (same deterministic filename,
+  `upsert: false`, `MEDIA_CACHE_CONTROL`) under `{userId}/` of the row's `profile_id`, then `markAssetReady`
+  on the row's `asset_id` (owner-scoped) and `delivering -> delivered_late` (terminal, never refunded).
+  Storage "already exists" on that filename means an earlier attempt saved it: delivered, and the library
+  row is written if that attempt died before it (unique `(user_id, storage_path)`, a duplicate is a no-op).
+  A 404, an untrusted URL, a download or save failure, or unusable `delivery` params put the row back to
+  `ambiguous` (only by the run that holds the lease), nothing refunded; the 72 h expiry rule still applies.
+  Once the image is stored the row never goes back to `ambiguous`: if the asset update or the final step
+  fails it stays `delivering` and the next run after the lease finishes it. Rows still `delivering` long
+  after their lease need a look: `select * from generation_batch_items where state = 'delivering' and
+  updated_at < now() - interval '1 hour';` (the image is usually in the library already). The job's
+  `output.storagePaths` is not rewritten: the library is the source of truth for a late image, and it
+  appears there without a notification. Rollback: revert the code; open rows fall back to the phase-2
+  expiry rule.
   The response carries `unconfirmedImageCount` (Fal only, also on the job output and usage metadata) and,
   only when the rows were written, `unconfirmedRecheck: true`. The photo page then says "{failed} of
   {requested} images didn't arrive. {refunded} were refunded. {unconfirmed} couldn't be confirmed yet, so
-  we're re-checking {it/them} with the AI provider: if {it/they} failed, the credits come back
-  automatically." Without the rows (migration absent or write failed) it keeps the earlier wording: "...
+  we're re-checking {it/them} with the AI provider: if {it/they} finished, {it'll/they'll} appear in your
+  library; if {it/they} failed, the credits come back automatically." Without the rows (migration absent or write failed) it keeps the earlier wording: "...
   {unconfirmed} couldn't be confirmed by the AI provider, so it is still charged for now. Contact support if
   it doesn't appear in your library." With no unconfirmed image the old "you were only charged for the K
   that worked" message stays (it is true then).

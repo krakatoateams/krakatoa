@@ -1,9 +1,11 @@
 /**
- * S2 phase 2 self-check: per-image settlement of partly delivered multi-image Fal requests
- * (migration 119). REAL: planBatchItemRows, settleBatchItem, scanSettledJobs/settledWindows, the Fal
- * adapter's getPredictionStatus (fake Fal client), the canonical refund policy, batchFailureMessage and
- * the generation_batch_items data module (Supabase answered by a stubbed fetch). Fake: the job table,
- * the item table and a ledger that dedupes idempotency keys like credit_transactions.
+ * S2 phases 2-3 self-check: per-image settlement of partly delivered multi-image Fal requests
+ * (migration 119), including late delivery. REAL: planBatchItemRows, settleBatchItem,
+ * deliverBatchItemLate, scanSettledJobs/settledWindows, the Fal adapter's getPredictionStatus and
+ * getPredictionOutput (fake Fal client), the canonical refund policy, batchFailureMessage and the
+ * generation_batch_items data module (Supabase answered by a stubbed fetch). Fake: the job table, the
+ * item table, a ledger that dedupes idempotency keys like credit_transactions, and storage + library +
+ * assets that behave like saveGeneratedProductPhoto (upsert: false, unique storage_path).
  * Run: `npx tsx --conditions=react-server lib/ai-providers/batch-items-self-check.ts`.
  */
 import { readFileSync } from "node:fs";
@@ -16,6 +18,7 @@ import {
 } from "./errors";
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
 import {
+  BATCH_ITEM_LEASE_MS,
   batchItemRefundKey,
   planBatchItemRows,
   settleBatchItem,
@@ -23,6 +26,7 @@ import {
   type BatchItemOps,
   type BatchItemState,
 } from "../generation-batch-items-pure";
+import { photosGeneratedPath } from "../product-photo";
 import { SETTLED_LOOKBACK_MS, scanSettledJobs, settledWindows, type SettledCursor } from "../generation-reconcile-settled";
 import { batchFailureMessage, planBatchFailures } from "../photo-batch-failure-pure";
 
@@ -91,12 +95,12 @@ const rowsFor = (provider: typeof fal, outcomes: PromiseSettledResult<unknown>[]
   assert(batchFailureMessage({ failed: 2, requested: 4, delivered: 2, unconfirmed: 1, recheck: false }) === phase1, "recheck false: phase-1 text");
   assert(
     batchFailureMessage({ failed: 2, requested: 4, delivered: 2, unconfirmed: 1, recheck: true }) ===
-      "2 of 4 images didn't arrive. 1 was refunded. 1 couldn't be confirmed yet, so we're re-checking it with the AI provider: if it failed, the credits come back automatically.",
+      "2 of 4 images didn't arrive. 1 was refunded. 1 couldn't be confirmed yet, so we're re-checking it with the AI provider: if it finished, it'll appear in your library; if it failed, the credits come back automatically.",
     "recheck singular",
   );
   assert(
     batchFailureMessage({ failed: 2, requested: 3, delivered: 1, unconfirmed: 2, recheck: true }) ===
-      "2 of 3 images didn't arrive. 2 couldn't be confirmed yet, so we're re-checking them with the AI provider: if they failed, the credits come back automatically.",
+      "2 of 3 images didn't arrive. 2 couldn't be confirmed yet, so we're re-checking them with the AI provider: if they finished, they'll appear in your library; if they failed, the credits come back automatically.",
     "recheck plural",
   );
   assert(
@@ -107,9 +111,24 @@ const rowsFor = (provider: typeof fal, outcomes: PromiseSettledResult<unknown>[]
 }
 
 // Fake Fal: per request id fate, answered through the REAL adapter's getPredictionStatus.
-type Fate = "failed" | "failed_4xx" | "processing" | "succeeded" | "expired_404" | "server_5xx" | "timeout";
+type Fate =
+  | "failed"
+  | "failed_4xx"
+  | "processing"
+  | "succeeded"
+  | "expired_404"
+  | "server_5xx"
+  | "timeout"
+  // Phase 3: COMPLETED, but the output read for delivery fails or is not trusted.
+  | "untrusted_output"
+  | "gone_after_status"
+  | "download_fails"
+  | "save_fails";
+const OUT_URL = "https://v3.fal.media/files/out.png";
+const BROKEN_URL = "https://v3.fal.media/files/broken.png";
 function fakeFal(fates: Map<string, Fate>, calls: { n: number }): FalQueueLike {
   const fate = (id: string) => fates.get(id) ?? "processing";
+  const results = new Map<string, number>();
   return {
     queue: {
       submit: async () => ({ request_id: "unused" }),
@@ -124,9 +143,13 @@ function fakeFal(fates: Map<string, Fate>, calls: { n: number }): FalQueueLike {
       },
       result: async (_e, o) => {
         const f = fate(o.requestId);
-        if (f === "expired_404") throw new ApiError({ message: "gone", status: 404, body: {} });
+        const n = (results.get(o.requestId) ?? 0) + 1;
+        results.set(o.requestId, n);
+        if (f === "expired_404" || (f === "gone_after_status" && n > 1)) throw new ApiError({ message: "gone", status: 404, body: {} });
         if (f === "failed_4xx") throw new ApiError({ message: "bad", status: 422, body: {} });
-        return { data: { images: [{ url: "https://v3.fal.media/files/out.png" }] } };
+        if (f === "untrusted_output") return { data: { images: [{ url: "https://evil.example.com/out.png" }] } };
+        if (f === "download_fails") return { data: { images: [{ url: BROKEN_URL }] } };
+        return { data: { images: [{ url: OUT_URL }] } };
       },
       cancel: async () => "unknown",
     },
@@ -134,7 +157,8 @@ function fakeFal(fates: Map<string, Fate>, calls: { n: number }): FalQueueLike {
   };
 }
 
-type Item = BatchItemCandidate & { state: BatchItemState; fate?: Fate; refundKey: string | null };
+type Item = Omit<BatchItemCandidate, "state"> & { state: BatchItemState; fate?: Fate; refundKey: string | null; lease?: string };
+const isOpen = (s: BatchItemState): s is "ambiguous" | "delivering" => s === "ambiguous" || s === "delivering";
 
 function world(items: Item[], jobs: Record<string, { status: string; spend: number; refunded?: number }>) {
   const fates = new Map(items.filter((i) => i.fate).map((i) => [`req-${i.id}`, i.fate!]));
@@ -142,6 +166,12 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
   const provider = createFalPhotoProvider(fakeFal(fates, falCalls), 0);
   const ledger = new Map<string, { jobId: string; amount: number }>(); // idempotency_key unique
   const refundCalls = { n: 0 };
+  const clock = { now: T0, tick: 0 };
+  const storage = new Map<string, ArrayBuffer>(); // upsert: false
+  const creations = new Set<string>(); // user_creations, unique storage_path
+  const assets = new Map<string, string>(); // `${profileId}/${assetId}` -> ready storage path
+  const downloads = { n: 0 };
+  const save: { gate?: Promise<void>; crashAfterUpload?: boolean; markReadyFails?: boolean } = {};
   for (const [jobId, j] of Object.entries(jobs)) if (j.refunded) ledger.set(`refund:product_photo:${jobId}:partial`, { jobId, amount: j.refunded });
   const ops: BatchItemOps = {
     jobStatus: async (_p, jobId) => jobs[jobId]?.status ?? null,
@@ -162,12 +192,64 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
       row.refundKey = key;
       return true;
     },
+    late: {
+      claim: async (item, staleBefore) => {
+        await Promise.resolve();
+        const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
+        if (row.state !== item.state) return null;
+        if (row.state === "delivering" && !(row.lease! < staleBefore)) return null;
+        row.state = "delivering";
+        row.lease = new Date(clock.now + ++clock.tick).toISOString(); // like the updated_at trigger
+        return row.lease;
+      },
+      outputUrl: async (providerId, id) => {
+        if (providerId !== "fal") throw new Error("no late delivery");
+        return provider.getPredictionOutput!(id);
+      },
+      download: async (url) => {
+        await Promise.resolve();
+        if (url === BROKEN_URL) throw new Error("Download failed (403).");
+        downloads.n += 1;
+        return new TextEncoder().encode(url).buffer as ArrayBuffer;
+      },
+      userIdForProfile: async (profileId) => (profileId === "p-1" ? "u-1" : ""),
+      save: async (p) => {
+        // saveGeneratedProductPhoto: upload with upsert:false, then the library row (unique storage_path).
+        const gate = save.gate; // one-shot: holds only the first save that sees it
+        save.gate = undefined;
+        if (gate) await gate;
+        const path = photosGeneratedPath(p.userId, p.photoMode, p.filename);
+        if (items.some((i) => i.fate === "save_fails" && i.delivery?.filename === p.filename)) throw new Error("Failed to save generated image: R2 upload failed (500).");
+        if (storage.has(path)) throw new Error("Failed to save generated image: The resource already exists");
+        storage.set(path, p.imageBuffer);
+        if (save.crashAfterUpload) return new Promise<never>(() => {}); // run killed mid-save
+        if (creations.has(path)) throw new Error("duplicate key value violates unique constraint");
+        creations.add(path);
+        return { storagePath: path };
+      },
+      recordLibrary: async (p) => {
+        creations.add(p.storagePath); // unique storage_path: a duplicate is a no-op
+      },
+      markReady: async (profileId, assetId, storagePath) => {
+        if (save.markReadyFails) throw new Error("Failed to mark asset ready.");
+        assets.set(`${profileId}/${assetId}`, storagePath);
+      },
+      finish: async (item, lease, to) => {
+        await Promise.resolve();
+        const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
+        if (row.state !== "delivering" || (to === "ambiguous" && row.lease !== lease)) return false;
+        row.state = to;
+        row.lease = new Date(clock.now + ++clock.tick).toISOString();
+        return true;
+      },
+      now: () => clock.now,
+    },
   };
   const deps = (w: { after: string; before: string }) => {
     const matching = (cursor: SettledCursor) =>
       items
-        .filter((i) => i.state === "ambiguous" && Date.parse(i.updatedAt) > Date.parse(w.after) && Date.parse(i.updatedAt) < Date.parse(w.before))
-        .map((i) => ({ ...i }))
+        .filter((i) => isOpen(i.state) && Date.parse(i.updatedAt) > Date.parse(w.after) && Date.parse(i.updatedAt) < Date.parse(w.before))
+        .map((i) => ({ ...i, state: i.state as "ambiguous" | "delivering" }))
         .sort((a, b) => (a.updatedAt < b.updatedAt ? -1 : a.updatedAt > b.updatedAt ? 1 : a.id < b.id ? -1 : 1))
         .filter((c) => !cursor || c.updatedAt > cursor.updatedAt || (c.updatedAt === cursor.updatedAt && c.id > cursor.id));
     return {
@@ -177,6 +259,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
   };
   /** One reconcile item scan at `now`, composed like runGenerationReconcile. */
   const run = (now: number, budgetMs?: number) => {
+    clock.now = now;
     const ws = settledWindows(now);
     return scanSettledJobs(
       {
@@ -186,7 +269,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
       budgetMs === undefined ? {} : { budgetMs },
     );
   };
-  return { items, ledger, refundCalls, falCalls, run, ops };
+  return { items, ledger, refundCalls, falCalls, run, ops, storage, creations, assets, downloads, save, clock };
 }
 
 const item = (id: string, over: Partial<Item> = {}): Item => ({
@@ -200,6 +283,8 @@ const item = (id: string, over: Partial<Item> = {}): Item => ({
   updatedAt: new Date(T0 - 2 * HOUR).toISOString(),
   state: "ambiguous",
   refundKey: null,
+  assetId: `asset-${id}`,
+  delivery: { photoMode: "social", filename: `${1_800_000_000_000 + (Number(id.replace(/\D/g, "")) || 0)}__auto__auto.jpg`, poseId: "auto", styleId: "auto", jobId: "job-1" },
   ...over,
 });
 
@@ -227,13 +312,15 @@ async function main() {
     assert(w.items.every((i) => i.state === "refunded"), "all settled once");
   }
 
-  // 6. Not a definitive failure (processing / succeeded / 404 / 5xx / timeout): no refund, stays ambiguous.
+  // 6. Not a definitive failure (processing / 404 / 5xx / timeout): no refund, stays ambiguous, nothing saved.
+  // (succeeded is delivered late: section 16.)
   {
-    const fates: Fate[] = ["processing", "succeeded", "expired_404", "server_5xx", "timeout"];
+    const fates: Fate[] = ["processing", "expired_404", "server_5xx", "timeout"];
     const w = world(fates.map((f, i) => item(`a${i}`, { fate: f })), { "job-1": { status: "succeeded", spend: 30 } });
     const r = await w.run(T0);
-    assert(r.outcomes.left === 5 && r.errors.length === 0, `ambiguous answers leave the rows open (${JSON.stringify(r)})`);
+    assert(r.outcomes.left === 4 && r.errors.length === 0, `ambiguous answers leave the rows open (${JSON.stringify(r)})`);
     assert(w.ledger.size === 0 && w.refundCalls.n === 0 && w.items.every((i) => i.state === "ambiguous"), "no refund, still ambiguous");
+    assert(w.storage.size === 0 && w.downloads.n === 0, "nothing downloaded or saved");
   }
 
   // 7. Delivered rows are never scanned; zero-success / running jobs are skipped (I1, I5).
@@ -281,7 +368,7 @@ async function main() {
   {
     const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
     const w = world(
-      [item("x1", { updatedAt: old, fate: "succeeded" }), item("x2", { updatedAt: old, fate: "failed" }), item("x3", { updatedAt: old, fate: "server_5xx" })],
+      [item("x1", { updatedAt: old, fate: "processing" }), item("x2", { updatedAt: old, fate: "failed" }), item("x3", { updatedAt: old, fate: "server_5xx" })],
       { "job-1": { status: "succeeded", spend: 20 } },
     );
     const r = await w.run(T0);
@@ -375,6 +462,127 @@ async function main() {
     assert(page.includes("recheck: data.unconfirmedRecheck === true,"), "page: passes the recheck flag");
     const sql = readFileSync("supabase/migrations/119_generation_batch_items.sql", "utf8");
     assert(sql.includes("create table if not exists generation_batch_items") && sql.includes("unique (job_id, batch_index)") && sql.includes("enable row level security") && !/create policy/i.test(sql), "migration: idempotent, unique per image, RLS without policies");
+  }
+
+  // 16. Late delivery: Fal COMPLETED with a trusted output -> saved exactly once under {userId}/ with the
+  // stored params, asset ready, row delivered_late, no refund. Re-runs change nothing (I1).
+  {
+    const w = world([item("l1", { fate: "succeeded" })], { "job-1": { status: "succeeded", spend: 10 } });
+    const r = await w.run(T0);
+    const path = photosGeneratedPath("u-1", "social", w.items[0].delivery!.filename as string);
+    assert(r.outcomes.delivered_late === 1 && w.items[0].state === "delivered_late", `delivered late (${JSON.stringify(r)})`);
+    assert(path.startsWith("u-1/") && w.storage.size === 1 && w.storage.has(path) && w.creations.has(path), "saved once under the owner's prefix with the stored filename");
+    assert(w.assets.get("p-1/asset-l1") === path, "asset marked ready (owner-scoped) with the saved path");
+    assert(w.ledger.size === 0 && w.refundCalls.n === 0, "no refund for a delivered image");
+    w.items[0].fate = "failed"; // even if Fal later said otherwise
+    await w.run(T0 + HOUR);
+    assert(w.storage.size === 1 && w.downloads.n === 1 && w.ledger.size === 0 && w.items[0].state === "delivered_late", "delivered_late is terminal: never re-saved or refunded");
+  }
+
+  // 17. Untrusted URL, 404 on the output read, download failure, save failure, unusable params or owner:
+  // back to ambiguous, nothing saved, no refund; past 72 h the expiry rule still moves them to unresolved.
+  {
+    const failing = (prefix: string, over: Partial<Item> = {}) => [
+      item(`${prefix}1`, { fate: "untrusted_output", ...over }),
+      item(`${prefix}2`, { fate: "gone_after_status", ...over }),
+      item(`${prefix}3`, { fate: "download_fails", ...over }),
+      item(`${prefix}4`, { fate: "save_fails", ...over }),
+      item(`${prefix}5`, { fate: "succeeded", delivery: { photoMode: "social", filename: "../../other-user/x.jpg" }, ...over }),
+      item(`${prefix}6`, { fate: "succeeded", profileId: "p-unknown", ...over }),
+    ];
+    const w = world(failing("e"), { "job-1": { status: "succeeded", spend: 40 } });
+    const r = await w.run(T0);
+    assert(r.outcomes.left === 6 && r.errors.length === 0, `failed deliveries are left (${JSON.stringify(r)})`);
+    assert(w.items.every((i) => i.state === "ambiguous"), "every failed delivery is back to ambiguous");
+    assert(w.storage.size === 0 && w.creations.size === 0 && w.assets.size === 0, "nothing saved, no asset touched");
+    assert(w.ledger.size === 0 && w.refundCalls.n === 0, "no refund");
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const x = world(failing("x", { updatedAt: old }), { "job-1": { status: "succeeded", spend: 40 } });
+    const rx = await x.run(T0);
+    assert(rx.outcomes.unresolved === 6 && x.items.every((i) => i.state === "unresolved"), "expired failed deliveries -> unresolved");
+    assert(x.storage.size === 0 && x.ledger.size === 0, "still nothing saved or refunded");
+  }
+
+  // 18. Overlapping runs: each finished image is saved exactly once, whichever run wins the claim.
+  {
+    const items = Array.from({ length: 4 }, (_, i) => item(`v${i}`, { fate: "succeeded" }));
+    const w = world(items, { "job-1": { status: "succeeded", spend: 20 } });
+    await Promise.all([w.run(T0), w.run(T0), w.run(T0)]);
+    assert(w.storage.size === 4 && w.creations.size === 4 && w.downloads.n === 4, `one save per image (${w.storage.size}, ${w.downloads.n})`);
+    assert(w.items.every((i) => i.state === "delivered_late") && w.ledger.size === 0, "all delivered late, no refund");
+  }
+
+  // 19. Lease expiry mid-save: a fresh lease is never taken over; a stale one is, and the slow first run then
+  // hits the storage conflict (= delivered). Still exactly one saved image.
+  {
+    const w = world([item("s1", { fate: "succeeded" })], { "job-1": { status: "succeeded", spend: 10 } });
+    let release!: () => void;
+    w.save.gate = new Promise<void>((r) => { release = r; });
+    const first = w.run(T0);
+    while ((w.items[0].state as BatchItemState) !== "delivering" || w.downloads.n === 0) await new Promise((r) => setTimeout(r, 1));
+    const fresh = await w.run(T0 + BATCH_ITEM_LEASE_MS / 2);
+    assert(fresh.outcomes.leased === 1 && w.storage.size === 0, "a fresh lease is not reclaimed");
+    const second = await w.run(T0 + BATCH_ITEM_LEASE_MS + 60_000);
+    assert(second.outcomes.delivered_late === 1 && w.storage.size === 1, "a stale lease is reclaimed and delivered");
+    release();
+    const r1 = await first;
+    assert(r1.outcomes.raced === 1 && r1.errors.length === 0, `slow first run: conflict counts as delivered, CAS lost (${JSON.stringify(r1)})`);
+    assert(w.storage.size === 1 && w.creations.size === 1 && w.items[0].state === "delivered_late" && w.ledger.size === 0, "exactly one saved image, no refund");
+  }
+
+  // 20. Crash mid-save (uploaded, then the run died): the row stays delivering; after the lease the next run
+  // reclaims it, storage says "already exists" -> delivered, asset ready. Still one image.
+  {
+    const w = world([item("k1", { fate: "succeeded" })], { "job-1": { status: "succeeded", spend: 10 } });
+    w.save.crashAfterUpload = true;
+    void w.run(T0); // never settles: the run was killed
+    while (w.storage.size === 0) await new Promise((r) => setTimeout(r, 1));
+    w.save.crashAfterUpload = false;
+    assert(w.items[0].state === "delivering", "crashed run leaves the lease behind");
+    const r = await w.run(T0 + BATCH_ITEM_LEASE_MS + 60_000);
+    const path = photosGeneratedPath("u-1", "social", w.items[0].delivery!.filename as string);
+    assert(r.outcomes.delivered_late === 1 && w.items[0].state === "delivered_late", "reclaimed after the lease");
+    assert(w.storage.size === 1 && w.assets.get("p-1/asset-k1") === path && w.ledger.size === 0, "one image, asset ready, no refund");
+    assert(w.creations.size === 1 && w.creations.has(path), "the library row the crashed run never wrote is added");
+  }
+
+  // 20b. Stored, then the asset update fails: the row stays delivering (never back to ambiguous, so never
+  // refunded or expired to unresolved); the next run after the lease finishes it. Still one image.
+  {
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const w = world([item("m1", { fate: "succeeded", updatedAt: old })], { "job-1": { status: "succeeded", spend: 10 } });
+    w.save.markReadyFails = true;
+    const r = await w.run(T0);
+    assert(r.errors.length === 1 && w.items[0].state === "delivering" && w.storage.size === 1, `stored image keeps the row delivering (${JSON.stringify(r)})`);
+    w.items[0].fate = "failed";
+    w.save.markReadyFails = false;
+    const again = await w.run(T0 + 60_000);
+    assert(again.outcomes.leased === 1 && w.ledger.size === 0, "held lease: not reclaimed, not refunded even though Fal now says failed");
+    const r2 = await w.run(T0 + BATCH_ITEM_LEASE_MS + 60_000);
+    assert(r2.outcomes.delivered_late === 1 && w.storage.size === 1 && w.creations.size === 1 && w.ledger.size === 0, "next run after the lease delivers it once, no refund");
+  }
+
+  // 21. Replicate rows (never written by the route) and non-succeeded jobs: no change from phase 2.
+  {
+    const w = world(
+      [item("rq1", { provider: "replicate", fate: "succeeded" }), item("rq2", { jobId: "job-running", fate: "succeeded" }), item("rq3", { jobId: "job-running", state: "delivering", lease: new Date(0).toISOString(), fate: "succeeded" })],
+      { "job-1": { status: "succeeded", spend: 10 }, "job-running": { status: "running", spend: 10 } },
+    );
+    const r = await w.run(T0);
+    assert(r.outcomes.left === 1 && r.outcomes.skipped_job === 2, `Replicate left, other jobs skipped (${JSON.stringify(r)})`);
+    assert(w.storage.size === 0 && w.items[0].state === "ambiguous" && w.ledger.size === 0, "Replicate: nothing saved or refunded");
+    assert(!readFileSync("lib/ai-providers/replicate-photo.ts", "utf8").includes("getPredictionOutput"), "Replicate does not implement late delivery");
+  }
+
+  // 22. Reconcile wiring: the real save helper, owner-scoped asset update, provider seam, counter.
+  {
+    const rec = readFileSync("lib/generation-reconcile.ts", "utf8");
+    assert(rec.includes("saveGeneratedProductPhoto({ ...rest, poseId: poseId as ModelPoseId, styleId: styleId as PhotoStyleId })"), "reconcile: saves with saveGeneratedProductPhoto and the stored params");
+    assert(rec.includes("markAssetReady(profileId, assetId, {") && rec.includes("claim: claimBatchItemDelivery") && rec.includes("finish: finishBatchItemDelivery"), "reconcile: owner-scoped asset + CAS ops");
+    assert(rec.includes("await insertProductPhotoGeneration({") && rec.includes("/duplicate key|unique constraint/i"), "reconcile: conflict path writes the library row, duplicate is a no-op");
+    assert(rec.includes("provider.getPredictionOutput(predictionId)") && rec.includes("result.itemsDeliveredLate = items.outcomes.delivered_late ?? 0;"), "reconcile: provider seam + itemsDeliveredLate");
+    const db = readFileSync("lib/generation-batch-items-db.ts", "utf8");
+    assert(db.includes('.in("state", ["ambiguous", "delivering"])') && db.includes('q = q.lt("updated_at", staleBefore)') && db.includes('q = q.eq("updated_at", lease)'), "db: open scan, lease reclaim, own-lease release");
   }
 
   console.log("generation-batch-items self-check passed");

@@ -43,3 +43,10 @@ Switch one tier at a time in Admin → Config v2 (see [runbook](fal-provider-run
 - [ ] Is a failed Fal run billed by Fal? (Check the billing dashboard after a forced failure.)
 - [ ] Force an ambiguous route failure (kill network mid-poll): job shows the "verifying" message, credits
       stay held, and one reconcile run refunds exactly once if Fal reports failure.
+- [ ] Late delivery (migration 119 applied, preview deployment): in a 2-image Social batch, force ONE image's
+      download to fail (block `*.fal.media` for that request, or a dev build that throws after Fal returns
+      the URL). The page says "1 of 2 images didn't arrive. 1 couldn't be confirmed yet, so we're
+      re-checking it with the AI provider: if it finished, it'll appear in your library; if it failed, the
+      credits come back automatically." Wait 5 minutes, run reconcile: the cron log shows
+      `itemsDeliveredLate=1`, the image appears in the library, its row is `delivered_late`, the asset is
+      `ready`, no new `credit_transactions` refund row. Run reconcile again: nothing changes.
