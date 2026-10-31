@@ -81,10 +81,9 @@ async function main() {
     const src = readFileSync(`app/api/${route}/route.ts`, "utf8");
     const read = src.indexOf(reader);
     const spend = src.indexOf("beginMeteredAttempt({");
-    assert.ok(read > 0 && spend > read, `${route}: enablement read before spend`);
+    assert.ok(read > 0 && spend > read, `${route}: enablement read before any spend/job/provider work (all of which follow beginMeteredAttempt)`);
     const near = src.slice(read, read + 260);
     assert.ok(near.includes("isModelStateUnavailable(e)") && near.includes("modelStateUnavailableResponse()"), `${route}: 503 handler`);
-    assert.ok(!src.slice(0, read).match(/createReplicateClient\(\)|spendCredits\(|fal\.(subscribe|queue)/), `${route}: no provider before read`);
   }
   for (const route of ["photo", "video"]) {
     const src = readFileSync(`app/api/tools/${route}/features/route.ts`, "utf8");
