@@ -96,7 +96,9 @@ is, and a suggested fix. "Likely" is a rough guess: rare = needs two unusual thi
 - **How likely:** common under GitHub load.
 - **Suggested fix:** none needed. Keep it as backup only.
 
-### 11. Google Fonts download can fail CI
+### 11. Google Fonts download can fail CI (fixed in #458)
+- **Status:** fixed. The app fonts are self-hosted in `app/fonts` with `next/font/local`; the build
+  no longer downloads them.
 - **What:** `next/font` downloads Google Fonts during the build, and that sometimes fails in CI.
 - **Why it matters:** a red build that has nothing to do with the change.
 - **How likely:** occasional.

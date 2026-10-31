@@ -1,24 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import { Providers } from "@/components/Providers";
 import { PwaRegister } from "@/components/PwaRegister";
 import { Analytics } from "@vercel/analytics/next";
 import "@/app/globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
+// Fonts are self-hosted (app/fonts, OFL) so builds never download from Google
+// (#458). The files are Google's latin subsets; Inter and Space Grotesk are
+// variable, so a weight range replaces the per-weight list.
+const spaceGrotesk = localFont({
+  src: "./fonts/space-grotesk-latin-variable.woff2",
   variable: "--font-display",
-  weight: ["500", "600", "700"],
+  weight: "500 700",
 });
 
 // Design-system-v2's body font, promoted from being scoped to /design-system
 // (see the removed --font-ds-body there) to the app-wide default — replaces
 // DM Sans everywhere `.font-body`/`--font-body` is used, which is just this
 // one place: <body className="font-body"> below.
-const inter = Inter({
-  subsets: ["latin"],
+const inter = localFont({
+  src: "./fonts/inter-latin-variable.woff2",
   variable: "--font-body",
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
 const SITE_TITLE = "Kelolako - AI-powered tools for content creators";
