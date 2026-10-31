@@ -121,7 +121,7 @@ import {
   type EditorDocument,
   type EditorOverlay,
 } from "@/lib/editor-document";
-import { Poppins } from "next/font/google";
+import localFont from "next/font/local";
 import { containSize } from "@/lib/editor-preview-size";
 import {
   TIMELINE_RULER_HEIGHT,
@@ -153,9 +153,9 @@ import EditorTopBar from "./EditorTopBar";
 import { useEditorLibrary } from "./EditorLibraryPicker";
 import EditorSavedList from "./EditorSavedList";
 
-const poppins = Poppins({
+const poppins = localFont({
+  src: "../../../fonts/poppins-latin-800.woff2",
   weight: "800",
-  subsets: ["latin"],
   display: "swap",
 });
 
