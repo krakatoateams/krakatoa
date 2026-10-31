@@ -24,8 +24,8 @@ decision below picked the most conservative option and is listed under Open ques
    not offered) so an admin adds it when pricing is ready.
 3. **"Remove" is soft by default.** Remove means archive: hidden from users and from the main admin
    list, kept in a "Removed models" section, history keeps rendering, pricing rows kept, reversible
-   with Restore (issue 04). Hard delete only purges DB config rows for models that are no longer in
-   code (orphans) and does nothing to history, jobs or pricing (issue 05).
+   with Restore (issue 04). There is no hard delete: issue 05 was reduced to a developer runbook
+   (`docs/admin/retiring-a-generation-model.md`) after research; archived and orphan rows are kept.
 4. **Every write is guarded on the server** by one pure function, `checkModelCatalogChange()`, driven
    by the real code catalog, real composer/feature enablement and real pricing rows (issue 01 builds
    it, 02 wires it).
@@ -59,8 +59,9 @@ decision below picked the most conservative option and is listed under Open ques
   Check: `archived_at is null or enabled = false` (added `not valid` then validated, idempotent with
   a `do $$ ... if not exists` guard).
 - Audit: reuse `admin_config_audit_log` (117). `config_key` holds the catalog `model_id`; `action` is
-  one of `model_enable`, `model_disable`, `model_add`, `model_archive`, `model_restore`,
-  `model_purge`; `from_value` / `to_value` hold a JSON string of the before/after state.
+  one of `model_enable`, `model_disable`, `model_add`, `model_archive`, `model_restore` (no
+  `model_purge`: hard delete was dropped); `from_value` / `to_value` hold a JSON string of the
+  before/after state.
 
 Lifecycle (derived, never stored as text):
 
@@ -69,7 +70,7 @@ Lifecycle (derived, never stored as text):
 | Offered | `enabled = true`, not archived | yes, in eligible composers/features where also enabled |
 | Not offered | `enabled = false`, not archived (includes shipped-dark models never added) | no |
 | Removed | `archived_at` set (implies `enabled = false`) | no; history still renders |
-| Orphan | DB row whose `model_id` is no longer in code | no; only hard delete applies |
+| Orphan | DB row whose `model_id` is no longer in code | no; ignored by the runtime and kept (never deleted) |
 
 ## Invariants (enforced server-side by `checkModelCatalogChange()`)
 
@@ -114,20 +115,24 @@ Lifecycle (derived, never stored as text):
 - Existing `test:admin-config-validation`, `test:admin-config-tree`, `test:admin-config-toggles`,
   `test:admin-config-persistence` stay green. `npm run lint`, `npm run typecheck`, `npm run build`.
 
-## Open questions for the user (defaults already chosen; nothing is blocked)
+## Open questions: decided (research 2026-10-31, `model-retirement-research.md`)
 
-1. **Re-enabling a model priced only by the built-in default.** Default: blocked until a pricing row
-   exists. Alternative: allow with a warning.
-2. **Who can hard delete orphans.** Default: owners only (`admin_users.role = 'owner'`). Alternative:
-   any admin.
-3. **Is hard delete (issue 05) wanted at all?** Orphan rows are ignored by the runtime, so issue 05
-   is optional. Default: keep it, scoped to orphans only.
-4. **Disabling a model that is a default.** Default: blocked until the admin picks another default
-   (two steps). Alternative: one dialog that picks the replacement and disables in one go (needs an
-   RPC migration).
-5. **Shipped-dark models.** Default: new code entries keep today's behavior (offered on deploy)
-   unless the developer sets `offeredByDefault: false`. Alternative: every new model ships dark.
-6. **Skills that designate a removed model.** Default: Remove is allowed and the impact preview lists
-   them; those skills fall back to the live default as they do today when a model is disabled.
-   Alternative: block Remove while any skill designates it.
-7. **Pipeline roles (LLM/TTS/Whisper/storyboard image).** Default: out of scope. Confirm.
+1. **Re-enabling a model priced only by the built-in default.** Decided: blocked until a pricing row
+   exists (`PRICING_NOT_READY`, fail closed). Built.
+2. **Who can hard delete orphans.** Moot: hard delete was dropped. If a delete is ever requested, it is
+   owner-only, only for rows archived for at least 30 days, dry-run by default, with a typed model id
+   checked server-side, an orphan re-check in the same request, one audit row with the full deleted rows
+   and no cascade.
+3. **Is hard delete (issue 05) wanted at all?** Decided: no. Orphans do nothing for users, and a deleted
+   row stops hiding a model whose id comes back in code. Issue 05 (#429) is a developer runbook only;
+   a purge, if ever needed, is a reviewed migration.
+4. **Disabling a model that is a default.** Decided: two steps (pick another default first,
+   `IS_DEFAULT`). Built.
+5. **Shipped-dark models.** Decided: new models should ship dark by default and an admin enables them
+   after pricing; existing live models are grandfathered. Not built: today `offeredByDefault: false` is
+   opt-in. Separate follow-up issue.
+6. **Skills that designate a removed model.** Decided: allow Remove, never delete the skill, fall back to
+   the live default, and the remove dialog names the affected skills. Gap: the dialog reads only
+   `skill_configs.model_id`, so code-default designations (`lib/skills.ts`) are missed, and it shows
+   skill ids, not titles. Separate follow-up issue.
+7. **Pipeline roles (LLM/TTS/Whisper/storyboard image).** Out of scope (unchanged).

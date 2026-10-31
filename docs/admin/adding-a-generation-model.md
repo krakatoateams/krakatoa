@@ -58,7 +58,22 @@ but cannot run or be billed. The admin list is therefore built from the code cat
 
 Admin Config → Models → **Remove** archives a model (migration 118): it is hidden from users, past
 creations keep their label and prices are kept, and **Restore** brings it back as not offered. Removing
-never edits the code registry; retiring a model from code is a separate developer task.
+never edits the code registry; retiring a model from code is a separate developer task (next section).
+
+## Retiring a model
+
+Full runbook: [`retiring-a-generation-model.md`](retiring-a-generation-model.md). The rules:
+
+1. Archive it in Admin Config (**Remove**) first; change code only after no jobs are in flight and the
+   72 h reconcile window has passed.
+2. Never delete the registry entry or its sort-order id (set `offeredByDefault: false` instead), the archived
+   `model_catalog_configs` row, its `feature_model_configs` rows or its pricing rows (deprecate them,
+   pattern 040). A missing config row means "shipped default", so a deleted row could re-offer the model.
+3. Never reuse a retired model id, provider slug or pricing key for a different model.
+4. History keeps its labels (from the kept registry entry or the stored `modelLabel`) and its prices
+   (`credit_transactions` and cost snapshots are never edited).
+5. Verify: the model is under **Removed models**, its row is archived, pricing rows are deprecated,
+   an old creation still shows the right label, then `npm run ci:checks`.
 The `model_add` vs `model_enable` audit label is derived from earlier audit rows, so a model enabled
 before the audit table existed (117) is labelled `model_enable`; the label is informational only.
 
