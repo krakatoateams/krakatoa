@@ -23,10 +23,12 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   and the reconcile cron refunds it only if Fal confirms every recorded request failed. The route
   settles such a job `failed` with code `PROVIDER_OUTCOME_UNKNOWN` (user sees "we're re-checking it
   for a few days; credits are returned automatically once the provider confirms the run failed", not
-  a refund claim). The reconcile cron (`/api/cron/generation-reconcile`, ONCE A DAY at 05:00 UTC,
-  `vercel.json`) re-checks those jobs: window = `updated_at` in (now-72 h, now-5 min)
-  (`SETTLED_LOOKBACK_MS`), so a job gets about three daily attempts and a job that failed minutes
-  before a run is picked up by the next one. The scan is keyset-paged (`updated_at`, `id` ascending,
+  a refund claim). The reconcile cron (`/api/cron/generation-reconcile`) re-checks those jobs every ~10 minutes
+  (GitHub Actions workflow `.github/workflows/generation-reconcile.yml`; the daily 05:00 UTC Vercel cron in
+  `vercel.json` stays as a backup): window = `updated_at` in (now-72 h, now-5 min)
+  (`SETTLED_LOOKBACK_MS`), so a job failed minutes before a run is picked up by the next one (Fal keeps
+  results about 1 hour, so the refund normally lands within ~15 minutes; later attempts mostly cannot
+  confirm and the job turns `unresolved` after the window). The scan is keyset-paged (`updated_at`, `id` ascending,
   50 per page) over ALL candidates, 4 jobs in parallel, each Fal check capped at 15 s, and stops
   starting new batches after 45 s (`SETTLED_BUDGET_MS`; route `maxDuration` is 120 s); anything left is
   counted in the run's `settledLeft` log/response and handled next run. Refunds use the route's own
@@ -43,8 +45,7 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   `refundCredits({ profileId, amount, jobId, idempotencyKey: "refund:product_photo:{jobId}", ... })`
   (RPC `krakatoa_apply_credit_transaction`, type `refund`) with that SAME key so a late route/reconcile
   refund cannot double it. Never refund a run that produced output.
-  Cadence: if a daily check is too slow after an outage, a more frequent cron is the lever (needs plan
-  support for sub-daily crons; not changed here).
+  Cadence: every ~10 minutes via GitHub Actions (no Vercel plan upgrade needed); see "Reconcile schedule" below.
   Batches with 0 delivered images: the route's `settleZeroSuccessBatch` is order independent. A definitive
   failure mixed with confirmed-cancelled (removed) images refunds the whole spend once; an ambiguous
   image keeps the job `UNKNOWN` (the removed/definitive images are refunded by the route with the
@@ -102,7 +103,7 @@ Signs: monitoring shows the amber "Fal jobs failed" banner, users report photo f
 page. A definitive Fal failure refunds; an ambiguous one (timeout, network loss) is held for reconcile (see Refund policy above).
 
 1. Switch every Fal tier back to Replicate (above). This stops new traffic to Fal.
-2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones are held and refunded by reconcile (daily, 72 h window) only if Fal confirms the failure; after that they are marked unresolved for manual review.
+2. Leave in-flight jobs alone; definitive failures refund on their own, ambiguous ones are held and refunded by reconcile (every ~10 min, 72 h window) only if Fal confirms the failure; after that they are marked unresolved for manual review.
 3. After Fal recovers, switch one tier back and run the checklist before the rest.
 4. There is no automatic fallback between providers (deliberately: backlog item).
 
@@ -169,7 +170,7 @@ CANCEL_REQUESTED  (the generate route polls; the adapter is the ONLY caller of F
      spend once (stable `refund:product_photo:{jobId}`), job `cancelled`, no asset
   -- 202 / 400 / error / unknown / output exists anyway --> COMMITTED (markProviderCommitted clears cancel_requested)
 COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRefundSpentCreditsAfterFailure)
-           | FAILED_AMBIGUOUS (stays locked, PROVIDER_OUTCOME_UNKNOWN, daily reconcile)
+           | FAILED_AMBIGUOUS (stays locked, PROVIDER_OUTCOME_UNKNOWN, reconcile every ~10 min)
 ```
 
 - The cancel-vs-commit race is decided by one atomic statement each (`requestCancel` and
@@ -258,3 +259,29 @@ Known gap: the margin dashboard does not yet use `provider_model_costs` (planned
 - Provider fallback: definitive failures only, same model on the other provider.
 
 Adding a new model (ship dark, then add in Admin Config): [`docs/admin/adding-a-generation-model.md`](../admin/adding-a-generation-model.md).
+
+## Reconcile schedule (every ~10 minutes)
+
+The workflow `.github/workflows/generation-reconcile.yml` calls `GET /api/cron/generation-reconcile` with
+`Authorization: Bearer <CRON_SECRET>` every 10 minutes (GitHub scheduled runs are best-effort and may start a few
+minutes late). The route still fails closed without `CRON_SECRET`. It is safe to run often:
+
+- Idempotent: refunds use stable keys (`refund:product_photo:{jobId}`, `refund:reconcile:{jobId}`) plus
+  `hasRefundForJob`/refunded-amount checks, so overlapping runs (Actions, the daily Vercel backup, a manual run)
+  cannot double refund.
+- Bounded: 4 Fal checks in parallel, each capped at 15 s, 45 s time budget per scan, leftovers wait for the next
+  run; the workflow uses `curl --max-time 115` (route `maxDuration` is 120 s), no retries, and a concurrency
+  group so two Actions runs never overlap.
+- Cheap when idle: with no held jobs a run is a few small queries.
+- Known cost: a held job unconfirmed after Fal drops its result (~1 h) is re-checked each run until the 72 h window
+  ends, then marked `unresolved`. This is bounded by the caps above; held jobs are rare.
+
+**One-time setup (needed once, by someone with repo admin access):**
+
+1. Open the GitHub repo, then Settings, then Secrets and variables, then Actions.
+2. Tab "Secrets" -> New repository secret. Name: `RECONCILE_CRON_SECRET`. Value: the same value as `CRON_SECRET` in Vercel (Project Settings -> Environment Variables -> Production).
+3. Tab "Variables" -> New repository variable. Name: `PROD_BASE_URL`. Value: the production site address starting with `https://`, no slash at the end.
+4. Test: Actions tab -> "Generation reconcile" -> Run workflow (branch main). A green run whose log shows JSON with `refunded`/`staleJobs` counts means it works. A green run saying "Skipped" means the secret or variable is missing.
+
+Until both exist the workflow skips (green) and only the daily Vercel cron runs. **Turn off:** Actions tab ->
+"Generation reconcile" -> "..." -> Disable workflow (or delete the `PROD_BASE_URL` variable).

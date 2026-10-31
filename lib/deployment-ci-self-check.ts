@@ -114,6 +114,37 @@ export function deploymentCiSelfCheck(): void {
     publishWorkflow.includes("permissions: {}"),
     "the production publisher workflow must not receive a repository token",
   );
+
+  const reconcileWorkflow = read(".github/workflows/generation-reconcile.yml");
+  assert(
+    reconcileWorkflow.includes("permissions: {}") &&
+      !reconcileWorkflow.includes("pull_request") &&
+      reconcileWorkflow.includes('cron: "*/10 * * * *"') &&
+      reconcileWorkflow.includes("workflow_dispatch") &&
+      reconcileWorkflow.includes("cancel-in-progress: false") &&
+      reconcileWorkflow.includes("default_branch"),
+    "the reconcile workflow must be schedule/manual only, token-less, non-overlapping and default-branch only",
+  );
+  assert(
+    reconcileWorkflow.includes("--fail-with-body") &&
+      reconcileWorkflow.includes("--retry 0") &&
+      reconcileWorkflow.includes("-H @-") &&
+      !/echo[^\n]*\$\{?CRON_SECRET/.test(reconcileWorkflow) &&
+      reconcileWorkflow.includes("RECONCILE_CRON_SECRET") &&
+      reconcileWorkflow.includes("exit 0"),
+    "the reconcile workflow must fail on HTTP errors, never echo or pass the secret on argv, and skip when unset",
+  );
+  const maxTime = Number(/--max-time (\d+)/.exec(reconcileWorkflow)?.[1]);
+  const routeSource = read("app/api/cron/generation-reconcile/route.ts");
+  const maxDuration = Number(/maxDuration = (\d+)/.exec(routeSource)?.[1]);
+  assert(
+    maxTime > 0 && maxTime < maxDuration,
+    "the reconcile workflow curl max-time must stay below the route maxDuration",
+  );
+  assert(
+    read("vercel.json").includes('"/api/cron/generation-reconcile"'),
+    "the daily Vercel reconcile cron stays as backup",
+  );
 }
 
 deploymentCiSelfCheck();

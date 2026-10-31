@@ -46,7 +46,7 @@ keeps only the rules needed on most engineering tasks.
   The one post-commit exception is a definitive provider failure (Fal reports an
   explicit failed status, no output): `shouldRefundSpentCreditsAfterFailure()`.
   Ambiguous outcomes (timeout, network loss, abort) stay locked; the job is
-  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and the daily reconcile
+  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and the reconcile (every ~10 min via GitHub Actions, daily Vercel cron as backup)
   (72 h window, paged, time-budgeted) refunds it (same idempotency key as the
   route) only on a Fal-confirmed failure; still unconfirmed after the window it
   becomes `PROVIDER_OUTCOME_UNRESOLVED` and needs manual review.
