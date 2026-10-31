@@ -207,7 +207,7 @@ Check: `npm run probe:signed-url-cache`. Full write-up incl. measurements and wh
 
 | Doc | Purpose |
 |-----|---------|
-| [`docs/admin/adding-a-generation-model.md`](docs/admin/adding-a-generation-model.md) | Developer checklist to add a generation model (`offeredByDefault: false` ships dark; admins add it in Models) |
+| [`docs/admin/adding-a-generation-model.md`](docs/admin/adding-a-generation-model.md) | Developer checklist to add a generation model (new models ship dark by default: set `offeredByDefault` explicitly; admins add it in Models) |
 | [`docs/admin/admin-config-v2-plan.md`](docs/admin/admin-config-v2-plan.md) | Authoritative plan for agents (architecture, phases, parity checklist) |
 | [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
 | [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |

@@ -129,8 +129,9 @@ Lifecycle (derived, never stored as text):
 4. **Disabling a model that is a default.** Decided: two steps (pick another default first,
    `IS_DEFAULT`). Built.
 5. **Shipped-dark models.** Decided: new models should ship dark by default and an admin enables them
-   after pricing; existing live models are grandfathered. Not built: today `offeredByDefault: false` is
-   opt-in. Separate follow-up issue.
+   after pricing; existing live models are grandfathered. Built in #453: an entry without
+   `offeredByDefault` is not offered unless it is in the frozen `OFFERED_BEFORE_SHIP_DARK` list, and
+   `test:model-catalog-guard` fails until a new entry chooses.
 6. **Skills that designate a removed model.** Decided: allow Remove, never delete the skill, fall back to
    the live default, and the remove dialog names the affected skills. Gap: the dialog reads only
    `skill_configs.model_id`, so code-default designations (`lib/skills.ts`) are missed, and it shows

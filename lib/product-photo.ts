@@ -162,8 +162,11 @@ export type ProductPhotoQualityOption = {
 
 export type ProductPhotoTier = {
   id: ProductPhotoModelTier;
-  /** Ship dark: not offered until an admin adds it in Admin Config → Models. Omit to offer on deploy. */
-  offeredByDefault?: false;
+  /**
+   * Required on new entries (#453): `false` ships dark (an admin adds it in Admin Config → Models after
+   * pricing), `true` offers it on deploy. Omitted only on models in `OFFERED_BEFORE_SHIP_DARK`.
+   */
+  offeredByDefault?: boolean;
   label: string;
   subtitle: string;
   /** Friendly model name shown in the omni-form model chip. */

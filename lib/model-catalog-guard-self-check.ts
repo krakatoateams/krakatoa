@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { defaultModelCatalogRows } from "./model-catalog-configs";
+import { OFFERED_BEFORE_SHIP_DARK, catalogRowsFrom, defaultModelCatalogRows } from "./model-catalog-configs";
 import { PRODUCT_PHOTO_TIERS, DEFAULT_PRODUCT_PHOTO_TIER } from "./product-photo";
 import {
   defaultTierForFeature,
@@ -276,6 +276,30 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   assert.equal((restore([archivedRow]) as { noop: boolean }).noop, false);
   assert.equal((restore([]) as { noop: boolean }).noop, true);
   assert.equal(fail(restore([], "nope")).code, "UNKNOWN_MODEL");
+}
+
+// #453 Ship dark by default. Every model offered before the switch stays offered (frozen snapshot); an
+// entry with no explicit choice is hidden, and every entry outside the frozen list must choose.
+{
+  const OFFERED_ON_2026_10_31 = [
+    "basic", "balanced", "pro", "seedream4", "flux_kontext", "flux11", "imagen4", "ideogram3", "seedream3",
+    "flux_schnell", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
+    "seedance2_mini", "seedance2_fast", "seedance2", "veo31_lite", "veo31_fast", "kling15_standard",
+    "kling16_standard", "kling21", "kling25_turbo_pro", "kling26", "kling15_pro", "kling16_pro", "kling_v3",
+    "kling_v3_omni", "grok_imagine_video", "kling26_motion", "kling_v3_motion",
+  ];
+  const rows = defaultModelCatalogRows();
+  for (const id of OFFERED_ON_2026_10_31) {
+    assert.equal(rows.find((r) => r.modelId === id)?.enabled, true, `${id} was offered before #453 and must stay offered`);
+  }
+  assert.deepEqual([...OFFERED_BEFORE_SHIP_DARK].sort(), [...OFFERED_ON_2026_10_31].sort(), "OFFERED_BEFORE_SHIP_DARK is frozen: never add to it");
+  assert.equal(catalogRowsFrom([{ id: "brand_new" }], [], [])[0].enabled, false, "no explicit choice: hidden");
+  assert.equal(catalogRowsFrom([{ id: "brand_new", offeredByDefault: true }], [], [])[0].enabled, true, "explicit true: offered");
+  assert.equal(catalogRowsFrom([{ id: "basic", offeredByDefault: false }], [], [])[0].enabled, false, "explicit false wins");
+  const undecided = [...PRODUCT_PHOTO_TIERS, ...VIDEO_MODELS, ...MOTION_CONTROL_MODELS]
+    .filter((m) => m.offeredByDefault === undefined && !OFFERED_BEFORE_SHIP_DARK.has(m.id))
+    .map((m) => m.id);
+  assert.deepEqual(undecided, [], `Set offeredByDefault: true or false on the new registry entry: ${undecided.join(", ")}`);
 }
 
 console.log("model-catalog-guard self-check passed");
