@@ -19,6 +19,7 @@ import {
 import { createFalPhotoProvider, type FalQueueLike } from "./fal-photo";
 import {
   BATCH_ITEM_LEASE_MS,
+  LATE_DELIVERY_STORED_CODE,
   batchItemRefundKey,
   planBatchItemRows,
   settleBatchItem,
@@ -162,7 +163,7 @@ function fakeFal(fates: { get(requestId: string): Fate | undefined }, calls: { n
   };
 }
 
-type Item = Omit<BatchItemCandidate, "state"> & { state: BatchItemState; fate?: Fate; refundKey: string | null; lease?: string };
+type Item = Omit<BatchItemCandidate, "state"> & { state: BatchItemState; fate?: Fate; lease?: string; errorCode?: string };
 const isOpen = (s: BatchItemState): s is "ambiguous" | "delivering" => s === "ambiguous" || s === "delivering";
 
 function world(items: Item[], jobs: Record<string, { status: string; spend: number; refunded?: number }>) {
@@ -201,7 +202,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
       const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
       if (row.state !== "ambiguous") return false;
       row.state = to;
-      row.refundKey = key;
+      if (key) row.refundKey = key; // like settleAmbiguousBatchItem: a null key leaves the column as is
       return true;
     },
     markRefund: async (item, key) => {
@@ -232,6 +233,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
         return new TextEncoder().encode(url).buffer as ArrayBuffer;
       },
       userIdForProfile: async (profileId) => (profileId === "p-1" ? "u-1" : ""),
+      isStored: async (path) => storage.has(path),
       save: async (p) => {
         // saveGeneratedProductPhoto: upload with upsert:false, then the library row (unique storage_path).
         const gate = save.gate; // one-shot: holds only the first save that sees it
@@ -258,6 +260,7 @@ function world(items: Item[], jobs: Record<string, { status: string; spend: numb
         const row = items.find((i) => i.id === item.id && i.profileId === item.profileId)!;
         if (row.state !== "delivering" || (to === "ambiguous" && row.lease !== lease)) return false;
         row.state = to;
+        if (to === "unresolved") row.errorCode = LATE_DELIVERY_STORED_CODE;
         row.lease = new Date(clock.now + ++clock.tick).toISOString();
         return true;
       },
@@ -566,10 +569,9 @@ async function main() {
   }
 
   // 20b. Stored, then the asset update fails: the row stays delivering (never back to ambiguous, so never
-  // refunded or expired to unresolved); the next run after the lease finishes it. Still one image.
+  // refunded); the next run after the lease finishes it. Still one image. (Past 72 h: section 26.)
   {
-    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
-    const w = world([item("m1", { fate: "succeeded", updatedAt: old })], { "job-1": { status: "succeeded", spend: 10 } });
+    const w = world([item("m1", { fate: "succeeded" })], { "job-1": { status: "succeeded", spend: 10 } });
     w.save.markReadyFails = true;
     const r = await w.run(T0);
     assert(r.errors.length === 1 && w.items[0].state === "delivering" && w.storage.size === 1, `stored image keeps the row delivering (${JSON.stringify(r)})`);
@@ -611,9 +613,9 @@ async function main() {
     }
   }
 
-  // 24. The refund call errors (before or after the ledger committed) or the run dies during it: the row
-  // stays ambiguous carrying its refund key, late delivery never claims it even when Fal then says finished,
-  // and a later failed answer refunds with the same key: exactly one ledger row, never a delivery (I1, I2).
+  // 24. The refund call errors (before or after the ledger committed) or the run dies after the mark: the
+  // row stays ambiguous carrying its key. The next run does not ask Fal again and never delivers it, even
+  // if Fal would now say finished: it retries the refund with the same key. Exactly one ledger row (I1, I2).
   {
     for (const fault of ["error", "commit_then_error", "hang"] as const) {
       const w = world([item("z9", { fate: "failed" })], { "job-1": { status: "succeeded", spend: 10 } });
@@ -627,14 +629,61 @@ async function main() {
       const key = batchItemRefundKey("job-1", 9);
       assert(w.items[0].state === "ambiguous" && w.items[0].refundKey === key, `${fault}: row stays ambiguous with its key`);
       assert(w.ledger.size === (fault === "commit_then_error" ? 1 : 0), `${fault}: ledger as the fault left it`);
-      w.items[0].fate = "succeeded"; // contradictory answer on the next run
-      await w.run(T0 + HOUR);
-      assert(w.storage.size === 0 && w.downloads.n === 0 && w.items[0].state === "ambiguous", `${fault}: a marked row is never delivered`);
-      w.items[0].fate = "failed";
-      const r = await w.run(T0 + 2 * HOUR);
-      assert(r.outcomes.refunded === 1 && w.items[0].state === "refunded", `${fault}: retried and settled (${JSON.stringify(r)})`);
-      assert(w.ledger.size === 1 && w.ledger.get(key)?.amount === 5 && w.storage.size === 0, `${fault}: exactly one refund, no delivery`);
+      w.items[0].fate = "succeeded"; // Fal would now say finished
+      const calls = w.falCalls.n;
+      const r = await w.run(T0 + HOUR);
+      assert(r.outcomes.refunded === 1 && w.items[0].state === "refunded", `${fault}: marked row retries the refund (${JSON.stringify(r)})`);
+      assert(w.falCalls.n === calls && w.storage.size === 0 && w.downloads.n === 0, `${fault}: Fal not asked again, never delivered`);
+      assert(w.ledger.size === 1 && w.ledger.get(key)?.amount === 5, `${fault}: exactly one refund`);
     }
+  }
+
+  // 25. A marked row whose refund keeps failing still reaches unresolved past 72 h (visible to manual
+  // review, key kept); a last retry that works refunds it instead.
+  {
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const key = batchItemRefundKey("job-1", 8);
+    const w = world([item("u8", { fate: "succeeded", updatedAt: old, refundKey: key })], { "job-1": { status: "succeeded", spend: 10 } });
+    w.refundFaults.push("error");
+    const r = await w.run(T0);
+    assert(w.items[0].state === "unresolved" && w.items[0].refundKey === key, `failing marked row -> unresolved (${JSON.stringify(r)})`);
+    assert(r.errors.length === 1 && r.errors[0].includes("credit RPC unavailable"), "the refund error is still reported");
+    assert(w.ledger.size === 0 && w.storage.size === 0, "no refund, no delivery");
+    const ok = world([item("u7", { fate: "succeeded", updatedAt: old, refundKey: batchItemRefundKey("job-1", 7) })], { "job-1": { status: "succeeded", spend: 10 } });
+    const r2 = await ok.run(T0);
+    assert(r2.outcomes.refunded === 1 && ok.ledger.size === 1 && ok.storage.size === 0, "last retry works: refunded once");
+  }
+
+  // 26. Stored, but the asset update keeps failing (20b: the row stays delivering and is reclaimed after
+  // each lease): past 72 h it ends unresolved with a code saying the image is saved. Never refunded.
+  {
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const w = world([item("g1", { fate: "succeeded", updatedAt: old })], { "job-1": { status: "succeeded", spend: 10 } });
+    w.save.markReadyFails = true;
+    const r = await w.run(T0);
+    assert(w.items[0].state === "unresolved" && w.items[0].errorCode === LATE_DELIVERY_STORED_CODE, `expired stored row -> unresolved (${JSON.stringify(r)})`);
+    assert(r.errors.length === 1 && w.storage.size === 1 && w.ledger.size === 0, "error reported, one image, no refund");
+  }
+
+  // 26b. A reclaimed delivering row whose image is already stored is finalized without asking Fal again,
+  // even when Fal's output is gone by now: a stored image never goes back to ambiguous.
+  {
+    const stale = new Date(T0 - BATCH_ITEM_LEASE_MS - 60_000).toISOString();
+    const w = world([item("h1", { fate: "expired_404", state: "delivering", lease: stale })], { "job-1": { status: "succeeded", spend: 10 } });
+    const path = photosGeneratedPath("u-1", "social", w.items[0].delivery!.filename as string);
+    w.storage.set(path, new ArrayBuffer(1)); // an earlier run saved it, then died before finalizing
+    const r = await w.run(T0);
+    assert(r.outcomes.delivered_late === 1 && w.items[0].state === "delivered_late", `reclaimed stored row finalized (${JSON.stringify(r)})`);
+    assert(w.downloads.n === 0 && w.storage.size === 1 && w.creations.has(path) && w.assets.get("p-1/asset-h1") === path, "no re-fetch, library row + asset ready");
+    assert(w.ledger.size === 0, "no refund");
+    // Same, but finalizing keeps failing past 72 h: unresolved with the stored code, never ambiguous.
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const x = world([item("h2", { fate: "expired_404", state: "delivering", lease: stale, updatedAt: old })], { "job-1": { status: "succeeded", spend: 10 } });
+    x.storage.set(photosGeneratedPath("u-1", "social", x.items[0].delivery!.filename as string), new ArrayBuffer(1));
+    x.save.markReadyFails = true;
+    const rx = await x.run(T0);
+    assert(x.items[0].state === "unresolved" && x.items[0].errorCode === LATE_DELIVERY_STORED_CODE && rx.errors.length === 1, `reclaimed stored row past 72 h -> unresolved with code (${JSON.stringify(rx)})`);
+    assert(x.ledger.size === 0 && x.downloads.n === 0, "no refund, no re-fetch");
   }
 
   // 22. Reconcile wiring: the real save helper, owner-scoped asset update, provider seam, counter.
@@ -647,6 +696,9 @@ async function main() {
     assert(rec.includes("provider.getPredictionOutput(predictionId)") && rec.includes("result.itemsDeliveredLate = items.outcomes.delivered_late ?? 0;"), "reconcile: provider seam + itemsDeliveredLate");
     const db = readFileSync("lib/generation-batch-items-db.ts", "utf8");
     assert(db.includes('.is("refund_idempotency_key", null); // a refund may have been paid'), "db: late delivery never claims a row with a refund key");
+    assert(db.includes("delivery, refund_idempotency_key") && db.includes("refundKey: r.refund_idempotency_key"), "db: the scan loads the refund key");
+    assert(db.includes("error_code: LATE_DELIVERY_STORED_CODE"), "db: stored-but-unfinished rows carry a code for manual review");
+    assert(rec.includes("await mediaExists(storagePath)"), "reconcile: reclaimed rows check Storage before re-fetching");
     assert(db.includes('.in("state", ["ambiguous", "delivering"])') && db.includes('q = q.lt("updated_at", staleBefore)') && db.includes('q = q.eq("updated_at", lease)'), "db: open scan, lease reclaim, own-lease release");
   }
 

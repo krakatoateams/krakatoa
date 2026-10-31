@@ -108,7 +108,12 @@ export type BatchItemCandidate = {
   assetId: string | null;
   /** Stored `saveGeneratedProductPhoto` params (minus userId and bytes). */
   delivery: Record<string, unknown> | null;
+  /** Set once a refund was decided (definitive failure) and marked; the row is then never delivered. */
+  refundKey: string | null;
 };
+
+/** Code on a row that reached `unresolved` with its image stored but not finalized (fix the asset, never refund). */
+export const LATE_DELIVERY_STORED_CODE = "LATE_DELIVERY_STORED";
 
 /** A `delivering` row whose lease (its `updated_at`) is older than this may be reclaimed by another run. */
 export const BATCH_ITEM_LEASE_MS = 10 * 60 * 1000;
@@ -140,14 +145,19 @@ export type LateDeliveryOps = {
   download: (url: string) => Promise<ArrayBuffer>;
   /** auth user id of the row's profile (canonical paths start with `{userId}/`). */
   userIdForProfile: (profileId: string) => Promise<string>;
+  /** Whether the object exists in Storage; throws when it cannot tell. */
+  isStored: (storagePath: string) => Promise<boolean>;
   /** `saveGeneratedProductPhoto` (upload with `upsert: false`, then the library row). */
   save: (params: BatchItemDelivery & { userId: string; imageBuffer: ArrayBuffer }) => Promise<{ storagePath: string }>;
   /** Library row after a storage conflict (an earlier attempt may have died before writing it); a duplicate is a no-op. */
   recordLibrary: (params: BatchItemDelivery & { userId: string; storagePath: string }) => Promise<unknown>;
   /** `markAssetReady`, owner-scoped. */
   markReady: (profileId: string, assetId: string, storagePath: string, credits: number, delivery: BatchItemDelivery) => Promise<unknown>;
-  /** `delivering -> delivered_late` (any lease: the image is saved) or back to `ambiguous` (own lease only). */
-  finish: (item: BatchItemCandidate, lease: string, to: "delivered_late" | "ambiguous") => Promise<boolean>;
+  /**
+   * `delivering -> delivered_late` (any lease: the image is saved), back to `ambiguous` (own lease only), or
+   * `unresolved` with LATE_DELIVERY_STORED_CODE (stored, could not be finalized before the lookback ended).
+   */
+  finish: (item: BatchItemCandidate, lease: string, to: "delivered_late" | "ambiguous" | "unresolved") => Promise<boolean>;
   now?: () => number;
 };
 
@@ -201,38 +211,50 @@ export async function settleBatchItem(
   if ((await ops.jobStatus(item.profileId, item.jobId)) !== "succeeded") return "skipped_job";
   // A `delivering` row was already confirmed finished; only a stale lease can be reclaimed.
   if (item.state === "delivering") return ops.late ? deliverBatchItemLate(ops, item, opts) : "leased";
-  if (!item.predictionId) {
-    // Submit itself failed: nothing can ever confirm this image.
-    return (await ops.settle(item, "unresolved", null)) ? "unresolved" : "raced";
+  // A refund key means an earlier run confirmed a definitive failure, marked the row and then errored or
+  // died before settling: retry that refund with the same key; never ask the provider again or deliver it.
+  let refundable = item.refundKey !== null;
+  if (!refundable) {
+    if (!item.predictionId) {
+      // Submit itself failed: nothing can ever confirm this image.
+      return (await ops.settle(item, "unresolved", null)) ? "unresolved" : "raced";
+    }
+    const status = await withTimeout(
+      ops.predictionStatus(item.provider, item.predictionId),
+      opts.confirmTimeoutMs ?? SETTLED_CONFIRM_TIMEOUT_MS,
+      "unknown",
+    );
+    if (status === "succeeded" && ops.late) return deliverBatchItemLate(ops, item, opts);
+    refundable = shouldRefundSpentCreditsAfterFailure({
+      creditsSpent: true,
+      creditsAmount: item.credits,
+      commitLocked: true,
+      definitiveProviderFailure: status === "failed",
+    });
   }
-  const status = await withTimeout(
-    ops.predictionStatus(item.provider, item.predictionId),
-    opts.confirmTimeoutMs ?? SETTLED_CONFIRM_TIMEOUT_MS,
-    "unknown",
-  );
-  if (status === "succeeded" && ops.late) return deliverBatchItemLate(ops, item, opts);
-  const refundable = shouldRefundSpentCreditsAfterFailure({
-    creditsSpent: true,
-    creditsAmount: item.credits,
-    commitLocked: true,
-    definitiveProviderFailure: status === "failed",
-  });
   if (refundable) {
     // A retry after a failed refund call fits even if the ledger did commit: a delivered image always keeps >= credits of headroom.
     const [spent, refunded] = await Promise.all([ops.spendAmount(item.jobId), ops.refundedAmount(item.jobId)]);
     if (refunded + item.credits <= spent) {
-      const key = batchItemRefundKey(item.jobId, item.batchIndex);
+      const key = item.refundKey ?? batchItemRefundKey(item.jobId, item.batchIndex);
       // Mark the row before money moves: an overlapping run that saw "finished" can no longer deliver it
       // (I1). A crash or a refund error leaves it ambiguous with the key; the next run retries the same key.
       if (!(await ops.markRefund(item, key))) return "raced";
-      await ops.refund({
-        profileId: item.profileId,
-        amount: item.credits,
-        idempotencyKey: key,
-        jobId: item.jobId,
-        description: "Refund for a batch image the provider confirmed failed (reconcile cron)",
-        metadata: { reason: "batch_image_failed", batchIndex: item.batchIndex, reconciledAt: new Date().toISOString() },
-      });
+      try {
+        await ops.refund({
+          profileId: item.profileId,
+          amount: item.credits,
+          idempotencyKey: key,
+          jobId: item.jobId,
+          description: "Refund for a batch image the provider confirmed failed (reconcile cron)",
+          metadata: { reason: "batch_image_failed", batchIndex: item.batchIndex, reconciledAt: new Date().toISOString() },
+        });
+      } catch (e) {
+        // Past the lookback a refund that still fails goes to manual review (key kept: check the ledger).
+        // The original error stays in the run's errors; the move is best-effort.
+        if (opts.expired) await ops.settle(item, "unresolved", null).catch(() => false);
+        throw e;
+      }
       return (await ops.settle(item, "refunded", key)) ? "refunded" : "raced";
     }
     // I3: never refund past the spend; past the lookback it goes to manual review like any unconfirmed image.
@@ -261,34 +283,50 @@ export async function deliverBatchItemLate(
   const now = late.now?.() ?? Date.now();
   const lease = await late.claim(item, new Date(now - BATCH_ITEM_LEASE_MS).toISOString());
   if (!lease) return "leased";
-  let stored: { delivery: BatchItemDelivery; userId: string; storagePath: string; conflict: boolean };
-  try {
-    const delivery = parseBatchItemDelivery(item.delivery);
-    if (!delivery || !item.predictionId) throw new Error("No delivery params.");
-    const url = await withTimeout(
-      late.outputUrl(item.provider, item.predictionId),
-      opts.confirmTimeoutMs ?? SETTLED_CONFIRM_TIMEOUT_MS,
-      "",
-    );
-    if (!url) throw new Error("Output not available.");
+  const delivery = parseBatchItemDelivery(item.delivery);
+  let stored: { delivery: BatchItemDelivery; userId: string; storagePath: string; conflict: boolean } | null = null;
+  if (item.state === "delivering" && delivery) {
+    // A reclaimed row may already be stored (an earlier run saved it, then died or could not finalize):
+    // finalize it without asking the provider again, so a stored image never goes back to `ambiguous`. A
+    // failing check throws here, outside the release below, and the row stays `delivering`.
     const userId = await late.userIdForProfile(item.profileId);
-    if (!userId) throw new Error("Owner not found.");
-    const imageBuffer = await late.download(url);
+    const storagePath = userId ? photosGeneratedPath(userId, delivery.photoMode, delivery.filename) : "";
+    if (userId && (await late.isStored(storagePath))) stored = { delivery, userId, storagePath, conflict: true };
+  }
+  if (!stored) {
     try {
-      stored = { delivery, userId, storagePath: (await late.save({ ...delivery, userId, imageBuffer })).storagePath, conflict: false };
-    } catch (e) {
-      if (!isStorageAlreadyExists(e)) throw e;
-      stored = { delivery, userId, storagePath: photosGeneratedPath(userId, delivery.photoMode, delivery.filename), conflict: true };
+      if (!delivery || !item.predictionId) throw new Error("No delivery params.");
+      const url = await withTimeout(
+        late.outputUrl(item.provider, item.predictionId),
+        opts.confirmTimeoutMs ?? SETTLED_CONFIRM_TIMEOUT_MS,
+        "",
+      );
+      if (!url) throw new Error("Output not available.");
+      const userId = await late.userIdForProfile(item.profileId);
+      if (!userId) throw new Error("Owner not found.");
+      const imageBuffer = await late.download(url);
+      try {
+        stored = { delivery, userId, storagePath: (await late.save({ ...delivery, userId, imageBuffer })).storagePath, conflict: false };
+      } catch (e) {
+        if (!isStorageAlreadyExists(e)) throw e;
+        stored = { delivery, userId, storagePath: photosGeneratedPath(userId, delivery.photoMode, delivery.filename), conflict: true };
+      }
+    } catch {
+      await late.finish(item, lease, "ambiguous");
+      if (!opts.expired) return "left";
+      return (await ops.settle(item, "unresolved", null)) ? "unresolved" : "raced";
     }
-  } catch {
-    await late.finish(item, lease, "ambiguous");
-    if (!opts.expired) return "left";
-    return (await ops.settle(item, "unresolved", null)) ? "unresolved" : "raced";
   }
   // Stored: a failure from here leaves the row `delivering`; after the lease the next run reclaims it and
-  // takes the conflict path again.
-  const { delivery, userId, storagePath, conflict } = stored;
-  if (conflict) await late.recordLibrary({ ...delivery, userId, storagePath });
-  if (item.assetId) await late.markReady(item.profileId, item.assetId, storagePath, item.credits, delivery);
+  // finalizes it. Past the lookback it goes to manual review instead (never refunded).
+  const { delivery: params, userId, storagePath, conflict } = stored!;
+  try {
+    if (conflict) await late.recordLibrary({ ...params, userId, storagePath });
+    if (item.assetId) await late.markReady(item.profileId, item.assetId, storagePath, item.credits, params);
+  } catch (e) {
+    // Keep the original error in the run's errors; the manual-review move is best-effort.
+    if (opts.expired) await late.finish(item, lease, "unresolved").catch(() => false);
+    throw e;
+  }
   return (await late.finish(item, lease, "delivered_late")) ? "delivered_late" : "raced";
 }
