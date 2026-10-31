@@ -133,7 +133,7 @@ Lifecycle (derived, never stored as text):
    `offeredByDefault` is not offered unless it is in the frozen `OFFERED_BEFORE_SHIP_DARK` list, and
    `test:model-catalog-guard` fails until a new entry chooses.
 6. **Skills that designate a removed model.** Decided: allow Remove, never delete the skill, fall back to
-   the live default, and the remove dialog names the affected skills. Gap: the dialog reads only
-   `skill_configs.model_id`, so code-default designations (`lib/skills.ts`) are missed, and it shows
-   skill ids, not titles. Separate follow-up issue.
+   the live default, and the remove dialog names the affected skills. Built in #454: the dialog lists
+   skill titles from the merged skill list (code `modelId` unless a DB override says otherwise, plus
+   shared custom skills; hidden skills left out) and shows "unknown" when the skill table cannot be read.
 7. **Pipeline roles (LLM/TTS/Whisper/storyboard image).** Out of scope (unchanged).

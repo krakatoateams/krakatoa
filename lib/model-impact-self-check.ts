@@ -6,6 +6,7 @@ import { buildModelRegistry } from "./model-registry";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
 import { setFeatureDefaultSafely } from "./feature-default-switch";
 import { modelPricingKeys } from "./model-pricing-keys";
+import type { SkillConfigOverride } from "./skill-configs-db";
 
 async function main() {
 // A photo tier with a Fal binding counts both its Replicate slug and the Fal slug (and the current model_configs slug).
@@ -130,6 +131,63 @@ assert.match(readFileSync("app/api/admin/config/feature-models/[id]/reset/route.
   log.length = 0;
   await setFeatureDefaultSafely({ ...mk({}), makesDefault: false });
   assert.deepEqual(log, ["write"]);
+}
+
+// #454 "Skills that use it" comes from the MERGED skill list (code designations + DB overrides, the same
+// merge the app uses), shows titles, and stays null (unknown) when the skill table cannot be read.
+{
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:1";
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= "self-check";
+  const { skillModelDesignations } = await import("./skill-configs-db");
+  const { dbModelImpactReads } = await import("./model-impact-db");
+  const { skillsUsingModel } = await import("./model-impact");
+  const { getSkill, WELCOME_VIDEO_SKILL_ID } = await import("./skills");
+  const welcome = getSkill(WELCOME_VIDEO_SKILL_ID)!;
+  assert.ok(welcome.modelId, "fixture: the welcome skill designates a model in code");
+  const override = (o: Partial<SkillConfigOverride> & Pick<SkillConfigOverride, "skillId">): SkillConfigOverride => ({
+    title: null, description: null, promptPlaceholder: null, recipe: null, thumbPath: null, category: null,
+    badge: null, promptRequired: null, origin: "overlay", mediaType: null, inputs: null, icon: null, hidden: false,
+    ownerProfileId: null, modelId: null, duration: null, resolution: null, aspectRatio: null, ...o,
+  });
+
+  // Code-only designation (no DB row) is listed, by title.
+  assert.ok(skillsUsingModel(skillModelDesignations(new Map()), welcome.modelId).includes(welcome.title), "code designation listed by title");
+  // A DB override pointing elsewhere moves it; an overridden title is shown.
+  const moved = new Map([[welcome.id, override({ skillId: welcome.id, modelId: "seedance2", title: "Coffee (edited)" })]]);
+  assert.ok(!skillsUsingModel(skillModelDesignations(moved), welcome.modelId).includes(welcome.title), "override elsewhere removes it");
+  assert.ok(skillsUsingModel(skillModelDesignations(moved), "seedance2").includes("Coffee (edited)"), "override target listed with its title");
+  // Shared custom skills count; skills owned by a user never designate a model and are not listed.
+  const customs = new Map([
+    ["custom-1", override({ skillId: "custom-1", origin: "custom", title: "Shared promo", mediaType: "video", modelId: "kling26" })],
+    ["custom-2", override({ skillId: "custom-2", origin: "custom", title: "Mine", mediaType: "video", modelId: "kling26", ownerProfileId: "p-1" })],
+  ]);
+  assert.deepEqual(skillsUsingModel(skillModelDesignations(customs), "kling26"), ["Shared promo"], "shared custom listed, owned not");
+  // Hidden skills (including a deleted catalog skill) are not listed, as users cannot use them.
+  const hidden = new Map([
+    [welcome.id, override({ skillId: welcome.id, hidden: true })],
+    ["custom-3", override({ skillId: "custom-3", origin: "custom", title: "Hidden promo", mediaType: "video", modelId: "kling26", hidden: true })],
+  ]);
+  assert.ok(!skillsUsingModel(skillModelDesignations(hidden), welcome.modelId).includes(welcome.title), "hidden catalog skill not listed");
+  assert.deepEqual(skillsUsingModel(skillModelDesignations(hidden), "kling26"), [], "hidden custom skill not listed");
+
+  // Production read, Supabase answered by a stubbed fetch: rows merge with code; a failed read is null.
+  const realFetch = globalThis.fetch;
+  let failing = false;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    assert.ok(String(input).includes("/skill_configs"), "only skill_configs is read");
+    if (failing) return new Response(JSON.stringify({ code: "XX000", message: "db down" }), { status: 500, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify([{ skill_id: "custom-9", origin: "custom", title: "From DB", media_type: "video", model_id: "kling26", hidden: false, owner_profile_id: null }]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.deepEqual(await dbModelImpactReads.skillsDesignating("kling26"), ["From DB"], "DB custom skill listed by title");
+    assert.ok((await dbModelImpactReads.skillsDesignating(welcome.modelId))!.includes(welcome.title), "code designation listed via the DB path");
+    failing = true;
+    await assert.rejects(dbModelImpactReads.skillsDesignating(welcome.modelId), "a failed read throws (buildModelImpact turns it into null)");
+    const unknown = await buildModelImpact({ model, modelConfigs: [], reads: { ...reads, skillsDesignating: dbModelImpactReads.skillsDesignating }, now: NOW });
+    assert.equal(unknown.skills, null, "unknown, never 'None', when the skill table cannot be read");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
   console.log("model-impact self-check passed");

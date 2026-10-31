@@ -14,9 +14,14 @@ export type ImpactCountScope = { table: "jobs" | "assets" | "usage_events"; sinc
 export type ModelImpactReads = {
   /** Exact head count of rows whose `model` is in `slugs`; null when the read failed. */
   count(slugs: string[], scope: ImpactCountScope): Promise<number | null>;
-  /** skill_configs designating this catalog model id; null when unreadable. */
+  /** Titles of skills whose effective model is this catalog id (code + DB overrides); null when unreadable. */
   skillsDesignating(modelId: string): Promise<string[] | null>;
 };
+
+/** Titles of the skills (from `skillModelDesignations`) that designate `modelId`. */
+export function skillsUsingModel(skills: readonly { title: string; modelId?: string | undefined }[], modelId: string): string[] {
+  return skills.filter((s) => s.modelId === modelId).map((s) => s.title);
+}
 
 const DAY_MS = 86_400_000;
 

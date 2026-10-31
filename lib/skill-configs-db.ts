@@ -434,34 +434,32 @@ function mapRow(row: SkillConfigRow): SkillConfigOverride | null {
   };
 }
 
+/** Shared (non-owned) skill_configs rows by skill id, read fresh. Throws when the read fails. */
+export async function fetchSkillOverrides(): Promise<Map<SkillId, SkillConfigOverride>> {
+  const { data, error } = await selectSkillConfigRows((cols) =>
+    supabaseServer.from(TABLE).select(cols).is("owner_profile_id", null)
+  );
+  if (error) throw new Error(error.message ?? "skill_configs read failed");
+  const byId = emptyCache();
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  for (const raw of rows) {
+    const mapped = mapRow(raw);
+    if (mapped) byId.set(mapped.skillId, mapped);
+  }
+  return byId;
+}
+
 export async function getSkillOverrides(): Promise<Map<SkillId, SkillConfigOverride>> {
   const now = Date.now();
   if (now < cache.expiresAt) return cache.byId;
 
   try {
-    const { data, error } = await selectSkillConfigRows((cols) =>
-      supabaseServer.from(TABLE).select(cols).is("owner_profile_id", null)
-    );
-
-    if (error) {
-      console.warn(
-        "[skill-configs] DB read failed, using catalog defaults:",
-        errorLogSafe(error)
-      );
-      return emptyCache();
-    }
-
-    const byId = emptyCache();
-    const rows = Array.isArray(data) ? data : data ? [data] : [];
-    for (const raw of rows) {
-      const mapped = mapRow(raw);
-      if (mapped) byId.set(mapped.skillId, mapped);
-    }
+    const byId = await fetchSkillOverrides();
     cache = { byId, expiresAt: now + CACHE_TTL_MS };
     return byId;
   } catch (e) {
     console.warn(
-      "[skill-configs] read threw, using catalog defaults:",
+      "[skill-configs] DB read failed, using catalog defaults:",
       errorLogSafe(e)
     );
     return emptyCache();
@@ -593,6 +591,27 @@ function customSkillFromOverride(
     resolution: override.resolution ?? undefined,
     aspectRatio: override.aspectRatio ?? undefined,
   };
+}
+
+/**
+ * Title and effective model of every skill users can see: catalog skills and shared custom skills, with
+ * the same merge as listCatalogSkills (a DB override wins over the code `modelId`), without thumbnails.
+ * Hidden (including deleted catalog) skills are left out, as in the users' list.
+ */
+export function skillModelDesignations(
+  overrides: ReadonlyMap<SkillId, SkillConfigOverride>
+): Pick<CatalogSkill, "title" | "modelId">[] {
+  const merged: CatalogSkill[] = [];
+  for (const base of SKILLS) {
+    const override = overrides.get(base.id) ?? null;
+    if (!override?.hidden) merged.push(mergeSkill(base, override));
+  }
+  for (const override of overrides.values()) {
+    if (override.ownerProfileId || override.hidden) continue;
+    const custom = customSkillFromOverride(override);
+    if (custom) merged.push(custom);
+  }
+  return merged.map(({ title, modelId }) => ({ title, modelId }));
 }
 
 export async function listCatalogSkills(opts?: {

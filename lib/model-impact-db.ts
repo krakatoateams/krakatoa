@@ -1,8 +1,9 @@
 import { supabaseServer } from "@/lib/supabase-server";
-import { providerSlugsFor, type ModelImpactReads } from "@/lib/model-impact";
+import { providerSlugsFor, skillsUsingModel, type ModelImpactReads } from "@/lib/model-impact";
+import { fetchSkillOverrides, skillModelDesignations } from "@/lib/skill-configs-db";
 import { listModelConfigs } from "@/lib/model-configs-db";
 
-/** Production reads for the impact preview: head-only exact counts, no rows, no user data. */
+/** Production reads for the impact preview: head-only exact counts plus shared skill titles; no user data. */
 export const dbModelImpactReads: ModelImpactReads = {
   async count(slugs, scope) {
     if (slugs.length === 0) return 0;
@@ -15,9 +16,8 @@ export const dbModelImpactReads: ModelImpactReads = {
     return count ?? 0;
   },
   async skillsDesignating(modelId) {
-    const { data, error } = await supabaseServer.from("skill_configs").select("skill_id").eq("model_id", modelId).limit(50);
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: { skill_id: string }) => r.skill_id);
+    // Same merge as the app (code designation unless a DB override says otherwise); a failed read throws.
+    return skillsUsingModel(skillModelDesignations(await fetchSkillOverrides()), modelId);
   },
 };
 
