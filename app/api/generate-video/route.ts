@@ -29,6 +29,7 @@ import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import {
   isGenerateVideoComposerKey,
   mapVideoComposerEnablement,
@@ -367,9 +368,13 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const composerEnablement = mapVideoComposerEnablement(
-      await getVideoComposerEnablement()
-    );
+    let composerEnablement;
+    try {
+      composerEnablement = mapVideoComposerEnablement(await getVideoComposerEnablement());
+    } catch (e) {
+      if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
+      throw e;
+    }
     if (!videoComposerModelEnabled(composerEnablement, composerKey, modelId)) {
       return NextResponse.json({ error: "This model isn't available." }, { status: 400 });
     }

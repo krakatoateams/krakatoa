@@ -1,5 +1,11 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import {
+  isTableMissing,
+  ModelStateUnavailableError,
+  ModelTableMissingError,
+  withModelStateTimeout,
+} from "@/lib/model-state-unavailable";
+import {
   defaultModelCatalogRows,
   enabledIdsFromRows,
   isArchiveColumnMissing,
@@ -28,20 +34,10 @@ export type ModelCatalogConfig = {
 
 const TABLE = "model_catalog_configs";
 
-const CACHE_TTL_MS = 0;
-type CatalogCache = {
-  byTool: Partial<Record<ModelCatalogToolKey, Set<string>>> | null;
-  expiresAt: number;
-};
-let cache: CatalogCache = { byTool: null, expiresAt: 0 };
-
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
-  if (
-    error.message.includes(TABLE) &&
-    (error.message.includes("schema cache") || error.message.includes("does not exist"))
-  ) {
-    throw new Error(
+  if (isTableMissing(error, TABLE)) {
+    throw new ModelTableMissingError(
       `Database table ${TABLE} is missing. Apply supabase/migrations/048_model_catalog_configs.sql.`
     );
   }
@@ -114,7 +110,6 @@ export async function updateModelCatalogConfig(
     .maybeSingle();
 
   handleError(error, "Failed to update model catalog config.");
-  cache = { byTool: null, expiresAt: 0 };
   return (data as ModelCatalogConfig | null) ?? null;
 }
 
@@ -134,7 +129,6 @@ export async function casModelCatalogEnabled(
     .maybeSingle();
 
   handleError(error, "Failed to update model catalog config.");
-  cache = { byTool: null, expiresAt: 0 };
   return (data as ModelCatalogConfig | null) ?? null;
 }
 
@@ -146,25 +140,24 @@ function codeDefaultEnabledIds(toolKey: ModelCatalogToolKey): Set<string> {
   );
 }
 
-/** Enabled model ids for a tool; missing DB row counts as enabled. */
+/**
+ * Enabled model ids for a tool; a missing DB row counts as enabled. FAILS CLOSED: a read error or
+ * timeout throws ModelStateUnavailableError (an archived/disabled model must never be offered on
+ * an unknown state). Only a table that does not exist at all falls back to the code defaults.
+ * No grace cache: a stale read could offer a model disabled since.
+ */
 export async function getEnabledCatalogModelIds(
-  toolKey: ModelCatalogToolKey
+  toolKey: ModelCatalogToolKey,
+  list: () => Promise<ModelCatalogConfig[]> = listModelCatalogConfigs,
+  timeoutMs?: number
 ): Promise<Set<string>> {
-  const now = Date.now();
-  if (cache.byTool?.[toolKey] && now < cache.expiresAt) {
-    return cache.byTool[toolKey]!;
-  }
-
   try {
-    const rows = await listModelCatalogConfigs();
-    const enabled = enabledIdsFromRows(toolKey, rows);
-
-    cache.byTool = { ...cache.byTool, [toolKey]: enabled };
-    cache.expiresAt = now + CACHE_TTL_MS;
-    return enabled;
+    const rows = await withModelStateTimeout(list(), timeoutMs);
+    return enabledIdsFromRows(toolKey, rows);
   } catch (e) {
-    console.warn("[model-catalog-configs] DB read failed, using code defaults:", e);
-    return codeDefaultEnabledIds(toolKey);
+    if (e instanceof ModelTableMissingError) return codeDefaultEnabledIds(toolKey);
+    console.warn("[model-catalog-configs] DB read failed, failing closed:", e);
+    throw new ModelStateUnavailableError(e);
   }
 }
 
@@ -235,6 +228,5 @@ export async function casModelCatalogArchive(
     throw new ArchiveMigrationRequiredError();
   }
   handleError(error, "Failed to archive model catalog config.");
-  cache = { byTool: null, expiresAt: 0 };
   return (data as ModelCatalogConfig | null) ?? null;
 }

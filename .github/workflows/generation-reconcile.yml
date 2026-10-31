@@ -1,0 +1,54 @@
+name: Generation reconcile
+
+# Calls the production reconcile endpoint every 10 minutes so credits held after an unclear
+# Fal run come back quickly (Fal keeps results about 1 hour). The daily Vercel cron in
+# vercel.json stays as a backup. The endpoint is idempotent and time-bounded, so overlapping
+# with the daily cron or a manual run is safe (stable refund keys, hasRefundForJob).
+#
+# One-time setup (Settings -> Secrets and variables -> Actions):
+#   Secret   RECONCILE_CRON_SECRET  same value as CRON_SECRET in Vercel
+#   Variable PROD_BASE_URL          production URL, https only, e.g. https://your-app.com
+# Until both exist the job skips with a notice (green). To turn it off: Actions -> this
+# workflow -> "..." -> Disable workflow, or remove the variable.
+# GitHub scheduled runs are best-effort and can start a few minutes late.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+# Only calls the deployed endpoint; no repository token needed.
+permissions: {}
+
+# Never overlap two runs.
+concurrency:
+  group: generation-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Scheduled runs already use the default branch; this also covers a manual run on another branch.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call reconcile endpoint
+        env:
+          BASE_URL: ${{ vars.PROD_BASE_URL }}
+          CRON_SECRET: ${{ secrets.RECONCILE_CRON_SECRET }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::Skipped: set the RECONCILE_CRON_SECRET secret and the PROD_BASE_URL variable (see docs/generation/fal-provider-runbook.md)."
+            exit 0
+          fi
+          case "$BASE_URL" in
+            https://*) ;;
+            *) echo "::error::PROD_BASE_URL must start with https://"; exit 1 ;;
+          esac
+
+          # The header goes through stdin so the secret never appears in the process list or logs.
+          # max-time stays below the route maxDuration (120 s); retries are off on purpose.
+          printf 'Authorization: Bearer %s' "$CRON_SECRET" | curl --silent --show-error \
+            --fail-with-body --retry 0 --max-time 115 --proto '=https' --max-redirs 0 \
+            -H @- "${BASE_URL%/}/api/cron/generation-reconcile"
+          echo

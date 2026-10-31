@@ -46,7 +46,7 @@ keeps only the rules needed on most engineering tasks.
   The one post-commit exception is a definitive provider failure (Fal reports an
   explicit failed status, no output): `shouldRefundSpentCreditsAfterFailure()`.
   Ambiguous outcomes (timeout, network loss, abort) stay locked; the job is
-  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and the daily reconcile
+  settled `failed` with code `PROVIDER_OUTCOME_UNKNOWN` and the reconcile (every ~10 min via GitHub Actions, daily Vercel cron as backup)
   (72 h window, paged, time-budgeted) refunds it (same idempotency key as the
   route) only on a Fal-confirmed failure; still unconfirmed after the window it
   becomes `PROVIDER_OUTCOME_UNRESOLVED` and needs manual review.
@@ -57,6 +57,10 @@ keeps only the rules needed on most engineering tasks.
   use the atomic RPCs in `lib/generation-workflows/`.
 - Prompt capture stores user prompts on jobs and assembled model prompts on the
   relevant job step. Do not persist system instructions.
+- Archived or admin-disabled models are never usable. When the model state read
+  errors or times out, fail closed: lists show no models and generate routes
+  return a retryable 503 before any spend or provider call (a missing table
+  keeps the code defaults).
 
 ### Cancellation and recovery
 

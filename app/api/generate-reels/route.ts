@@ -50,6 +50,7 @@ import {
 } from "@/lib/generation-idempotency";
 import { validateReelsRequest, REELS_ENGINE_CATALOG_MODEL_ID } from "@/lib/reels-models";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import {
   runSeedancePipeline,
   runVeoSinglePipeline,
@@ -203,7 +204,13 @@ export async function POST(req: Request) {
     const reqv = validated.value;
     jobType = reqv.jobType;
 
-    const composerEnablement = await getVideoComposerEnablement();
+    let composerEnablement;
+    try {
+      composerEnablement = await getVideoComposerEnablement();
+    } catch (e) {
+      if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
+      throw e;
+    }
     const engineCatalogModelId = REELS_ENGINE_CATALOG_MODEL_ID[reqv.engine];
     if (!composerEnablement["reels-creator"].enabledTiers.includes(engineCatalogModelId)) {
       return NextResponse.json({ error: "This engine isn't available." }, { status: 400 });

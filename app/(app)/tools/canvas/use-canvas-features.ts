@@ -7,7 +7,7 @@ import {
 } from "@/lib/video-composer-features";
 import type { CanvasImageEnablement, CanvasVideoEnablement } from "@/lib/canvas-model-options";
 
-/** Loading / ready / failed. `data` keeps the last good value across a failed refresh. */
+/** Loading / ready / failed. `data` is cleared on failure: unknown server state offers no models. */
 export type FeatureState<T> = { status: "loading" | "ready" | "error"; data: T | null };
 
 /**
@@ -28,7 +28,7 @@ function createFeatureStore<T>(load: () => Promise<T>) {
     inflight = true;
     load()
       .then((data) => set({ status: "ready", data }))
-      .catch(() => set({ status: "error", data: state.data }))
+      .catch(() => set({ status: "error", data: null }))
       .finally(() => {
         inflight = false;
       });

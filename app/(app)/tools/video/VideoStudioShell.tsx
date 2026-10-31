@@ -118,6 +118,8 @@ export default function VideoStudioShell({
 
   const [composerEnablement, setComposerEnablement] =
     useState<Record<VideoComposerKey, VideoComposerEnablement> | null>(null);
+  // Server state unknown: no models are offered (retried when the tab regains focus).
+  const [modelsUnavailable, setModelsUnavailable] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -125,7 +127,13 @@ export default function VideoStudioShell({
       fetch("/api/tools/video/features")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (!active || !data?.composers) return;
+          if (!active) return;
+          if (!data?.composers) {
+            setComposerEnablement(null);
+            setModelsUnavailable(true);
+            return;
+          }
+          setModelsUnavailable(false);
           const raw = {} as Record<VideoComposerKey, { enabledTiers: string[]; defaultTier: string }>;
           for (const c of data.composers) {
             if (c.key) {
@@ -137,7 +145,11 @@ export default function VideoStudioShell({
           }
           setComposerEnablement(mapVideoComposerEnablement(raw));
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!active) return;
+          setComposerEnablement(null);
+          setModelsUnavailable(true);
+        });
     };
 
     loadEnablement();
@@ -282,6 +294,11 @@ export default function VideoStudioShell({
           </h1>
         </div>
 
+        {modelsUnavailable && (
+          <p role="alert" className="mb-3 text-sm text-warning">
+            Models are temporarily unavailable. Please try again in a moment.
+          </p>
+        )}
         {renderActiveComposer()}
 
         {status === "authenticated" && (

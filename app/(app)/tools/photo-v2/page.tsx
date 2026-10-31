@@ -1,6 +1,5 @@
 "use client";
 
-import { enabledIdsFromRows } from "@/lib/model-catalog-configs";
 import {
   Suspense,
   useCallback,
@@ -559,7 +558,8 @@ function PhotoOmniPage({
   const [characterStyle, setCharacterStyle] = useState<CharacterStyleId>(DEFAULT_CHARACTER_STYLE);
   const [characterGender, setCharacterGender] = useState<CharacterGenderId>(DEFAULT_CHARACTER_GENDER);
   const [characterAge, setCharacterAge] = useState<CharacterAgeId>(DEFAULT_CHARACTER_AGE);
-  // Admin-controlled per-feature model enablement (null until loaded → code fallback).
+  // Admin-controlled per-feature model enablement (null until loaded or when the read failed → no models).
+  const [featuresFailed, setFeaturesFailed] = useState(false);
   const [featureModels, setFeatureModels] = useState<Record<
     string,
     { enabledTiers: string[]; defaultTier: string | null }
@@ -694,10 +694,9 @@ function PhotoOmniPage({
 
   // Models usable in the current mode. When the admin enablement has loaded, use
   // its per-feature list (it already encodes capability + admin toggles). Before
-  // it loads (or on API failure) fall back to the in-code capability rule so the
-  // form is never empty.
-  const enabledTierIds = featureModels?.[featureKey]?.enabledTiers ?? null;
-  const codeOfferedPhotoTiers = enabledIdsFromRows("photo", []);
+  // it loads, or when the server state is unknown (API failure), offer no models:
+  // an archived/disabled model must never be listed.
+  const enabledTierIds = featureModels?.[featureKey]?.enabledTiers ?? [];
   // Count every reference image the current request will send: product, an attached
   // character (Try-on), an uploaded reference (image/character modes), and any
   // @-mentioned asset. Mentions/references can only be honored by reference-capable
@@ -716,11 +715,7 @@ function PhotoOmniPage({
   const needsMultiReferenceModel = referenceImageCount > 1;
   const availableTiers = PRODUCT_PHOTO_TIERS.filter(
     (t) =>
-      (enabledTierIds
-        ? enabledTierIds.includes(t.id)
-        : // Not loaded / failed: only models shipped as offered (never ship-dark ones).
-          codeOfferedPhotoTiers.has(t.id) &&
-          (isImageMode || isCharacterMode || isSocialMode || t.supportsReference)) &&
+      enabledTierIds.includes(t.id) &&
       (!needsReferenceModel || t.supportsReference) &&
       (!needsMultiReferenceModel || tierSupportsMultiReference(t))
   );
@@ -743,14 +738,21 @@ function PhotoOmniPage({
     fetch("/api/tools/photo/features")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!active || !data?.features) return;
+        if (!active) return;
+        if (!data?.features) {
+          setFeaturesFailed(true);
+          return;
+        }
+        setFeaturesFailed(false);
         const map: Record<string, { enabledTiers: string[]; defaultTier: string | null }> = {};
         for (const f of data.features) {
           map[f.key] = { enabledTiers: f.enabledTiers ?? [], defaultTier: f.defaultTier ?? null };
         }
         setFeatureModels(map);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setFeaturesFailed(true);
+      });
     return () => {
       active = false;
     };
@@ -1380,6 +1382,13 @@ function PhotoOmniPage({
             </p>
           ) : null}
         </StudioForm>
+
+        {featuresFailed && !featureModels && (
+          <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+            <span>Models are temporarily unavailable. Please try again in a moment.</span>
+          </div>
+        )}
 
         {warning && (
           <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">

@@ -16,8 +16,13 @@ import {
   VIDEO_COMPOSER_KEYS,
   type VideoComposerKey,
 } from "@/lib/video-composer-features";
+import {
+  isTableMissing,
+  ModelStateUnavailableError,
+  ModelTableMissingError,
+  withModelStateTimeout,
+} from "@/lib/model-state-unavailable";
 import { getEnabledCatalogModelIds } from "@/lib/model-catalog-configs-db";
-import { codeDefaults, codeVideoDefaults } from "@/lib/feature-enablement-defaults";
 import { setFeatureDefaultSafely } from "@/lib/feature-default-switch";
 import { resolveFeatureEnablement, type FeatureEnablement } from "@/lib/feature-enablement";
 
@@ -53,11 +58,8 @@ const TABLE = "feature_model_configs";
 
 function handleError(error: { message: string } | null, fallback: string): void {
   if (!error) return;
-  if (
-    error.message.includes(TABLE) &&
-    (error.message.includes("schema cache") || error.message.includes("does not exist"))
-  ) {
-    throw new Error(
+  if (isTableMissing(error, TABLE)) {
+    throw new ModelTableMissingError(
       `Database table ${TABLE} is missing. Apply supabase/migrations/012_feature_model_enablement.sql ` +
         "through the configured Supabase MCP or SQL Editor, or run npm run db:setup with DATABASE_URL."
     );
@@ -163,8 +165,6 @@ export async function updateFeatureModelConfig(
     .maybeSingle();
 
   handleError(error, "Failed to update feature model config.");
-  cache = { map: null, expiresAt: 0 };
-  videoCache = { map: null, expiresAt: 0 };
   return (data as FeatureModelConfig | null) ?? null;
 }
 
@@ -220,8 +220,6 @@ export async function casFeatureModelConfig(
         console.error("[feature-model-configs] could not undo a partial default switch:", generationErrorLogSafe(e)),
     });
   } finally {
-    cache = { map: null, expiresAt: 0 };
-    videoCache = { map: null, expiresAt: 0 };
   }
 }
 
@@ -265,101 +263,87 @@ export async function resetFeatureModelConfig(
 }
 
 // ---------------------------------------------------------------------------
-// Runtime enablement resolver (never throws; falls back to code defaults).
+// Runtime enablement resolver. FAILS CLOSED (ModelStateUnavailableError) when admin state cannot
+// be read; only a table that does not exist at all resolves from the shipped code defaults.
 // ---------------------------------------------------------------------------
 
 export type { FeatureEnablement };
 
-const CACHE_TTL_MS = 0;
-type EnablementCache = {
-  map: Record<PhotoFeatureKey, FeatureEnablement> | null;
-  expiresAt: number;
+/** Read seams (injectable so self-checks can simulate read failures). */
+export type EnablementReaders = {
+  listRows: () => Promise<FeatureModelConfig[]>;
+  catalogIds: (toolKey: "photo" | "reels") => Promise<Set<string>>;
 };
-let cache: EnablementCache = { map: null, expiresAt: 0 };
 
-type VideoEnablementCache = {
-  map: Record<VideoComposerKey, FeatureEnablement> | null;
-  expiresAt: number;
+const defaultReaders: EnablementReaders = {
+  listRows: listFeatureModelConfigs,
+  catalogIds: getEnabledCatalogModelIds,
 };
-let videoCache: VideoEnablementCache = { map: null, expiresAt: 0 };
 
-/**
- * Resolve enabled tiers + default per Photo feature, merging admin DB overrides
- * over the code catalog. Eligibility (reference capability) is always enforced in
- * code. A missing row = enabled. Cached ~60s; on any DB error returns code
- * defaults so the omni-form and generation routes never break.
- */
-export async function getPhotoFeatureEnablement(): Promise<
-  Record<PhotoFeatureKey, FeatureEnablement>
-> {
-  const now = Date.now();
-  if (cache.map && now < cache.expiresAt) return cache.map;
-
+/** Rows + catalog ids, or ModelStateUnavailableError. A missing feature table = no admin rows. */
+async function readState(toolKey: "photo" | "reels", readers: EnablementReaders) {
   try {
-    const [rows, catalogEnabled] = await Promise.all([
-      listFeatureModelConfigs(),
-      getEnabledCatalogModelIds("photo"),
-    ]);
-    const byKey = new Map<string, FeatureModelConfig>();
-    for (const r of rows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
-
-    const out = {} as Record<PhotoFeatureKey, FeatureEnablement>;
-    for (const featureKey of PHOTO_FEATURE_KEYS) {
-      out[featureKey] = resolveFeatureEnablement({
-        eligible: eligibleTiersForFeature(featureKey),
-        catalogEnabled,
-        rowFor: (tier) => byKey.get(`${featureKey}:${tier}`),
-        codeDefault: defaultTierForFeature(featureKey),
-      });
-    }
-
-    cache = { map: out, expiresAt: now + CACHE_TTL_MS };
-    return out;
-  } catch (e) {
-    console.warn(
-      "[feature-model-configs] DB read failed, using code defaults:",
-      generationErrorLogSafe(e)
+    const [rows, catalogEnabled] = await withModelStateTimeout(
+      Promise.all([
+        readers.listRows().catch((e) => {
+          if (e instanceof ModelTableMissingError) return [] as FeatureModelConfig[];
+          throw e;
+        }),
+        readers.catalogIds(toolKey),
+      ])
     );
-    return codeDefaults();
+    return { rows, catalogEnabled };
+  } catch (e) {
+    if (e instanceof ModelStateUnavailableError) throw e;
+    console.warn("[feature-model-configs] DB read failed, failing closed:", generationErrorLogSafe(e));
+    throw new ModelStateUnavailableError(e);
   }
 }
 
 /**
- * Resolve enabled models + default per Video composer, merging admin DB overrides
- * over the code catalog. Eligibility is always enforced in code. Cached ~60s.
+ * Resolve enabled tiers + default per Photo feature, merging admin DB overrides
+ * over the code catalog. Eligibility (reference capability) is always enforced in
+ * code. A missing row = enabled. Throws ModelStateUnavailableError when state is unreadable.
  */
-export async function getVideoComposerEnablement(): Promise<
-  Record<VideoComposerKey, FeatureEnablement>
-> {
-  const now = Date.now();
-  if (videoCache.map && now < videoCache.expiresAt) return videoCache.map;
+export async function getPhotoFeatureEnablement(
+  readers: EnablementReaders = defaultReaders
+): Promise<Record<PhotoFeatureKey, FeatureEnablement>> {
+  const { rows, catalogEnabled } = await readState("photo", readers);
+  const byKey = new Map<string, FeatureModelConfig>();
+  for (const r of rows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
 
-  try {
-    const [rows, catalogEnabled] = await Promise.all([
-      listFeatureModelConfigs(),
-      getEnabledCatalogModelIds("reels"),
-    ]);
-    const reelsRows = rows.filter((r) => r.tool_key === "reels");
-    const byKey = new Map<string, FeatureModelConfig>();
-    for (const r of reelsRows) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
-
-    const out = {} as Record<VideoComposerKey, FeatureEnablement>;
-    for (const composerKey of VIDEO_COMPOSER_KEYS) {
-      out[composerKey] = resolveFeatureEnablement({
-        eligible: eligibleModelsForComposer(composerKey),
-        catalogEnabled,
-        rowFor: (tier) => byKey.get(`${composerKey}:${tier}`),
-        codeDefault: defaultModelForComposer(composerKey),
-      });
-    }
-
-    videoCache = { map: out, expiresAt: now + CACHE_TTL_MS };
-    return out;
-  } catch (e) {
-    console.warn(
-      "[feature-model-configs] video DB read failed, using code defaults:",
-      generationErrorLogSafe(e)
-    );
-    return codeVideoDefaults();
+  const out = {} as Record<PhotoFeatureKey, FeatureEnablement>;
+  for (const featureKey of PHOTO_FEATURE_KEYS) {
+    out[featureKey] = resolveFeatureEnablement({
+      eligible: eligibleTiersForFeature(featureKey),
+      catalogEnabled,
+      rowFor: (tier) => byKey.get(`${featureKey}:${tier}`),
+      codeDefault: defaultTierForFeature(featureKey),
+    });
   }
+  return out;
+}
+
+/**
+ * Resolve enabled models + default per Video composer, merging admin DB overrides
+ * over the code catalog. Eligibility is always enforced in code. Throws
+ * ModelStateUnavailableError when state is unreadable.
+ */
+export async function getVideoComposerEnablement(
+  readers: EnablementReaders = defaultReaders
+): Promise<Record<VideoComposerKey, FeatureEnablement>> {
+  const { rows, catalogEnabled } = await readState("reels", readers);
+  const byKey = new Map<string, FeatureModelConfig>();
+  for (const r of rows.filter((r) => r.tool_key === "reels")) byKey.set(`${r.feature_key}:${r.model_tier}`, r);
+
+  const out = {} as Record<VideoComposerKey, FeatureEnablement>;
+  for (const composerKey of VIDEO_COMPOSER_KEYS) {
+    out[composerKey] = resolveFeatureEnablement({
+      eligible: eligibleModelsForComposer(composerKey),
+      catalogEnabled,
+      rowFor: (tier) => byKey.get(`${composerKey}:${tier}`),
+      codeDefault: defaultModelForComposer(composerKey),
+    });
+  }
+  return out;
 }

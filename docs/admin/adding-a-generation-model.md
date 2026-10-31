@@ -61,3 +61,12 @@ creations keep their label and prices are kept, and **Restore** brings it back a
 never edits the code registry; retiring a model from code is a separate developer task.
 The `model_add` vs `model_enable` audit label is derived from earlier audit rows, so a model enabled
 before the audit table existed (117) is labelled `model_enable`; the label is informational only.
+
+**When the model settings cannot be read (fail closed).** An archived or admin-disabled model must never
+be usable. If reading `model_catalog_configs` / `feature_model_configs` fails (database error, timeout,
+network), the app does NOT fall back to the code defaults: the model lists return a retryable 503 and show
+"Models are temporarily unavailable. Please try again in a moment.", and every generate route (photo, video,
+storyboard video, motion control, reels; Canvas nodes use photo/video) answers 503 before any credit spend or
+provider call. There is no stale-state grace window. Only a table that does not exist at all (migration never
+applied) uses the code defaults, so fresh environments and CI without a database keep working.
+Check: `npm run test:model-catalog-guard`.

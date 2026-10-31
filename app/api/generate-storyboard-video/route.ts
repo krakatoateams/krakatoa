@@ -36,6 +36,7 @@ import { getVideoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { resolveModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import {
   mapVideoComposerEnablement,
   videoComposerModelEnabled,
@@ -199,9 +200,13 @@ export async function POST(req: Request) {
       ? videoModelIdRaw
       : DEFAULT_STORYBOARD_VIDEO_MODEL_ID;
     const videoModel = getVideoModel(videoModelId);
-    const composerEnablement = mapVideoComposerEnablement(
-      await getVideoComposerEnablement()
-    );
+    let composerEnablement;
+    try {
+      composerEnablement = mapVideoComposerEnablement(await getVideoComposerEnablement());
+    } catch (e) {
+      if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
+      throw e;
+    }
     if (!videoComposerModelEnabled(composerEnablement, "storyboard", videoModelId)) {
       return NextResponse.json({ error: "This video model isn't available." }, { status: 400 });
     }
