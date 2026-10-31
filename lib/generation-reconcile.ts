@@ -23,6 +23,8 @@ import {
 } from "@/lib/generation-client-error";
 import {
   SETTLED_CONFIRM_TIMEOUT_MS,
+  SETTLED_ITEMS_BUDGET_MS,
+  SETTLED_ITEMS_RUN_DEADLINE_MS,
   expireSettledJob,
   reconcileSettledProviderFailure,
   scanSettledJobs,
@@ -31,6 +33,13 @@ import {
   type SettledCursor,
   type SettledFailureOps,
 } from "@/lib/generation-reconcile-settled";
+import { settleBatchItem, type BatchItemOps } from "@/lib/generation-batch-items-pure";
+import {
+  batchItemsTableReady,
+  countAmbiguousBatchItems,
+  fetchAmbiguousBatchItems,
+  settleAmbiguousBatchItem,
+} from "@/lib/generation-batch-items-db";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
@@ -51,6 +60,14 @@ export type GenerationReconcileResult = {
   settledLeft: number;
   /** Held Fal jobs past the lookback with no confirmation, marked unresolved this run. */
   unresolvedJobs: number;
+  /** Per-image (S2) rows refunded after Fal confirmed that image failed. */
+  itemsRefunded: number;
+  /** Per-image rows nothing can confirm any more (manual review). */
+  itemsUnresolved: number;
+  /** Per-image rows not visited this run (budget spent). */
+  itemsLeft: number;
+  /** True while migration 119 is not applied (the per-image scan is skipped). */
+  itemsScanSkipped: boolean;
   errors: string[];
 };
 
@@ -147,6 +164,7 @@ async function spendAmountForJob(jobId: string): Promise<number> {
  * executor died without ever settling them.
  */
 export async function runGenerationReconcile(): Promise<GenerationReconcileResult> {
+  const runStart = Date.now();
   const cutoff = new Date(Date.now() - LOCK_TTL_MS - RECONCILE_BUFFER_MS).toISOString();
   const result: GenerationReconcileResult = {
     staleJobs: 0,
@@ -158,6 +176,10 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
     sweptResumableFolders: 0,
     settledLeft: 0,
     unresolvedJobs: 0,
+    itemsRefunded: 0,
+    itemsUnresolved: 0,
+    itemsLeft: 0,
+    itemsScanSkipped: false,
     errors: [],
   };
 
@@ -326,6 +348,44 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
     console.log(`[generation-reconcile] ${collect("settled-expired", expired)}`);
   } catch (e) {
     result.errors.push(`settled jobs query: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // S2: ambiguous images of partly delivered Fal batches (migration 119), each refunded on its own
+  // once Fal confirms THAT prediction failed. Own budget slice; skipped while the table is absent.
+  try {
+    if (!(await batchItemsTableReady())) {
+      result.itemsScanSkipped = true;
+      console.log("[generation-reconcile] items: skipped (generation_batch_items missing)");
+    } else {
+      const itemOps: BatchItemOps = {
+        jobStatus: async (profileId, jobId) => (await getJob(profileId, jobId))?.status ?? null,
+        predictionStatus: async (providerId, predictionId) => {
+          const provider = getPhotoProviderById(providerId);
+          if (!provider?.commitsOnSubmit) return "unknown";
+          return (await provider.getPredictionStatus(predictionId)).status;
+        },
+        refundedAmount: refundedAmountForJob,
+        spendAmount: spendAmountForJob,
+        refund: refundCredits,
+        settle: settleAmbiguousBatchItem,
+      };
+      const w = { after: windows.expired.after, before: windows.active.before };
+      const items = await scanSettledJobs(
+        {
+          fetchPage: (cursor, limit) => fetchAmbiguousBatchItems(w, cursor, limit),
+          countFrom: (cursor) => countAmbiguousBatchItems(w, cursor),
+          process: (item) => settleBatchItem(itemOps, item, { expired: Date.parse(item.updatedAt) <= Date.parse(windows.active.after) }),
+        },
+        { budgetMs: Math.max(0, Math.min(SETTLED_ITEMS_BUDGET_MS, SETTLED_ITEMS_RUN_DEADLINE_MS - (Date.now() - runStart))) },
+      );
+      result.itemsRefunded = items.outcomes.refunded ?? 0;
+      result.itemsUnresolved = items.outcomes.unresolved ?? 0;
+      result.itemsLeft = items.left;
+      result.errors.push(...items.errors);
+      console.log(`[generation-reconcile] items: scanned=${items.scanned} ${JSON.stringify(items.outcomes)} left=${items.left}`);
+    }
+  } catch (e) {
+    result.errors.push(`batch items: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const { data: staleRequests, error: reqError } = await supabaseServer

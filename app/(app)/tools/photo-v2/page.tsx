@@ -961,6 +961,7 @@ function PhotoOmniPage({
               requested: Number(data.requestedImageCount),
               delivered: batchLen,
               unconfirmed: typeof data.unconfirmedImageCount === "number" ? data.unconfirmedImageCount : undefined,
+              recheck: data.unconfirmedRecheck === true,
             }),
           );
         }

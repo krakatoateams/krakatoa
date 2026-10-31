@@ -50,6 +50,9 @@ keeps only the rules needed on most engineering tasks.
   (72 h window, paged, time-budgeted) refunds it (same idempotency key as the
   route) only on a Fal-confirmed failure; still unconfirmed after the window it
   becomes `PROVIDER_OUTCOME_UNRESOLVED` and needs manual review.
+  A partly delivered multi-image Fal request settles each ambiguous image on its
+  own (migration 119 `generation_batch_items`, key `refund:product_photo:{jobId}:item:{batchIndex}`),
+  under the same Fal-confirmed-failure rule; a delivered image is never refunded.
 - Keep spend and refund idempotency keys stable.
 - Client generation keys are scoped per composer and persist across navigation;
   reuse them for identical retries, rotating only after success or input changes.

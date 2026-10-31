@@ -54,14 +54,31 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   `:partial` key). Reconcile then refunds only the REMAINDER (spend minus refunds so far, valid because a
   failed job delivered nothing) under `refund:product_photo:{jobId}:remainder`, only when Fal reports every
   prediction failed (a cancelled request Fal no longer knows, status 404, keeps it unconfirmed: manual review).
-  Known limit (S2): a batch with some images saved and some ambiguous failures is `succeeded`, so reconcile
-  never sees it and the user stays charged for the undelivered image; fixing it needs per-image outcome
-  records and refund keys (schema change), being fixed in #441/#442. Until then the response carries
-  `unconfirmedImageCount` (Fal only, also on the job output and usage metadata) and the photo page tells the
-  truth: "{failed} of {requested} images didn't arrive. {refunded} were refunded. {unconfirmed} couldn't be
-  confirmed by the AI provider, so it is still charged for now. Contact support if it doesn't appear in your
-  library." (singular/plural adjusted, refunded sentence omitted when 0). With no unconfirmed image the old
-  "you were only charged for the K that worked" message stays (it is true then).
+  Per-image settlement (S2, migration 119 `generation_batch_items`): a Fal batch with some images saved and
+  some ambiguous failures is `succeeded`, so the job-level path never sees it. The route then writes one row
+  per image in one statement (after the `:partial` refund, before `finishJob`): `delivered`,
+  `failed_definitive` / `cancelled_confirmed` (key `refund:product_photo:{jobId}:partial`), or `ambiguous`
+  (with that image's `prediction_id`, the Fal `output_url` if it was known, and the exact save params in
+  `delivery`). Only Fal (`commitsOnSubmit`), more than one image, at least one delivered and one ambiguous;
+  Replicate and single-image requests never write rows. Reconcile scans `ambiguous` rows (own 20 s budget
+  slice, keyset by `created_at`, same 72 h window + 7-day band): it skips a row whose job is not `succeeded`
+  (zero-success batches stay on the `:remainder` path), marks a row with no `prediction_id` `unresolved`,
+  and refunds exactly `credits` under `refund:product_photo:{jobId}:item:{batchIndex}` only when
+  `getPredictionStatus` for THAT prediction is `failed` and the job's refunds stay within its spend
+  (`ambiguous` -> `refunded`, compare-and-set). Processing / succeeded / 404 / 5xx / timeout leave it
+  `ambiguous`; past 72 h one last check, then `unresolved`. A delivered image is never refunded. Cron log:
+  `itemsRefunded`, `itemsUnresolved`, `itemsLeft`, `itemsSkipped`. Manual review:
+  `select * from generation_batch_items where state = 'unresolved' order by created_at desc;` (refund only
+  a Fal-confirmed failure, with that row's `:item:{batchIndex}` key). Images Fal finished but we failed to
+  download stay `ambiguous` until late delivery (#442) or expiry.
+  The response carries `unconfirmedImageCount` (Fal only, also on the job output and usage metadata) and,
+  only when the rows were written, `unconfirmedRecheck: true`. The photo page then says "{failed} of
+  {requested} images didn't arrive. {refunded} were refunded. {unconfirmed} couldn't be confirmed yet, so
+  we're re-checking {it/them} with the AI provider: if {it/they} failed, the credits come back
+  automatically." Without the rows (migration absent or write failed) it keeps the earlier wording: "...
+  {unconfirmed} couldn't be confirmed by the AI provider, so it is still charged for now. Contact support if
+  it doesn't appear in your library." With no unconfirmed image the old "you were only charged for the K
+  that worked" message stays (it is true then).
   Expired results: reconcile treats a 404 on `result()` as ambiguous (the run may have delivered), never as failed.
   A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
 - Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`
@@ -86,6 +103,11 @@ parameters together). Effective within 60 s. SQL fallback:
 ```sql
 update model_configs set provider='replicate', model='<replicate model>', parameters='{}' where tool_key='photo' and config_key='<config_key>';
 ```
+
+Migration 119 (`generation_batch_items`, per-image settlement, S2) is applied by hand in the Supabase SQL editor.
+Until it exists the route writes no rows and reconcile logs `items: skipped (generation_batch_items missing)`
+(today's behavior); within about a minute of applying it both switch on with no redeploy. Check:
+`select count(*) from generation_batch_items`.
 
 Migrations: 113-117 are ALL applied in prod as of 2026-10-31. 113-114 (`provider` columns for model config and
 `generation_predictions`) are required; 115-117 (Fal Nano Banana cost rows, Fal GPT Flare cost rows, admin config
