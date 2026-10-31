@@ -45,6 +45,7 @@ import {
 } from "@/lib/generation-batch-items-db";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { markAssetReady } from "@/lib/assets-db";
+import { mediaExists } from "@/lib/media-storage";
 import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
 import type { ModelPoseId, PhotoStyleId } from "@/lib/product-photo";
 
@@ -393,6 +394,11 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
             return res.arrayBuffer();
           },
           userIdForProfile,
+          isStored: async (storagePath) => {
+            const { data, error } = await mediaExists(storagePath);
+            if (data === null) throw new Error(error?.message ?? "Storage check failed.");
+            return data;
+          },
           save: ({ poseId, styleId, ...rest }) =>
             saveGeneratedProductPhoto({ ...rest, poseId: poseId as ModelPoseId, styleId: styleId as PhotoStyleId }),
           recordLibrary: async ({ userId, storagePath, poseId, styleId, prompt, title, creationKind, characterName, modelTier, modelLabel, skillId, jobId }) => {

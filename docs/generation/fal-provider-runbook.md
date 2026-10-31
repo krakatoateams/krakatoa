@@ -68,9 +68,10 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   (the key is written on the still-`ambiguous` row first, compare-and-set on the state, then the ledger
   refund runs, then `ambiguous` -> `refunded`). Late delivery never claims a row that carries a refund key,
   so overlapping runs with contradictory Fal answers never both refund and deliver an image. A refund call
-  that errors or a run that dies mid-refund leaves the row `ambiguous` with its key; the next confirmed
-  failure retries the same key (the ledger dedupes it). Such a row that Fal later calls finished is not
-  delivered: at 72 h it becomes `unresolved` with the key set (check the ledger for that key first). Processing / succeeded / 404 / 5xx / timeout leave it
+  that errors or a run that dies mid-refund leaves the row `ambiguous` with its key. The next run does not
+  ask Fal again and never delivers it: it retries the refund with the same key (the ledger dedupes it,
+  same spend cap), then `refunded`. If the retry still fails past 72 h the row becomes `unresolved` with
+  the key set (check the ledger for that key before refunding by hand). Processing / succeeded / 404 / 5xx / timeout leave it
   `ambiguous`; past 72 h one last check, then `unresolved`. A delivered image is never refunded. Cron log:
   `itemsRefunded`, `itemsDeliveredLate`, `itemsUnresolved`, `itemsLeft`, `itemsSkipped`. Manual review:
   `select * from generation_batch_items where state = 'unresolved' order by created_at desc;` (refund only
@@ -88,9 +89,11 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   A 404, an untrusted URL, a download or save failure, or unusable `delivery` params put the row back to
   `ambiguous` (only by the run that holds the lease), nothing refunded; the 72 h expiry rule still applies.
   Once the image is stored the row never goes back to `ambiguous`: if the asset update or the final step
-  fails it stays `delivering` and the next run after the lease finishes it. Rows still `delivering` long
-  after their lease need a look: `select * from generation_batch_items where state = 'delivering' and
-  updated_at < now() - interval '1 hour';` (the image is usually in the library already). The job's
+  fails it stays `delivering` and the next run after the lease finishes it (a reclaimed row first checks
+  Storage for its filename and, if the image is there, finalizes it without asking Fal again); past 72 h it becomes
+  `unresolved` with `error_code = 'LATE_DELIVERY_STORED'` (the image is saved: fix the asset, never refund).
+  Rows still `delivering` long after their lease need a look: `select * from generation_batch_items where
+  state = 'delivering' and updated_at < now() - interval '1 hour';`. The job's
   `output.storagePaths` is not rewritten: the library is the source of truth for a late image, and it
   appears there without a notification. Rollback: revert the code; open rows fall back to the phase-2
   expiry rule.

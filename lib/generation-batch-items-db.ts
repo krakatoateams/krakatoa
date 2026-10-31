@@ -2,7 +2,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { isMissingDbObject } from "@/lib/generation-db-errors";
 import { errorLogSafe } from "@/lib/error-log-safe";
 import type { SettledCursor } from "@/lib/generation-reconcile-settled";
-import type { BatchItemCandidate, BatchItemRow } from "@/lib/generation-batch-items-pure";
+import { LATE_DELIVERY_STORED_CODE, type BatchItemCandidate, type BatchItemRow } from "@/lib/generation-batch-items-pure";
 
 /**
  * Every read/write of `generation_batch_items` (migration 119). While the table is missing nothing is
@@ -62,9 +62,11 @@ type ItemRow = {
   state: "ambiguous" | "delivering";
   asset_id: string | null;
   delivery: Record<string, unknown> | null;
+  refund_idempotency_key: string | null;
 };
 
-const ITEM_COLUMNS = "id, profile_id, job_id, batch_index, provider, prediction_id, credits, created_at, state, asset_id, delivery";
+const ITEM_COLUMNS =
+  "id, profile_id, job_id, batch_index, provider, prediction_id, credits, created_at, state, asset_id, delivery, refund_idempotency_key";
 
 // Open rows: `delivering` ones are included so a stale lease can be reclaimed (the claim CAS decides).
 const openQuery = (w: { after: string; before: string }, cursor: SettledCursor, head: boolean) => {
@@ -101,6 +103,7 @@ export async function fetchOpenBatchItems(
     state: r.state,
     assetId: r.asset_id,
     delivery: r.delivery,
+    refundKey: r.refund_idempotency_key,
   }));
 }
 
@@ -153,15 +156,23 @@ export async function claimBatchItemDelivery(
   return ((data as { updated_at: string }[] | null) ?? [])[0]?.updated_at ?? null;
 }
 
-/** `delivering -> delivered_late` (whoever holds the lease: the image is saved) or back to `ambiguous` (own lease only). */
+/**
+ * `delivering -> delivered_late` (whoever holds the lease: the image is saved), back to `ambiguous` (own
+ * lease only), or `unresolved` with LATE_DELIVERY_STORED_CODE (stored, not finalized within the lookback).
+ */
 export async function finishBatchItemDelivery(
   item: { id: string; profileId: string },
   lease: string,
-  to: "delivered_late" | "ambiguous",
+  to: "delivered_late" | "ambiguous" | "unresolved",
 ): Promise<boolean> {
+  const settledAt = new Date().toISOString();
   let q = supabaseServer
     .from(TABLE)
-    .update(to === "delivered_late" ? { state: to, settled_at: new Date().toISOString() } : { state: to })
+    .update(
+      to === "ambiguous"
+        ? { state: to }
+        : { state: to, settled_at: settledAt, ...(to === "unresolved" ? { error_code: LATE_DELIVERY_STORED_CODE } : {}) },
+    )
     .eq("id", item.id)
     .eq("profile_id", item.profileId)
     .eq("state", "delivering");
