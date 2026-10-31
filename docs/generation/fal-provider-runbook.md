@@ -56,7 +56,12 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
   prediction failed (a cancelled request Fal no longer knows, status 404, keeps it unconfirmed: manual review).
   Known limit (S2): a batch with some images saved and some ambiguous failures is `succeeded`, so reconcile
   never sees it and the user stays charged for the undelivered image; fixing it needs per-image outcome
-  records and refund keys (schema change), left for a follow-up decision.
+  records and refund keys (schema change), being fixed in #441/#442. Until then the response carries
+  `unconfirmedImageCount` (Fal only, also on the job output and usage metadata) and the photo page tells the
+  truth: "{failed} of {requested} images didn't arrive. {refunded} were refunded. {unconfirmed} couldn't be
+  confirmed by the AI provider, so it is still charged for now. Contact support if it doesn't appear in your
+  library." (singular/plural adjusted, refunded sentence omitted when 0). With no unconfirmed image the old
+  "you were only charged for the K that worked" message stays (it is true then).
   Expired results: reconcile treats a 404 on `result()` as ambiguous (the run may have delivered), never as failed.
   A run that produced output is never refunded. Batch partial refunds follow the same rule per image.
 - Unverified: whether Fal bills failed runs. Fal's docs describe failed requests (status `COMPLETED`

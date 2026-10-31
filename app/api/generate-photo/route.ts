@@ -1046,6 +1046,7 @@ export async function POST(req: Request) {
           assetId: photoAssetId,
           imageCount: successes.length,
           storagePaths: successes.map((s) => s.saved.storagePath),
+          unconfirmedImageCount: plan.unconfirmedFailures,
         },
         costCredits: creditsAmount,
       }));
@@ -1062,6 +1063,8 @@ export async function POST(req: Request) {
       })),
       requestedImageCount: imageCount,
       failedImageCount: failureCount,
+      // Failed images still charged because the provider outcome is unknown (Fal only); additive field.
+      unconfirmedImageCount: plan.unconfirmedFailures,
       savedToCloud: true,
     };
     await finishMeteredAttempt(metered, {
@@ -1088,6 +1091,7 @@ export async function POST(req: Request) {
           providerResolution,
           requestedImageCount: imageCount,
           failedImageCount: failureCount,
+          unconfirmedImageCount: plan.unconfirmedFailures,
         },
       },
     });
