@@ -43,7 +43,8 @@ export async function insertBatchItems(rows: BatchItemRow[]): Promise<"written" 
 /** Reconcile: false while the table is missing; other errors throw (reported in the run's errors). */
 export async function batchItemsTableReady(): Promise<boolean> {
   if (knownMissing()) return false;
-  const { error } = await supabaseServer.from(TABLE).select("id", { count: "exact", head: true }).limit(1);
+  // A GET, not HEAD: a HEAD 404 has no body and supabase-js reports it as success.
+  const { error } = await supabaseServer.from(TABLE).select("id").limit(1);
   if (!error) return true;
   if (noteMissing(error.message)) return false;
   throw new Error(error.message);

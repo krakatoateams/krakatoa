@@ -16,6 +16,11 @@ export const SETTLED_CONCURRENCY = 4;
 export const SETTLED_BUDGET_MS = 45_000;
 /** Own slice for the per-image (S2) scan, so it cannot starve the job scans. */
 export const SETTLED_ITEMS_BUDGET_MS = 20_000;
+/**
+ * The per-image scan only uses run time left before this mark; its last batch can overrun by one Fal
+ * check (SETTLED_CONFIRM_TIMEOUT_MS) plus a refund, which still leaves room for the stale-request sweep.
+ */
+export const SETTLED_ITEMS_RUN_DEADLINE_MS = 85_000;
 /** Per-job cap on Fal status calls; a slow Fal counts as "not confirmed". */
 export const SETTLED_CONFIRM_TIMEOUT_MS = 15_000;
 

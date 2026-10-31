@@ -154,18 +154,22 @@ export async function settleBatchItem(
   if (refundable) {
     // A replay of this key after a lost CAS still fits: a delivered image always keeps >= credits of headroom.
     const [spent, refunded] = await Promise.all([ops.spendAmount(item.jobId), ops.refundedAmount(item.jobId)]);
-    if (refunded + item.credits > spent) return "over_cap";
-    const key = batchItemRefundKey(item.jobId, item.batchIndex);
-    await ops.refund({
-      profileId: item.profileId,
-      amount: item.credits,
-      idempotencyKey: key,
-      jobId: item.jobId,
-      description: "Refund for a batch image the provider confirmed failed (reconcile cron)",
-      metadata: { reason: "batch_image_failed", batchIndex: item.batchIndex, reconciledAt: new Date().toISOString() },
-    });
-    return (await ops.settle(item, "refunded", key)) ? "refunded" : "raced";
+    if (refunded + item.credits <= spent) {
+      const key = batchItemRefundKey(item.jobId, item.batchIndex);
+      await ops.refund({
+        profileId: item.profileId,
+        amount: item.credits,
+        idempotencyKey: key,
+        jobId: item.jobId,
+        description: "Refund for a batch image the provider confirmed failed (reconcile cron)",
+        metadata: { reason: "batch_image_failed", batchIndex: item.batchIndex, reconciledAt: new Date().toISOString() },
+      });
+      return (await ops.settle(item, "refunded", key)) ? "refunded" : "raced";
+    }
+    // I3: never refund past the spend; past the lookback it goes to manual review like any unconfirmed image.
+    if (!opts.expired) return "over_cap";
+  } else if (!opts.expired) {
+    return "left";
   }
-  if (!opts.expired) return "left";
   return (await ops.settle(item, "unresolved", null)) ? "unresolved" : "raced";
 }

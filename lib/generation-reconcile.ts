@@ -24,6 +24,7 @@ import {
 import {
   SETTLED_CONFIRM_TIMEOUT_MS,
   SETTLED_ITEMS_BUDGET_MS,
+  SETTLED_ITEMS_RUN_DEADLINE_MS,
   expireSettledJob,
   reconcileSettledProviderFailure,
   scanSettledJobs,
@@ -42,8 +43,6 @@ import {
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
-/** The per-image scan starts only while this much of the run is left unspent (route maxDuration is 120 s). */
-const RUN_BUDGET_MS = 100_000;
 type SettledRow = { id: string; profile_id: string; cost_credits?: number; updated_at: string };
 
 export type GenerationReconcileResult = {
@@ -377,7 +376,7 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
           countFrom: (cursor) => countAmbiguousBatchItems(w, cursor),
           process: (item) => settleBatchItem(itemOps, item, { expired: Date.parse(item.updatedAt) <= Date.parse(windows.active.after) }),
         },
-        { budgetMs: Math.max(0, Math.min(SETTLED_ITEMS_BUDGET_MS, RUN_BUDGET_MS - (Date.now() - runStart))) },
+        { budgetMs: Math.max(0, Math.min(SETTLED_ITEMS_BUDGET_MS, SETTLED_ITEMS_RUN_DEADLINE_MS - (Date.now() - runStart))) },
       );
       result.itemsRefunded = items.outcomes.refunded ?? 0;
       result.itemsUnresolved = items.outcomes.unresolved ?? 0;

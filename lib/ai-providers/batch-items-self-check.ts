@@ -257,6 +257,10 @@ async function main() {
     const w = world([item("c1", { fate: "failed" })], { "job-1": { status: "succeeded", spend: 10, refunded: 10 } });
     const r = await w.run(T0);
     assert(r.outcomes.over_cap === 1 && w.ledger.size === 1 && w.items[0].state === "ambiguous", "cap blocks the over-refund");
+    const old = new Date(T0 - SETTLED_LOOKBACK_MS - HOUR).toISOString();
+    const x = world([item("c2", { fate: "failed", updatedAt: old })], { "job-1": { status: "succeeded", spend: 10, refunded: 10 } });
+    await x.run(T0);
+    assert(x.items[0].state === "unresolved" && x.ledger.size === 1, "capped row past the lookback goes to manual review, no refund");
   }
 
   // 9. Replicate row (never written by the route) is never refunded by this scan.
@@ -326,20 +330,23 @@ async function main() {
     console.warn = (...a: unknown[]) => { warnings.push(a.join(" ")); };
     let tableExists = false;
     let requests = 0;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       requests += 1;
       assert(String(input).includes("/generation_batch_items"), "only the batch items table is queried");
       if (!tableExists) {
+        // PostgREST: a HEAD has no body (supabase-js then reports success); GET/POST carry the error JSON.
+        if (init?.method === "HEAD") return new Response(null, { status: 404 });
         return new Response(JSON.stringify({ code: "PGRST205", message: "Could not find the table 'public.generation_batch_items' in the schema cache" }), { status: 404, headers: { "content-type": "application/json" } });
       }
-      return new Response(null, { status: 201, headers: { "content-range": "*/0" } });
+      if (init?.method === "POST") return new Response(null, { status: 201 });
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     try {
       const db = await import("../generation-batch-items-db");
       const rows = rowsFor(fal, [ok(), no(networkLoss())])!;
-      assert((await db.insertBatchItems(rows)) === "missing", "missing table: insert reports missing, no throw");
-      assert((await db.batchItemsTableReady()) === false && (await db.insertBatchItems(rows)) === "missing", "cached: still missing");
-      assert(requests === 1 && warnings.length === 1, "one probe and one log line while cached");
+      assert((await db.batchItemsTableReady()) === false, "missing table: reconcile probe says not ready (fresh, no cache), no throw");
+      assert((await db.insertBatchItems(rows)) === "missing" && (await db.batchItemsTableReady()) === false, "cached: insert and probe report missing");
+      assert(requests === 1 && warnings.length === 1, "one request and one log line while cached");
       tableExists = true; // Ryan applies 119
       const t = realNow();
       Date.now = () => t + 61_000;
