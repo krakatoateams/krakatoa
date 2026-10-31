@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Filter } from "lucide-react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Filter, Plus } from "lucide-react";
 import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import {
   type AdminCostVariant,
@@ -12,6 +12,7 @@ import {
   type AdminProviderChoice,
   type AdminToolNode,
   buildAdminConfigTree,
+  splitToolModels,
   suggestCreditsFromProvider,
 } from "@/lib/admin-config-tree";
 import {
@@ -32,7 +33,7 @@ import {
 import { PROVIDER_LABEL, marginForCost, type PhotoProviderId } from "@/lib/admin-provider-switch";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
-import { ModelRegistrySection } from "./ModelRegistrySection";
+import { AddModelDialog, RemoveModelDialog } from "./ToolModelDialogs";
 import { TOOL_CONFIG_UPDATED_EVENT } from "@/lib/tool-config-events";
 import type { Platform } from "@/lib/platform-availability-pure";
 
@@ -109,6 +110,22 @@ class AdminApiError extends Error {
 }
 
 const STALE_MODEL_MESSAGE = "Someone else changed this model. Review and try again.";
+
+/** A model_catalog_configs row as the catalog routes return it (`archived_at` only after migration 118). */
+type CatalogRow = { id: string; enabled: boolean; updated_at: string; archived_at?: string | null };
+
+async function sendApi(method: "PATCH" | "POST", url: string, body: Record<string, unknown>) {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) throw new AdminApiError(String(data.error ?? `Request failed (${res.status})`), res.status, data);
+  return data;
+}
+const patchApi = (url: string, body: Record<string, unknown>) => sendApi("PATCH", url, body);
+const postApi = (url: string, body: Record<string, unknown>) => sendApi("POST", url, body);
 
 const ProviderAdminContext = createContext<ProviderAdmin>({
   falConfigured: false,
@@ -737,7 +754,6 @@ function ModelSection({
   model,
   tool,
   billingSettings,
-  defaultOpen,
   saving,
   savedPricing,
   onChange,
@@ -746,11 +762,11 @@ function ModelSection({
   onSaveVariant,
   onToggleVariant,
   onCommitCatalog,
+  onRemove,
 }: {
   model: AdminModelNode;
   tool: AdminToolNode;
   billingSettings: BillingSettings;
-  defaultOpen?: boolean;
   saving: boolean;
   savedPricing: Record<string, PricingBaseline>;
   onChange: (patch: Partial<AdminModelNode>) => void;
@@ -759,12 +775,18 @@ function ModelSection({
   onSaveVariant: (variant: AdminCostVariant) => void;
   onToggleVariant: (variant: AdminCostVariant) => void;
   onCommitCatalog: (modelId: string, enabled: boolean) => void;
+  onRemove: (model: AdminModelNode) => void;
 }) {
   const { falConfigured } = useContext(ProviderAdminContext);
   const notice = useContext(ModelNoticeContext)[model.id];
-  const [open, setOpen] = useState(defaultOpen ?? false);
+  const [open, setOpen] = useState(false);
   const showModes = model.features.length > 0;
-  const modeSummary = model.features.map((f) => f.label).join(" · ");
+  // Quiet secondary line: where it runs and which features it serves. Pricing and modes stay in details.
+  const runsOn = model.providerChoice
+    ? PROVIDER_LABEL[model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider]
+    : "Replicate";
+  const details = [runsOn, ...model.features.map((f) => f.label)].join(" · ");
+  const noteId = `model-note-${tool.toolKey}-${model.id}`;
 
   const setVariant = (pricingKey: string, patch: Partial<AdminCostVariant>) => {
     onChange({
@@ -773,42 +795,59 @@ function ModelSection({
   };
 
   return (
-    <div className={`border-l border-white/10 pl-3 ${model.enabled ? "" : "opacity-60"}`}>
-      <div className="flex flex-wrap items-center gap-2 py-2">
+    <div className="border-b border-white/5 last:border-b-0">
+      <div className="flex items-center gap-3 py-2.5">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          aria-expanded={open}
+          title={model.subtitle}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
         >
           {open ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+            <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+            <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" />
           )}
-          <span className="text-sm font-medium text-white">{model.label}</span>
-          {modeSummary ? (
-            <>
-              <span className="text-gray-600" aria-hidden>
-                ·
-              </span>
-              <span className="truncate text-sm font-normal text-gray-500">{modeSummary}</span>
-            </>
-          ) : null}
+          <span className="min-w-0">
+            <span className={`block truncate text-sm font-medium ${model.enabled ? "text-white" : "text-gray-400"}`}>
+              {model.label}
+            </span>
+            <span className="block truncate text-xs normal-case text-gray-500">{details}</span>
+          </span>
         </button>
-        <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
-          <input
-            type="checkbox"
-            checked={model.enabled}
-            onChange={(e) => {
-              const enabled = e.target.checked;
-              onChange({ enabled });
-              onCommitCatalog(model.id, enabled);
-            }}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={model.enabled}
+          aria-label={`${model.label} ${model.enabled ? "on" : "off"}`}
+          aria-describedby={noteId}
+          title={model.enabled ? "On: users can pick this model" : "Off: hidden from users"}
+          onClick={() => {
+            const enabled = !model.enabled;
+            onChange({ enabled });
+            onCommitCatalog(model.id, enabled);
+          }}
+          className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-150 ${
+            model.enabled ? "border-emerald-400/40 bg-emerald-400/30" : "border-white/15 bg-white/10"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-[left] duration-150 ${
+              model.enabled ? "left-[18px]" : "left-0.5"
+            }`}
           />
-          On
-        </label>
+        </button>
+        <button
+          type="button"
+          onClick={() => onRemove(model)}
+          aria-label={`Remove ${model.label} from ${tool.label}`}
+          className="shrink-0 rounded px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-white"
+        >
+          Remove
+        </button>
       </div>
-      <p aria-live="polite" className={notice ? "pb-2 text-xs text-amber-300/90" : "sr-only"}>
+      <p id={noteId} aria-live="polite" className={notice ? "-mt-1 pb-2.5 pl-[22px] text-xs text-amber-300/90" : "sr-only"}>
         {notice ? notice.join(" ") : ""}
       </p>
 
@@ -865,6 +904,8 @@ function ToolSection({
   onCommitMode,
   onCommitCatalog,
   onCommitPipelineRole,
+  onRemoveModel,
+  onAddModel,
 }: {
   tool: AdminToolNode;
   billingSettings: BillingSettings;
@@ -877,16 +918,23 @@ function ToolSection({
   onCommitMode: (featureModelId: string) => void;
   onCommitCatalog: (modelId: string, enabled: boolean) => void;
   onCommitPipelineRole: (role: AdminPipelineRole) => void;
+  onRemoveModel: (modelId: string) => void;
+  onAddModel: (modelId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [featureFilter, setFeatureFilter] = useState("all");
   const [overridePrompt, setOverridePrompt] = useState<DefaultOverridePrompt | null>(null);
+  const [removing, setRemoving] = useState<AdminModelNode | null>(null);
+  const [adding, setAdding] = useState(false);
 
-  const featureOptions = featureFilterOptions(tool.toolKey, tool.models);
+  // One source for the list and the picker: the catalog rows behind this tree.
+  const { inTool, removed } = splitToolModels(tool.models);
+  const hasModelList = tool.models.length > 0;
+  const featureOptions = featureFilterOptions(tool.toolKey, inTool);
   const visibleModels =
     featureFilter === "all"
-      ? tool.models
-      : tool.models.filter((m) => modelMatchesFeatureFilter(m, featureFilter));
+      ? inTool
+      : inTool.filter((m) => modelMatchesFeatureFilter(m, featureFilter));
 
   const featureFilterChipOptions = [
     { id: "all", label: "All features" },
@@ -897,7 +945,7 @@ function ToolSection({
       ? "All features"
       : (featureOptions.find((opt) => opt.key === featureFilter)?.label ?? "All features");
 
-  const storyboardModels = tool.models
+  const storyboardModels = inTool
     .filter((m) => m.features.some((f) => f.key === "storyboard"))
     .map((m) => m.label);
 
@@ -980,6 +1028,31 @@ function ToolSection({
         onConfirm={confirmOverride}
         onCancel={() => setOverridePrompt(null)}
       />
+      {hasModelList ? (
+        <>
+          <RemoveModelDialog
+            model={removing}
+            toolLabel={tool.label}
+            onConfirm={() => {
+              const m = removing;
+              setRemoving(null);
+              if (m) onRemoveModel(m.id);
+            }}
+            onCancel={() => setRemoving(null)}
+          />
+          <AddModelDialog
+            open={adding}
+            toolKey={tool.toolKey}
+            toolLabel={tool.label}
+            candidates={removed}
+            onAdd={(m) => {
+              setAdding(false);
+              onAddModel(m.id);
+            }}
+            onClose={() => setAdding(false)}
+          />
+        </>
+      ) : null}
       <section className="rounded-lg border border-white/10">
       <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2.5">
         <button
@@ -1040,25 +1113,30 @@ function ToolSection({
 
       {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
         <div className="px-3 py-2">
-          {featureOptions.length > 0 ? (
-            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-white/10 pb-2">
-              <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                Filter by feature
-              </span>
-              <ChipDropdown
-                icon={<Filter className="h-3.5 w-3.5" />}
-                value={featureFilterLabel}
-                activeId={featureFilter}
-                options={featureFilterChipOptions}
-                onSelect={setFeatureFilter}
-                square
-                sheetTitle="Filter by feature"
-              />
-              {featureFilter !== "all" ? (
-                <span className="text-xs text-gray-500">
-                  {visibleModels.length} model{visibleModels.length === 1 ? "" : "s"}
-                </span>
+          {hasModelList ? (
+            <div className="mb-1 flex flex-wrap items-center gap-3 border-b border-white/10 pb-2">
+              {featureOptions.length > 0 ? (
+                <ChipDropdown
+                  icon={<Filter className="h-3.5 w-3.5" />}
+                  value={featureFilterLabel}
+                  activeId={featureFilter}
+                  options={featureFilterChipOptions}
+                  onSelect={setFeatureFilter}
+                  square
+                  sheetTitle="Filter by feature"
+                />
               ) : null}
+              <span className="text-xs text-gray-500">
+                {visibleModels.length} model{visibleModels.length === 1 ? "" : "s"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/30 hover:bg-white/[0.06]"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add model
+              </button>
             </div>
           ) : null}
 
@@ -1072,7 +1150,6 @@ function ToolSection({
               model={m}
               tool={tool}
               billingSettings={billingSettings}
-              defaultOpen={m.id === "balanced" || m.id === "seedance2_fast"}
               saving={saving}
               savedPricing={savedPricing}
               onChange={(patch) => patchModel(m.id, patch)}
@@ -1081,6 +1158,7 @@ function ToolSection({
               onSaveVariant={onSaveVariant}
               onToggleVariant={onToggleVariant}
               onCommitCatalog={onCommitCatalog}
+              onRemove={setRemoving}
             />
           ))}
 
@@ -1192,7 +1270,6 @@ export default function AdminConfigV2Page() {
   const saveBatchErroredRef = useRef(false);
   const catalogPendingRef = useRef(new Map<string, boolean>());
   const [modelNotices, setModelNotices] = useState<Record<string, string[]>>({});
-  const [registryRefresh, setRegistryRefresh] = useState(0);
   const autosaveInflightRef = useRef(new Map<string, Promise<void>>());
 
   const load = useCallback(async (quiet = false) => {
@@ -1305,6 +1382,7 @@ export default function AdminConfigV2Page() {
         model_id: String(row.model_id),
         enabled: Boolean(row.enabled),
         updated_at: row.updated_at ? String(row.updated_at) : undefined,
+        archived_at: row.archived_at ? String(row.archived_at) : null,
       }));
 
       const tree = buildAdminConfigTree({
@@ -1358,17 +1436,6 @@ export default function AdminConfigV2Page() {
     showToast({ type: "success", message: `Switched to ${PROVIDER_LABEL[provider]}.` });
   }, [showToast]);
 
-  const patchApi = async (url: string, body: Record<string, unknown>) => {
-    const res = await fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json()) as Record<string, unknown>;
-    if (!res.ok) throw new AdminApiError(String(data.error ?? `Request failed (${res.status})`), res.status, data);
-    return data;
-  };
-
   const setNotice = useCallback((modelId: string, reasons: string[] | null) => {
     setModelNotices((prev) => {
       const next = { ...prev };
@@ -1378,13 +1445,21 @@ export default function AdminConfigV2Page() {
     });
   }, []);
 
-  // Tree updates from a server row: keeps the compare-and-set token (updated_at) current.
-  const applyCatalogRow = useCallback((row: { id: string; enabled: boolean; updated_at: string }) => {
+  // Tree updates from a server row: keeps the compare-and-set token (updated_at) and the removed flag current,
+  // so a removed model leaves its tool card (and an added one appears) without a reload.
+  const applyCatalogRow = useCallback((row: CatalogRow) => {
     setTools((prev) => {
       const next = prev.map((t) => ({
         ...t,
         models: t.models.map((m) =>
-          m.catalogConfigId === row.id ? { ...m, enabled: row.enabled, catalogUpdatedAt: row.updated_at } : m
+          m.catalogConfigId === row.id
+            ? {
+                ...m,
+                enabled: row.enabled,
+                catalogUpdatedAt: row.updated_at,
+                ...(row.archived_at !== undefined ? { archived: !!row.archived_at } : {}),
+              }
+            : m
         ),
       }));
       toolsRef.current = next;
@@ -1413,12 +1488,11 @@ export default function AdminConfigV2Page() {
     []
   );
 
-  // Other rows' tokens may have moved (setting a default clears the old one) and the registry
-  // view should follow: resync once the autosave batch has settled.
+  // Other rows' tokens may have moved (setting a default clears the old one): resync once the
+  // autosave batch has settled.
   const resyncSoon = useCallback(() => {
     setTimeout(() => {
       void load(true);
-      setRegistryRefresh((n) => n + 1);
     }, 500);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1566,6 +1640,26 @@ export default function AdminConfigV2Page() {
     [scheduleAutosave]
   );
 
+  /** A refused catalog change (409): roll the row back to the server's copy and say why next to the model. */
+  const catalogRefusal = useCallback(
+    (modelId: string, e: unknown): Error => {
+      if (!(e instanceof AdminApiError) || e.status !== 409) return e instanceof Error ? e : new Error("Failed to save.");
+      const current = e.body.modelCatalog as CatalogRow | null;
+      if (current) applyCatalogRow(current);
+      const reasons =
+        e.body.code === "STALE_MODEL_CONFIG"
+          ? [STALE_MODEL_MESSAGE]
+          : e.body.code === "MIGRATION_REQUIRED"
+            ? ["This needs migration 118. Ask a developer to apply it."]
+            : ((e.body.reasons as string[] | undefined) ?? [e.message]);
+      // One short sentence at the moment of action: the first (highest-priority) guard reason.
+      setNotice(modelId, reasons.slice(0, 1));
+      if (e.body.code === "STALE_MODEL_CONFIG") resyncSoon();
+      return new Error(reasons[0]);
+    },
+    [applyCatalogRow, setNotice, resyncSoon]
+  );
+
   const commitModelCatalog = useCallback(
     (modelId: string, enabled: boolean) => {
       catalogPendingRef.current.set(modelId, enabled);
@@ -1585,28 +1679,76 @@ export default function AdminConfigV2Page() {
               enabled: targetEnabled,
               expectedUpdatedAt: live.catalogUpdatedAt,
             });
-            applyCatalogRow(data.modelCatalog as { id: string; enabled: boolean; updated_at: string });
+            applyCatalogRow(data.modelCatalog as CatalogRow);
           } catch (e) {
             catalogPendingRef.current.delete(modelId);
-            if (e instanceof AdminApiError && e.status === 409) {
-              // Roll the optimistic toggle back to the server's row and say why.
-              const current = e.body.modelCatalog as { id: string; enabled: boolean; updated_at: string } | null;
-              if (current) applyCatalogRow(current);
-              const stale = e.body.code === "STALE_MODEL_CONFIG";
-              const reasons = stale ? [STALE_MODEL_MESSAGE] : ((e.body.reasons as string[] | undefined) ?? [e.message]);
-              setNotice(modelId, reasons);
-              if (stale) resyncSoon();
-              throw new Error(reasons.join(" "));
-            }
-            throw e;
+            // A refusal rolls the optimistic toggle back to the server's row and says why.
+            throw catalogRefusal(modelId, e);
           }
           if (catalogPendingRef.current.get(modelId) === targetEnabled) break;
         } while (true);
         catalogPendingRef.current.delete(modelId);
-        setRegistryRefresh((n) => n + 1);
       });
     },
-    [scheduleAutosave, setNotice, applyCatalogRow, resyncSoon]
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal]
+  );
+
+  /** The model's current catalog row (id + compare-and-set token), read at save time. */
+  const liveCatalogModel = useCallback((modelId: string) => {
+    const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
+    if (!live?.catalogConfigId || !live.catalogUpdatedAt) {
+      throw new Error("Model settings are not ready. Click Refresh, then try again.");
+    }
+    return { ...live, catalogConfigId: live.catalogConfigId, catalogUpdatedAt: live.catalogUpdatedAt };
+  }, []);
+
+  // Remove = archive this tool's catalog row (guarded server-side). Same autosave key as the
+  // on/off switch, so the two never race on the compare-and-set token.
+  const removeModel = useCallback(
+    (modelId: string) => {
+      setNotice(modelId, null);
+      scheduleAutosave(`catalog:${modelId}`, async () => {
+        const live = liveCatalogModel(modelId);
+        try {
+          const data = await postApi(`/api/admin/config/model-catalog/${live.catalogConfigId}/archive`, {
+            expectedUpdatedAt: live.catalogUpdatedAt,
+          });
+          applyCatalogRow(data.modelCatalog as CatalogRow);
+        } catch (e) {
+          throw catalogRefusal(modelId, e);
+        }
+      });
+    },
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal, liveCatalogModel]
+  );
+
+  // Add = restore (when removed) then turn on; the enable step re-runs the price/provider guard.
+  const addModel = useCallback(
+    (modelId: string) => {
+      setNotice(modelId, null);
+      scheduleAutosave(`catalog:${modelId}`, async () => {
+        const live = liveCatalogModel(modelId);
+        try {
+          let token = live.catalogUpdatedAt;
+          if (live.archived) {
+            const restored = await postApi(`/api/admin/config/model-catalog/${live.catalogConfigId}/restore`, {
+              expectedUpdatedAt: token,
+            });
+            const row = restored.modelCatalog as CatalogRow;
+            applyCatalogRow(row);
+            token = row.updated_at;
+          }
+          const data = await patchApi(`/api/admin/config/model-catalog/${live.catalogConfigId}`, {
+            enabled: true,
+            expectedUpdatedAt: token,
+          });
+          applyCatalogRow(data.modelCatalog as CatalogRow);
+        } catch (e) {
+          throw catalogRefusal(modelId, e);
+        }
+      });
+    },
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal, liveCatalogModel]
   );
 
   const commitFeatureMode = useCallback(
@@ -1629,7 +1771,6 @@ export default function AdminConfigV2Page() {
           });
           applyFeatureRow(data.featureModel as { id: string; enabled: boolean; is_default: boolean; updated_at: string });
           if (feature.isDefault) resyncSoon();
-          setRegistryRefresh((n) => n + 1);
         } catch (e) {
           if (e instanceof AdminApiError && e.status === 409) {
             const current = e.body.featureModel as { id: string; enabled: boolean; is_default: boolean; updated_at: string } | null;
@@ -1654,24 +1795,18 @@ export default function AdminConfigV2Page() {
     <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, onSwitched: onProviderSwitched }}>
       {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
       <div className="mx-auto max-w-5xl space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-        <span>
-          Credits = user charge · Replicate $ = provider reference · toggles save automatically · pricing rows use Save ·{" "}
-          <button type="button" onClick={() => void load()} className="text-gray-300 hover:text-white">
-            Refresh
-          </button>
-        </span>
+      <div className="flex items-center justify-end">
+        <button type="button" onClick={() => void load()} className="text-xs text-gray-400 hover:text-white">
+          Refresh
+        </button>
       </div>
 
       {loadError ? <p className="text-xs text-red-400">{loadError}</p> : null}
 
-      <ModelRegistrySection refreshKey={registryRefresh} onChanged={() => void load(true)} />
-
       <div id="admin-config-tools" className="space-y-2">
           {tools.map((tool) => (
-            <>
+            <Fragment key={tool.toolKey}>
               <ToolSection
-                key={tool.toolKey}
                 tool={tool}
                 billingSettings={billingSettings}
                 saving={saving}
@@ -1683,6 +1818,8 @@ export default function AdminConfigV2Page() {
                 onCommitMode={commitFeatureMode}
                 onCommitCatalog={commitModelCatalog}
                 onCommitPipelineRole={commitPipelineRole}
+                onRemoveModel={removeModel}
+                onAddModel={addModel}
               />
               {/* Platform availability (see CONTEXT.md) is product-wide, not
                   tool-scoped (Schedule is the only current consumer of these
@@ -1690,8 +1827,8 @@ export default function AdminConfigV2Page() {
                   section since that's the natural place an admin looks for
                   it, kept as its own self-contained fetch/save rather than
                   woven into ToolSection's autosave machinery. */}
-              {tool.toolKey === "schedule" && <PlatformAvailabilitySection key="platform-availability" />}
-            </>
+              {tool.toolKey === "schedule" && <PlatformAvailabilitySection />}
+            </Fragment>
           ))}
       </div>
       </div>

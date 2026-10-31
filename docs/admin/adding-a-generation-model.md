@@ -1,7 +1,7 @@
 # Adding a generation model (developer checklist)
 
-A model goes live in two steps: a developer ships it in code (hidden), then an admin adds it in
-**Admin Config → Models → Add…** once its price is set. No code release is needed for the second step.
+A model goes live in two steps: a developer ships it in code (hidden), then an admin turns it on in its
+tool card in **Admin Config** once its price is set. No code release is needed for the second step.
 
 ## Why a model slug cannot be added from the UI
 
@@ -41,26 +41,39 @@ but cannot run or be billed. The admin list is therefore built from the code cat
    `test:model-catalog-guard` fails until you choose. Only the models already offered before this rule
    (`OFFERED_BEFORE_SHIP_DARK` in `lib/model-catalog-configs.ts`, frozen: never add to it) may omit it.
    The flag only sets the shipped default: flipping it on a model that is already offered does not hide
-   it, because its DB row stays enabled. Hide an existing model from Admin Config (Hide or Remove).
+   it, because its DB row stays enabled. Hide an existing model in its Admin Config tool card (switch it
+Off, or Remove it).
 8. **Self-checks.** Run `npm run test:model-catalog-guard` and the checks for the touched provider,
    then `npm run ci:checks`.
 
 ## After deploy
 
 1. Apply migrations (`npm run db:setup`) so the pricing keys exist.
-2. Open Admin Config → Models, find the model under **Not offered**, press **Add…**.
-3. The dialog shows the tool, where it will appear, price per key and the provider status. **Add model**
-   is disabled with the reason while pricing is not ready (`PRICING_NOT_READY`) or the provider is not
-   configured (`PROVIDER_NOT_CONFIGURED`).
-4. Adding goes through the same guarded `PATCH /api/admin/config/model-catalog/[id]` as enable/disable
-   (guard, compare-and-set, audit). The first offer of a ship-dark model is audited as `model_add`;
-   otherwise `model_enable`. Pricing and billing are never written by this flow.
+2. Open Admin Config and expand the tool card (Product Photo or Video). Each card has one model list:
+   name, an On/Off switch and **Remove**; provider and features sit on a quiet second line, and pricing,
+   modes and defaults open with the row's arrow. A ship-dark model is in the list switched Off.
+3. Turn it On. The server guard refuses with one sentence next to the row while pricing is not ready
+   (`PRICING_NOT_READY`) or the provider is not configured (`PROVIDER_NOT_CONFIGURED`).
+4. The switch goes through the guarded `PATCH /api/admin/config/model-catalog/[id]` (guard,
+   compare-and-set, audit). The first offer of a ship-dark model is audited as `model_add`; otherwise
+   `model_enable`. Pricing and billing are never written by this flow.
 
-## Removing a model later
+## Removing a model, and adding it back
 
-Admin Config → Models → **Remove** archives a model (migration 118): it is hidden from users, past
-creations keep their label and prices are kept, and **Restore** brings it back as not offered. Removing
-never edits the code registry; retiring a model from code is a separate developer task (next section).
+**Remove** (in the model's row) takes the model out of **that tool only**: it archives the tool's
+`model_catalog_configs` row (migration 118, `POST …/[id]/archive`). It disappears from the card at once
+and from users on their next request; past creations keep their label and prices are kept. The
+confirmation names the features that lose it, the skills that use it and how often it was used. The server
+refuses (and the dialog says why in one sentence) while the model is the default of a feature
+(`IS_DEFAULT`: pick another default in the row's details first), the last model of the tool
+(`LAST_ENABLED_MODEL`) or the last Reels engine (`REELS_ENGINE_LAST`). Catalog rows are per tool, so a
+model is never shared between tool cards.
+
+**Add model** (one button per card) lists only that tool's removed models. Choosing one restores it
+(`POST …/[id]/restore`) and turns it on (`PATCH …/[id]`), re-running the price and provider guard; a model
+that cannot be offered yet is listed with the reason and cannot be picked. The card updates without a
+reload. Removing never edits the code registry; retiring a model from code is a separate developer task
+(next section).
 
 ## Retiring a model
 
@@ -74,7 +87,7 @@ Full runbook: [`retiring-a-generation-model.md`](retiring-a-generation-model.md)
 3. Never reuse a retired model id, provider slug or pricing key for a different model.
 4. History keeps its labels (from the kept registry entry or the stored `modelLabel`) and its prices
    (`credit_transactions` and cost snapshots are never edited).
-5. Verify: the model is under **Removed models**, its row is archived, pricing rows are deprecated,
+5. Verify: the model is gone from its tool card and listed under **Add model**, its row is archived, pricing rows are deprecated,
    an old creation still shows the right label, then `npm run ci:checks`.
 The `model_add` vs `model_enable` audit label is derived from earlier audit rows, so a model enabled
 before the audit table existed (117) is labelled `model_enable`; the label is informational only.

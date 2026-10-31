@@ -26,6 +26,8 @@ import {
   type ModelCatalogGuardInput,
 } from "./model-catalog-guard";
 import { buildModelRegistry, type RegistryCatalogRow } from "./model-registry";
+import { buildAdminConfigTree, splitToolModels } from "./admin-config-tree";
+import { DEFAULT_BILLING_SETTINGS } from "./pricing-math";
 
 // Only DB rows are fixtures; the catalog, eligibility, defaults and pricing keys are the real code.
 const all = defaultModelCatalogRows();
@@ -276,6 +278,61 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   assert.equal((restore([archivedRow]) as { noop: boolean }).noop, false);
   assert.equal((restore([]) as { noop: boolean }).noop, true);
   assert.equal(fail(restore([], "nope")).code, "UNKNOWN_MODEL");
+}
+
+// #460 One model list per tool card. The list and the "Add model" picker come from the same catalog rows:
+// a removed (archived) model is only in the picker, never offered, never a default; adding it back is
+// judged by the same guard minus ARCHIVED (price / provider still apply).
+{
+  const at = "2026-01-01T00:00:00Z";
+  const tree = (catalog: { model_id: string; enabled: boolean; archived_at?: string | null }[], deprecated: string[] = []) =>
+    buildAdminConfigTree({
+      tools: [{ tool_key: "photo", display_name: "Product Photo", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 0 }],
+      pricing: readyPricing.map((r) => ({
+        pricing_key: r.pricing_key,
+        display_name: r.pricing_key,
+        credit_amount: 5,
+        enabled: true,
+        provider_cost_usd: 0.01,
+        cost_unit: "per_image" as const,
+        is_deprecated: deprecated.includes(r.pricing_key),
+      })),
+      featureModels: [],
+      modelCatalog: catalog.map((c, i) => ({ id: `c${i}`, tool_key: "photo", updated_at: at, ...c })),
+      modelConfigs: [],
+      billingSettings: DEFAULT_BILLING_SETTINGS,
+    })[0];
+  const photo = tree([{ model_id: plain, enabled: false, archived_at: at }]);
+  const { inTool, removed } = splitToolModels(photo.models);
+  assert.deepEqual(removed.map((m) => m.id), [plain], "a removed model is only in the picker");
+  assert.ok(!inTool.some((m) => m.id === plain), "a removed model never lingers in the tool list");
+  assert.equal(inTool.length, ids("photo").length - 1);
+  // Archived wins over a stale enabled flag, and a removed model never holds a default.
+  const stale = tree([{ model_id: DEFAULT_PRODUCT_PHOTO_TIER, enabled: true, archived_at: at }]);
+  const gone = stale.models.find((m) => m.id === DEFAULT_PRODUCT_PHOTO_TIER)!;
+  assert.equal(gone.enabled, false);
+  assert.ok(gone.features.every((f) => !f.isDefault), "a removed model is never a mode default");
+  // A retired model (removed, every price deprecated) still shows under Add model; an unpriced live one does not.
+  const retiredKeys = modelPricingKeys("photo", plain);
+  assert.deepEqual(splitToolModels(tree([{ model_id: plain, enabled: false, archived_at: at }], retiredKeys).models).removed.map((m) => m.id), [plain]);
+  assert.ok(!tree([], retiredKeys).models.some((m) => m.id === plain), "a live model with no price rows stays out of the card");
+  // An off (not removed) model stays in the list with its switch off.
+  const offTree = splitToolModels(tree([{ model_id: plain, enabled: false }]).models);
+  assert.equal(offTree.inTool.find((m) => m.id === plain)?.enabled, false);
+  assert.equal(offTree.removed.length, 0);
+
+  const archivedRow: RegistryCatalogRow = { id: "a1", tool_key: "photo", model_id: plain, enabled: false, archived_at: at, updated_at: at };
+  const reg = (pricingRows: GuardPricingRow[]) =>
+    buildModelRegistry({ catalogRows: [archivedRow], featureRows: [], pricingRows, modelConfigs: [], providerConfigured: () => true }).find(
+      (m) => m.modelId === plain
+    )!;
+  const ready = reg(readyPricing);
+  assert.equal(ready.enableCheck.code, "ARCHIVED", "the plain enable route still refuses a removed model");
+  assert.equal(ready.addCheck.ok, true, "Add model = restore then offer: allowed when price and provider are ready");
+  const unpriced = reg(readyPricing.filter((r) => !modelPricingKeys("photo", plain).includes(r.pricing_key)));
+  assert.equal(unpriced.addCheck.code, "PRICING_NOT_READY", "Add model never skips the pricing guard");
+  const live = buildModelRegistry({ catalogRows: [], featureRows: [], pricingRows: readyPricing, modelConfigs: [] }).find((m) => m.modelId === plain)!;
+  assert.deepEqual(live.addCheck, live.enableCheck, "for a model that is not removed, Add is the enable check");
 }
 
 // #453 Ship dark by default. Every model offered before the switch stays offered (frozen snapshot); an

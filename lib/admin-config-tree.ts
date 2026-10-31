@@ -31,6 +31,7 @@ import {
   type PhotoProviderOption,
 } from "@/lib/admin-provider-switch";
 import { getModelDefault } from "@/lib/admin-config-resolved-defaults";
+import { defaultModelCatalogRows } from "@/lib/model-catalog-configs";
 import { PIPELINE_GROUP_SPECS, type PipelineRoleSpec } from "@/lib/admin-pipeline-config";
 import { getV2PricingDefault } from "@/lib/pricing-defaults";
 import {
@@ -88,6 +89,8 @@ export type AdminModelNode = {
   subtitle: string;
   /** Catalog on/off — hides model from studio when false. */
   enabled: boolean;
+  /** Removed from the tool (catalog row archived, migration 118). Never shown in the tool's list. */
+  archived: boolean;
   catalogConfigId?: string;
   /** updated_at of the catalog row: the compare-and-set token for on/off saves. */
   catalogUpdatedAt?: string;
@@ -165,6 +168,8 @@ export type ModelCatalogInput = {
   model_id: string;
   enabled: boolean;
   updated_at?: string;
+  /** Present only after migration 118; absent/null = not archived. */
+  archived_at?: string | null;
 };
 
 export type ModelConfigInput = {
@@ -299,7 +304,9 @@ function buildVideoFeatures(
  * One default model per mode (feature key) across the whole tool. Each model used to
  * mark its primary mode as default independently — this normalizes after the tree is built.
  */
-function normalizeDefaultsPerMode(models: AdminModelNode[]): AdminModelNode[] {
+function normalizeDefaultsPerMode(all: AdminModelNode[]): AdminModelNode[] {
+  // A removed model is never a mode's default.
+  const models = all.filter((m) => !m.archived);
   const modeKeys = new Set<string>();
   for (const m of models) {
     for (const f of m.features) {
@@ -331,7 +338,7 @@ function normalizeDefaultsPerMode(models: AdminModelNode[]): AdminModelNode[] {
     if (first) defaultModelByMode.set(modeKey, first.id);
   }
 
-  return models.map((m) => ({
+  return all.map((m) => ({
     ...m,
     features: m.features.map((f) => ({
       ...f,
@@ -380,13 +387,25 @@ function resolveCatalogModel(
   toolKey: string,
   modelId: string,
   modelCatalog: ModelCatalogInput[]
-): { enabled: boolean; catalogConfigId?: string; catalogUpdatedAt?: string } {
+): { enabled: boolean; archived: boolean; catalogConfigId?: string; catalogUpdatedAt?: string } {
   const row = modelCatalog.find((r) => r.tool_key === toolKey && r.model_id === modelId);
+  // A missing row means the shipped default (ship dark unless offered by default), like the runtime.
+  const shipped = defaultModelCatalogRows().find((d) => d.toolKey === toolKey && d.modelId === modelId);
+  const archived = !!row?.archived_at;
   return {
-    enabled: row?.enabled ?? true,
+    enabled: !archived && (row?.enabled ?? shipped?.enabled ?? false),
+    archived,
     catalogConfigId: row?.id,
     catalogUpdatedAt: row?.updated_at,
   };
+}
+
+/**
+ * A model with no live price rows is left out of the tree, except a removed one: retiring a model
+ * deprecates its prices, and it must still show under "Add model" (blocked until priced again).
+ */
+function listedInTree(variants: readonly AdminCostVariant[], catalog: { archived: boolean }): boolean {
+  return variants.length > 0 || catalog.archived;
 }
 
 function buildVideoModels(
@@ -399,12 +418,13 @@ function buildVideoModels(
 
   for (const model of VIDEO_MODELS) {
     const variants = enumerateVideoVariants(model, map, settings);
-    if (variants.length === 0) continue;
+    const catalog = resolveCatalogModel("reels", model.id, modelCatalog);
+    if (!listedInTree(variants, catalog)) continue;
     models.push({
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      ...resolveCatalogModel("reels", model.id, modelCatalog),
+      ...catalog,
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -412,12 +432,13 @@ function buildVideoModels(
 
   for (const model of MOTION_CONTROL_MODELS) {
     const variants = enumerateMotionVariants(model, map, settings);
-    if (variants.length === 0) continue;
+    const catalog = resolveCatalogModel("reels", model.id, modelCatalog);
+    if (!listedInTree(variants, catalog)) continue;
     models.push({
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      ...resolveCatalogModel("reels", model.id, modelCatalog),
+      ...catalog,
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -453,7 +474,7 @@ function buildPhotoModels(
       ...resolveCatalogModel("photo", tier.id, modelCatalog),
       features: buildPhotoFeatures(tier.id, featureModels),
       variants: enumeratePhotoVariants(tier, map, settings),
-    })).filter((m) => m.variants.length > 0)
+    })).filter((m) => listedInTree(m.variants, m))
   );
 }
 
@@ -552,6 +573,20 @@ export function buildAdminConfigTree(params: {
         pipelines,
       };
     });
+}
+
+/**
+ * The tool card's model list and its "Add model" picker, from the same catalog rows: a removed
+ * (archived) model is only in the picker, so it can never linger in the list after Remove (#460).
+ */
+export function splitToolModels(models: readonly AdminModelNode[]): {
+  inTool: AdminModelNode[];
+  removed: AdminModelNode[];
+} {
+  return {
+    inTool: models.filter((m) => !m.archived),
+    removed: models.filter((m) => m.archived),
+  };
 }
 
 export function suggestCreditsFromProvider(
