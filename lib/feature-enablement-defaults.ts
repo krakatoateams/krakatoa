@@ -15,8 +15,8 @@ import { resolveFeatureEnablement, type FeatureEnablement } from "@/lib/feature-
 
 /**
  * Enablement the runtime falls back to when the DB read fails: exactly what it resolves with no
- * rows. It goes through the same resolver as the DB path so ship-dark models
- * (`offeredByDefault: false`) stay hidden on failure instead of being listed and accepted.
+ * rows. It goes through the same resolver as the DB path so ship-dark models (`offeredByDefault: false`,
+ * or no flag outside `OFFERED_BEFORE_SHIP_DARK`) stay hidden on failure instead of being listed and accepted.
  * Pure (no I/O); `defaults` is injectable for the self-check.
  */
 export function codeDefaults(

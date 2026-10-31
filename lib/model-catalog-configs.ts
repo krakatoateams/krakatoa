@@ -1,11 +1,11 @@
-import { PRODUCT_PHOTO_TIERS } from "@/lib/product-photo";
-import { MOTION_CONTROL_MODELS } from "@/lib/motion-control-models";
-import { VIDEO_MODELS } from "@/lib/video-models";
+import { PRODUCT_PHOTO_TIERS, type ProductPhotoModelTier } from "@/lib/product-photo";
+import { MOTION_CONTROL_MODELS, type MotionControlModelId } from "@/lib/motion-control-models";
+import { VIDEO_MODELS, type VideoModelId } from "@/lib/video-models";
 
 /**
  * Generation model catalog on/off (Admin Config v2 Phase 3).
  *
- * One row per (tool_key, model_id). Missing row = shipped default (enabled).
+ * One row per (tool_key, model_id). Missing row = shipped default (`catalogRowsFrom`).
  * Align with: supabase/migrations/048_model_catalog_configs.sql,
  * lib/model-catalog-configs-db.ts, admin-config-tree.ts.
  */
@@ -19,9 +19,22 @@ export type ModelCatalogDefault = {
   sortOrder: number;
 };
 
-type CatalogSource = { id: string; offeredByDefault?: false };
+type CatalogSource = { id: string; offeredByDefault?: boolean };
 
-/** Pure core of defaultModelCatalogRows(): `offeredByDefault: false` ships a model dark. */
+/**
+ * Models offered before new models shipped dark by default (#453). They stay offered without a flag.
+ * Every other registry entry must set `offeredByDefault` (test:model-catalog-guard fails otherwise), and
+ * an entry without it is not offered. Frozen: never add to this list.
+ */
+export const OFFERED_BEFORE_SHIP_DARK: ReadonlySet<string> = new Set<ProductPhotoModelTier | VideoModelId | MotionControlModelId>([
+  "basic", "balanced", "pro", "seedream4", "flux_kontext", "flux11", "imagen4", "ideogram3", "seedream3",
+  "flux_schnell", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
+  "seedance2_mini", "seedance2_fast", "seedance2", "veo31_lite", "veo31_fast", "kling15_standard",
+  "kling16_standard", "kling21", "kling25_turbo_pro", "kling26", "kling15_pro", "kling16_pro", "kling_v3",
+  "kling_v3_omni", "grok_imagine_video", "kling26_motion", "kling_v3_motion",
+]);
+
+/** Pure core of defaultModelCatalogRows(): a model ships dark unless it says `offeredByDefault: true` or predates #453. */
 export function catalogRowsFrom(
   photo: readonly CatalogSource[],
   video: readonly CatalogSource[],
@@ -30,7 +43,7 @@ export function catalogRowsFrom(
   const row = (toolKey: ModelCatalogToolKey, m: CatalogSource, sortOrder: number): ModelCatalogDefault => ({
     toolKey,
     modelId: m.id,
-    enabled: m.offeredByDefault !== false,
+    enabled: m.offeredByDefault ?? OFFERED_BEFORE_SHIP_DARK.has(m.id),
     sortOrder,
   });
   return [

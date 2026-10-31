@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isArchiveColumnMissing, catalogRowsFrom, defaultModelCatalogRows, enabledIdsFromRows } from "./model-catalog-configs";
+import {
+  OFFERED_BEFORE_SHIP_DARK,
+  isArchiveColumnMissing,
+  catalogRowsFrom,
+  defaultModelCatalogRows,
+  enabledIdsFromRows,
+} from "./model-catalog-configs";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
 import { buildModelRegistry } from "./model-registry";
 import { DEFAULT_PRODUCT_PHOTO_TIER } from "./product-photo";
@@ -243,8 +249,13 @@ async function main() {
   // Phase 3: ship dark + add from catalog. Flag the REAL plain tier dark for this block, then restore it.
   {
     const snapshot = defaultModelCatalogRows().map((d) => `${d.toolKey}:${d.modelId}:${d.enabled}`);
-    assert.ok(snapshot.every((s) => s.endsWith(":true")), "existing models all stay offered by default");
+    assert.ok(
+      defaultModelCatalogRows().every((d) => d.enabled || !OFFERED_BEFORE_SHIP_DARK.has(d.modelId)),
+      "models offered before #453 all stay offered by default",
+    );
+    const offeredPhoto = enabledIdsFromRows("photo", []).size;
     const tier = PRODUCT_PHOTO_TIERS.find((x) => x.id === plain)!;
+    const prevFlag = tier.offeredByDefault;
     tier.offeredByDefault = false;
     try {
       const dark = defaultModelCatalogRows().filter((d) => !d.enabled);
@@ -253,7 +264,7 @@ async function main() {
       // Missing-row path (no DB row) and materialized path both keep it hidden; every other model stays offered.
       assert.equal(enabledIdsFromRows("photo", []).has(plain), false);
       assert.equal(enabledIdsFromRows("photo", [{ tool_key: "photo", model_id: plain, enabled: false }]).has(plain), false);
-      assert.equal(enabledIdsFromRows("photo", []).size, photo.length - 1);
+      assert.equal(enabledIdsFromRows("photo", []).size, offeredPhoto - 1);
       assert.equal(enabledIdsFromRows("photo", [{ tool_key: "photo", model_id: plain, enabled: true }]).has(plain), true);
 
       // Pricing not ready -> rejected; provider not configured -> rejected; unknown model never reachable.
@@ -323,7 +334,8 @@ async function main() {
       assert.equal((await toggle(af.store, ar.id, true, ar.updated_at)).status, 200);
       assert.equal(ar.enabled, true);
     } finally {
-      delete tier.offeredByDefault;
+      if (prevFlag === undefined) delete tier.offeredByDefault;
+      else tier.offeredByDefault = prevFlag;
     }
     assert.deepEqual(defaultModelCatalogRows().map((d) => `${d.toolKey}:${d.modelId}:${d.enabled}`), snapshot);
   }

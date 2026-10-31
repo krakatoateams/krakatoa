@@ -35,11 +35,13 @@ but cannot run or be billed. The admin list is therefore built from the code cat
    composer unless an admin turns that composer off.
 6. **History label.** `lib/creation-model-label.ts` reads the registry; set `modelLabel` and
    `providerModel` correctly.
-7. **Ship dark.** Set `offeredByDefault: false` on the entry. `defaultModelCatalogRows()` then returns
-   `enabled: false`, so the model stays hidden whether or not its DB row exists. Omit the flag and the
-   model is offered on deploy (today's behavior for every existing model). The flag is for NEW models
-   only: flipping it on a model that is already offered does not hide it, because its DB row stays
-   enabled. Hide an existing model from Admin Config (Hide or Remove).
+7. **Choose `offeredByDefault` explicitly (ship dark by default).** Every new entry must set it:
+   `false` (recommended) keeps the model hidden until an admin adds it in Admin Config after checking the
+   price; `true` offers it on deploy. An entry without the flag is NOT offered, and
+   `test:model-catalog-guard` fails until you choose. Only the models already offered before this rule
+   (`OFFERED_BEFORE_SHIP_DARK` in `lib/model-catalog-configs.ts`, frozen: never add to it) may omit it.
+   The flag only sets the shipped default: flipping it on a model that is already offered does not hide
+   it, because its DB row stays enabled. Hide an existing model from Admin Config (Hide or Remove).
 8. **Self-checks.** Run `npm run test:model-catalog-guard` and the checks for the touched provider,
    then `npm run ci:checks`.
 
