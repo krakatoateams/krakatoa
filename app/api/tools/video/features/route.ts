@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import { getCurrentProfile } from "@/lib/profiles-db";
 import { getVideoComposerEnablement } from "@/lib/feature-model-configs-db";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
@@ -8,8 +9,7 @@ import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
  *
  * Any signed-in user may read this. Returns, per composer, the set of model ids
  * an admin has enabled and the default model. The studio intersects this with
- * in-code capability rules. Never throws — falls back to code defaults when DB
- * is unavailable.
+ * in-code capability rules. Fails closed: 503 (retryable) when the admin state cannot be read.
  */
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,7 @@ export async function GET() {
       })),
     });
   } catch (e) {
+    if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
     console.error("[tools/video/features] failed:", e);
     return NextResponse.json({ error: "Failed to load video features." }, { status: 500 });
   }

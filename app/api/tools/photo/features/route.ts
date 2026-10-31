@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import { getCurrentProfile } from "@/lib/profiles-db";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { getPhotoFeatureEnablement } from "@/lib/feature-model-configs-db";
@@ -9,8 +10,7 @@ import { getPhotoFeatureEnablement } from "@/lib/feature-model-configs-db";
  * Any signed-in user may read this. It returns, per creation feature, the set of
  * model tiers an admin has enabled and the default tier. The omni-form intersects
  * this with the in-code capability rules (e.g. only reference-capable models can
- * appear in Product try-on). Never throws — the resolver falls back to code
- * defaults when the DB is unavailable.
+ * appear in Product try-on). Fails closed: 503 (retryable) when the admin state cannot be read.
  */
 export const dynamic = "force-dynamic";
 
@@ -32,6 +32,7 @@ export async function GET() {
       })),
     });
   } catch (e) {
+    if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
     console.error("[tools/photo/features] failed:", e);
     return NextResponse.json({ error: "Failed to load photo features." }, { status: 500 });
   }

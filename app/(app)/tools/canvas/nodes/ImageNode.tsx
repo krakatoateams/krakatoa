@@ -488,7 +488,7 @@ export default function ImageNode({
           )}
           {features.status === "error" && !tiersReady && (
             <p role="alert" className="mb-2 text-[11px] text-error">
-              Couldn&apos;t load available models. Try again in a moment.
+              Models are temporarily unavailable. Please try again in a moment.
             </p>
           )}
           {tiersReady && photoTiers.length === 0 && (

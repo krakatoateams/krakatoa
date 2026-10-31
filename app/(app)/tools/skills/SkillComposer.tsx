@@ -200,13 +200,20 @@ function SkillOmniInner({
     Record<"product" | "image" | "character", string[]>
   > | null>(null);
 
+  const [modelsUnavailable, setModelsUnavailable] = useState(false);
+
   useEffect(() => {
     if (status !== "authenticated") return;
     let active = true;
     fetch("/api/tools/photo/features")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
-        if (!active || !Array.isArray(data?.features)) return;
+        if (!active) return;
+        if (!Array.isArray(data?.features)) {
+          setModelsUnavailable(true);
+          return;
+        }
+        setModelsUnavailable(false);
         const next: Partial<
           Record<"product" | "image" | "character", string[]>
         > = {};
@@ -228,16 +235,19 @@ function SkillOmniInner({
         }
         setPhotoEnablement(next);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setModelsUnavailable(true);
+      });
     return () => {
       active = false;
     };
   }, [status]);
 
   const photoTiers = useMemo(() => {
-    let candidates = photoMode && photoEnablement?.[photoMode]
+    // Photo skill with enablement not loaded or its read failed: server state unknown, offer no models.
+    let candidates = photoMode
       ? PRODUCT_PHOTO_TIERS.filter((tier) =>
-          photoEnablement[photoMode]?.includes(tier.id)
+          photoEnablement?.[photoMode]?.includes(tier.id)
         )
       : PRODUCT_PHOTO_TIERS;
     if (photoMode === "product" && (needsCharacter || character.file)) {
@@ -305,7 +315,12 @@ function SkillOmniInner({
     fetch("/api/tools/video/features")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!active || !data?.composers) return;
+        if (!active) return;
+        if (!data?.composers) {
+          setModelsUnavailable(true);
+          return;
+        }
+        setModelsUnavailable(false);
         const raw = {} as Record<
           VideoComposerKey,
           { enabledTiers: string[]; defaultTier: string }
@@ -320,7 +335,9 @@ function SkillOmniInner({
         }
         setComposerEnablement(mapVideoComposerEnablement(raw));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setModelsUnavailable(true);
+      });
     return () => {
       active = false;
     };
@@ -899,6 +916,12 @@ function SkillOmniInner({
           />
         ) : null}
       </StudioForm>
+
+      {modelsUnavailable && (
+        <p role="alert" className="mt-4 text-sm text-warning">
+          Models are temporarily unavailable. Please try again in a moment.
+        </p>
+      )}
 
       <StudioGenerationFeedback
         error={error}

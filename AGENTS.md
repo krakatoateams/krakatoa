@@ -203,6 +203,8 @@ Check: `npm run probe:signed-url-cache`. Full write-up incl. measurements and wh
 
 **Status:** Cutover complete. Photo + Video mode matrices and per-model catalog on/off persist via `feature_model_configs` and `model_catalog_configs`.
 
+**Fail closed:** if the model-state read errors or times out, readers throw `ModelStateUnavailableError` (`lib/model-state-unavailable.ts`): user model lists and every generate route (photo, video, storyboard video, motion control, reels) answer a retryable 503 before spend/provider work, and clients list no models. Only a missing table uses code defaults. No grace cache. Check: `npm run test:model-catalog-guard`.
+
 | Doc | Purpose |
 |-----|---------|
 | [`docs/admin/adding-a-generation-model.md`](docs/admin/adding-a-generation-model.md) | Developer checklist to add a generation model (`offeredByDefault: false` ships dark; admins add it in Models) |

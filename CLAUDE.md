@@ -57,6 +57,10 @@ keeps only the rules needed on most engineering tasks.
   use the atomic RPCs in `lib/generation-workflows/`.
 - Prompt capture stores user prompts on jobs and assembled model prompts on the
   relevant job step. Do not persist system instructions.
+- Archived or admin-disabled models are never usable. When the model state read
+  errors or times out, fail closed: lists show no models and generate routes
+  return a retryable 503 before any spend or provider call (a missing table
+  keeps the code defaults).
 
 ### Cancellation and recovery
 

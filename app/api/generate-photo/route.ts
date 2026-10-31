@@ -47,6 +47,7 @@ import {
 } from "@/lib/credits-db";
 import { getProductPhotoCredits, PricingConfigError } from "@/lib/pricing-resolver";
 import { getPhotoFeatureEnablement } from "@/lib/feature-model-configs-db";
+import { isModelStateUnavailable, modelStateUnavailableResponse } from "@/lib/model-state-unavailable";
 import { getPhotoFeature } from "@/lib/creation-features";
 import { getPhotoModel, replicateRef } from "@/lib/model-resolver";
 import { assertToolEnabled, ToolDisabledError } from "@/lib/tool-access";
@@ -416,9 +417,15 @@ export async function POST(req: Request) {
     // Per-feature model enablement (Admin Config v3). An admin can disable a model
     // for a specific feature; reject a disabled/ineligible tier before any
     // job/spend/provider work. The omni-form already hides disabled models; this
-    // guards a stale or forged client value. Never throws — falls back to code
-    // defaults (all eligible tiers enabled) when the DB is unavailable.
-    const enablement = await getPhotoFeatureEnablement();
+    // guards a stale or forged client value. Fails CLOSED (503, retryable) when the
+    // admin state cannot be read: nothing is charged and no provider is called.
+    let enablement;
+    try {
+      enablement = await getPhotoFeatureEnablement();
+    } catch (e) {
+      if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
+      throw e;
+    }
     if (!enablement[mode].enabledTiers.includes(modelTier)) {
       return NextResponse.json(
         {
