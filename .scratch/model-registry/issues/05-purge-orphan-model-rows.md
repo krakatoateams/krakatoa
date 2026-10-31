@@ -1,34 +1,66 @@
 # Clean up settings left behind by models developers retired, and document how to retire one
 
-Status: ready-for-agent
+Status: done (reduced scope: runbook only)
 GitHub: https://github.com/krakatoateams/krakatoa/issues/429
 Blocked by: 04
 
 ## Overview
 
-When developers fully retire a model from the app, a few leftover settings stay behind in Admin Config. This adds a careful "Delete permanently" for those leftovers only, with a preview first and a typed confirmation, and a short guide for developers on how to retire a model without breaking anyone's past creations. Users notice nothing; past creations and charges are never touched.
+Scope was reduced after research (orchestrator scratchpad `model-retirement-research.md`, 2026-10-31).
+This issue now delivers only a developer guide on how to retire a model without breaking anyone's past
+creations. There is no "Delete permanently" button. Users notice nothing; past creations and charges are
+never touched.
+
+## Research-backed decisions
+
+| Question | Decision |
+| --- | --- |
+| Archive vs hard delete for referenced catalog rows | Archive, keep indefinitely, no timed purge (Stripe, Google AIP-164). |
+| Hard delete of orphan rows in the UI | Dropped. Orphans are ignored by the runtime, so deleting them helps no user. Deleting also removes a guard: a missing row means "shipped default", so a returning id would be offered without an admin choosing to (Unleash name-reuse risk). If a purge is ever needed, a developer writes a reviewed, idempotent migration. |
+| If a delete button is ever requested anyway | Owner-only; only rows archived for at least 30 days; dry-run by default; typed model id checked server-side; orphan re-check in the same request; one audit row with the full deleted rows; no cascade. |
+| Re-enable a model without a price | Block (already `PRICING_NOT_READY`). |
+| Disable the current default | Two steps: pick a new default first (already `IS_DEFAULT`). |
+| New models shipped in code | Ship dark by default; an admin enables after pricing. Follow-up outside this issue; existing live models grandfathered. |
+| Skills that designate a removed model | Allow the removal; never cascade-delete the skill; fall back to the live default; the remove dialog names the affected skills. |
 
 ## Implementation Requirements
 
-1. **Scope of hard delete = orphan config rows only.** An orphan is a `model_catalog_configs` row whose `(tool_key, model_id)` is not in `defaultModelCatalogRows()`, plus `feature_model_configs` rows whose `model_tier` is not eligible for any code composer/feature. Hard delete of a row for a model that still exists in code is forbidden (a missing row means "shipped default", which can silently re-offer the model).
-2. **Never deleted by this feature:** `pricing_configs` rows (use `is_deprecated`), `provider_model_costs`, `model_configs`, jobs, assets, `generation_predictions`, `usage_events`, `credit_transactions`, user creations, audit log.
-3. **Endpoints** (`withAdmin`, and owner-only: `ctx.admin.role === "owner"`, else 403; see open question 2 in spec.md):
-   - `GET /api/admin/config/model-catalog/orphans`: lists orphans with a dry-run impact (same slug-based counts as issue 04's impact endpoint where a slug is known from the row's audit history or `metadata`; otherwise "unknown slug, history unaffected").
-   - `DELETE /api/admin/config/model-catalog/orphans/[id]` `{ confirm: "<model_id>", expectedUpdatedAt }`: re-checks orphan status server-side at delete time, requires the typed `model_id` to match exactly, deletes the catalog row and that model's orphan `feature_model_configs` rows, writes one `model_purge` audit row with the deleted rows as `from_value` JSON (this JSON is the rollback path: re-insert). Idempotent: already gone → 200 no-op.
-   - No DB function needed: deletes are by id with an orphan re-check in the same request; a concurrent re-introduction of the id in code cannot happen without a deploy.
-4. **UI:** a collapsed "Leftover settings" section (hidden when empty) with Delete permanently → accessible dialog showing the dry run and a text field that must equal the model id; button disabled until it matches. English only.
-5. **Developer runbook** `docs/admin/retiring-a-generation-model.md` (linked from `docs/admin/adding-a-generation-model.md` from issue 03): archive in Admin Config first; wait until no in-flight jobs and the 72 h reconcile window has passed for its jobs; keep the registry entry's label available for history (move it to a retired-label map consumed by `lib/creation-model-label.ts` rather than deleting it, because `getProductPhotoTier` / `getVideoModel` / `getMotionControlModel` fall back to the default for unknown ids); remove it from composer eligibility and code defaults/FALLBACKS; deprecate pricing rows with an additive migration (pattern 040); then purge orphans here. Precedent: 040/041 Kling 2.0, 113 GPT Image 2.
+1. **Developer runbook** `docs/admin/retiring-a-generation-model.md`, linked from
+   `docs/admin/adding-a-generation-model.md` ("Retiring a model"). Steps:
+   1. archive in Admin Config first;
+   2. wait until no in-flight jobs remain and the 72 h reconcile window has passed;
+   3. keep the registry entry (`offeredByDefault: false`); if an entry must ever leave the registry,
+      add a retired-label map read by `lib/creation-model-label.ts` first;
+   4. remove it from code defaults/FALLBACKS and composer eligibility;
+   5. deprecate pricing rows with an additive migration (pattern 040);
+   6. leave the `model_catalog_configs` row archived and the `feature_model_configs` rows in place,
+      never delete them;
+   7. never reuse a retired id, slug or pricing key.
+
+   Precedent: 040/041 Kling 2.0, 113 GPT Image 2.
+2. **Never deleted** by anything the runbook prescribes: `model_catalog_configs`,
+   `feature_model_configs`, `pricing_configs` (use `is_deprecated`), `provider_model_costs`,
+   `model_configs`, jobs, assets, `generation_predictions`, `usage_events`, `credit_transactions`, user
+   creations, audit log.
+3. **Removed from scope:** the `GET/DELETE /api/admin/config/model-catalog/orphans` endpoints, the
+   "Leftover settings" UI and the `model_purge` audit action.
 
 ## Technical Notes (verified in code)
 
-- `admin_users.role` is `owner | admin` (007); `CurrentAdmin.admin` carries it.
-- Runtime readers iterate code defaults and ignore DB rows for unknown ids (`getEnabledCatalogModelIds`, `getPhotoFeatureEnablement`, `getVideoComposerEnablement`), so orphans are harmless at runtime; this issue is housekeeping and can be skipped if the user prefers (open question 3).
+- Runtime readers iterate code defaults and ignore DB rows for unknown ids (`getEnabledCatalogModelIds`,
+  `getPhotoFeatureEnablement`, `getVideoComposerEnablement`), so orphans are harmless at runtime.
 - `ensureFeatureModelRows` / `ensureModelCatalogRows` only insert missing rows; they never delete.
+- `lib/model-catalog-guard.ts` already enforces `PRICING_NOT_READY` and `IS_DEFAULT`.
+- Checked while writing the runbook (separate follow-ups, not fixed here):
+  - shipping dark is opt-in today (a missing `offeredByDefault` means offered);
+  - the remove dialog's "Skills that use it" reads only `skill_configs.model_id`, so a code-default
+    skill designation (`lib/skills.ts` `modelId`) is not listed, and it shows skill ids, not titles.
 
 ## Acceptance Criteria
 
-1. Self-check with the REAL `defaultModelCatalogRows` and eligibility functions: a row for an id in code is never classified orphan; a row for an unknown id is; delete with a wrong confirm string → 400; delete of a non-orphan → 409 `NOT_ORPHAN`; non-owner admin → 403; repeat delete → 200 no-op; exactly one audit row containing the deleted rows.
-2. Nothing outside `model_catalog_configs` / `feature_model_configs` is deleted (asserted by test against the query builder calls).
-3. Runbook exists and is linked. `npm run ci:checks` passes. English-only copy. Works whether or not migration 118 is applied (orphan purge does not depend on `archived_at`).
+1. The runbook exists, is linked from `docs/admin/adding-a-generation-model.md`, and covers the steps
+   above, including "archive, never delete, the config row" and "never reuse a retired id".
+2. No code deletes rows from `model_catalog_configs` or `feature_model_configs`.
+3. `npm run ci:checks` passes. English-only copy.
 
 ## Comments
