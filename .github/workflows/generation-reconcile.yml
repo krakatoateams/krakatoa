@@ -11,6 +11,7 @@ name: Generation reconcile
 # Until both exist the job skips with a notice (green). To turn it off: Actions -> this
 # workflow -> "..." -> Disable workflow, or remove the variable.
 # GitHub scheduled runs are best-effort and can start a few minutes late.
+# The repo is public: the log shows the HTTP status and counts only, never ids or error text.
 
 on:
   schedule:
@@ -48,7 +49,19 @@ jobs:
 
           # The header goes through stdin so the secret never appears in the process list or logs.
           # max-time stays below the route maxDuration (120 s); retries are off on purpose.
-          printf 'Authorization: Bearer %s' "$CRON_SECRET" | curl --silent --show-error \
+          # The reply goes to a file, never to the log (it can hold job ids and error text).
+          set +e
+          code=$(printf 'Authorization: Bearer %s' "$CRON_SECRET" | curl --silent --show-error \
             --fail-with-body --retry 0 --max-time 115 --proto '=https' --max-redirs 0 \
-            -H @- "${BASE_URL%/}/api/cron/generation-reconcile"
-          echo
+            -o "$RUNNER_TEMP/reply.json" -w '%{http_code}' \
+            -H @- "${BASE_URL%/}/api/cron/generation-reconcile")
+          rc=$?
+          set -e
+          echo "HTTP $code"
+          # Counts only: numeric fields plus how many errors there were.
+          jq -c 'with_entries(select(.value | type == "number")) + {errors: ((.errors // []) | length)}' \
+            "$RUNNER_TEMP/reply.json" 2>/dev/null || echo "(no summary)"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Reconcile endpoint returned HTTP $code"
+            exit 1
+          fi

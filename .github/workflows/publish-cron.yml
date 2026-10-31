@@ -48,7 +48,8 @@ jobs:
           code=$(printf '%s' "$response" | tail -n1)
 
           echo "HTTP $code"
-          echo "$body"
+          # Public repo: counts only, never the raw reply (it can hold error text).
+          printf '%s' "$body" | jq -c 'with_entries(select(.value | type == "number"))' 2>/dev/null || echo "(no summary)"
 
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             echo "::error::Publisher returned HTTP $code"

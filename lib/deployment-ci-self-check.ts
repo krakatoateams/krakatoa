@@ -114,6 +114,12 @@ export function deploymentCiSelfCheck(): void {
     publishWorkflow.includes("permissions: {}"),
     "the production publisher workflow must not receive a repository token",
   );
+  // Public repo: workflow logs show the HTTP status and counts only, never the raw reply (ids, error text).
+  assert(
+    !/echo\s+"?\$\{?body\b/.test(publishWorkflow) &&
+      publishWorkflow.includes("jq -c 'with_entries(select(.value | type == \"number\"))'"),
+    "the publisher workflow must log counts only, never the raw reply",
+  );
 
   const reconcileWorkflow = read(".github/workflows/generation-reconcile.yml");
   assert(
@@ -133,6 +139,13 @@ export function deploymentCiSelfCheck(): void {
       reconcileWorkflow.includes("RECONCILE_CRON_SECRET") &&
       reconcileWorkflow.includes("exit 0"),
     "the reconcile workflow must fail on HTTP errors, never echo or pass the secret on argv, and skip when unset",
+  );
+  assert(
+    reconcileWorkflow.includes('-o "$RUNNER_TEMP/reply.json"') &&
+      reconcileWorkflow.includes("with_entries(select(.value | type == \"number\"))") &&
+      !/cat\s+"?\$RUNNER_TEMP\/reply\.json/.test(reconcileWorkflow) &&
+      !/echo\s+"?\$\{?(body|response)\b/.test(reconcileWorkflow),
+    "the reconcile workflow must keep the reply out of the public log and print counts only",
   );
   const maxTime = Number(/--max-time (\d+)/.exec(reconcileWorkflow)?.[1]);
   const routeSource = read("app/api/cron/generation-reconcile/route.ts");
