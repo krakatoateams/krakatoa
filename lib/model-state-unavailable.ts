@@ -35,12 +35,16 @@ export function modelStateUnavailableResponse(): NextResponse {
   );
 }
 
-/** True when the error says the table itself is absent (Postgres 42P01 / PostgREST PGRST205). */
+/**
+ * True only when the error code says a table is absent (Postgres 42P01 / PostgREST PGRST205) AND the
+ * message names this table. Anything else, including a missing COLUMN (42703 / PGRST204) under schema
+ * drift, is an unknown state and fails closed.
+ */
 export function isTableMissing(error: { message?: string; code?: string } | null, table: string): boolean {
-  if (!error) return false;
-  if (error.code === "42P01" || error.code === "PGRST205") return true;
-  const msg = error.message ?? "";
-  return msg.includes(table) && (msg.includes("schema cache") || msg.includes("does not exist"));
+  if (!error || (error.code !== "42P01" && error.code !== "PGRST205")) return false;
+  // Whole identifier only: "model_configs" must not match "feature_model_configs".
+  const name = table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\w])${name}($|[^\\w])`).test(error.message ?? "");
 }
 
 export const MODEL_STATE_READ_TIMEOUT_MS = 8_000;

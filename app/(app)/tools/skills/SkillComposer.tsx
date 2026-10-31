@@ -35,6 +35,7 @@ import { useCurrentUser } from "@/lib/auth-context";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
+import { skillModelsUnavailable, useRetryWhenVisible } from "@/lib/use-model-state-retry";
 import {
   DEFAULT_MODEL_POSE,
   DEFAULT_PHOTO_ASPECT_RATIO,
@@ -200,7 +201,18 @@ function SkillOmniInner({
     Record<"product" | "image" | "character", string[]>
   > | null>(null);
 
-  const [modelsUnavailable, setModelsUnavailable] = useState(false);
+  // Separate flags: a failed photo read must not warn on a video skill (and vice versa).
+  const [photoModelsFailed, setPhotoModelsFailed] = useState(false);
+  const [videoModelsFailed, setVideoModelsFailed] = useState(false);
+  const modelsUnavailable = skillModelsUnavailable({
+    isVideo,
+    photoFailed: photoModelsFailed,
+    videoFailed: videoModelsFailed,
+  });
+  // While this skill's list is unavailable, retry on focus or via Retry (both lists refetch; they are cheap).
+  const [featuresAttempt, setFeaturesAttempt] = useState(0);
+  const retryFeatures = useCallback(() => setFeaturesAttempt((n) => n + 1), []);
+  useRetryWhenVisible(modelsUnavailable, retryFeatures);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -210,10 +222,10 @@ function SkillOmniInner({
       .then((data) => {
         if (!active) return;
         if (!Array.isArray(data?.features)) {
-          setModelsUnavailable(true);
+          setPhotoModelsFailed(true);
           return;
         }
-        setModelsUnavailable(false);
+        setPhotoModelsFailed(false);
         const next: Partial<
           Record<"product" | "image" | "character", string[]>
         > = {};
@@ -236,12 +248,12 @@ function SkillOmniInner({
         setPhotoEnablement(next);
       })
       .catch(() => {
-        if (active) setModelsUnavailable(true);
+        if (active) setPhotoModelsFailed(true);
       });
     return () => {
       active = false;
     };
-  }, [status]);
+  }, [status, featuresAttempt]);
 
   const photoTiers = useMemo(() => {
     // Photo skill with enablement not loaded or its read failed: server state unknown, offer no models.
@@ -317,10 +329,10 @@ function SkillOmniInner({
       .then((data) => {
         if (!active) return;
         if (!data?.composers) {
-          setModelsUnavailable(true);
+          setVideoModelsFailed(true);
           return;
         }
-        setModelsUnavailable(false);
+        setVideoModelsFailed(false);
         const raw = {} as Record<
           VideoComposerKey,
           { enabledTiers: string[]; defaultTier: string }
@@ -336,12 +348,12 @@ function SkillOmniInner({
         setComposerEnablement(mapVideoComposerEnablement(raw));
       })
       .catch(() => {
-        if (active) setModelsUnavailable(true);
+        if (active) setVideoModelsFailed(true);
       });
     return () => {
       active = false;
     };
-  }, [status]);
+  }, [status, featuresAttempt]);
 
   const useImageToVideo = startFrame.done.length > 0;
   const videoComposerKey: VideoComposerKey = useImageToVideo ? "image2video" : "text2video";
@@ -920,6 +932,9 @@ function SkillOmniInner({
       {modelsUnavailable && (
         <p role="alert" className="mt-4 text-sm text-warning">
           Models are temporarily unavailable. Please try again in a moment.
+          <button type="button" onClick={retryFeatures} className="ml-2 font-medium underline underline-offset-2 hover:text-text-primary">
+            Retry
+          </button>
         </p>
       )}
 

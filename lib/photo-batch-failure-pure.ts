@@ -13,13 +13,16 @@ export function planBatchFailures(p: {
   cancelWhileQueued: boolean;
   isDefinitive: (reason: unknown) => boolean;
   isCancelled: (reason: unknown) => boolean;
-}): { refundableFailures: number; fullyCancelled: boolean; ambiguous: unknown } {
+}): { refundableFailures: number; unconfirmedFailures: number; fullyCancelled: boolean; ambiguous: unknown } {
   const removed = (r: unknown) => p.cancelWhileQueued && p.isCancelled(r);
   const definitiveOrRemoved = (r: unknown) => p.isDefinitive(r) || removed(r);
+  const refundableFailures = p.rejections.filter((r) =>
+    shouldRefundFailedBatchImage({ commitsOnSubmit: p.commitsOnSubmit, definitiveProviderFailure: definitiveOrRemoved(r) }),
+  ).length;
   return {
-    refundableFailures: p.rejections.filter((r) =>
-      shouldRefundFailedBatchImage({ commitsOnSubmit: p.commitsOnSubmit, definitiveProviderFailure: definitiveOrRemoved(r) }),
-    ).length,
+    refundableFailures,
+    // Failed images that stay charged because the outcome is unknown (Fal only; Replicate refunds every failure).
+    unconfirmedFailures: p.rejections.length - refundableFailures,
     fullyCancelled: p.rejections.length > 0 && p.rejections.every(removed),
     ambiguous: p.rejections.find((r) => !definitiveOrRemoved(r)),
   };
@@ -37,4 +40,24 @@ export function settleZeroSuccessBatch(p: Parameters<typeof planBatchFailures>[0
   if (plan.fullyCancelled || !p.commitsOnSubmit) return { refundFirst: false, reason: first };
   if (plan.ambiguous !== undefined) return { refundFirst: true, reason: plan.ambiguous };
   return { refundFirst: false, reason: p.rejections.find(p.isDefinitive) ?? first };
+}
+
+/**
+ * User-facing warning for a batch that delivered some images. `unconfirmed` (absent in older responses)
+ * counts failed images still charged because the provider outcome is unknown; the old "only charged for
+ * the ones that worked" wording is used only when that is true.
+ */
+export function batchFailureMessage(p: { failed: number; requested: number; delivered: number; unconfirmed?: number }): string {
+  const unconfirmed = p.unconfirmed ?? 0;
+  if (unconfirmed <= 0) {
+    return `${p.failed} of ${p.requested} images couldn't be generated — you were only charged for the ${p.delivered} that worked.`;
+  }
+  const refunded = p.failed - unconfirmed;
+  const one = unconfirmed === 1;
+  return [
+    `${p.failed} of ${p.requested} images didn't arrive.`,
+    ...(refunded > 0 ? [`${refunded} ${refunded === 1 ? "was" : "were"} refunded.`] : []),
+    `${unconfirmed} couldn't be confirmed by the AI provider, so ${one ? "it is" : "they are"} still charged for now.`,
+    `Contact support if ${one ? "it doesn't" : "they don't"} appear in your library.`,
+  ].join(" ");
 }

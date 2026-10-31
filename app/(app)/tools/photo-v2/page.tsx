@@ -114,6 +114,8 @@ import {
 import { isViralTemplateAssetPath } from "@/lib/trending-templates";
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { pickGenerateStoragePath } from "@/lib/use-signed-media-url";
+import { batchFailureMessage } from "@/lib/photo-batch-failure-pure";
+import { useRetryWhenVisible } from "@/lib/use-model-state-retry";
 
 // Creation types surfaced in the top-left chip. Every type posts to
 // /api/generate-photo with a distinct `mode` (storyboard included).
@@ -732,7 +734,10 @@ function PhotoOmniPage({
       ? prompt.trim().length > 0 || (allowReferenceUpload && !!reference.file)
       : true);
 
-  // Load admin per-feature model enablement once.
+  // Load admin per-feature model enablement; a failed read retries on focus or via Retry.
+  const [featuresAttempt, setFeaturesAttempt] = useState(0);
+  const retryFeatures = useCallback(() => setFeaturesAttempt((n) => n + 1), []);
+  useRetryWhenVisible(featuresFailed && !featureModels, retryFeatures);
   useEffect(() => {
     let active = true;
     fetch("/api/tools/photo/features")
@@ -756,7 +761,7 @@ function PhotoOmniPage({
     return () => {
       active = false;
     };
-  }, []);
+  }, [featuresAttempt]);
 
   // Keep the selected model valid for the current feature: if it isn't offered,
   // snap to the feature's default (admin-configured) or the first available model.
@@ -951,7 +956,12 @@ function PhotoOmniPage({
               ? 1
               : 0;
           setWarning(
-            `${data.failedImageCount} of ${data.requestedImageCount} images couldn't be generated — you were only charged for the ${batchLen} that worked.`,
+            batchFailureMessage({
+              failed: data.failedImageCount,
+              requested: Number(data.requestedImageCount),
+              delivered: batchLen,
+              unconfirmed: typeof data.unconfirmedImageCount === "number" ? data.unconfirmedImageCount : undefined,
+            }),
           );
         }
       },
@@ -1386,12 +1396,17 @@ function PhotoOmniPage({
         {featuresFailed && !featureModels && (
           <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-            <span>Models are temporarily unavailable. Please try again in a moment.</span>
+            <span>
+              Models are temporarily unavailable. Please try again in a moment.
+              <button type="button" onClick={retryFeatures} className="ml-2 font-medium underline underline-offset-2 hover:text-text-primary">
+                Retry
+              </button>
+            </span>
           </div>
         )}
 
         {warning && (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
+          <div role="status" className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
             <span>{warning}</span>
           </div>

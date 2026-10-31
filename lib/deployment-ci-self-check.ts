@@ -114,6 +114,12 @@ export function deploymentCiSelfCheck(): void {
     publishWorkflow.includes("permissions: {}"),
     "the production publisher workflow must not receive a repository token",
   );
+  // Public repo: workflow logs show the HTTP status and counts only, never the raw reply (ids, error text).
+  assert(
+    !/echo\s+"?\$\{?body\b/.test(publishWorkflow) &&
+      publishWorkflow.includes("jq -c 'with_entries(select(.value | type == \"number\"))'"),
+    "the publisher workflow must log counts only, never the raw reply",
+  );
 
   const reconcileWorkflow = read(".github/workflows/generation-reconcile.yml");
   assert(
@@ -130,9 +136,17 @@ export function deploymentCiSelfCheck(): void {
       reconcileWorkflow.includes("--retry 0") &&
       reconcileWorkflow.includes("-H @-") &&
       !/echo[^\n]*\$\{?CRON_SECRET/.test(reconcileWorkflow) &&
-      reconcileWorkflow.includes("RECONCILE_CRON_SECRET") &&
+      reconcileWorkflow.includes("${{ secrets.CRON_SECRET }}") &&
+      reconcileWorkflow.includes("${{ secrets.CRON_TARGET_URL }}") &&
       reconcileWorkflow.includes("exit 0"),
     "the reconcile workflow must fail on HTTP errors, never echo or pass the secret on argv, and skip when unset",
+  );
+  assert(
+    reconcileWorkflow.includes('-o "$RUNNER_TEMP/reply.json"') &&
+      reconcileWorkflow.includes("with_entries(select(.value | type == \"number\"))") &&
+      !/cat\s+"?\$RUNNER_TEMP\/reply\.json/.test(reconcileWorkflow) &&
+      !/echo\s+"?\$\{?(body|response)\b/.test(reconcileWorkflow),
+    "the reconcile workflow must keep the reply out of the public log and print counts only",
   );
   const maxTime = Number(/--max-time (\d+)/.exec(reconcileWorkflow)?.[1]);
   const routeSource = read("app/api/cron/generation-reconcile/route.ts");
@@ -141,6 +155,14 @@ export function deploymentCiSelfCheck(): void {
     maxTime > 0 && maxTime < maxDuration,
     "the reconcile workflow curl max-time must stay below the route maxDuration",
   );
+  // Docs stay honest: GitHub schedules are best-effort, cron-job.org is the 10-minute trigger.
+  for (const doc of ["CLAUDE.md", "AGENTS.md", "docs/generation/fal-provider-runbook.md"]) {
+    const text = read(doc);
+    assert(
+      text.includes("cron-job.org") && !/(~|every )10 min[^\n]*via GitHub/.test(text),
+      `${doc} must name cron-job.org as the reconcile trigger, not GitHub Actions`,
+    );
+  }
   assert(
     read("vercel.json").includes('"/api/cron/generation-reconcile"'),
     "the daily Vercel reconcile cron stays as backup",

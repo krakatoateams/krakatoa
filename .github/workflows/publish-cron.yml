@@ -1,8 +1,9 @@
 name: Publish scheduled posts
 
 # BACKUP trigger for the publisher. The PRIMARY trigger is cron-job.org (~1 min,
-# more punctual). This workflow runs less often (every ~15 min) as a safety net in
-# case cron-job.org is down. The endpoint is idempotent and bounded, so running
+# more punctual). This workflow is scheduled every 15 min but GitHub often runs it
+# hours late (about 5 runs a day observed); it is only a safety net in case
+# cron-job.org is down. The endpoint is idempotent and bounded, so running
 # both triggers concurrently is safe (claim-lock prevents double uploads).
 #
 # Required repository secrets (Settings → Secrets and variables → Actions):
@@ -48,7 +49,8 @@ jobs:
           code=$(printf '%s' "$response" | tail -n1)
 
           echo "HTTP $code"
-          echo "$body"
+          # Public repo: counts only, never the raw reply (it can hold error text).
+          printf '%s' "$body" | jq -c 'with_entries(select(.value | type == "number"))' 2>/dev/null || echo "(no summary)"
 
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             echo "::error::Publisher returned HTTP $code"

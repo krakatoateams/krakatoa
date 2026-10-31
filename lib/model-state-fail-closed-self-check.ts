@@ -62,8 +62,14 @@ async function main() {
   assert.ok(Object.values(blocked).every((f) => !f.enabledTiers.includes(tier)));
 
   // Error classification.
-  assert.ok(isTableMissing({ code: "PGRST205" }, "t"));
-  assert.ok(isTableMissing({ message: 'relation "t" does not exist' }, "t"));
+  assert.ok(isTableMissing({ code: "PGRST205", message: "Could not find the table 'public.t' in the schema cache" }, "t"));
+  assert.ok(isTableMissing({ code: "42P01", message: 'relation "public.t" does not exist' }, "t"));
+  assert.ok(!isTableMissing({ code: "PGRST205", message: "Could not find the table 'public.other' in the schema cache" }, "t"));
+  assert.ok(!isTableMissing({ code: "PGRST205", message: "Could not find the table 'public.feature_model_configs' in the schema cache" }, "model_configs"));
+  assert.ok(!isTableMissing({ message: 'relation "t" does not exist' }, "t"), "no code: unknown state");
+  // Schema drift: a missing column is not a missing table.
+  assert.ok(!isTableMissing({ code: "42703", message: 'column t.archived_at does not exist' }, "t"));
+  assert.ok(!isTableMissing({ code: "PGRST204", message: "Could not find the 'archived_at' column of 't' in the schema cache" }, "t"));
   assert.ok(!isTableMissing({ message: "connection reset" }, "t"));
   assert.ok(!isTableMissing({ message: "timeout reading t" }, "t"));
 

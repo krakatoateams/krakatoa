@@ -129,7 +129,15 @@ Code: `app/api/cron/cleanup-failed-posts/route.ts`
 
 **User merasakan:** Cancel/timeout tidak membuat kredit “nyangkut” tanpa refund. Recovery window 24h default.
 
-**Jadwal Vercel:** **setiap hari 05:00 UTC** (12:00 WIB) — plan Hobby hanya mengizinkan cron harian (`*/30 * * * *` bikin deployment gagal). Untuk cadence lebih rapat, trigger eksternal endpoint ini tiap 30 menit dengan `Authorization: Bearer $CRON_SECRET`, sama seperti publisher `/api/cron`. Naikkan ke `*/30 * * * *` kalau sudah Pro.
+**Jadwal:**
+
+| Trigger | Cadence | Config |
+|---------|---------|--------|
+| cron-job.org (utama) | tiap 10 menit | URL `/api/cron/generation-reconcile` + Bearer `CRON_SECRET`; langkah setup di [`fal-provider-runbook.md`](../generation/fal-provider-runbook.md#reconcile-schedule-every-10-minutes) |
+| GitHub Actions | `*/10`, best-effort (sering telat berjam-jam) — backup | `.github/workflows/generation-reconcile.yml`, pakai secrets `CRON_TARGET_URL` + `CRON_SECRET` yang sama dengan publisher |
+| Vercel | harian 05:00 UTC (12:00 WIB) — backup terakhir | `vercel.json` (plan Hobby hanya izinkan cron harian) |
+
+Aman dijalankan bersamaan: refund pakai idempotency key yang stabil + `hasRefundForJob`, jadi tidak bisa double refund.
 
 Code: `app/api/cron/generation-reconcile/route.ts` · Plans: [`generation-cancel-hardening`](generation/generation-cancel-hardening-plan.md), [`pipeline-recovery`](generation/pipeline-recovery-plan.md)
 
@@ -174,7 +182,7 @@ generation-reconcile        → 0 5 * * *    (harian 05:00 UTC)
 instagram-token-refresh     → 30 5 * * *   (harian 05:30 UTC)
 ```
 
-Publisher (`/api/cron`) sengaja **di luar** `vercel.json` karena plan Hobby membatasi cron Vercel; trigger eksternal lebih sering. Alasan yang sama bikin `generation-reconcile` harian di sini — pakai trigger eksternal kalau butuh tiap 30 menit.
+Publisher (`/api/cron`) sengaja **di luar** `vercel.json` karena plan Hobby membatasi cron Vercel; trigger eksternal lebih sering. Alasan yang sama bikin `generation-reconcile` harian di sini — trigger utamanya cron-job.org tiap 10 menit.
 
 ---
 
@@ -204,5 +212,5 @@ Deployment mengembalikan 503 sebelum menjalankan mutation.
 
 1. Set `CRON_SECRET` di semua environment deployment yang dapat diakses + redeploy
 2. Samakan secret di GitHub Actions (`CRON_SECRET`, `CRON_TARGET_URL`) jika pakai scheduler publish
-3. Konfigurasi cron-job.org untuk `/api/cron` jika dipakai sebagai trigger utama publisher
+3. Konfigurasi cron-job.org untuk `/api/cron` (publisher) dan `/api/cron/generation-reconcile` (tiap 10 menit)
 4. Pastikan cron Vercel di dashboard aktif (dari `vercel.json`)

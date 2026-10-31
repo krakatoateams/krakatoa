@@ -15,6 +15,9 @@ import {
  * missing, disabled, malformed, or the query fails.
  *
  * Guarantees:
+ *   - Routing only: a DB error falls back to the code-default provider/model for a model the
+ *     caller already allowed. Whether a model is enabled or archived is decided elsewhere
+ *     (feature/catalog state, which fails closed); this fallback never re-enables one.
  *   - NEVER throws.
  *   - DB value used only when enabled=true and provider/model are non-empty strings.
  *   - Returns only safe fields (provider, model, parameters). No secrets/API keys
