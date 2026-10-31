@@ -14,6 +14,8 @@ export const SETTLED_PAGE_SIZE = 50;
 export const SETTLED_CONCURRENCY = 4;
 /** Stop starting new batches after this long; leftovers wait for the next run (route maxDuration is 120 s). */
 export const SETTLED_BUDGET_MS = 45_000;
+/** Own slice for the per-image (S2) scan, so it cannot starve the job scans. */
+export const SETTLED_ITEMS_BUDGET_MS = 20_000;
 /** Per-job cap on Fal status calls; a slow Fal counts as "not confirmed". */
 export const SETTLED_CONFIRM_TIMEOUT_MS = 15_000;
 
@@ -52,14 +54,14 @@ export type SettledScanResult = {
 };
 
 /**
- * Keyset-paged (updated_at, id ascending) walk over every candidate, in batches of `concurrency`,
+ * Keyset-paged (updated_at, id ascending; any keyset column mapped to `updatedAt`) walk over every candidate, in batches of `concurrency`,
  * until exhausted or the time budget is spent. A throwing job is recorded and skipped, never retried in-run.
  */
-export async function scanSettledJobs(
+export async function scanSettledJobs<C extends { id: string; updatedAt: string } = SettledCandidate>(
   deps: {
-    fetchPage: (after: SettledCursor, limit: number) => Promise<SettledCandidate[]>;
+    fetchPage: (after: SettledCursor, limit: number) => Promise<C[]>;
     countFrom: (after: SettledCursor) => Promise<number>;
-    process: (job: SettledCandidate) => Promise<string>;
+    process: (job: C) => Promise<string>;
     now?: () => number;
   },
   opts: { pageSize?: number; concurrency?: number; budgetMs?: number } = {},

@@ -64,6 +64,8 @@ import {
 } from "@/lib/generation-cancel";
 import { markProviderCommitted, isRefundableUserCancellation, lockProviderUnlessCancelRequested } from "@/lib/generation-commit";
 import { planBatchFailures, settleZeroSuccessBatch } from "@/lib/photo-batch-failure-pure";
+import { planBatchItemRows } from "@/lib/generation-batch-items-pure";
+import { insertBatchItems } from "@/lib/generation-batch-items-db";
 import { recordCancelTrace } from "@/lib/generation-cancel-trace";
 import {
   DevBlankForbiddenError,
@@ -866,6 +868,29 @@ export async function POST(req: Request) {
 
     // Request-level Fal queue lock (compare-and-set), shared by every image of a batch.
     let queueLocked = false;
+    // Per image (S2 settlement rows): the provider's prediction id and output URL once known.
+    const batchPredictionIds: (string | undefined)[] = [];
+    const batchOutputUrls: (string | undefined)[] = [];
+    // `saveGeneratedProductPhoto` params minus userId/bytes; also stored for late delivery (S2).
+    const deliveryParams = (index: number) => ({
+      photoMode: photoStorageModeFromGenerate(mode),
+      filename: buildGeneratedFilename(poseId, styleId, batchTimestamp + index),
+      poseId,
+      styleId,
+      prompt: userPrompt || undefined,
+      title: savedTitle,
+      // Tag character creations so the library can group/badge them.
+      creationKind: isCharacterMode
+        ? CHARACTER_CREATION_KIND
+        : isSocialMode
+          ? SOCIAL_POST_CREATION_KIND
+          : undefined,
+      characterName: isCharacterMode && characterName ? characterName : undefined,
+      modelTier,
+      modelLabel: devBlank ? "Dev blank" : tier.modelLabel,
+      skillId,
+      jobId,
+    });
 
     const generateOne = async (index: number) => {
       let imageBuffer: ArrayBuffer;
@@ -878,7 +903,7 @@ export async function POST(req: Request) {
       } else {
         // Fal (cancelWhileQueued): the adapter owns the cancel + confirmation and locks via these hooks only
         // when the run leaves the queue / is ambiguous / a cancel is unconfirmed. Submit is not a commit.
-        const runHooks = provider!.cancelWhileQueued
+        const baseHooks = provider!.cancelWhileQueued
           ? {
               ...photoHooks,
               commit: async ({ ifNoCancel }: { ifNoCancel: boolean }) => {
@@ -895,6 +920,16 @@ export async function POST(req: Request) {
               },
             }
           : photoHooks;
+        // Commit-on-submit providers (Fal): remember this image's prediction id for its settlement row.
+        const runHooks = provider!.commitsOnSubmit
+          ? {
+              ...baseHooks,
+              onPrediction: (t: { id: string; status: string }) => {
+                batchPredictionIds[index] = t.id;
+                baseHooks?.onPrediction?.(t);
+              },
+            }
+          : baseHooks;
         const generatedImageUrl = await provider!.run({
           model: photoModelRef,
           input: providerInput!,
@@ -904,6 +939,7 @@ export async function POST(req: Request) {
         if (!generatedImageUrl.startsWith("http")) {
           throw new Error("Nano Banana did not return a valid image URL");
         }
+        batchOutputUrls[index] = generatedImageUrl;
         await commitProviderOnce();
 
         const imageResponse = await fetch(generatedImageUrl);
@@ -913,29 +949,7 @@ export async function POST(req: Request) {
         imageBuffer = await imageResponse.arrayBuffer();
       }
 
-      const filename = buildGeneratedFilename(poseId, styleId, batchTimestamp + index);
-
-      const saved = await saveGeneratedProductPhoto({
-        userId,
-        photoMode: photoStorageModeFromGenerate(mode),
-        filename,
-        imageBuffer,
-        poseId,
-        styleId,
-        prompt: userPrompt || undefined,
-        title: savedTitle,
-        // Tag character creations so the library can group/badge them.
-        creationKind: isCharacterMode
-          ? CHARACTER_CREATION_KIND
-          : isSocialMode
-            ? SOCIAL_POST_CREATION_KIND
-            : undefined,
-        characterName: isCharacterMode && characterName ? characterName : undefined,
-        modelTier,
-        modelLabel: devBlank ? "Dev blank" : tier.modelLabel,
-        skillId,
-        jobId,
-      });
+      const saved = await saveGeneratedProductPhoto({ userId, imageBuffer, ...deliveryParams(index) });
       console.log("[Product Photo] Saved output.");
       return { saved };
     };
@@ -1037,6 +1051,27 @@ export async function POST(req: Request) {
       }
       photoAssetsFinalized = true;
     }
+    // S2: a partly delivered Fal batch with an unconfirmed image records one row per image, so reconcile
+    // can refund exactly that image once Fal confirms it failed. Best-effort; inert until migration 119.
+    const batchItemRows =
+      provider && jobId && profileId && plan.unconfirmedFailures > 0
+        ? planBatchItemRows({
+            jobId,
+            profileId,
+            generationRequestId,
+            provider,
+            outcomes,
+            predictionIds: batchPredictionIds,
+            outputUrls: batchOutputUrls,
+            assetIds: photoAssetIds,
+            delivery: deliveryParams,
+            perImageCredits,
+            isDefinitive: isProviderDefinitiveFailure,
+            isCancelled: isGenerationCancelled,
+            nowIso: new Date().toISOString(),
+          })
+        : null;
+    const unconfirmedRecheck = batchItemRows ? (await insertBatchItems(batchItemRows)) === "written" : false;
     const primary = successes[0].saved;
     if (jobId && profileId) {
       await safe("finishJob", () => finishJob(profileId!, jobId!, {
@@ -1065,6 +1100,8 @@ export async function POST(req: Request) {
       failedImageCount: failureCount,
       // Failed images still charged because the provider outcome is unknown (Fal only); additive field.
       unconfirmedImageCount: plan.unconfirmedFailures,
+      // Only when the per-image rows exist: reconcile re-checks the unconfirmed images (additive field).
+      ...(unconfirmedRecheck ? { unconfirmedRecheck: true } : {}),
       savedToCloud: true,
     };
     await finishMeteredAttempt(metered, {

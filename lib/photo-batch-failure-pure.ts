@@ -45,9 +45,16 @@ export function settleZeroSuccessBatch(p: Parameters<typeof planBatchFailures>[0
 /**
  * User-facing warning for a batch that delivered some images. `unconfirmed` (absent in older responses)
  * counts failed images still charged because the provider outcome is unknown; the old "only charged for
- * the ones that worked" wording is used only when that is true.
+ * the ones that worked" wording is used only when that is true. `recheck` (response `unconfirmedRecheck`)
+ * is set only when reconcile will re-check those images, so only then is an automatic refund promised.
  */
-export function batchFailureMessage(p: { failed: number; requested: number; delivered: number; unconfirmed?: number }): string {
+export function batchFailureMessage(p: {
+  failed: number;
+  requested: number;
+  delivered: number;
+  unconfirmed?: number;
+  recheck?: boolean;
+}): string {
   const unconfirmed = p.unconfirmed ?? 0;
   if (unconfirmed <= 0) {
     return `${p.failed} of ${p.requested} images couldn't be generated — you were only charged for the ${p.delivered} that worked.`;
@@ -57,7 +64,13 @@ export function batchFailureMessage(p: { failed: number; requested: number; deli
   return [
     `${p.failed} of ${p.requested} images didn't arrive.`,
     ...(refunded > 0 ? [`${refunded} ${refunded === 1 ? "was" : "were"} refunded.`] : []),
-    `${unconfirmed} couldn't be confirmed by the AI provider, so ${one ? "it is" : "they are"} still charged for now.`,
-    `Contact support if ${one ? "it doesn't" : "they don't"} appear in your library.`,
+    ...(p.recheck
+      ? [
+          `${unconfirmed} couldn't be confirmed yet, so we're re-checking ${one ? "it" : "them"} with the AI provider: if ${one ? "it" : "they"} failed, the credits come back automatically.`,
+        ]
+      : [
+          `${unconfirmed} couldn't be confirmed by the AI provider, so ${one ? "it is" : "they are"} still charged for now.`,
+          `Contact support if ${one ? "it doesn't" : "they don't"} appear in your library.`,
+        ]),
   ].join(" ");
 }
