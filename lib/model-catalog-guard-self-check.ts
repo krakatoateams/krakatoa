@@ -285,7 +285,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
 // judged by the same guard minus ARCHIVED (price / provider still apply).
 {
   const at = "2026-01-01T00:00:00Z";
-  const tree = (catalog: { model_id: string; enabled: boolean; archived_at?: string | null }[]) =>
+  const tree = (catalog: { model_id: string; enabled: boolean; archived_at?: string | null }[], deprecated: string[] = []) =>
     buildAdminConfigTree({
       tools: [{ tool_key: "photo", display_name: "Product Photo", enabled: true, visible_in_sidebar: true, coming_soon: false, sort_order: 0 }],
       pricing: readyPricing.map((r) => ({
@@ -295,7 +295,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
         enabled: true,
         provider_cost_usd: 0.01,
         cost_unit: "per_image" as const,
-        is_deprecated: false,
+        is_deprecated: deprecated.includes(r.pricing_key),
       })),
       featureModels: [],
       modelCatalog: catalog.map((c, i) => ({ id: `c${i}`, tool_key: "photo", updated_at: at, ...c })),
@@ -312,6 +312,10 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   const gone = stale.models.find((m) => m.id === DEFAULT_PRODUCT_PHOTO_TIER)!;
   assert.equal(gone.enabled, false);
   assert.ok(gone.features.every((f) => !f.isDefault), "a removed model is never a mode default");
+  // A retired model (removed, every price deprecated) still shows under Add model; an unpriced live one does not.
+  const retiredKeys = modelPricingKeys("photo", plain);
+  assert.deepEqual(splitToolModels(tree([{ model_id: plain, enabled: false, archived_at: at }], retiredKeys).models).removed.map((m) => m.id), [plain]);
+  assert.ok(!tree([], retiredKeys).models.some((m) => m.id === plain), "a live model with no price rows stays out of the card");
   // An off (not removed) model stays in the list with its switch off.
   const offTree = splitToolModels(tree([{ model_id: plain, enabled: false }]).models);
   assert.equal(offTree.inTool.find((m) => m.id === plain)?.enabled, false);

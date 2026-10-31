@@ -1640,6 +1640,26 @@ export default function AdminConfigV2Page() {
     [scheduleAutosave]
   );
 
+  /** A refused catalog change (409): roll the row back to the server's copy and say why next to the model. */
+  const catalogRefusal = useCallback(
+    (modelId: string, e: unknown): Error => {
+      if (!(e instanceof AdminApiError) || e.status !== 409) return e instanceof Error ? e : new Error("Failed to save.");
+      const current = e.body.modelCatalog as CatalogRow | null;
+      if (current) applyCatalogRow(current);
+      const reasons =
+        e.body.code === "STALE_MODEL_CONFIG"
+          ? [STALE_MODEL_MESSAGE]
+          : e.body.code === "MIGRATION_REQUIRED"
+            ? ["This needs migration 118. Ask a developer to apply it."]
+            : ((e.body.reasons as string[] | undefined) ?? [e.message]);
+      // One short sentence at the moment of action: the first (highest-priority) guard reason.
+      setNotice(modelId, reasons.slice(0, 1));
+      if (e.body.code === "STALE_MODEL_CONFIG") resyncSoon();
+      return new Error(reasons[0]);
+    },
+    [applyCatalogRow, setNotice, resyncSoon]
+  );
+
   const commitModelCatalog = useCallback(
     (modelId: string, enabled: boolean) => {
       catalogPendingRef.current.set(modelId, enabled);
@@ -1662,44 +1682,25 @@ export default function AdminConfigV2Page() {
             applyCatalogRow(data.modelCatalog as CatalogRow);
           } catch (e) {
             catalogPendingRef.current.delete(modelId);
-            if (e instanceof AdminApiError && e.status === 409) {
-              // Roll the optimistic toggle back to the server's row and say why.
-              const current = e.body.modelCatalog as CatalogRow | null;
-              if (current) applyCatalogRow(current);
-              const stale = e.body.code === "STALE_MODEL_CONFIG";
-              const reasons = stale ? [STALE_MODEL_MESSAGE] : ((e.body.reasons as string[] | undefined) ?? [e.message]);
-              setNotice(modelId, reasons);
-              if (stale) resyncSoon();
-              throw new Error(reasons.join(" "));
-            }
-            throw e;
+            // A refusal rolls the optimistic toggle back to the server's row and says why.
+            throw catalogRefusal(modelId, e);
           }
           if (catalogPendingRef.current.get(modelId) === targetEnabled) break;
         } while (true);
         catalogPendingRef.current.delete(modelId);
       });
     },
-    [scheduleAutosave, setNotice, applyCatalogRow, resyncSoon]
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal]
   );
 
-  /** A refused catalog change (409): roll the row back to the server's copy and say why next to the model. */
-  const catalogRefusal = useCallback(
-    (modelId: string, e: unknown): Error => {
-      if (!(e instanceof AdminApiError) || e.status !== 409) return e instanceof Error ? e : new Error("Failed to save.");
-      const current = e.body.modelCatalog as CatalogRow | null;
-      if (current) applyCatalogRow(current);
-      const reasons =
-        e.body.code === "STALE_MODEL_CONFIG"
-          ? [STALE_MODEL_MESSAGE]
-          : e.body.code === "MIGRATION_REQUIRED"
-            ? ["Removing models needs migration 118. Ask a developer to apply it."]
-            : ((e.body.reasons as string[] | undefined) ?? [e.message]);
-      setNotice(modelId, reasons);
-      if (e.body.code === "STALE_MODEL_CONFIG") resyncSoon();
-      return new Error(reasons.join(" "));
-    },
-    [applyCatalogRow, setNotice, resyncSoon]
-  );
+  /** The model's current catalog row (id + compare-and-set token), read at save time. */
+  const liveCatalogModel = useCallback((modelId: string) => {
+    const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
+    if (!live?.catalogConfigId || !live.catalogUpdatedAt) {
+      throw new Error("Model settings are not ready. Click Refresh, then try again.");
+    }
+    return { ...live, catalogConfigId: live.catalogConfigId, catalogUpdatedAt: live.catalogUpdatedAt };
+  }, []);
 
   // Remove = archive this tool's catalog row (guarded server-side). Same autosave key as the
   // on/off switch, so the two never race on the compare-and-set token.
@@ -1707,10 +1708,7 @@ export default function AdminConfigV2Page() {
     (modelId: string) => {
       setNotice(modelId, null);
       scheduleAutosave(`catalog:${modelId}`, async () => {
-        const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
-        if (!live?.catalogConfigId || !live.catalogUpdatedAt) {
-          throw new Error("Model settings are not ready. Click Refresh, then try again.");
-        }
+        const live = liveCatalogModel(modelId);
         try {
           const data = await postApi(`/api/admin/config/model-catalog/${live.catalogConfigId}/archive`, {
             expectedUpdatedAt: live.catalogUpdatedAt,
@@ -1721,7 +1719,7 @@ export default function AdminConfigV2Page() {
         }
       });
     },
-    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal]
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal, liveCatalogModel]
   );
 
   // Add = restore (when removed) then turn on; the enable step re-runs the price/provider guard.
@@ -1729,10 +1727,7 @@ export default function AdminConfigV2Page() {
     (modelId: string) => {
       setNotice(modelId, null);
       scheduleAutosave(`catalog:${modelId}`, async () => {
-        const live = toolsRef.current.flatMap((t) => t.models).find((m) => m.id === modelId);
-        if (!live?.catalogConfigId || !live.catalogUpdatedAt) {
-          throw new Error("Model settings are not ready. Click Refresh, then try again.");
-        }
+        const live = liveCatalogModel(modelId);
         try {
           let token = live.catalogUpdatedAt;
           if (live.archived) {
@@ -1753,7 +1748,7 @@ export default function AdminConfigV2Page() {
         }
       });
     },
-    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal]
+    [scheduleAutosave, setNotice, applyCatalogRow, catalogRefusal, liveCatalogModel]
   );
 
   const commitFeatureMode = useCallback(

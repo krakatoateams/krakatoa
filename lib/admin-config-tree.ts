@@ -400,6 +400,14 @@ function resolveCatalogModel(
   };
 }
 
+/**
+ * A model with no live price rows is left out of the tree, except a removed one: retiring a model
+ * deprecates its prices, and it must still show under "Add model" (blocked until priced again).
+ */
+function listedInTree(variants: readonly AdminCostVariant[], catalog: { archived: boolean }): boolean {
+  return variants.length > 0 || catalog.archived;
+}
+
 function buildVideoModels(
   map: Map<string, PricingConfigInput>,
   settings: BillingSettings,
@@ -410,12 +418,13 @@ function buildVideoModels(
 
   for (const model of VIDEO_MODELS) {
     const variants = enumerateVideoVariants(model, map, settings);
-    if (variants.length === 0) continue;
+    const catalog = resolveCatalogModel("reels", model.id, modelCatalog);
+    if (!listedInTree(variants, catalog)) continue;
     models.push({
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      ...resolveCatalogModel("reels", model.id, modelCatalog),
+      ...catalog,
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -423,12 +432,13 @@ function buildVideoModels(
 
   for (const model of MOTION_CONTROL_MODELS) {
     const variants = enumerateMotionVariants(model, map, settings);
-    if (variants.length === 0) continue;
+    const catalog = resolveCatalogModel("reels", model.id, modelCatalog);
+    if (!listedInTree(variants, catalog)) continue;
     models.push({
       id: model.id,
       label: model.modelLabel,
       subtitle: model.providerModel,
-      ...resolveCatalogModel("reels", model.id, modelCatalog),
+      ...catalog,
       features: buildVideoFeatures(model.id, featureModels),
       variants,
     });
@@ -464,7 +474,7 @@ function buildPhotoModels(
       ...resolveCatalogModel("photo", tier.id, modelCatalog),
       features: buildPhotoFeatures(tier.id, featureModels),
       variants: enumeratePhotoVariants(tier, map, settings),
-    })).filter((m) => m.variants.length > 0)
+    })).filter((m) => listedInTree(m.variants, m))
   );
 }
 

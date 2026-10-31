@@ -39,9 +39,10 @@ export function RemoveModelDialog({
   const id = model?.catalogConfigId ?? null;
 
   useEffect(() => {
+    // Closing keeps the last preview (no skeleton flash mid-animation); a new model starts fresh.
+    if (!id) return;
     setImpact(null);
     setFailed(false);
-    if (!id) return;
     let cancelled = false;
     fetch(`/api/admin/config/model-catalog/${id}/impact`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
@@ -53,7 +54,6 @@ export function RemoveModelDialog({
   }, [id]);
 
   const blocked = impact ? !impact.archiveCheck.ok : false;
-  const c = impact?.counts;
   return (
     <ConfirmDialog
       open={model !== null}
@@ -99,9 +99,12 @@ export function RemoveModelDialog({
               </span>
               {impact.skills?.length ? " (they switch to the default model)" : null}
             </li>
-            {c!.inFlightJobs ? <li>{plural(c!.inFlightJobs, "creation is", "creations are")} still running; they finish normally.</li> : null}
+            {impact.counts.inFlightJobs ? (
+              <li>{plural(impact.counts.inFlightJobs, "creation is", "creations are")} still running; they finish normally.</li>
+            ) : null}
             <li>
-              Made with it so far: {plural(c!.jobs.allTime, "creation", "creations")} ({countText(c!.jobs.last30Days)} in the last 30 days).
+              Made with it so far: {plural(impact.counts.jobs.allTime, "creation", "creations")} (
+              {countText(impact.counts.jobs.last30Days)} in the last 30 days).
             </li>
           </ul>
         )}
