@@ -201,5 +201,11 @@ export function createFalPhotoProvider(
       }
       return { id: raw, status: TICK_STATUS[status] ?? "processing" };
     },
+    getPredictionOutput: async (raw) => {
+      const parsed = decodeFalPredictionId(raw);
+      if (!parsed) throw new Error("Unrecognized Fal prediction id.");
+      // normalizeFalOutput enforces a trusted *.fal.media URL (I9).
+      return normalizeFalOutput((await fal.queue.result(parsed.endpoint, { requestId: parsed.requestId })).data);
+    },
   };
 }

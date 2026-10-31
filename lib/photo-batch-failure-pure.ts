@@ -66,7 +66,7 @@ export function batchFailureMessage(p: {
     ...(refunded > 0 ? [`${refunded} ${refunded === 1 ? "was" : "were"} refunded.`] : []),
     ...(p.recheck
       ? [
-          `${unconfirmed} couldn't be confirmed yet, so we're re-checking ${one ? "it" : "them"} with the AI provider: if ${one ? "it" : "they"} failed, the credits come back automatically.`,
+          `${unconfirmed} couldn't be confirmed yet, so we're re-checking ${one ? "it" : "them"} with the AI provider: if ${one ? "it" : "they"} finished, ${one ? "it'll" : "they'll"} appear in your library; if ${one ? "it" : "they"} failed, the credits come back automatically.`,
         ]
       : [
           `${unconfirmed} couldn't be confirmed by the AI provider, so ${one ? "it is" : "they are"} still charged for now.`,

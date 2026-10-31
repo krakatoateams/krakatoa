@@ -36,10 +36,16 @@ import {
 import { settleBatchItem, type BatchItemOps } from "@/lib/generation-batch-items-pure";
 import {
   batchItemsTableReady,
-  countAmbiguousBatchItems,
-  fetchAmbiguousBatchItems,
+  claimBatchItemDelivery,
+  countOpenBatchItems,
+  fetchOpenBatchItems,
+  finishBatchItemDelivery,
   settleAmbiguousBatchItem,
 } from "@/lib/generation-batch-items-db";
+import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
+import { markAssetReady } from "@/lib/assets-db";
+import { insertProductPhotoGeneration } from "@/lib/product-photo-db";
+import type { ModelPoseId, PhotoStyleId } from "@/lib/product-photo";
 
 /** Buffer beyond idempotency lock TTL before treating a run as abandoned. */
 const RECONCILE_BUFFER_MS = 5 * 60 * 1000;
@@ -62,6 +68,8 @@ export type GenerationReconcileResult = {
   unresolvedJobs: number;
   /** Per-image (S2) rows refunded after Fal confirmed that image failed. */
   itemsRefunded: number;
+  /** Per-image rows Fal confirmed finished, saved into the owner's library by reconcile (late delivery). */
+  itemsDeliveredLate: number;
   /** Per-image rows nothing can confirm any more (manual review). */
   itemsUnresolved: number;
   /** Per-image rows not visited this run (budget spent). */
@@ -177,6 +185,7 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
     settledLeft: 0,
     unresolvedJobs: 0,
     itemsRefunded: 0,
+    itemsDeliveredLate: 0,
     itemsUnresolved: 0,
     itemsLeft: 0,
     itemsScanSkipped: false,
@@ -351,7 +360,8 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
   }
 
   // S2: ambiguous images of partly delivered Fal batches (migration 119), each refunded on its own
-  // once Fal confirms THAT prediction failed. Own budget slice; skipped while the table is absent.
+  // once Fal confirms THAT prediction failed, or delivered late once Fal confirms it finished.
+  // Own budget slice; skipped while the table is absent.
   try {
     if (!(await batchItemsTableReady())) {
       result.itemsScanSkipped = true;
@@ -368,17 +378,66 @@ export async function runGenerationReconcile(): Promise<GenerationReconcileResul
         spendAmount: spendAmountForJob,
         refund: refundCredits,
         settle: settleAmbiguousBatchItem,
+        late: {
+          claim: claimBatchItemDelivery,
+          outputUrl: async (providerId, predictionId) => {
+            const provider = getPhotoProviderById(providerId);
+            if (!provider?.getPredictionOutput) throw new Error("Late delivery is not supported for this provider.");
+            return provider.getPredictionOutput(predictionId);
+          },
+          download: async (url) => {
+            const res = await fetch(url, { signal: AbortSignal.timeout(SETTLED_CONFIRM_TIMEOUT_MS) });
+            if (!res.ok) throw new Error(`Download failed (${res.status}).`);
+            return res.arrayBuffer();
+          },
+          userIdForProfile,
+          save: ({ poseId, styleId, ...rest }) =>
+            saveGeneratedProductPhoto({ ...rest, poseId: poseId as ModelPoseId, styleId: styleId as PhotoStyleId }),
+          recordLibrary: async ({ userId, storagePath, poseId, styleId, prompt, title, creationKind, characterName, modelTier, modelLabel, skillId, jobId }) => {
+            const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+            try {
+              await insertProductPhotoGeneration({
+                userId,
+                imageUrl: storagePath,
+                storagePath,
+                poseId: poseId as ModelPoseId,
+                styleId: styleId as PhotoStyleId,
+                prompt: str(prompt),
+                title: str(title),
+                creationKind: str(creationKind),
+                characterName: str(characterName),
+                modelTier: str(modelTier),
+                modelLabel: str(modelLabel),
+                skillId: str(skillId),
+                jobId: str(jobId),
+              });
+            } catch (e) {
+              // Unique (user_id, storage_path): the earlier attempt already wrote it.
+              if (!/duplicate key|unique constraint/i.test(e instanceof Error ? e.message : String(e))) throw e;
+            }
+          },
+          // markAssetFailed replaced the route's metadata; restore what the stored params carry.
+          markReady: (profileId, assetId, storagePath, credits, { poseId, styleId, modelTier, skillId }) =>
+            markAssetReady(profileId, assetId, {
+              storagePath,
+              mimeType: GENERATED_PHOTO_MIME,
+              costCredits: credits,
+              metadata: { poseId, styleId, modelTier, ...(skillId ? { skillId } : {}), deliveredLate: true },
+            }),
+          finish: finishBatchItemDelivery,
+        },
       };
       const w = { after: windows.expired.after, before: windows.active.before };
       const items = await scanSettledJobs(
         {
-          fetchPage: (cursor, limit) => fetchAmbiguousBatchItems(w, cursor, limit),
-          countFrom: (cursor) => countAmbiguousBatchItems(w, cursor),
+          fetchPage: (cursor, limit) => fetchOpenBatchItems(w, cursor, limit),
+          countFrom: (cursor) => countOpenBatchItems(w, cursor),
           process: (item) => settleBatchItem(itemOps, item, { expired: Date.parse(item.updatedAt) <= Date.parse(windows.active.after) }),
         },
         { budgetMs: Math.max(0, Math.min(SETTLED_ITEMS_BUDGET_MS, SETTLED_ITEMS_RUN_DEADLINE_MS - (Date.now() - runStart))) },
       );
       result.itemsRefunded = items.outcomes.refunded ?? 0;
+      result.itemsDeliveredLate = items.outcomes.delivered_late ?? 0;
       result.itemsUnresolved = items.outcomes.unresolved ?? 0;
       result.itemsLeft = items.left;
       result.errors.push(...items.errors);

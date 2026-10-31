@@ -45,4 +45,9 @@ export interface PhotoProvider {
   cancelPredictions(ids: string[]): Promise<{ requested: number; cancelled: number }>;
   /** Read the current status of one prediction. */
   getPredictionStatus(id: string): Promise<PhotoPredictionStatus>;
+  /**
+   * Fal only (late delivery, S2): the trusted output URL of a finished prediction, read fresh from the
+   * provider. Throws when it is not available (expired 404, failed, untrusted host, network).
+   */
+  getPredictionOutput?(id: string): Promise<string>;
 }

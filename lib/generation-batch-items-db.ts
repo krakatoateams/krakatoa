@@ -59,26 +59,32 @@ type ItemRow = {
   prediction_id: string | null;
   credits: number;
   created_at: string;
+  state: "ambiguous" | "delivering";
+  asset_id: string | null;
+  delivery: Record<string, unknown> | null;
 };
 
-const ambiguousQuery = (w: { after: string; before: string }, cursor: SettledCursor, head: boolean) => {
+const ITEM_COLUMNS = "id, profile_id, job_id, batch_index, provider, prediction_id, credits, created_at, state, asset_id, delivery";
+
+// Open rows: `delivering` ones are included so a stale lease can be reclaimed (the claim CAS decides).
+const openQuery = (w: { after: string; before: string }, cursor: SettledCursor, head: boolean) => {
   let q = supabaseServer
     .from(TABLE)
-    .select("id, profile_id, job_id, batch_index, provider, prediction_id, credits, created_at", head ? { count: "exact", head: true } : undefined)
-    .eq("state", "ambiguous")
+    .select(ITEM_COLUMNS, head ? { count: "exact", head: true } : undefined)
+    .in("state", ["ambiguous", "delivering"])
     .gt("created_at", w.after)
     .lt("created_at", w.before);
   if (cursor) q = q.or(`created_at.gt.${cursor.updatedAt},and(created_at.eq.${cursor.updatedAt},id.gt.${cursor.id})`);
   return q;
 };
 
-/** Keyset page of ambiguous rows, (created_at, id) ascending; `updatedAt` carries created_at. */
-export async function fetchAmbiguousBatchItems(
+/** Keyset page of open rows, (created_at, id) ascending; `updatedAt` carries created_at. */
+export async function fetchOpenBatchItems(
   w: { after: string; before: string },
   cursor: SettledCursor,
   limit: number,
 ): Promise<BatchItemCandidate[]> {
-  const { data, error } = await ambiguousQuery(w, cursor, false)
+  const { data, error } = await openQuery(w, cursor, false)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
     .limit(limit);
@@ -92,11 +98,14 @@ export async function fetchAmbiguousBatchItems(
     predictionId: r.prediction_id,
     credits: r.credits,
     updatedAt: r.created_at,
+    state: r.state,
+    assetId: r.asset_id,
+    delivery: r.delivery,
   }));
 }
 
-export async function countAmbiguousBatchItems(w: { after: string; before: string }, cursor: SettledCursor): Promise<number> {
-  const { count } = await ambiguousQuery(w, cursor, true);
+export async function countOpenBatchItems(w: { after: string; before: string }, cursor: SettledCursor): Promise<number> {
+  const { count } = await openQuery(w, cursor, true);
   return count ?? 0;
 }
 
@@ -117,6 +126,45 @@ export async function settleAmbiguousBatchItem(
     .eq("profile_id", item.profileId)
     .eq("state", "ambiguous")
     .select("id");
+  if (error) throw new Error(error.message);
+  return ((data as { id: string }[] | null) ?? []).length > 0;
+}
+
+/**
+ * Late delivery claim (compare-and-set, owner-scoped): `ambiguous -> delivering`, or reclaim a
+ * `delivering` row whose lease (`updated_at`, bumped by the trigger) is older than `staleBefore`.
+ * Resolves the new `updated_at` as the lease token, or null when another run holds the row.
+ */
+export async function claimBatchItemDelivery(
+  item: { id: string; profileId: string; state: "ambiguous" | "delivering" },
+  staleBefore: string,
+): Promise<string | null> {
+  let q = supabaseServer
+    .from(TABLE)
+    .update({ state: "delivering" })
+    .eq("id", item.id)
+    .eq("profile_id", item.profileId)
+    .eq("state", item.state);
+  if (item.state === "delivering") q = q.lt("updated_at", staleBefore);
+  const { data, error } = await q.select("updated_at");
+  if (error) throw new Error(error.message);
+  return ((data as { updated_at: string }[] | null) ?? [])[0]?.updated_at ?? null;
+}
+
+/** `delivering -> delivered_late` (whoever holds the lease: the image is saved) or back to `ambiguous` (own lease only). */
+export async function finishBatchItemDelivery(
+  item: { id: string; profileId: string },
+  lease: string,
+  to: "delivered_late" | "ambiguous",
+): Promise<boolean> {
+  let q = supabaseServer
+    .from(TABLE)
+    .update(to === "delivered_late" ? { state: to, settled_at: new Date().toISOString() } : { state: to })
+    .eq("id", item.id)
+    .eq("profile_id", item.profileId)
+    .eq("state", "delivering");
+  if (to === "ambiguous") q = q.eq("updated_at", lease);
+  const { data, error } = await q.select("id");
   if (error) throw new Error(error.message);
   return ((data as { id: string }[] | null) ?? []).length > 0;
 }
