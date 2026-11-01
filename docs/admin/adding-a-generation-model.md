@@ -136,18 +136,19 @@ So the migration's `credit_amount` IS the price. Compute it with the formula, th
 | Model, variant | Cost (USD) | × 90 | Credits | Live |
 |---|---|---|---|---|
 | GPT Image 2.5 Flare, medium (per image) | 0.047 | 4.23 | 5 | 5 |
-| Nano Banana 2, 2K (per image) | 0.101 | 9.09 | 10 | 10 |
+| Nano Banana (basic, per image) | 0.039 | 3.51 | 4 | 4 |
 | Nano Banana Pro, 4K (per image) | 0.30 | 27.000…004 | 27 (float noise ignored, `CEIL_EPSILON`) | 27 |
 | Grok Imagine Video, 720p (per second) | 0.08 | 7.2 | 8, so a 10 s clip costs 80 | 8 |
 
 **Reference snapshot** (a sample, not the full list; the console snippet below lists all keys).
-Re-verify before you rely on it: an admin can edit prices. The Nano Banana 2 1K row shows the price after
-`120_raise_nano_banana_2_1k_price.sql` (#464); before that SQL runs it is 0.067 / 7.
+Re-verify before you rely on it: an admin can edit prices. The Nano Banana 2 row shows the prices after
+`120_raise_nano_banana_2_1k_price.sql` (#464, 1K) and `121_raise_nano_banana_2_2k_4k_price.sql` (#469, 2K
+and 4K); before those run they are 0.067 / 7, 0.101 / 10 and 0.151 / 14.
 
 | Pricing key | Cost (USD) | Credits |
 |---|---|---|
 | `product_photo_nano_banana_per_image` | 0.039 | 4 |
-| `product_photo_nano_banana_2_1k_per_image` / `_2k_` / `_4k_` | 0.08 / 0.101 / 0.151 | 8 / 10 / 14 |
+| `product_photo_nano_banana_2_1k_per_image` / `_2k_` / `_4k_` | 0.08 / 0.12 / 0.16 | 8 / 11 / 15 |
 | `product_photo_nano_banana_pro_1k_per_image` / `_2k_` / `_4k_` | 0.15 / 0.15 / 0.30 | 14 / 14 / 27 |
 | `product_photo_gpt_image_2_low_per_image` / `_medium_` / `_high_` | 0.012 / 0.047 / 0.128 | 2 / 5 / 12 |
 | `grok_imagine_480p_per_second` / `grok_imagine_720p_per_second` | 0.05 / 0.08 | 5 / 8 |
@@ -183,8 +184,9 @@ margin  = revenue − cost
 differs per provider. Example: `product_photo_nano_banana_2_1k_per_image` used to charge 7 credits
 ($0.0778): Replicate costs $0.067, but Fal costs $0.08, so every Fal image lost $0.002. Since #464
 (`120_raise_nano_banana_2_1k_price.sql`) it is priced from the Fal cost: ceil(0.08 × 90) = 8 credits
-($0.0889). `_2k_` (10 credits, $0.111 against Fal $0.12) and `_4k_` (14 credits, $0.156 against Fal
-$0.16) still lose a little on Fal. Show the human the margin per provider and let them choose the price.
+($0.0889). `_2k_` and `_4k_` followed in #469 (`121_raise_nano_banana_2_2k_4k_price.sql`): ceil(0.12 × 90) =
+11 and ceil(0.16 × 90) = 15 credits, so no Nano Banana 2 size loses money on Fal any more. Show the human
+the margin per provider and let them choose the price.
 
 In Admin → Models, a row's price table shows this directly (display only, #466):
 

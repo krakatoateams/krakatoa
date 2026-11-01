@@ -54,7 +54,7 @@ export const DEFAULT_PHOTO_STYLE: PhotoStyleId = "auto";
  *
  * Three real provider models, each its own credit price:
  *   - basic    -> google/nano-banana       (NO resolution param)        4 cr
- *   - balanced -> google/nano-banana-2      (resolution 1K/2K/4K)   8/10/14 cr
+ *   - balanced -> google/nano-banana-2      (resolution 1K/2K/4K)   8/11/15 cr
  *   - pro      -> google/nano-banana-pro    (resolution 1K/2K/4K)  14/14/27 cr
  *
  * The credit charge is provider-cost based (lib/pricing-defaults.ts +
@@ -234,8 +234,8 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     hasResolution: true,
     resolutions: [
       { id: "1k", label: "1K", pricingKey: "product_photo_nano_banana_2_1k_per_image", fallbackCredits: 8 },
-      { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_2_2k_per_image", fallbackCredits: 10 },
-      { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_2_4k_per_image", fallbackCredits: 14 },
+      { id: "2k", label: "2K", pricingKey: "product_photo_nano_banana_2_2k_per_image", fallbackCredits: 11 },
+      { id: "4k", label: "4K", pricingKey: "product_photo_nano_banana_2_4k_per_image", fallbackCredits: 15 },
     ],
     providerFamily: "nano_balanced",
     supportsReference: true,

@@ -407,13 +407,15 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_image", credit_amount: 8, enabled: true,
     provider_cost_usd: 0.08, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_1k", currency: "USD",
   },
+  // Highest provider cost (fal $0.12; Replicate $0.101): ceil(0.12 x 90) = 11 (#469, migration 121).
   product_photo_nano_banana_2_2k_per_image: {
-    pricing_type: "per_image", credit_amount: 10, enabled: true,
-    provider_cost_usd: 0.101, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_2k", currency: "USD",
+    pricing_type: "per_image", credit_amount: 11, enabled: true,
+    provider_cost_usd: 0.12, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_2k", currency: "USD",
   },
+  // Highest provider cost (fal $0.16; Replicate $0.151): ceil(0.16 x 90) = 15 (#469, migration 121).
   product_photo_nano_banana_2_4k_per_image: {
-    pricing_type: "per_image", credit_amount: 14, enabled: true,
-    provider_cost_usd: 0.151, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_4k", currency: "USD",
+    pricing_type: "per_image", credit_amount: 15, enabled: true,
+    provider_cost_usd: 0.16, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_4k", currency: "USD",
   },
   product_photo_nano_banana_pro_1k_per_image: {
     pricing_type: "per_image", credit_amount: 14, enabled: true,

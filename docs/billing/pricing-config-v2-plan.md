@@ -479,8 +479,8 @@ now **deprecated + disabled** (kept for audit, never read by the runtime).
 |---|---|---|---|---|
 | **Basic** | `google/nano-banana` | none | $0.039 | **4** |
 | **Balanced 1K** | `google/nano-banana-2` | `1K` | $0.08 (fal; Replicate $0.067), #464 | **8** |
-| **Balanced 2K** | `google/nano-banana-2` | `2K` | $0.101 | **10** |
-| **Balanced 4K** | `google/nano-banana-2` | `4K` | $0.151 | **14** |
+| **Balanced 2K** | `google/nano-banana-2` | `2K` | $0.12 (fal; Replicate $0.101), #469 | **11** |
+| **Balanced 4K** | `google/nano-banana-2` | `4K` | $0.16 (fal; Replicate $0.151), #469 | **15** |
 | **Pro 1K** | `google/nano-banana-pro` | `1K` | $0.15 | **14** |
 | **Pro 2K** | `google/nano-banana-pro` | `2K` | $0.15 | **14** |
 | **Pro 4K** | `google/nano-banana-pro` | `4K` | $0.30 | **27** |
@@ -493,8 +493,8 @@ Pro 4K `ceil(0.30 × 90) = 27`.
 
 - `product_photo_nano_banana_per_image` — Basic ($0.039 → 4)
 - `product_photo_nano_banana_2_1k_per_image` — Balanced 1K ($0.067 → 7; raised to fal's $0.08 → 8 in #464, migration 120)
-- `product_photo_nano_banana_2_2k_per_image` — Balanced 2K ($0.101 → 10)
-- `product_photo_nano_banana_2_4k_per_image` — Balanced 4K ($0.151 → 14)
+- `product_photo_nano_banana_2_2k_per_image` — Balanced 2K ($0.101 → 10; raised to fal's $0.12 → 11 in #469, migration 121)
+- `product_photo_nano_banana_2_4k_per_image` — Balanced 4K ($0.151 → 14; raised to fal's $0.16 → 15 in #469, migration 121)
 - `product_photo_nano_banana_pro_1k_per_image` — Pro 1K ($0.15 → 14)
 - `product_photo_nano_banana_pro_2k_per_image` — Pro 2K ($0.15 → 14)
 - `product_photo_nano_banana_pro_4k_per_image` — Pro 4K ($0.30 → 27)
