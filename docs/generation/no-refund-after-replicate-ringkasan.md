@@ -32,6 +32,6 @@ Abandon recoverable (`cancel` + `jobId`) **tidak** refund — biaya provider sud
 - `generation_requests.cancel_allowed` — `markProviderCommitted()` set `false`
 - `POST /api/generations/cancel` → 409 `CANCEL_NOT_ALLOWED` bila locked
 - `isRefundableUserCancellation()` di catch metered routes
-- UI: `useGenerationStatusPoll` + `GenerationCancelButton` (“Finalizing…”)
+- UI: `useGenerationStatusPoll` + `GenerationCancelButton` (after commit: “Already generating, can't be cancelled.”, #472)
 
 Detail: [`no-refund-after-replicate-plan.md`](no-refund-after-replicate-plan.md)

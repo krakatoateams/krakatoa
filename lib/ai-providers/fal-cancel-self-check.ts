@@ -21,7 +21,9 @@ import {
 import { planBatchFailures, settleZeroSuccessBatch } from "../photo-batch-failure-pure";
 import {
   CANCEL_FAILED_MESSAGE,
-  CANCEL_NOT_ALLOWED_MESSAGE,
+  CANCEL_LOCKED_MESSAGE,
+  CANCEL_DELIVERED_ANYWAY_MESSAGE,
+  cancelControl,
   cancelUiState,
   cancelWithNotice,
   postGenerationCancel,
@@ -306,16 +308,32 @@ async function main(): Promise<void> {
     assert(await postGenerationCancel(mk(200, { status: "cancelling" }), "k") === "cancelling", "7: accepted");
     const refused = await postGenerationCancel(mk(409, { code: "CANCEL_NOT_ALLOWED" }), "k");
     const ui = cancelUiState(refused);
-    assert(refused === "not_allowed" && ui.refused && ui.notice === CANCEL_NOT_ALLOWED_MESSAGE, "7: 409 CANCEL_NOT_ALLOWED => notice + Finalizing…");
-    assert(/credits are used/i.test(CANCEL_NOT_ALLOWED_MESSAGE) && /^[\x20-\x7E]+$/.test(CANCEL_NOT_ALLOWED_MESSAGE + CANCEL_FAILED_MESSAGE), "7: English copy");
+    // #472: a 409 is not an error. The control turns into the calm line at once; no red banner.
+    assert(refused === "not_allowed" && ui.refused && ui.notice === null, "7: 409 CANCEL_NOT_ALLOWED => calm line, no error notice");
+    assert(CANCEL_LOCKED_MESSAGE === "Already generating, can't be cancelled.", "7: calm line wording");
+    assert(!/refund/i.test(CANCEL_LOCKED_MESSAGE + CANCEL_DELIVERED_ANYWAY_MESSAGE + CANCEL_FAILED_MESSAGE), "7: never implies a refund");
+    assert(/credits are used/i.test(CANCEL_DELIVERED_ANYWAY_MESSAGE), "7: delivered-after-accepted-cancel still says credits are used");
+    assert(/^[\x20-\x7E]+$/.test(CANCEL_LOCKED_MESSAGE + CANCEL_DELIVERED_ANYWAY_MESSAGE + CANCEL_FAILED_MESSAGE), "7: English copy");
     for (const failed of [await postGenerationCancel(mk(500, {}), "k"), await postGenerationCancel(mk(409, { code: "OTHER" }), "k"), await postGenerationCancel(async () => { throw new Error("offline"); }, "k")]) {
       const u = cancelUiState(failed);
       assert(failed === "failed" && !u.refused && u.notice === CANCEL_FAILED_MESSAGE, "7: other failures show the retry notice");
     }
     const shown: string[] = [];
-    assert((await cancelWithNotice(async () => "not_allowed", (n) => shown.push(n))) === "not_allowed" && shown[0] === CANCEL_NOT_ALLOWED_MESSAGE, "7: canvas cancel shows the refused notice");
+    assert((await cancelWithNotice(async () => "not_allowed", (n) => shown.push(n))) === "not_allowed" && shown.length === 0, "7: canvas 409 shows no error notice");
     await cancelWithNotice(async () => "cancelling", (n) => shown.push(n));
-    assert(shown.length === 1, "7: accepted cancel shows nothing at click time");
+    assert(shown.length === 0, "7: accepted cancel shows nothing at click time");
+    await cancelWithNotice(async () => "failed", (n) => shown.push(n));
+    assert(shown.length === 1 && shown[0] === CANCEL_FAILED_MESSAGE, "7: canvas failed cancel still shows the retry notice");
+    // Cancel is offered only while the server says it can succeed (cancel_allowed true, no 409 seen).
+    assert(cancelControl({ visible: false, cancelAllowed: true }) === "hidden", "7: nothing in flight => no control");
+    assert(cancelControl({ visible: true, cancelAllowed: true }) === "cancel", "7: cancel_allowed true => Cancel button");
+    assert(cancelControl({ visible: true, cancelAllowed: false }) === "locked", "7: cancel_allowed false => calm line");
+    // After a 409 every caller passes cancelAllowed && !cancelRefused, so the line shows before the next poll.
+    const hook = readFileSync("lib/use-idempotent-submit.ts", "utf8");
+    assert(/result === "not_allowed" && sameAttempt/.test(hook), "7: a late 409 never locks the next run");
+    for (const f of ["lib/studio-generation-submit.ts", "app/(app)/tools/canvas/nodes/ImageNode.tsx", "app/(app)/tools/canvas/nodes/PromptNode.tsx", "app/(app)/tools/canvas/nodes/VideoNode.tsx"]) {
+      assert(/cancelAllowed\s*=?\s*\{?\s*\w*[cC]ancelAllowed && !cancelRefused/.test(readFileSync(f, "utf8")), `7: ${f} hides Cancel after a 409`);
+    }
     assert(cancelUiState("cancelling").notice === null && cancelUiState("idle").notice === null, "7: success path shows no notice");
   }
 

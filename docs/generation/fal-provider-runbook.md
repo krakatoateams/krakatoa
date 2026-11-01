@@ -252,20 +252,23 @@ COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRef
 - Trace: every attempt is kept as a finished job step (admin job timeline): `cancel_requested`, `cancel_refused`
   (reason `committed` / `raced_with_commit`) from the cancel endpoint, and `cancel_outcome` (`result`, `confirmed`,
   Fal status) from the generate route, plus a log line. No new column.
-- UI: a 409 `CANCEL_NOT_ALLOWED` shows "Generation already started and can't be cancelled. Credits are used." in the
-  form's error banner and the button becomes "Finalizing…" at once; other cancel failures show "Couldn't cancel. Please
-  try again."
+- UI (#472): Cancel is offered only while the status poll says `cancelAllowed` (no extra Fal calls). Once it is false,
+  or on a 409 `CANCEL_NOT_ALLOWED`, the button gives way at once to one calm line in the same slot, "Already generating,
+  can't be cancelled." (no error banner, no refund claim). Other cancel failures show "Couldn't cancel. Please try
+  again." in the error banner. A cancel the API accepted whose image still arrives shows "Generation already started
+  and can't be cancelled. Credits are used." in the error banner after delivery.
 
 ### Live test steps for the cancel (run by hand, record results in the table below)
 
 1. Queued cancel: submit a Photo job and press Cancel within the first second or two (before Fal reports IN_PROGRESS;
    a busy model or a batch of 4 helps). Expect: job `cancelled`, credits refunded once, no asset, `cancel_outcome` step
    with `result: removed, confirmed: true`. Record what Fal's status/result returned afterwards and whether Fal billed.
-2. Running cancel: press Cancel after the job is processing. Expect: the notice, "Finalizing…", the image arrives,
-   one spend and no refund, `cancel_refused` step. Check Fal usage to see whether the run was billed (normal).
+2. Running cancel: once the job is processing, Cancel is gone. Expect the calm line "Already generating, can't be
+   cancelled." (on a race, the 409 shows the same line), the image arrives, one spend and no refund, `cancel_refused`
+   step only after a raced click. Check Fal usage to see whether the run was billed (normal).
 3. Race: spam Cancel around the moment the run starts. Expect exactly one of: refund and no image, or image and charge;
    never both and never neither. Look at the job's `cancel_*` steps and the credit ledger.
-4. Batch of 2+ images: cancel while queued (full refund) and after one started (409, charged for all).
+4. Batch of 2+ images: cancel while queued (full refund) and after one started (Cancel is gone; on a race the 409 shows the calm line; charged for all).
 
 ## Observed behavior (fill in during the live run)
 

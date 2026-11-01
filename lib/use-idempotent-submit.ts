@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GENERATION_CHANGED_EVENT } from "@/lib/active-generation-events";
-import { CANCEL_NOT_ALLOWED_MESSAGE, postGenerationCancel, type CancelResult } from "@/lib/generation-cancel-client-pure";
+import { CANCEL_DELIVERED_ANYWAY_MESSAGE, postGenerationCancel, type CancelResult } from "@/lib/generation-cancel-client-pure";
 import {
   clearPersistedIdempotentAttempt,
   readPersistedIdempotentAttempt,
@@ -73,8 +73,12 @@ export function useIdempotentSubmit(scope: string) {
   // in flight, and disable it once a cancel request has been sent.
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // The server answered 409 CANCEL_NOT_ALLOWED for this attempt: show the calm line now, before the next poll.
+  const [cancelRefused, setCancelRefused] = useState(false);
   // A cancel the server accepted for the attempt in flight: if the run then delivers anyway, the cancel was refused.
   const cancelAcceptedRef = useRef(false);
+  // Bumped on every begin(): a 409 that lands after its attempt ended must not lock the next run.
+  const attemptSeqRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -107,7 +111,9 @@ export function useIdempotentSubmit(scope: string) {
     const key = attemptState.key;
     setActiveKey(key);
     setCancelling(false);
+    setCancelRefused(false);
     cancelAcceptedRef.current = false;
+    attemptSeqRef.current += 1;
     emitGenerationChanged();
     let settled = false;
     const settle = (succeeded: boolean, options?: { rotate?: boolean }) => {
@@ -117,6 +123,7 @@ export function useIdempotentSubmit(scope: string) {
       if (mountedRef.current) {
         setActiveKey(null);
         setCancelling(false);
+        setCancelRefused(false);
       }
       emitGenerationChanged();
       if (succeeded || options?.rotate) {
@@ -140,8 +147,11 @@ export function useIdempotentSubmit(scope: string) {
     const key = attemptStateRef.current?.key;
     if (!key || !inFlightRef.current) return "idle";
     if (mountedRef.current) setCancelling(true);
+    const seq = attemptSeqRef.current;
     const result = await postGenerationCancel((url, init) => fetch(url, init), key);
     if (result === "cancelling") cancelAcceptedRef.current = true;
+    const sameAttempt = inFlightRef.current && attemptSeqRef.current === seq;
+    if (result === "not_allowed" && sameAttempt && mountedRef.current) setCancelRefused(true);
     // Accepted: keep `cancelling` true, the in-flight generate fetch settles shortly and resets it.
     // Refused or failed: let the user act again; the generate request is still running.
     if (result !== "cancelling" && mountedRef.current) setCancelling(false);
@@ -150,9 +160,9 @@ export function useIdempotentSubmit(scope: string) {
 
   /** After a delivered run: the refused-cancel notice when a cancel was accepted but the output arrived anyway (credits used). */
   const deliveredAfterCancelNotice = useCallback(
-    () => (cancelAcceptedRef.current ? CANCEL_NOT_ALLOWED_MESSAGE : null),
+    () => (cancelAcceptedRef.current ? CANCEL_DELIVERED_ANYWAY_MESSAGE : null),
     [],
   );
 
-  return { begin, cancel, activeKey, cancelling, deliveredAfterCancelNotice };
+  return { begin, cancel, activeKey, cancelling, cancelRefused, deliveredAfterCancelNotice };
 }

@@ -35,10 +35,9 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
     resumeStillFailingMessage,
   } = config;
 
-  const { begin, cancel: cancelRequest, cancelling, activeKey, deliveredAfterCancelNotice } = useIdempotentSubmit(idempotencyScope);
+  const { begin, cancel: cancelRequest, cancelling, cancelRefused, activeKey, deliveredAfterCancelNotice } = useIdempotentSubmit(idempotencyScope);
   const { cancelAllowed: pollCancelAllowed, phase } = useGenerationStatusPoll(activeKey);
-  // A 409 on Cancel means the run already started: show "Finalizing…" now instead of waiting for the poll.
-  const [cancelRefused, setCancelRefused] = useState(false);
+  // A 409 on Cancel means the run already started: show the calm line now instead of waiting for the poll.
   const cancelAllowed = pollCancelAllowed && !cancelRefused;
 
   const [loading, setLoading] = useState(false);
@@ -69,13 +68,11 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
     [clearError, refetchCredits, refreshHistory, openPreviewFromResponse],
   );
 
-  // The notice reuses the form's inline error banner (role="alert"), which the run's outcome clears.
+  // A failed cancel reuses the form's inline error banner (role="alert"); a 409 shows only the calm line.
   const cancel = useCallback(async () => {
     const result = await cancelRequest();
-    const { refused, notice } = cancelUiState(result);
-    if (!mountedRef.current) return result;
-    if (refused) setCancelRefused(true);
-    if (notice) setError(notice);
+    const { notice } = cancelUiState(result);
+    if (notice && mountedRef.current) setError(notice);
     return result;
   }, [cancelRequest]);
 
@@ -86,7 +83,6 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
       setLoading(true);
       setError(null);
-      setCancelRefused(false);
       setRecoverableJobId(null);
 
       try {
