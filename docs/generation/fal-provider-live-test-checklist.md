@@ -5,7 +5,7 @@ equivalent runs in CI (`npm run test:ai-provider-guard`, `photo-e2e-self-check.t
 what only a real Fal account can show. Record results in the runbook's "Observed behavior" table.
 
 Setup: `FAL_KEY` set and deployed; Fal account funded; migrations 113-117 applied in prod (2026-10-31).
-Switch one tier at a time in Admin → Config v2 (see [runbook](fal-provider-runbook.md)); wait 60 s.
+Switch one tier at a time in Admin → Models → Product Photo (see [runbook](fal-provider-runbook.md)); wait 60 s.
 
 ## Per tier: Nano Banana, Nano Banana 2, Nano Banana Pro, GPT Image 2.5 Flare
 

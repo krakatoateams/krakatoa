@@ -122,7 +122,7 @@ export type VideoReferenceCaps = {
 export type VideoModel = {
   id: VideoModelId;
   /**
-   * Required on new entries (#453): `false` ships dark (it appears switched off in its Admin Config tool card; an
+   * Required on new entries (#453): `false` ships dark (it appears switched off in its tool's list in the Admin Models tab; an
    * admin turns it on after pricing), `true` offers it on deploy. Omitted only on models in `OFFERED_BEFORE_SHIP_DARK`.
    */
   offeredByDefault?: boolean;

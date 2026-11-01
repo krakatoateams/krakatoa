@@ -117,7 +117,7 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
 ## Switch a tier to Fal
 
 1. Make sure `FAL_KEY` is set in the deployment env and the deployment has been redeployed.
-2. Admin → Config v2 → the tier's section → provider dropdown → Fal → save. Credit price does not change.
+2. Admin → Models → Product Photo → open the tier's row → provider dropdown → Fal (saves at once). Credit price does not change.
 3. Wait up to 60 s (resolver cache TTL). In-flight jobs finish on the provider they started on.
 4. Check (below).
 

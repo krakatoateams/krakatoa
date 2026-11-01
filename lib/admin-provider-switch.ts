@@ -88,3 +88,46 @@ export function marginForCost(
 export function creditsForCost(costUsd: number, settings: BillingSettings): number {
   return calculateCredits({ providerCostUsd: costUsd, unitCount: 1, settings });
 }
+
+/** Lookup key into provider_model_costs rows: `${provider}|${model}|${pricing_key}`. */
+export function providerCostKey(provider: string, model: string, pricingKey: string): string {
+  return `${provider}|${model}|${pricingKey}`;
+}
+
+export type ProviderMargin = {
+  provider: PhotoProviderId;
+  /** null = no recorded cost (shown as "cost not set", never a guess). */
+  costUsd: number | null;
+  /** True when the cost comes from provider_model_costs; false for the Replicate fallback. */
+  recorded: boolean;
+  active: boolean;
+  margin: { usd: number; pct: number } | null;
+};
+
+/**
+ * Margin of one variant's price on every provider the tier can run on (display only, #466).
+ * Costs come from provider_model_costs. Replicate without a recorded row falls back to the
+ * variant's reference cost, which was the old margin source; Fal without a row stays unknown.
+ */
+export function providerMargins(params: {
+  credits: number;
+  pricingKey: string;
+  referenceUsd: number;
+  options: readonly PhotoProviderOption[];
+  activeProvider: PhotoProviderId;
+  costs: Record<string, number>;
+  settings: BillingSettings;
+}): ProviderMargin[] {
+  return params.options.map((o) => {
+    const recordedCost = params.costs[providerCostKey(o.provider, o.model, params.pricingKey)];
+    const recorded = recordedCost !== undefined;
+    const costUsd = recorded ? recordedCost : o.provider === "replicate" ? params.referenceUsd : null;
+    return {
+      provider: o.provider,
+      costUsd,
+      recorded,
+      active: o.provider === params.activeProvider,
+      margin: marginForCost(params.credits, costUsd, params.settings),
+    };
+  });
+}

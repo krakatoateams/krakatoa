@@ -44,7 +44,7 @@ Plus section **Pipeline** (langkah internal: LLM, TTS, Whisper, storyboard image
 
 ## File penting
 
-- UI: `app/(app)/admin/config-v2/page.tsx`
+- UI: `app/(app)/admin/(catalog)/AdminCatalog.tsx` (tab Config dan tab Models, #466)
 - Tree: `lib/admin-config-tree.ts`
 - Pipeline registry: `lib/admin-pipeline-config.ts`
 - Photo features: `lib/creation-features.ts`

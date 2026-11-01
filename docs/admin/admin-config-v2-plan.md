@@ -168,7 +168,7 @@ not the product-photo tier matrix.
 
 ## 5. UI contract (config v2 page)
 
-**File:** `app/(app)/admin/config-v2/page.tsx`
+**File:** `app/(app)/admin/(catalog)/AdminCatalog.tsx` (since #466: Config tab at `/admin/config-v2`, Models tab at `/admin/models`)
 
 | Control | Persists to | Notes |
 |---------|-------------|-------|
@@ -286,7 +286,7 @@ Until Phase 4: keep read-only `provider/model` in Pipeline table.
 
 | File | Role |
 |------|------|
-| `app/(app)/admin/config-v2/page.tsx` | Main UI |
+| `app/(app)/admin/(catalog)/AdminCatalog.tsx` | Main UI: Config and Models tabs (#466) |
 | `app/(app)/admin/config/page.tsx` | Legacy (delete after cutover) |
 | `lib/admin-config-tree.ts` | Tree types + `buildAdminConfigTree()` |
 | `lib/admin-pipeline-config.ts` | Pipeline group registry |

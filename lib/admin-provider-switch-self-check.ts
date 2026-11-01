@@ -4,7 +4,7 @@ import { V2_PRICING_DEFAULTS } from "./pricing-defaults";
 import { isSupportedProviderModel } from "./ai-provider-catalog";
 import { getModelDefault, getPricingDefault } from "./admin-config-resolved-defaults";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
-import { activePhotoProvider, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget } from "./admin-provider-switch";
+import { activePhotoProvider, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget, providerCostKey, providerMargins } from "./admin-provider-switch";
 
 const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2"];
 for (const tier of PRODUCT_PHOTO_TIERS) {
@@ -46,4 +46,22 @@ assert.equal(
 for (const cost of [0.067, 0.08]) {
   assert.ok((marginForCost(8, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `NB2 1K at 8 credits covers $${cost}`);
 }
+// #466: margin per provider (display only). Costs from provider_model_costs; Replicate falls back to the reference cost.
+const nb2Options = photoProviderOptions("image_balanced");
+const nb2Margins = providerMargins({
+  credits: 8,
+  pricingKey: "product_photo_nano_banana_2_1k_per_image",
+  referenceUsd: 0.08,
+  options: nb2Options,
+  activeProvider: "fal",
+  costs: {
+    [providerCostKey("replicate", "google/nano-banana-2", "product_photo_nano_banana_2_1k_per_image")]: 0.067,
+    [providerCostKey("fal", "fal-ai/nano-banana-2", "product_photo_nano_banana_2_1k_per_image")]: 0.08,
+  },
+  settings: DEFAULT_BILLING_SETTINGS,
+});
+assert.deepEqual(nb2Margins.map((x) => [x.provider, x.costUsd, x.recorded, x.active]), [["replicate", 0.067, true, false], ["fal", 0.08, true, true]]);
+assert.ok(nb2Margins[0].margin!.pct > 24 && nb2Margins[0].margin!.pct < 25 && nb2Margins[1].margin!.pct > 9 && nb2Margins[1].margin!.pct < 10.1, "Replicate ~25%, fal ~10%");
+const noRows = providerMargins({ credits: 8, pricingKey: "k", referenceUsd: 0.08, options: nb2Options, activeProvider: "replicate", costs: {}, settings: DEFAULT_BILLING_SETTINGS });
+assert.deepEqual(noRows.map((x) => [x.provider, x.costUsd, x.recorded, x.margin === null]), [["replicate", 0.08, false, false], ["fal", null, false, true]], "Replicate falls back to the reference cost; fal without a row is unknown, never a guess");
 console.log("admin-provider-switch self-check ok");

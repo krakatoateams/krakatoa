@@ -441,7 +441,7 @@ export function SkillModifyPanel({
             </span>
             <p className="mb-2 text-xs text-text-secondary">
               Pinned for everyone who uses this skill. Leave as catalog default to follow the live
-              Photo or Video default. The model must be enabled in Admin Config or generate falls
+              Photo or Video default. The model must be on in Admin → Models or generate falls
               back.
             </p>
             <select

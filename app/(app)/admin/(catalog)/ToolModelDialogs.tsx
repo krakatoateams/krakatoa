@@ -18,7 +18,7 @@ const countText = (n: number | null) => (n === null ? "unknown" : n.toLocaleStri
 const plural = (n: number | null, one: string, many: string) => `${countText(n)} ${n === 1 ? one : many}`;
 
 /**
- * Remove confirmation for one model in one tool card. Remove archives the model's row for this tool
+ * Remove confirmation for one model in one tool (Models tab). Remove archives the model's row for this tool
  * only (the server guard refuses a default, the last model or the last Reels engine). The impact
  * preview loads with a skeleton; a guard refusal is one sentence and keeps the button inert.
  */
@@ -114,7 +114,7 @@ export function RemoveModelDialog({
 }
 
 /**
- * "Add model" for one tool card: lists only this tool's models that are not in the card (removed ones).
+ * "Add model" for one tool (Models tab): lists only this tool's models that are not in its list (removed ones).
  * Adding restores the model and turns it on; the server re-runs the same guard (price, provider).
  */
 export function AddModelDialog({

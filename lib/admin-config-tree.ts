@@ -576,7 +576,7 @@ export function buildAdminConfigTree(params: {
 }
 
 /**
- * The tool card's model list and its "Add model" picker, from the same catalog rows: a removed
+ * A tool's model list (Models tab) and its "Add model" picker, from the same catalog rows: a removed
  * (archived) model is only in the picker, so it can never linger in the list after Remove (#460).
  */
 export function splitToolModels(models: readonly AdminModelNode[]): {
@@ -587,6 +587,37 @@ export function splitToolModels(models: readonly AdminModelNode[]): {
     inTool: models.filter((m) => !m.archived),
     removed: models.filter((m) => m.archived),
   };
+}
+
+/** Tools listed in the Models tab: every tool with a model list or a pipeline (#466). */
+export function modelsTabTools(tools: readonly AdminToolNode[]): AdminToolNode[] {
+  return tools.filter((t) => t.models.length > 0 || t.pipelines.length > 0);
+}
+
+const PRICE_UNIT_TEXT: Partial<Record<CostUnit, string>> = {
+  per_image: "per image",
+  per_second: "per second",
+  per_run: "per run",
+};
+
+/**
+ * Read-only price for a model row, from the SAVED credits (what users pay now, not an unsaved
+ * draft): "10 credits per image", or a range over the variants that are on ("8–14 credits per image").
+ */
+export function priceSummary(
+  variants: readonly AdminCostVariant[],
+  saved: Readonly<Record<string, { credits: number }>>
+): string | null {
+  const on = variants.filter((v) => v.enabled);
+  const rows = on.length > 0 ? on : variants;
+  if (rows.length === 0) return null;
+  const credits = rows.map((v) => saved[v.pricingKey]?.credits ?? v.credits);
+  const min = Math.min(...credits);
+  const max = Math.max(...credits);
+  const units = new Set(rows.map((v) => v.costUnit));
+  const unit = units.size === 1 ? (PRICE_UNIT_TEXT[rows[0].costUnit] ?? "") : "";
+  const amount = min === max ? `${min}` : `${min}–${max}`;
+  return `${amount} ${max === 1 ? "credit" : "credits"} ${unit}`.trim();
 }
 
 export function suggestCreditsFromProvider(
