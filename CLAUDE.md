@@ -126,6 +126,7 @@ keeps only the rules needed on most engineering tasks.
 - Generation lifecycle: `docs/generation/`
 - Supabase egress: `docs/ops/supabase-egress.md`
 - Admin configuration: `docs/admin/admin-config-v2-plan.md`
+- Adding a generation model (agent runbook): `docs/admin/adding-a-generation-model.md`
 - Admin monitoring: `docs/admin/admin-monitoring.md`
 - Durable workflows: `docs/generation/durable-workflows.md`
 - Full project architecture and current invariants: `AGENTS.md`
