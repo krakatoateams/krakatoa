@@ -1,3 +1,4 @@
+import { FAL_KREA_MAX_PROMPT_CHARS } from "@/lib/ai-providers/fal-photo-catalog";
 import { PHOTOS_FOLDER, STORAGE_BUCKET, photosUserPrefix } from "@/lib/storage-buckets";
 
 export const PRODUCT_PHOTO_BUCKET = STORAGE_BUCKET;
@@ -78,7 +79,9 @@ export type ProductPhotoModelTier =
   | "seedream3"
   | "flux_schnell"
   | "gpt_image_2"
-  | "krea2_turbo";
+  | "krea2_turbo"
+  | "krea2_large"
+  | "krea2_medium";
 export type ProductPhotoResolution = "1k" | "2k" | "4k";
 /** GPT Image 2 quality (the only input that changes Replicate's price). "auto" is not offered. */
 export type ProductPhotoQuality = "low" | "medium" | "high";
@@ -97,10 +100,13 @@ export type PhotoProviderFamily =
   | "flux_t2i"
   | "imagen"
   | "ideogram"
-  | "gpt_image";
+  | "gpt_image"
+  | "krea_v2";
 
 /** Fal endpoint for Krea 2 Turbo (#467): Fal-only, text-to-image only. */
 export const KREA_2_TURBO_FAL_MODEL = "fal-ai/krea-2/turbo";
+/** Krea 2 Large / Medium aspect ratios we offer (provider enum minus 2.35:1, which the pickers lack). */
+export const KREA_V2_ASPECT_RATIOS: PhotoAspectRatio[] = ["1:1", "4:5", "2:3", "9:16", "3:2", "4:3", "16:9"];
 
 /** Replicate slug for GPT Image 2.5 Flare (Photo GPT Image tier and Storyboard sheets). */
 export const GPT_IMAGE_2_5_FLARE_MODEL = "openai/gpt-image-2.5-flare";
@@ -183,6 +189,13 @@ export type ProductPhotoTier = {
    * model-state read is a retryable 503 before any spend (`resolveFalOnlyPhotoModel`).
    */
   falOnly?: true;
+  /**
+   * Text-to-image tier whose generate route refuses a reference image (400, before any spend) instead
+   * of silently dropping it (#467, #474). Other text-only tiers keep ignoring references.
+   */
+  rejectsReference?: true;
+  /** Provider prompt limit in characters; longer prompts are refused before any spend (#467, #474). */
+  maxPromptChars?: number;
   /** Provider model id (display/metadata only; resolved via model_configs). */
   providerModel: string;
   hasResolution: boolean;
@@ -412,6 +425,8 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     id: "krea2_turbo",
     offeredByDefault: false,
     falOnly: true,
+    rejectsReference: true,
+    maxPromptChars: FAL_KREA_MAX_PROMPT_CHARS,
     label: "Krea 2 Turbo",
     subtitle: "Text-to-image · fal.ai",
     modelLabel: "Krea 2 Turbo",
@@ -425,6 +440,51 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     // Same Replicate-shaped fields (prompt, aspect_ratio, output_format); mapFalPhotoInput maps them.
     providerFamily: "flux_t2i",
     supportsReference: false,
+  },
+  {
+    // Krea 2 Large (#474): Replicate krea/krea-2-large by default, Fal krea/v2/large/text-to-image as a
+    // second provider. Text-to-image only; both bill a flat price per image ($0.06), any ratio.
+    id: "krea2_large",
+    offeredByDefault: false,
+    rejectsReference: true,
+    maxPromptChars: FAL_KREA_MAX_PROMPT_CHARS,
+    label: "Krea 2 Large",
+    subtitle: "Text-to-image",
+    modelLabel: "Krea 2 Large",
+    modelRole: "image_krea2_large",
+    providerModel: "krea/krea-2-large",
+    // No resolution chip: neither provider documents the output size.
+    hasResolution: false,
+    basicPricingKey: "product_photo_krea_2_large_per_image",
+    basicFallbackCredits: 6,
+    resolutions: [],
+    providerFamily: "krea_v2",
+    supportsReference: false,
+    // Provider ratios (verbatim, same on both providers): 3:4 and 21:9 are not offered and clamp to 4:5 / 16:9.
+    supportedAspectRatios: KREA_V2_ASPECT_RATIOS,
+    limitAspectRatioPicker: true,
+  },
+  {
+    // Krea 2 Medium (#474): Replicate krea/krea-2-medium by default, Fal krea/v2/medium/text-to-image as a
+    // second provider. Text-to-image only; both bill a flat price per image ($0.03), any ratio.
+    id: "krea2_medium",
+    offeredByDefault: false,
+    rejectsReference: true,
+    maxPromptChars: FAL_KREA_MAX_PROMPT_CHARS,
+    label: "Krea 2 Medium",
+    subtitle: "Text-to-image",
+    modelLabel: "Krea 2 Medium",
+    modelRole: "image_krea2_medium",
+    providerModel: "krea/krea-2-medium",
+    // No resolution chip: neither provider documents the output size.
+    hasResolution: false,
+    basicPricingKey: "product_photo_krea_2_medium_per_image",
+    basicFallbackCredits: 3,
+    resolutions: [],
+    providerFamily: "krea_v2",
+    supportsReference: false,
+    supportedAspectRatios: KREA_V2_ASPECT_RATIOS,
+    limitAspectRatioPicker: true,
   },
 ];
 
@@ -817,7 +877,7 @@ export function buildSocialPostPrompt(params: {
 const ASPECT_FALLBACK: Record<PhotoAspectRatio, PhotoAspectRatio[]> = {
   "1:1": ["1:1"],
   "4:5": ["4:5", "3:4", "2:3", "9:16"],
-  "3:4": ["3:4", "9:16"],
+  "3:4": ["3:4", "4:5", "2:3", "9:16"],
   "2:3": ["2:3", "3:4", "9:16"],
   "9:16": ["9:16", "3:4"],
   "3:2": ["3:2", "4:3", "16:9"],
@@ -903,6 +963,14 @@ export function buildPhotoProviderInput(params: {
         prompt,
         aspect_ratio: aspectRatio,
         output_format: "png",
+      };
+    case "krea_v2":
+      // Allowlist; creativity pinned to the provider default. No style references or moodboard: they
+      // change the per-image price.
+      return {
+        prompt,
+        aspect_ratio: aspectRatio,
+        creativity: "medium",
       };
     case "gpt_image":
       return {

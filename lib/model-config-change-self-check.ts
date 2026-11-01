@@ -253,9 +253,9 @@ async function main() {
       defaultModelCatalogRows().every((d) => d.enabled || !OFFERED_BEFORE_SHIP_DARK.has(d.modelId)),
       "models offered before #453 all stay offered by default",
     );
-    // #467: Krea 2 Turbo is the only model that ships hidden; every other model is offered.
+    // #467 / #474: the Krea models ship hidden; every other model is offered.
     const shippedDark = defaultModelCatalogRows().filter((d) => !d.enabled).map((d) => d.modelId);
-    assert.deepEqual(shippedDark, ["krea2_turbo"], "only Krea 2 Turbo ships hidden");
+    assert.deepEqual(shippedDark, ["krea2_turbo", "krea2_large", "krea2_medium"], "only the Krea models ship hidden");
     const offeredPhoto = enabledIdsFromRows("photo", []).size;
     const tier = PRODUCT_PHOTO_TIERS.find((x) => x.id === plain)!;
     const prevFlag = tier.offeredByDefault;

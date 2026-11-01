@@ -28,9 +28,7 @@ import {
   DEFAULT_CHARACTER_STYLE,
   DEFAULT_CHARACTER_GENDER,
   DEFAULT_CHARACTER_AGE,
-  KREA_2_TURBO_FAL_MODEL,
 } from "@/lib/product-photo";
-import { FAL_KREA_MAX_PROMPT_CHARS } from "@/lib/ai-providers/fal-photo-catalog";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { getPhotoProvider, isGenerationCancelled, isProviderDefinitiveFailure, type PhotoProvider } from "@/lib/ai-providers";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -517,10 +515,10 @@ export async function POST(req: Request) {
         if (err) return NextResponse.json({ error: err }, { status: 400 });
         extraReferenceFiles.push(referenceFile);
       }
-    } else if (tier.falOnly && referenceFiles.length > 0) {
-      // Fal-only text-to-image tier (Krea 2 Turbo, #467): refuse a reference instead of silently
-      // dropping it, before any job, spend or provider call. The pickers never send one. Other
-      // text-only tiers keep ignoring it.
+    } else if (tier.rejectsReference && referenceFiles.length > 0) {
+      // Krea text-to-image tiers (#467, #474): refuse a reference instead of silently dropping it,
+      // before any job, spend or provider call. The pickers never send one. Other text-only tiers
+      // keep ignoring it.
       return NextResponse.json(
         {
           error: `${tier.modelLabel} doesn't support a reference image. Remove it or choose a reference-capable model.`,
@@ -705,11 +703,11 @@ export async function POST(req: Request) {
       ? `${basePrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim()
       : basePrompt;
 
-    // Fal caps Krea 2 Turbo prompts (#467): refuse an over-long one here, before the spend,
-    // instead of charging for a run fal would reject.
-    if (photoModel.model === KREA_2_TURBO_FAL_MODEL && prompt.length > FAL_KREA_MAX_PROMPT_CHARS) {
+    // Krea caps prompts (#467, #474): refuse an over-long one here, before the spend, instead of
+    // charging for a run the provider would reject.
+    if (tier.maxPromptChars && prompt.length > tier.maxPromptChars) {
       return NextResponse.json(
-        { error: `This prompt is too long for ${tier.modelLabel} (max ${FAL_KREA_MAX_PROMPT_CHARS} characters). Shorten it or choose another model.` },
+        { error: `This prompt is too long for ${tier.modelLabel} (max ${tier.maxPromptChars} characters). Shorten it or choose another model.` },
         { status: 400 }
       );
     }

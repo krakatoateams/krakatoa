@@ -40,10 +40,17 @@ const resolveAt = route.indexOf("photoModel = await getPhotoModel(modelTier)");
 const spendAt = route.indexOf("beginMeteredAttempt(");
 assert.ok(resolveAt > 0 && spendAt > resolveAt, "model resolved before the spend");
 assert.match(route.slice(resolveAt, resolveAt + 300), /isModelStateUnavailable\(e\)\) return modelStateUnavailableResponse\(\)/, "resolver failure is the retryable 503");
-const refAt = route.indexOf("else if (tier.falOnly && referenceFiles.length > 0)");
-assert.ok(refAt > 0 && refAt < spendAt, "reference images on a Fal-only tier are refused before the spend");
-const capAt = route.indexOf("prompt.length > FAL_KREA_MAX_PROMPT_CHARS");
+const refAt = route.indexOf("else if (tier.rejectsReference && referenceFiles.length > 0)");
+assert.ok(refAt > 0 && refAt < spendAt, "reference images on a Krea tier are refused before the spend");
+const capAt = route.indexOf("tier.maxPromptChars && prompt.length > tier.maxPromptChars");
 assert.ok(capAt > resolveAt && capAt < spendAt, "an over-long Krea prompt is refused before the spend");
+// #474: every Krea tier refuses references and caps the prompt at fal's 5000 characters.
+for (const id of ["krea2_turbo", "krea2_large", "krea2_medium"] as const) {
+  const t = PRODUCT_PHOTO_TIERS.find((x) => x.id === id)!;
+  assert.ok(t.rejectsReference === true && t.maxPromptChars === 5000 && !t.supportsReference && !t.offeredByDefault, `${id}: hidden, text-to-image, refuses references, prompt cap`);
+  assert.equal(eligibleTiersForFeature("product").includes(id), false, `${id} not offered in Product try-on`);
+}
+assert.deepEqual(PRODUCT_PHOTO_TIERS.filter((t) => t.rejectsReference).map((t) => t.id), ["krea2_turbo", "krea2_large", "krea2_medium"], "only the Krea tiers refuse references");
 
 // Text-to-image only: never offered where a reference is required.
 assert.equal(eligibleTiersForFeature("product").includes("krea2_turbo"), false, "not offered in Product try-on");

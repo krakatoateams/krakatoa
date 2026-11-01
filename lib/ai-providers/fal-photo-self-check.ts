@@ -62,6 +62,31 @@ for (const ref of [{ image_input: ["https://x/a.png"] }, { input_images: ["https
   assert((() => { try { mapFalPhotoInput(KREA, { prompt: "p", aspect_ratio: "1:1", ...ref }); return false; } catch { return true; } })(), `krea rejects ${Object.keys(ref)[0]}`);
 }
 assert((() => { try { mapFalPhotoInput(KREA, { prompt: "p", aspect_ratio: "5:4" }); return false; } catch { return true; } })(), "krea rejects an unpinned ratio");
+
+// Krea 2 Large / Medium (#474): second provider of Replicate tiers; aspect_ratio enum, flat per-image price.
+for (const [endpoint, tierId] of [["krea/v2/large/text-to-image", "krea2_large"], ["krea/v2/medium/text-to-image", "krea2_medium"]] as const) {
+  const tier = getProductPhotoTier(tierId);
+  assert(!tier.falOnly && tier.providerFamily === "krea_v2" && tier.limitAspectRatioPicker === true, `${tierId} runs on Replicate by default`);
+  for (const ratio of photoAspectRatioOptionsForTier(tier)) {
+    const built = buildPhotoProviderInput({ tier, prompt: "p", aspectRatio: ratio.id, imageInput: ["https://x/a.png"], providerResolution: null });
+    assert(JSON.stringify(built) === JSON.stringify({ prompt: "p", aspect_ratio: ratio.id, creativity: "medium" }), `${tierId} ${ratio.id}: Replicate allowlist, reference dropped`);
+    const mapped = mapFalPhotoInput(endpoint, built);
+    assert(
+      mapped.endpoint === endpoint &&
+        JSON.stringify(mapped.input) === JSON.stringify({ prompt: "p", aspect_ratio: ratio.id, creativity: "medium", enable_safety_checker: true }),
+      `${tierId} ${ratio.id}: fal allowlist (no styles, moodboards or style references)`,
+    );
+  }
+  assert(photoAspectRatioOptionsForTier(tier).map((r) => r.id).join() === "1:1,4:5,2:3,9:16,3:2,4:3,16:9", `${tierId} offers exactly the provider's ratios`);
+  assert(buildPhotoProviderInput({ tier, prompt: "p", aspectRatio: "3:4", providerResolution: null }).aspect_ratio === "4:5", `${tierId} clamps 3:4 to the nearest ratio`);
+  assert(tier.fixedResolutionLabel === undefined, `${tierId} shows no unverified resolution chip`);
+  assert(buildPhotoProviderInput({ tier, prompt: "p", aspectRatio: "21:9", providerResolution: null }).aspect_ratio === "16:9", `${tierId} clamps 21:9`);
+  for (const ref of [{ image_input: ["https://x/a.png"] }, { input_images: ["https://x/a.png"] }, { input_image: "https://x/a.png" }]) {
+    assert((() => { try { mapFalPhotoInput(endpoint, { prompt: "p", aspect_ratio: "1:1", ...ref }); return false; } catch { return true; } })(), `${tierId} rejects ${Object.keys(ref)[0]}`);
+  }
+  assert((() => { try { mapFalPhotoInput(endpoint, { prompt: "x".repeat(FAL_KREA_MAX_PROMPT_CHARS + 1), aspect_ratio: "1:1" }); return false; } catch { return true; } })(), `${tierId} rejects a prompt over fal's cap`);
+  assert((() => { try { mapFalPhotoInput(endpoint, { prompt: "p", aspect_ratio: "21:9" }); return false; } catch { return true; } })(), `${tierId} rejects a ratio fal lacks`);
+}
 assert((() => { try { mapFalPhotoInput(KREA, { prompt: "x".repeat(FAL_KREA_MAX_PROMPT_CHARS + 1), aspect_ratio: "1:1" }); return false; } catch { return true; } })(), "krea rejects a prompt over fal's cap");
 assert(FAL_KREA_MAX_PROMPT_CHARS === 5000 && mapFalPhotoInput(KREA, { prompt: "x".repeat(5000), aspect_ratio: "1:1" }).endpoint === KREA, "krea accepts a prompt at the cap");
 
