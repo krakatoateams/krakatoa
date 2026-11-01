@@ -13,7 +13,7 @@ import {
 } from "./product-photo";
 
 const tier = getProductPhotoTier("gpt_image_2");
-assert.equal(PRODUCT_PHOTO_TIERS.at(-1)?.id, "gpt_image_2", "appended at the end");
+assert.deepEqual(PRODUCT_PHOTO_TIERS.slice(-2).map((t) => t.id), ["gpt_image_2", "krea2_turbo"], "appended at the end (Krea 2 Turbo after it, #467)");
 assert.equal(tier.providerModel, "openai/gpt-image-2.5-flare");
 assert.equal(tier.modelRole, "image_gpt_image_2");
 for (const f of ["product", "image", "character", "social"] as const) {

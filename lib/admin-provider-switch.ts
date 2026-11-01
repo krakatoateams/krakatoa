@@ -12,11 +12,16 @@ export type PhotoProviderOption = { provider: PhotoProviderId; model: string };
 
 export const PROVIDER_LABEL: Record<PhotoProviderId, string> = { replicate: "Replicate", fal: "fal.ai" };
 
-/** Replicate is always offered; Fal only when the catalog has an entry for the tier. */
+/** Whether a Photo role is a Fal-only tier (#467): no Replicate option, never a Replicate fallback. */
+export function isFalOnlyPhotoRole(configKey: string): boolean {
+  return PRODUCT_PHOTO_TIERS.some((t) => t.modelRole === configKey && t.falOnly);
+}
+
+/** Replicate is offered except on a Fal-only tier; Fal only when the catalog has an entry for the tier. */
 export function photoProviderOptions(configKey: string): PhotoProviderOption[] {
   const tier = PRODUCT_PHOTO_TIERS.find((t) => t.modelRole === configKey);
   if (!tier) return [];
-  const options: PhotoProviderOption[] = [{ provider: "replicate", model: tier.providerModel }];
+  const options: PhotoProviderOption[] = tier.falOnly ? [] : [{ provider: "replicate", model: tier.providerModel }];
   for (const [model, spec] of Object.entries(FAL_PHOTO_MODELS)) {
     if (spec.configKey === configKey) options.push({ provider: "fal", model });
   }
@@ -43,7 +48,8 @@ export function photoPatchUnit(
   patch: { provider?: string; model?: string; parameters?: unknown }
 ): { ok: true; parameters?: Record<string, unknown> } | { ok: false; error: string } {
   const options = photoProviderOptions(configKey);
-  if (options.length < 2) return { ok: true };
+  // A Fal-only row stays constrained even with one option: it must never be moved to Replicate.
+  if (options.length < 2 && !isFalOnlyPhotoRole(configKey)) return { ok: true };
   const provider = patch.provider ?? row.provider;
   const model = patch.model ?? row.model;
   // The Fal mapper ignores row parameters, so a free-form PATCH on a Fal row is reset to catalog (empty).
@@ -61,11 +67,15 @@ export function photoPatchUnit(
   return { ok: true, parameters: {} };
 }
 
-/** Provider of a stored row, falling back to Replicate when the row is missing or off-catalog. */
+/**
+ * Provider of a stored row, falling back to Replicate when the row is missing or off-catalog.
+ * A Fal-only tier is always Fal (it never runs anywhere else), so "configured" means FAL_KEY.
+ */
 export function activePhotoProvider(
   configKey: string,
   row: { provider: string; model: string; enabled: boolean } | null | undefined
 ): PhotoProviderId {
+  if (isFalOnlyPhotoRole(configKey)) return "fal";
   const match = row?.enabled
     ? photoProviderOptions(configKey).find((o) => o.provider === row.provider && o.model === row.model)
     : undefined;

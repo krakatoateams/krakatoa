@@ -147,13 +147,37 @@ const ProviderAdminContext = createContext<ProviderAdmin>({
   onSwitched: () => {},
 });
 
+/**
+ * The provider a tier actually runs on: Fal selected without FAL_KEY falls back to Replicate, except
+ * on a Fal-only tier (#467), which has no Replicate option and stays Fal (it cannot run at all).
+ */
+function effectiveProvider(choice: AdminProviderChoice, falConfigured: boolean): PhotoProviderId {
+  const canFallBack = choice.options.some((o) => o.provider === "replicate");
+  return choice.provider === "fal" && !falConfigured && canFallBack ? "replicate" : choice.provider;
+}
+
 function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
   const { falConfigured, onSwitched } = useContext(ProviderAdminContext);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (choice.options.length < 2) {
-    return <p className="text-xs text-gray-500">Provider: Replicate only</p>;
+    const only = choice.options[0]?.provider ?? "replicate";
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-gray-500">Provider: {PROVIDER_LABEL[only]} only</p>
+        {only === "fal" && !falConfigured ? (
+          <p className="text-[11px] text-amber-400">
+            fal.ai is not configured on this server (FAL_KEY missing): this model cannot run and cannot be turned on.
+          </p>
+        ) : null}
+        {only === "fal" && (!choice.modelConfigId || choice.rowEnabled === false) ? (
+          <p className="text-[11px] text-amber-400">
+            Its fal.ai settings row is missing or off (apply its migration): generations are refused until it exists.
+          </p>
+        ) : null}
+      </div>
+    );
   }
 
   const switchTo = async (provider: PhotoProviderId) => {
@@ -810,9 +834,7 @@ function ModelSection({
   const [open, setOpen] = useState(false);
   const showModes = model.features.length > 0;
   // Quiet secondary line: where it runs and which features it serves. Pricing and modes stay in details.
-  const runsOn = model.providerChoice
-    ? PROVIDER_LABEL[model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider]
-    : "Replicate";
+  const runsOn = model.providerChoice ? PROVIDER_LABEL[effectiveProvider(model.providerChoice, falConfigured)] : "Replicate";
   const details = [runsOn, ...model.features.map((f) => f.label)].join(" · ");
   const noteId = `model-note-${tool.toolKey}-${model.id}`;
   // What users pay now (saved credits); a pending price edit is flagged, not shown as the price.
@@ -914,9 +936,7 @@ function ModelSection({
               model.providerChoice
                 ? {
                     options: model.providerChoice.options,
-                    // Fal selected without FAL_KEY actually runs on Replicate: mark Replicate as in use.
-                    active:
-                      model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider,
+                    active: effectiveProvider(model.providerChoice, falConfigured),
                   }
                 : undefined
             }

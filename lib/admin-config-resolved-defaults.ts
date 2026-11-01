@@ -4,6 +4,7 @@ import {
   type ModelDefault,
   type PricingDefault,
 } from "@/lib/admin-config-defaults";
+import { isFalOnlyPhotoRole } from "@/lib/admin-provider-switch";
 import { MOTION_CONTROL_MODELS } from "@/lib/motion-control-models";
 import { calculateCredits, DEFAULT_BILLING_SETTINGS } from "@/lib/pricing-math";
 import { getV2PricingDefault } from "@/lib/pricing-defaults";
@@ -59,8 +60,10 @@ export function getModelDefault(
         ? PRODUCT_PHOTO_TIERS.find((tier) => tier.modelRole === configKey)
         : undefined;
   if (!registryModel) return null;
+  // A Fal-only photo tier (#467) resets to its Fal endpoint; everything else to Replicate.
+  const falOnly = toolKey === "photo" && isFalOnlyPhotoRole(configKey);
   return {
-    provider: "replicate",
+    provider: falOnly ? "fal" : "replicate",
     model: registryModel.providerModel,
     parameters: {},
     enabled: true,

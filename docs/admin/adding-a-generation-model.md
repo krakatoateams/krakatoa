@@ -42,15 +42,18 @@ Stop and report to the human, without writing code, when any of these is true:
 - **Fal for anything other than a Photo tier.** Fal runs only Photo tiers today. Video, motion control and
   reels on Fal need a Fal webhook and a submission fence first (backlog in
   `docs/generation/fal-provider-runbook.md`).
-- **A Fal-only photo model with no Replicate twin.** `getPhotoModel` (`lib/model-resolver.ts`) falls back
-  to Replicate with the tier's `providerModel` whenever the Fal row is missing, unsupported, or `FAL_KEY`
-  is absent. A tier without a runnable Replicate slug would then call Replicate with a Fal id. Fal is
-  added as a second provider of a tier that already runs on Replicate.
+- **A Fal-only photo model with no Replicate twin, without the `falOnly` marker.** `getPhotoModel`
+  (`lib/model-resolver.ts`) falls back to Replicate with the tier's `providerModel` whenever the Fal row is
+  missing, unsupported, or `FAL_KEY` is absent, so an unmarked tier would call Replicate with a Fal id.
+  Resolved in #467: mark the tier `falOnly: true` and follow "Fal-only model" in step 3; never ship one
+  without the marker.
 - **The schema needs a new input dimension in the UI**, such as a new picker (GPT Image's `quality` was
   one). The pickers live in `app/(app)/tools/photo-v2/page.tsx`, `app/(app)/tools/canvas/nodes/ImageNode.tsx`
   and `app/(app)/tools/skills/SkillComposer.tsx`. Scope that work with the human first.
 - **The price depends on something we cannot fix per call.** Examples: billed by tokens, by input
-  length, by number of reference images, or by megapixels when we do not fix the size. Pricing keys are
+  length, by number of reference images, or by megapixels when we do not fix the size. Megapixel pricing
+  is fine when the mapper pins every size: Krea 2 Turbo pins each ratio to at most 1 MP
+  (`FAL_KREA_SIZES`) and prices the key at the 1 MP cost. Pricing keys are
   one flat price per image, per second or per run. Fal's GPT Image is token-billed and is priced as an
   approximation (see "Cost approximation" in the Fal runbook); agree on that with the human.
 - **The output is not one media URL** (several files, base64, JSON with no URL, or a host other than
@@ -151,6 +154,7 @@ and 4K); before those run they are 0.067 / 7, 0.101 / 10 and 0.151 / 14.
 | `product_photo_nano_banana_2_1k_per_image` / `_2k_` / `_4k_` | 0.08 / 0.12 / 0.16 | 8 / 11 / 15 |
 | `product_photo_nano_banana_pro_1k_per_image` / `_2k_` / `_4k_` | 0.15 / 0.15 / 0.30 | 14 / 14 / 27 |
 | `product_photo_gpt_image_2_low_per_image` / `_medium_` / `_high_` | 0.012 / 0.047 / 0.128 | 2 / 5 / 12 |
+| `product_photo_krea_2_turbo_per_image` (fal only, after `122_krea_2_turbo_pricing.sql`) | 0.008 | 1 |
 | `grok_imagine_480p_per_second` / `grok_imagine_720p_per_second` | 0.05 / 0.08 | 5 / 8 |
 | `kling3_pro_per_second` | 0.224 | 21 |
 
@@ -266,6 +270,29 @@ Copy the closest existing entry of the same provider family; do not invent a new
 5. Read the Fal sections of `docs/generation/fal-provider-runbook.md` before you start: switching,
    cancel, refunds, reconcile, cost approximation.
 
+**Fal-only model (Photo tier with no Replicate equivalent, #467), extra:**
+
+1. Everything in the Fal list above. The `FAL_PHOTO_MODELS` entry may be text-to-image only (no
+   `editEndpoint`; pattern: the `krea_t2i` family). Set the tier's `providerModel` to the Fal endpoint id
+   and `supportsReference: false` unless the Fal model takes references.
+2. Mark the tier `falOnly: true`. That marker is what makes it safe:
+   - `getPhotoModel` sends it to `resolveFalOnlyPhotoModel` (`lib/fal-only-photo-model.ts`), which **never
+     falls back to Replicate**. A missing or disabled Fal row, an off-catalog model, a missing `FAL_KEY`
+     or a failed model-state read throws `ModelStateUnavailableError`, and the route answers the retryable
+     503 before any spend or provider call. Every other tier keeps the Replicate fallback.
+   - Admin → Models shows "Provider: fal.ai only", with a warning when `FAL_KEY` or the row is missing.
+     The provider dropdown, a PATCH and Reset can never move the row to Replicate
+     (`isFalOnlyPhotoRole`, `photoPatchUnit`, `getModelDefault`).
+   - Turning it On checks `FAL_KEY` (`PROVIDER_NOT_CONFIGURED`), because `activePhotoProvider` is always
+     `fal` for it.
+3. The mapper must reject reference images (last line of defence), and the generate route already
+   refuses them with a 400 before the spend for any tier with `supportsReference: false`.
+4. The migration (step 4) must also insert the tier's `model_configs` row (`provider 'fal'`, the endpoint
+   id, `on conflict (tool_key, config_key) do nothing`). Until it exists, generations are refused with the
+   503; nothing is charged. Pattern: `122_krea_2_turbo_pricing.sql`.
+5. Self-checks: `lib/fal-only-photo-model-self-check.ts` (resolver cases and wiring pins) and the Fal-only
+   cases in `lib/admin-provider-switch-self-check.ts`.
+
 **Do not touch:**
 
 - spend and refund code or idempotency keys;
@@ -362,7 +389,7 @@ the live `billing_settings`; the two match today. The migration stays the record
    - `PROVIDER_NOT_CONFIGURED`: the provider's server key is missing.
 
    This flow never writes pricing or billing.
-4. Fal tier: the model starts on Replicate. To move it to Fal, use the tier's provider dropdown; see
+4. Fal tier: the model starts on Replicate (a Fal-only tier is always on fal.ai). To move it to Fal, use the tier's provider dropdown; see
    "Switch a tier to Fal" in the Fal runbook.
 
 ## Removing a model, and adding it back

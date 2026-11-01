@@ -1,6 +1,7 @@
 import { listModelConfigs, type ModelConfig } from "@/lib/model-configs-db";
 import { isProviderConfigured, isSupportedProviderModel } from "@/lib/ai-provider-catalog";
 import { generationErrorLogSafe } from "@/lib/error-log-safe";
+import { resolveFalOnlyPhotoModel } from "@/lib/fal-only-photo-model";
 import {
   GPT_IMAGE_2_5_FLARE_MODEL,
   getProductPhotoTier,
@@ -18,7 +19,8 @@ import {
  *   - Routing only: a DB error falls back to the code-default provider/model for a model the
  *     caller already allowed. Whether a model is enabled or archived is decided elsewhere
  *     (feature/catalog state, which fails closed); this fallback never re-enables one.
- *   - NEVER throws.
+ *   - NEVER throws, except `getPhotoModel` for a Fal-only tier (#467), which throws
+ *     ModelStateUnavailableError instead of falling back (see resolveFalOnlyPhotoModel).
  *   - DB value used only when enabled=true and provider/model are non-empty strings.
  *   - Returns only safe fields (provider, model, parameters). No secrets/API keys
  *     are stored or returned; keys remain in environment variables.
@@ -269,11 +271,23 @@ export async function getPhotoModels(): Promise<{ image: ResolvedModel }> {
  * tier definition, so adding a new model in lib/product-photo.ts automatically
  * resolves here — no per-role switch to maintain. An admin can still override any
  * tier via a model_configs row keyed on its modelRole.
+ *
+ * A Fal-only tier (`falOnly`, #467) has no Replicate equivalent: it never falls back and throws
+ * ModelStateUnavailableError (route: retryable 503 before any spend) when its Fal row is missing or
+ * off, FAL_KEY is absent, or the model_configs read fails. Every other tier is unchanged.
  */
 export async function getPhotoModel(
   modelTier: ProductPhotoModelTier
 ): Promise<ResolvedModel> {
   const tier = getProductPhotoTier(modelTier);
+  if (tier.falOnly) {
+    const map = await getModelMap();
+    return resolveFalOnlyPhotoModel(
+      tier.modelRole,
+      map ? { row: map.get(key("photo", tier.modelRole)) } : null,
+      isProviderConfigured("fal")
+    );
+  }
   return resolveModel({
     toolKey: "photo",
     configKey: tier.modelRole,
