@@ -304,20 +304,54 @@ export function AdminUsageSkeleton() {
 }
 
 export function AdminConfigSkeleton() {
-  // Matches the page: a Refresh link, then collapsed tool cards (name + On / Sidebar / Coming soon).
+  // Matches the Config tab: a Refresh link, then one flat row per tool (name + On / Sidebar / Coming soon).
   return (
     <div className="mx-auto max-w-5xl space-y-3">
       <div className="flex justify-end">
         <Bone className="h-3.5 w-14" />
       </div>
-      <div className="space-y-2">
+      <div className="divide-y divide-white/10 rounded-lg border border-white/10">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-lg border border-white/10 px-3 py-2.5">
-            <Bone className="h-4 w-4" />
+          <div key={i} className="flex items-center gap-3 px-3 py-2.5">
             <Bone className="h-4 w-28" />
             <Bone className="ml-auto h-3.5 w-10" />
             <Bone className="h-3.5 w-16" />
             <Bone className="h-3.5 w-24" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AdminModelsSkeleton() {
+  // Matches the Models tab: Refresh, tool chips, then one tool's toolbar and model rows (name, price, switch, Remove).
+  return (
+    <div className="mx-auto max-w-5xl space-y-3">
+      <div className="flex justify-end">
+        <Bone className="h-3.5 w-14" />
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {["w-20", "w-28", "w-24", "w-20"].map((w, i) => (
+          <Bone key={i} className={`h-8 rounded-md ${w}`} />
+        ))}
+      </div>
+      <div className="rounded-lg border border-white/10 px-3 py-2">
+        <div className="flex items-center gap-3 border-b border-white/10 pb-2">
+          <Bone className="h-7 w-28 rounded-md" />
+          <Bone className="h-3 w-14" />
+          <Bone className="ml-auto h-7 w-24 rounded-md" />
+        </div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 border-b border-white/5 py-3 last:border-b-0">
+            <Bone className="h-3.5 w-3.5" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Bone className="h-3.5 w-32" />
+              <Bone className="h-3 w-56 max-w-full" />
+            </div>
+            <Bone className="hidden h-3 w-28 sm:block" />
+            <Bone className="h-5 w-9 rounded-full" />
+            <Bone className="h-3 w-12" />
           </div>
         ))}
       </div>

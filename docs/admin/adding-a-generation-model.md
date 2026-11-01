@@ -8,8 +8,8 @@ runbook against the code before going on.
 A model goes live in two steps:
 
 1. A developer (you) ships it in code, **switched off** (ship dark).
-2. After deploy, the owner applies the pricing migration and turns the model **On** in its Admin Config
-   tool card.
+2. After deploy, the owner applies the pricing migration and turns the model **On** in Admin → **Models**
+   (pick the tool at the top).
 
 Step 2 needs no code release.
 
@@ -186,6 +186,12 @@ differs per provider. Example: `product_photo_nano_banana_2_1k_per_image` used t
 ($0.0889). `_2k_` (10 credits, $0.111 against Fal $0.12) and `_4k_` (14 credits, $0.156 against Fal
 $0.16) still lose a little on Fal. Show the human the margin per provider and let them choose the price.
 
+In Admin → Models, a row's price table shows this directly (display only, #466):
+
+- **Highest cost $** is the key's `provider_cost_usd`, and the **→ N** button suggests credits from it.
+- **Margin per provider** lists each provider's cost from `provider_model_costs` and its margin. If
+  Replicate has no row there, its margin uses the highest cost. A Fal tier without a row shows "cost not set".
+
 ## 3. Code (ship dark)
 
 Copy the closest existing entry of the same provider family; do not invent a new pattern.
@@ -205,7 +211,7 @@ Copy the closest existing entry of the same provider family; do not invent a new
 
    Never reuse a retired id, slug or pricing key. Never remove an entry later.
 2. **`offeredByDefault: false`.** Required on every new entry; `test:model-catalog-guard` fails without
-   it. The model then appears in its Admin Config card switched Off. Never add to
+   it. The model then appears in its tool's list in Admin → Models, switched Off. Never add to
    `OFFERED_BEFORE_SHIP_DARK` (`lib/model-catalog-configs.ts`, frozen).
 3. **Input mapping.** If an existing family sends exactly the fields the schema needs, reuse it. Otherwise
    add a family and its case:
@@ -306,7 +312,7 @@ on conflict (provider, model, pricing_key) do nothing;
 ```
 
 Before the migration is applied, an admin can also create a missing price for a key that is in
-`V2_PRICING_DEFAULTS` by saving it in Admin Config. The route is
+`V2_PRICING_DEFAULTS` by saving it in Admin → Models. The route is
 `PATCH /api/admin/config/pricing/[pricing_key]`, and `saveBuiltinPricingConfig` inserts from the
 built-in default. That default is priced with `DEFAULT_BILLING_SETTINGS` (`lib/pricing-math.ts`), not
 the live `billing_settings`; the two match today. The migration stays the record of the price.
@@ -321,8 +327,8 @@ the live `billing_settings`; the two match today. The migration stays the record
    - `npm run test:migration-catalog`.
 
    Then run `npm run lint` and `npm run ci:checks`, which also builds.
-2. Admin Config locally (or on a preview): the model is in its tool card, switched **Off**, with its
-   price under the row's arrow.
+2. Admin → Models locally (or on a preview), with its tool picked: the model is in the list, switched
+   **Off**, with its price under the row's arrow.
 3. Write the PR body. Include the mapping table, unmapped fields, the price table with sources and dates,
    the margin per provider, the SQL file, and what the owner must do.
 4. **Test generation (the owner runs it; it costs money).** There is no per-model preview: turning a model
@@ -340,11 +346,12 @@ the live `billing_settings`; the two match today. The migration stays the record
 
    Never announce the model or make it a default before this run passes.
 
-## 6. Turn it on (Admin Config)
+## 6. Turn it on (Admin → Models)
 
-1. Expand the tool card (Product Photo or Video). Each row shows the name, an **On/Off** switch and
-   **Remove**. Pricing, modes and defaults open with the row's arrow. The new model is in the list,
-   switched Off.
+1. Open the **Models** tab and pick the tool at the top (Product Photo or Video). Each row shows the
+   name, its price (read-only, for example "10 credits per image"), an **On/Off** switch and **Remove**.
+   Provider, modes, defaults and the price table open with the row's arrow. The new model is in the
+   list, switched Off. (The **Config** tab only holds each tool's On / Sidebar / Coming soon.)
 2. Turn it **On**. The switch goes through `PATCH /api/admin/config/model-catalog/[id]`
    (`checkModelCatalogChange()`, compare-and-set, audit). The first offer of a ship-dark model is audited
    as `model_add`, later ones as `model_enable`.
@@ -361,7 +368,7 @@ the live `billing_settings`; the two match today. The migration stays the record
 **Remove** (in the model's row) takes the model out of **that tool only**:
 
 - It archives the tool's `model_catalog_configs` row (migration 118, `POST …/[id]/archive`).
-- The model leaves the card at once, and users stop seeing it on their next request.
+- The model leaves the tool's list at once, and users stop seeing it on their next request.
 - Past creations keep their label, and prices are kept.
 - The confirmation names the features that lose it, the Reels engine it runs, the skills that use it,
   jobs still running and how often it was used.
@@ -369,21 +376,21 @@ the live `billing_settings`; the two match today. The migration stays the record
   - the default of a feature (`IS_DEFAULT`: pick another default in the row's details first);
   - the last model of the tool (`LAST_ENABLED_MODEL`);
   - the last Reels engine (`REELS_ENGINE_LAST`).
-- Catalog rows are per tool, so a model is never shared between tool cards.
+- Catalog rows are per tool, so a model is never shared between tools.
 
-**Add model** (one button per card) lists only that tool's removed models:
+**Add model** (one button per tool in the Models tab) lists only that tool's removed models:
 
 - Choosing one restores it (`POST …/[id]/restore`) and turns it on (`PATCH …/[id]`), re-running the price
   and provider guard.
 - A model that cannot be offered yet is listed with the reason and cannot be picked.
 - **Add model never shows a brand-new model.** A new model needs the code and pricing above. It then
-  appears in the card switched Off, and turning it On is how it is added.
+  appears in its tool's list switched Off, and turning it On is how it is added.
 
 ## Retiring a model
 
 Full runbook: [`retiring-a-generation-model.md`](retiring-a-generation-model.md). In short:
 
-1. Remove it in Admin Config first.
+1. Remove it in Admin → Models first.
 2. Change code only after no jobs are in flight and the 72 h reconcile window has passed.
 3. Never delete the registry entry (set `offeredByDefault: false`), its rows or its pricing (deprecate
    pricing, pattern `040_deprecate_kling20.sql`).

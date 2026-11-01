@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Filter, Plus } from "lucide-react";
 import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import {
@@ -12,6 +13,8 @@ import {
   type AdminProviderChoice,
   type AdminToolNode,
   buildAdminConfigTree,
+  modelsTabTools,
+  priceSummary,
   splitToolModels,
   suggestCreditsFromProvider,
 } from "@/lib/admin-config-tree";
@@ -27,10 +30,17 @@ import {
 } from "@/lib/pricing-math";
 import {
   AdminConfigSkeleton,
+  AdminModelsSkeleton,
   AdminToast,
   useAdminToast,
 } from "../admin-ui";
-import { PROVIDER_LABEL, marginForCost, type PhotoProviderId } from "@/lib/admin-provider-switch";
+import {
+  PROVIDER_LABEL,
+  providerCostKey,
+  providerMargins,
+  type PhotoProviderId,
+  type PhotoProviderOption,
+} from "@/lib/admin-provider-switch";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
 import { AddModelDialog, RemoveModelDialog } from "./ToolModelDialogs";
@@ -88,6 +98,10 @@ function PricingNumberInput({
 const TH =
   "px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wider text-gray-500";
 
+// pricing_configs.provider_cost_usd: deliberately the highest provider cost (#464), so the suggestion never loses money.
+const HIGHEST_COST_HINT =
+  "Highest cost: the most any provider charges for this variant. Suggested credits use it, so no provider loses money.";
+
 
 /** Provider-switch data shared by the Photo model sections (fetched once by the page). */
 type ProviderAdmin = {
@@ -132,10 +146,6 @@ const ProviderAdminContext = createContext<ProviderAdmin>({
   costs: {},
   onSwitched: () => {},
 });
-
-function providerCostKey(provider: string, model: string, pricingKey: string): string {
-  return `${provider}|${model}|${pricingKey}`;
-}
 
 function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
   const { falConfigured, onSwitched } = useContext(ProviderAdminContext);
@@ -422,10 +432,10 @@ function VariantTable({
   onChange,
   onSave,
   onToggle,
-  activeProvider,
+  providers,
 }: {
-  /** Photo tiers: the provider in use, so cost and margin follow it. */
-  activeProvider?: { provider: PhotoProviderId; model: string };
+  /** Photo tiers: the providers the tier can run on and the one in use, for the margin per provider. */
+  providers?: { options: PhotoProviderOption[]; active: PhotoProviderId };
   variants: AdminCostVariant[];
   billingSettings: BillingSettings;
   saving: boolean;
@@ -435,16 +445,16 @@ function VariantTable({
   onToggle: (variant: AdminCostVariant) => void;
 }) {
   const { costs } = useContext(ProviderAdminContext);
-  const onFal = activeProvider?.provider === "fal";
   return (
+    <div>
     <div className="overflow-x-auto rounded-lg border border-white/10">
       <table className="w-full text-sm">
         <thead className="border-b border-white/10 bg-white/[0.03]">
           <tr>
             <th className={TH}>Variant</th>
-            <th className={`${TH} w-24`}>{onFal ? "fal.ai $" : "Replicate $"}</th>
+            <th className={`${TH} w-24`} title={HIGHEST_COST_HINT}>Highest cost $</th>
             <th className={`${TH} w-20`}>Credits</th>
-            {activeProvider ? <th className={`${TH} w-20`}>Margin</th> : null}
+            {providers ? <th className={`${TH} w-40`}>Margin per provider</th> : null}
             <th className={`${TH} w-16`}></th>
             <th className={`${TH} w-10`}>On</th>
             <th className={`${TH} w-16`}></th>
@@ -455,12 +465,18 @@ function VariantTable({
             const suggested = suggestCreditsFromProvider(v.providerReferenceUsd, billingSettings);
             const custom = v.credits !== suggested;
             const dirty = isPricingDirty(v, savedPricing);
-            // Fal cost comes from provider_model_costs; a missing row shows "not set", never a guess.
-            const falCost = activeProvider
-              ? (costs[providerCostKey("fal", activeProvider.model, v.pricingKey)] ?? null)
+            // Costs per provider come from provider_model_costs; a missing Fal row shows "cost not set", never a guess.
+            const margins = providers
+              ? providerMargins({
+                  credits: v.credits,
+                  pricingKey: v.pricingKey,
+                  referenceUsd: v.providerReferenceUsd,
+                  options: providers.options,
+                  activeProvider: providers.active,
+                  costs,
+                  settings: billingSettings,
+                })
               : null;
-            const activeCost = onFal ? falCost : v.providerReferenceUsd;
-            const margin = activeProvider ? marginForCost(v.credits, activeCost, billingSettings) : null;
             return (
               <tr key={v.pricingKey} className={v.enabled ? "text-gray-300" : "text-gray-600"}>
                 <td className="px-2 py-2 font-medium text-white">
@@ -473,17 +489,11 @@ function VariantTable({
                   ) : null}
                 </td>
                 <td className="px-2 py-1.5">
-                  {onFal ? (
-                    <span className="font-mono text-xs text-gray-300" title="Set in provider_model_costs">
-                      {falCost === null ? "cost not set" : `$${falCost}`}
-                    </span>
-                  ) : (
-                    <PricingNumberInput
-                      decimals
-                      value={v.providerReferenceUsd}
-                      onChange={(next) => onChange(v.pricingKey, { providerReferenceUsd: next })}
-                    />
-                  )}
+                  <PricingNumberInput
+                    decimals
+                    value={v.providerReferenceUsd}
+                    onChange={(next) => onChange(v.pricingKey, { providerReferenceUsd: next })}
+                  />
                 </td>
                 <td className="px-2 py-1.5">
                   <PricingNumberInput
@@ -492,22 +502,35 @@ function VariantTable({
                     className={`${INPUT} font-mono text-emerald-300`}
                   />
                 </td>
-                {activeProvider ? (
-                  <td className="px-2 py-1.5 font-mono text-xs text-gray-300">
-                    {margin ? `${margin.pct.toFixed(0)}%` : "—"}
+                {margins ? (
+                  <td className="px-2 py-1.5 font-mono text-[11px]">
+                    {margins.map((row) => (
+                      <div
+                        key={row.provider}
+                        className={`whitespace-nowrap ${row.active ? "text-white" : "text-gray-500"}`}
+                        title={`${row.active ? "In use. " : ""}${
+                          row.recorded
+                            ? "Cost from provider_model_costs."
+                            : row.costUsd === null
+                              ? "No cost recorded in provider_model_costs."
+                              : "No recorded cost: using the highest cost."
+                        }`}
+                      >
+                        {PROVIDER_LABEL[row.provider]} {row.costUsd === null ? "cost not set" : `$${row.costUsd}`}
+                        {row.margin ? ` · ${row.margin.pct.toFixed(0)}%` : ""}
+                      </div>
+                    ))}
                   </td>
                 ) : null}
                 <td className="px-2 py-1.5">
-                  {onFal ? null : (
-                    <button
-                      type="button"
-                      title={`Suggest ${suggested} credits from Replicate price`}
-                      onClick={() => onChange(v.pricingKey, { credits: suggested })}
-                      className="whitespace-nowrap rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white"
-                    >
-                      → {suggested}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    title={`Suggest ${suggested} credits from the highest cost`}
+                    onClick={() => onChange(v.pricingKey, { credits: suggested })}
+                    className="whitespace-nowrap rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white"
+                  >
+                    → {suggested}
+                  </button>
                 </td>
                 <td className="px-2 py-2 text-center">
                   <input
@@ -540,6 +563,8 @@ function VariantTable({
           })}
         </tbody>
       </table>
+    </div>
+    {providers ? <p className="mt-1.5 text-[11px] text-gray-500">{HIGHEST_COST_HINT}</p> : null}
     </div>
   );
 }
@@ -660,7 +685,10 @@ function PipelineSection({
   onCommitRole,
   onSaveVariant,
   onToggleVariant,
+  standalone = false,
 }: {
+  /** The tool has nothing but its pipeline (e.g. Schedule): open on arrival, no divider above. */
+  standalone?: boolean;
   pipelines: AdminPipelineGroup[];
   storyboardModels: string[];
   billingSettings: BillingSettings;
@@ -671,7 +699,7 @@ function PipelineSection({
   onSaveVariant: (variant: AdminCostVariant) => void;
   onToggleVariant: (variant: AdminCostVariant) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(standalone);
   if (pipelines.length === 0) return null;
 
   const patchRole = (groupKey: string, role: AdminPipelineRole, enabled: boolean) => {
@@ -695,7 +723,7 @@ function PipelineSection({
   };
 
   return (
-    <div className="mt-3 border-t border-white/10 pt-3">
+    <div className={standalone ? "" : "mt-3 border-t border-white/10 pt-3"}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -787,6 +815,15 @@ function ModelSection({
     : "Replicate";
   const details = [runsOn, ...model.features.map((f) => f.label)].join(" · ");
   const noteId = `model-note-${tool.toolKey}-${model.id}`;
+  // What users pay now (saved credits); a pending price edit is flagged, not shown as the price.
+  const price = priceSummary(model.variants, savedPricing);
+  const unsaved = model.variants.some((v) => isPricingDirty(v, savedPricing));
+  const priceText = (
+    <>
+      {price}
+      {unsaved ? <span className="text-amber-300/90">{price ? " · " : ""}unsaved</span> : null}
+    </>
+  );
 
   const setVariant = (pricingKey: string, patch: Partial<AdminCostVariant>) => {
     onChange({
@@ -814,8 +851,16 @@ function ModelSection({
               {model.label}
             </span>
             <span className="block truncate text-xs normal-case text-gray-500">{details}</span>
+            {price || unsaved ? (
+              <span className="block truncate text-xs text-gray-300 sm:hidden">{priceText}</span>
+            ) : null}
           </span>
         </button>
+        {price || unsaved ? (
+          <span className="hidden shrink-0 whitespace-nowrap text-xs tabular-nums text-gray-300 sm:block">
+            {priceText}
+          </span>
+        ) : null}
         <button
           type="button"
           role="switch"
@@ -865,17 +910,14 @@ function ModelSection({
           ) : null}
 
           <VariantTable
-            activeProvider={
+            providers={
               model.providerChoice
-                ? (() => {
-                    // Fal selected without FAL_KEY actually runs on Replicate: show that margin.
-                    const effective =
-                      model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider;
-                    return {
-                      provider: effective,
-                      model: model.providerChoice.options.find((o) => o.provider === effective)?.model ?? "",
-                    };
-                  })()
+                ? {
+                    options: model.providerChoice.options,
+                    // Fal selected without FAL_KEY actually runs on Replicate: mark Replicate as in use.
+                    active:
+                      model.providerChoice.provider === "fal" && !falConfigured ? "replicate" : model.providerChoice.provider,
+                  }
                 : undefined
             }
             variants={model.variants}
@@ -892,13 +934,16 @@ function ModelSection({
   );
 }
 
-function ToolSection({
+/**
+ * One tool's models in the Models tab: feature filter, model rows (switch, Remove, price details),
+ * Add model and the Pipeline section. Formerly the body of the Config tool card (#466: moved, not rewritten).
+ */
+function ToolModels({
   tool,
   billingSettings,
   saving,
   savedPricing,
   onChange,
-  onCommitTool,
   onSaveVariant,
   onToggleVariant,
   onCommitMode,
@@ -906,13 +951,17 @@ function ToolSection({
   onCommitPipelineRole,
   onRemoveModel,
   onAddModel,
+  featureFilter,
+  onFeatureFilterChange,
 }: {
+  /** Kept per tool in the shared provider, so it survives switching tools and tabs. */
+  featureFilter: string;
+  onFeatureFilterChange: (featureKey: string) => void;
   tool: AdminToolNode;
   billingSettings: BillingSettings;
   saving: boolean;
   savedPricing: Record<string, PricingBaseline>;
   onChange: (patch: Partial<AdminToolNode>) => void;
-  onCommitTool: (fields: ToolCommitFields) => void;
   onSaveVariant: (variant: AdminCostVariant) => void;
   onToggleVariant: (variant: AdminCostVariant) => void;
   onCommitMode: (featureModelId: string) => void;
@@ -921,8 +970,6 @@ function ToolSection({
   onRemoveModel: (modelId: string) => void;
   onAddModel: (modelId: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [featureFilter, setFeatureFilter] = useState("all");
   const [overridePrompt, setOverridePrompt] = useState<DefaultOverridePrompt | null>(null);
   const [removing, setRemoving] = useState<AdminModelNode | null>(null);
   const [adding, setAdding] = useState(false);
@@ -1054,19 +1101,93 @@ function ToolSection({
         </>
       ) : null}
       <section className="rounded-lg border border-white/10">
-      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2.5">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex flex-1 items-center gap-2 text-left"
-        >
-          {open ? (
-            <ChevronDown className="h-4 w-4 text-gray-300" />
-          ) : (
-            <ChevronRight className="h-4 w-4 text-gray-300" />
-          )}
-          <h2 className="text-sm font-semibold text-white">{tool.label}</h2>
-        </button>
+      {tool.models.length > 0 || tool.pipelines.length > 0 ? (
+        <div className="px-3 py-2">
+          {hasModelList ? (
+            <div className="mb-1 flex flex-wrap items-center gap-3 border-b border-white/10 pb-2">
+              {featureOptions.length > 0 ? (
+                <ChipDropdown
+                  icon={<Filter className="h-3.5 w-3.5" />}
+                  value={featureFilterLabel}
+                  activeId={featureFilter}
+                  options={featureFilterChipOptions}
+                  onSelect={onFeatureFilterChange}
+                  square
+                  sheetTitle="Filter by feature"
+                />
+              ) : null}
+              <span className="text-xs text-gray-500">
+                {visibleModels.length} model{visibleModels.length === 1 ? "" : "s"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/30 hover:bg-white/[0.06]"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add model
+              </button>
+            </div>
+          ) : null}
+
+          {visibleModels.length === 0 && featureFilter !== "all" ? (
+            <p className="py-4 text-sm text-gray-500">No models support this feature.</p>
+          ) : null}
+
+          {visibleModels.map((m) => (
+            <ModelSection
+              key={m.id}
+              model={m}
+              tool={tool}
+              billingSettings={billingSettings}
+              saving={saving}
+              savedPricing={savedPricing}
+              onChange={(patch) => patchModel(m.id, patch)}
+              onEnabledChange={handleEnabledChange}
+              onDefaultChange={handleDefaultChange}
+              onSaveVariant={onSaveVariant}
+              onToggleVariant={onToggleVariant}
+              onCommitCatalog={onCommitCatalog}
+              onRemove={setRemoving}
+            />
+          ))}
+
+          <PipelineSection
+            standalone={!hasModelList}
+            pipelines={tool.pipelines}
+            storyboardModels={storyboardModels}
+            billingSettings={billingSettings}
+            saving={saving}
+            savedPricing={savedPricing}
+            onChange={patchPipeline}
+            onCommitRole={onCommitPipelineRole}
+            onSaveVariant={onSaveVariant}
+            onToggleVariant={onToggleVariant}
+          />
+        </div>
+      ) : null}
+    </section>
+    </>
+  );
+}
+
+/**
+ * One tool in the Config tab: only On / Sidebar / Coming soon, saved automatically (same commitTool
+ * autosave as before #466). Models and prices live in the Models tab.
+ */
+function ToolRow({
+  tool,
+  onChange,
+  onCommitTool,
+}: {
+  tool: AdminToolNode;
+  onChange: (patch: Partial<AdminToolNode>) => void;
+  onCommitTool: (fields: ToolCommitFields) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
+      <h2 className="min-w-0 flex-1 text-sm font-semibold text-white">{tool.label}</h2>
+      <div className="flex flex-wrap items-center gap-3">
         <label className="inline-flex items-center gap-1.5 text-xs text-gray-400">
           <input
             type="checkbox"
@@ -1110,73 +1231,7 @@ function ToolSection({
           Coming soon
         </label>
       </div>
-
-      {open && (tool.models.length > 0 || tool.pipelines.length > 0) ? (
-        <div className="px-3 py-2">
-          {hasModelList ? (
-            <div className="mb-1 flex flex-wrap items-center gap-3 border-b border-white/10 pb-2">
-              {featureOptions.length > 0 ? (
-                <ChipDropdown
-                  icon={<Filter className="h-3.5 w-3.5" />}
-                  value={featureFilterLabel}
-                  activeId={featureFilter}
-                  options={featureFilterChipOptions}
-                  onSelect={setFeatureFilter}
-                  square
-                  sheetTitle="Filter by feature"
-                />
-              ) : null}
-              <span className="text-xs text-gray-500">
-                {visibleModels.length} model{visibleModels.length === 1 ? "" : "s"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/30 hover:bg-white/[0.06]"
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                Add model
-              </button>
-            </div>
-          ) : null}
-
-          {visibleModels.length === 0 && featureFilter !== "all" ? (
-            <p className="py-4 text-sm text-gray-500">No models support this feature.</p>
-          ) : null}
-
-          {visibleModels.map((m) => (
-            <ModelSection
-              key={m.id}
-              model={m}
-              tool={tool}
-              billingSettings={billingSettings}
-              saving={saving}
-              savedPricing={savedPricing}
-              onChange={(patch) => patchModel(m.id, patch)}
-              onEnabledChange={handleEnabledChange}
-              onDefaultChange={handleDefaultChange}
-              onSaveVariant={onSaveVariant}
-              onToggleVariant={onToggleVariant}
-              onCommitCatalog={onCommitCatalog}
-              onRemove={setRemoving}
-            />
-          ))}
-
-          <PipelineSection
-            pipelines={tool.pipelines}
-            storyboardModels={storyboardModels}
-            billingSettings={billingSettings}
-            saving={saving}
-            savedPricing={savedPricing}
-            onChange={patchPipeline}
-            onCommitRole={onCommitPipelineRole}
-            onSaveVariant={onSaveVariant}
-            onToggleVariant={onToggleVariant}
-          />
-        </div>
-      ) : null}
-    </section>
-    </>
+    </div>
   );
 }
 
@@ -1187,7 +1242,7 @@ const PLATFORM_LABELS: Record<Platform, string> = { tiktok: "TikTok", instagram:
  * product-wide, governing both connecting the account (Settings) and
  * selecting it in Schedule (currently the only consumer of these
  * connections). Deliberately self-contained (own fetch/save via
- * /api/platform-availability) rather than woven into ToolSection's autosave
+ * /api/platform-availability) rather than woven into the tool rows' autosave
  * machinery, since this isn't actually tool-scoped data.
  */
 function PlatformAvailabilitySection() {
@@ -1253,7 +1308,59 @@ function PlatformAvailabilitySection() {
   );
 }
 
-export default function AdminConfigV2Page() {
+/** Everything the Config and Models tabs render, owned by one provider so state and drafts survive switching tabs. */
+type CatalogState = {
+  tools: AdminToolNode[];
+  billingSettings: BillingSettings;
+  saving: boolean;
+  savedPricing: Record<string, PricingBaseline>;
+  patchTool: (toolKey: string, patch: Partial<AdminToolNode>) => void;
+  commitTool: (toolKey: string, overrides?: ToolCommitFields) => void;
+  saveVariant: (variant: AdminCostVariant) => void;
+  toggleVariant: (variant: AdminCostVariant) => void;
+  commitFeatureMode: (featureModelId: string) => void;
+  commitModelCatalog: (modelId: string, enabled: boolean) => void;
+  commitPipelineRole: (role: AdminPipelineRole) => void;
+  removeModel: (modelId: string) => void;
+  addModel: (modelId: string) => void;
+  /** Last tool picked in the Models tab, so coming back from Config opens the same tool. */
+  modelsTool: string | null;
+  setModelsTool: (toolKey: string) => void;
+  featureFilters: Record<string, string>;
+  setFeatureFilter: (toolKey: string, featureKey: string) => void;
+};
+const CatalogContext = createContext<CatalogState | null>(null);
+
+function useCatalog(): CatalogState {
+  const state = useContext(CatalogContext);
+  if (!state) throw new Error("useCatalog must be used inside AdminCatalogProvider");
+  return state;
+}
+
+/** Routes that share this provider: leaving them drops unsaved price drafts, so the guard asks first. */
+const MODELS_PATH = "/admin/models";
+const CATALOG_PATHS = ["/admin/config-v2", MODELS_PATH];
+const UNSAVED_LEAVE_MESSAGE = "You have unsaved price changes. Leave without saving?";
+
+function hasUnsavedPricing(tools: AdminToolNode[], saved: Record<string, PricingBaseline>): boolean {
+  return tools.some(
+    (t) =>
+      t.models.some((m) => m.variants.some((v) => isPricingDirty(v, saved))) ||
+      t.pipelines.some((g) => g.variants.some((v) => isPricingDirty(v, saved)))
+  );
+}
+
+/**
+ * Shared state for the Config and Models tabs (the former single Config page, #466). It lives in the
+ * route group layout, so moving between the two tabs keeps every draft and does not reload.
+ */
+export function AdminCatalogProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const [modelsTool, setModelsTool] = useState<string | null>(null);
+  const [featureFilters, setFeatureFilters] = useState<Record<string, string>>({});
+  const setFeatureFilter = useCallback((toolKey: string, featureKey: string) => {
+    setFeatureFilters((prev) => ({ ...prev, [toolKey]: featureKey }));
+  }, []);
   const [tools, setTools] = useState<AdminToolNode[]>([]);
   const toolsRef = useRef(tools);
   toolsRef.current = tools;
@@ -1446,7 +1553,7 @@ export default function AdminConfigV2Page() {
   }, []);
 
   // Tree updates from a server row: keeps the compare-and-set token (updated_at) and the removed flag current,
-  // so a removed model leaves its tool card (and an added one appears) without a reload.
+  // so a removed model leaves its tool's model list (and an added one appears) without a reload.
   const applyCatalogRow = useCallback((row: CatalogRow) => {
     setTools((prev) => {
       const next = prev.map((t) => ({
@@ -1788,9 +1895,59 @@ export default function AdminConfigV2Page() {
     [scheduleAutosave, setNotice, applyFeatureRow, resyncSoon]
   );
 
-  if (loading) return <AdminConfigSkeleton />;
+  const unsaved = hasUnsavedPricing(tools, savedPricing);
+  useEffect(() => {
+    if (!unsaved) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    // In-app links (admin tabs, sidebar) unmount this provider and its drafts: ask first.
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || (link.target && link.target !== "_self")) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin || CATALOG_PATHS.some((p) => url.pathname.startsWith(p))) return;
+      if (!window.confirm(UNSAVED_LEAVE_MESSAGE)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [unsaved]);
+
+  if (loading) {
+    return pathname?.startsWith(MODELS_PATH) ? <AdminModelsSkeleton /> : <AdminConfigSkeleton />;
+  }
 
   return (
+    <CatalogContext.Provider
+      value={{
+        tools,
+        billingSettings,
+        saving,
+        savedPricing,
+        patchTool,
+        commitTool,
+        saveVariant,
+        toggleVariant,
+        commitFeatureMode,
+        commitModelCatalog,
+        commitPipelineRole,
+        removeModel,
+        addModel,
+        modelsTool,
+        setModelsTool,
+        featureFilters,
+        setFeatureFilter,
+      }}
+    >
     <ModelNoticeContext.Provider value={modelNotices}>
     <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, onSwitched: onProviderSwitched }}>
       {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
@@ -1803,36 +1960,108 @@ export default function AdminConfigV2Page() {
 
       {loadError ? <p className="text-xs text-red-400">{loadError}</p> : null}
 
-      <div id="admin-config-tools" className="space-y-2">
-          {tools.map((tool) => (
-            <Fragment key={tool.toolKey}>
-              <ToolSection
-                tool={tool}
-                billingSettings={billingSettings}
-                saving={saving}
-                savedPricing={savedPricing}
-                onChange={(patch) => patchTool(tool.toolKey, patch)}
-                onCommitTool={(fields) => commitTool(tool.toolKey, fields)}
-                onSaveVariant={saveVariant}
-                onToggleVariant={toggleVariant}
-                onCommitMode={commitFeatureMode}
-                onCommitCatalog={commitModelCatalog}
-                onCommitPipelineRole={commitPipelineRole}
-                onRemoveModel={removeModel}
-                onAddModel={addModel}
-              />
-              {/* Platform availability (see CONTEXT.md) is product-wide, not
-                  tool-scoped (Schedule is the only current consumer of these
-                  connections) — placed right after the Schedule tool's own
-                  section since that's the natural place an admin looks for
-                  it, kept as its own self-contained fetch/save rather than
-                  woven into ToolSection's autosave machinery. */}
-              {tool.toolKey === "schedule" && <PlatformAvailabilitySection />}
-            </Fragment>
-          ))}
-      </div>
+      {children}
       </div>
     </ProviderAdminContext.Provider>
     </ModelNoticeContext.Provider>
+    </CatalogContext.Provider>
+  );
+}
+
+/** Config tab: one flat row per tool (On / Sidebar / Coming soon), then Platform availability. */
+export function AdminConfigView() {
+  const { tools, patchTool, commitTool } = useCatalog();
+  return (
+    <div className="space-y-6">
+      <div id="admin-config-tools" className="divide-y divide-white/10 rounded-lg border border-white/10">
+        {tools.map((tool) => (
+          <ToolRow
+            key={tool.toolKey}
+            tool={tool}
+            onChange={(patch) => patchTool(tool.toolKey, patch)}
+            onCommitTool={(fields) => commitTool(tool.toolKey, fields)}
+          />
+        ))}
+      </div>
+      {/* Platform availability (see CONTEXT.md) is product-wide, not tool-scoped, with its own
+          self-contained fetch/save rather than the tool autosave machinery. */}
+      <PlatformAvailabilitySection />
+    </div>
+  );
+}
+
+/** Models tab: pick a tool, then its models with price, On/Off, Remove and Add model (#466). */
+export function AdminModelsView() {
+  const catalog = useCatalog();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabTools = modelsTabTools(catalog.tools);
+  // The selected tool is in the URL (?tool=photo), so a refresh or a bookmark keeps it.
+  const requested = searchParams.get("tool") ?? catalog.modelsTool;
+  const tool = tabTools.find((t) => t.toolKey === requested) ?? tabTools[0];
+  const shownKey = tool?.toolKey;
+  const urlKey = searchParams.get("tool");
+  useEffect(() => {
+    // Arriving from the nav link (no ?tool) or with an unknown tool: write the shown tool into the URL.
+    if (shownKey && urlKey !== shownKey) {
+      router.replace(`${pathname}?tool=${encodeURIComponent(shownKey)}`, { scroll: false });
+    }
+  }, [shownKey, urlKey, pathname, router]);
+
+  if (!tool) return <p className="text-sm text-gray-500">No tool has models yet.</p>;
+
+  const select = (toolKey: string) => {
+    catalog.setModelsTool(toolKey);
+    router.replace(`${pathname}?tool=${encodeURIComponent(toolKey)}`, { scroll: false });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Tool">
+        {tabTools.map((t) => {
+          const active = t.toolKey === tool.toolKey;
+          const unsaved = hasUnsavedPricing([t], catalog.savedPricing);
+          return (
+            <button
+              key={t.toolKey}
+              type="button"
+              aria-pressed={active}
+              onClick={() => select(t.toolKey)}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                active
+                  ? "border-white/30 bg-white/[0.08] text-white"
+                  : "border-white/10 text-gray-400 hover:border-white/20 hover:text-white"
+              }`}
+            >
+              {t.label}
+              {unsaved ? (
+                <>
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-300" aria-hidden />
+                  <span className="sr-only">(unsaved price changes)</span>
+                </>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <ToolModels
+        key={tool.toolKey}
+        tool={tool}
+        billingSettings={catalog.billingSettings}
+        saving={catalog.saving}
+        savedPricing={catalog.savedPricing}
+        onChange={(patch) => catalog.patchTool(tool.toolKey, patch)}
+        onSaveVariant={catalog.saveVariant}
+        onToggleVariant={catalog.toggleVariant}
+        onCommitMode={catalog.commitFeatureMode}
+        onCommitCatalog={catalog.commitModelCatalog}
+        onCommitPipelineRole={catalog.commitPipelineRole}
+        onRemoveModel={catalog.removeModel}
+        onAddModel={catalog.addModel}
+        featureFilter={catalog.featureFilters[tool.toolKey] ?? "all"}
+        onFeatureFilterChange={(featureKey) => catalog.setFeatureFilter(tool.toolKey, featureKey)}
+      />
+    </div>
   );
 }

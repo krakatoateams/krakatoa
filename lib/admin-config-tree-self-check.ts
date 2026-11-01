@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildAdminConfigTree,
+  modelsTabTools,
+  priceSummary,
   variantFromPricingRow,
+  type AdminCostVariant,
   type ToolConfigInput,
 } from "./admin-config-tree";
 import {
@@ -129,7 +135,85 @@ async function main(): Promise<void> {
     /Tools unavailable/,
     "a failed required admin response must abort the tree load"
   );
+  modelsTabSelfCheck();
   console.log("admin-config-tree self-check passed");
+}
+
+/**
+ * #466: Config (feature toggles) and Models (models + prices) tabs. Pure helpers, plus a wiring pin on the
+ * moved UI so a save path, dialog or section that gets disconnected fails CI.
+ */
+function modelsTabSelfCheck(): void {
+  const v = (pricingKey: string, credits: number, enabled = true, costUnit: AdminCostVariant["costUnit"] = "per_image"): AdminCostVariant => ({
+    pricingKey,
+    label: pricingKey,
+    credits,
+    providerReferenceUsd: 0.1,
+    costUnit,
+    enabled,
+  });
+  assert.equal(priceSummary([v("a", 10)], {}), "10 credits per image");
+  assert.equal(priceSummary([v("a", 1, true, "per_run")], {}), "1 credit per run");
+  assert.equal(priceSummary([v("a", 8), v("b", 14), v("c", 10)], {}), "8–14 credits per image");
+  assert.equal(priceSummary([v("a", 8), v("b", 99, false)], {}), "8 credits per image", "variants that are off do not widen the range");
+  assert.equal(priceSummary([v("a", 8, false)], {}), "8 credits per image", "all off still shows a price");
+  assert.equal(priceSummary([v("a", 9)], { a: { credits: 7 } }), "7 credits per image", "the row shows the saved price, not a draft");
+  assert.equal(priceSummary([v("a", 5, true, "per_second"), v("b", 3)], {}), "3–5 credits", "mixed units drop the unit");
+  assert.equal(priceSummary([], {}), null);
+
+  const listed = modelsTabTools(tree).map((t) => t.toolKey);
+  for (const t of tree) {
+    const hasModels = t.models.length > 0 || t.pipelines.length > 0;
+    assert.equal(listed.includes(t.toolKey), hasModels, `${t.toolKey}: in the Models tab iff it has models or a pipeline`);
+  }
+
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const admin = join(root, "app/(app)/admin");
+  const src = readFileSync(join(admin, "(catalog)/AdminCatalog.tsx"), "utf8");
+  const body = (name: string) => {
+    const start = src.search(new RegExp(`\\nexport function ${name}\\(|\\nfunction ${name}\\(`));
+    assert.ok(start >= 0, `${name} exists`);
+    const next = src.slice(start + 1).search(/\n(export )?function |\nconst [A-Z_]+ |\ntype |\nclass /);
+    return next < 0 ? src.slice(start) : src.slice(start, start + 1 + next);
+  };
+  const renders = (parent: string, children: string[]) => {
+    const b = body(parent);
+    for (const c of children) assert.ok(b.includes(`<${c}`), `${parent} still renders ${c}`);
+  };
+  renders("AdminConfigView", ["ToolRow", "PlatformAvailabilitySection"]);
+  renders("AdminModelsView", ["ToolModels"]);
+  renders("ToolModels", ["ModelSection", "PipelineSection", "RemoveModelDialog", "AddModelDialog", "ChipDropdown", "OverrideDefaultDialog"]);
+  renders("ModelSection", ["PhotoProviderSwitch", "ModesTable", "VariantTable"]);
+  renders("PipelineSection", ["PipelineRolesTable", "VariantTable"]);
+  const toolRow = body("ToolRow");
+  for (const field of ["tool.enabled", "tool.visibleInSidebar", "tool.comingSoon"]) {
+    assert.ok(toolRow.includes(field), `Config row keeps ${field}`);
+  }
+  assert.equal((toolRow.match(/onCommitTool\(/g) ?? []).length, 3, "all three Config toggles still autosave");
+  // Every save endpoint the old single page called is still called.
+  for (const url of [
+    "/api/admin/config/tools/${toolKey}",
+    "/api/admin/config/pricing/${pricingKey}",
+    "/api/admin/config/feature-models/${featureModelId}",
+    "/api/admin/config/model-catalog/${live.catalogConfigId}",
+    "/archive",
+    "/restore",
+    "/api/admin/config/models/${modelConfigId}",
+    "/api/admin/config/photo-provider",
+    "/api/admin/config/provider-costs",
+    "/api/platform-availability",
+    "TOOL_CONFIG_UPDATED_EVENT",
+  ]) {
+    assert.ok(src.includes(url), `still wired: ${url}`);
+  }
+  assert.ok(!src.includes("Replicate $"), "the cost column is labelled as the highest cost, not Replicate");
+  for (const route of ["(catalog)/layout.tsx", "(catalog)/config-v2/page.tsx", "(catalog)/models/page.tsx"]) {
+    assert.ok(existsSync(join(admin, route)), `route file ${route} exists`);
+  }
+  assert.ok(!existsSync(join(admin, "config-v2")), "no second config-v2 route outside the shared layout");
+  assert.ok(readFileSync(join(admin, "config/page.tsx"), "utf8").includes('redirect("/admin/config-v2")'), "old /admin/config still redirects");
+  const nav = readFileSync(join(admin, "AdminNav.tsx"), "utf8");
+  assert.ok(nav.includes('href: "/admin/config-v2"') && nav.includes('href: "/admin/models"'), "admin nav has Config and Models");
 }
 
 void main();
