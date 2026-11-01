@@ -478,7 +478,7 @@ now **deprecated + disabled** (kept for audit, never read by the runtime).
 | Tier | Provider model | Resolution param | Provider USD | Credits (factor 90) |
 |---|---|---|---|---|
 | **Basic** | `google/nano-banana` | none | $0.039 | **4** |
-| **Balanced 1K** | `google/nano-banana-2` | `1K` | $0.067 | **7** |
+| **Balanced 1K** | `google/nano-banana-2` | `1K` | $0.08 (fal; Replicate $0.067), #464 | **8** |
 | **Balanced 2K** | `google/nano-banana-2` | `2K` | $0.101 | **10** |
 | **Balanced 4K** | `google/nano-banana-2` | `4K` | $0.151 | **14** |
 | **Pro 1K** | `google/nano-banana-pro` | `1K` | $0.15 | **14** |
@@ -492,7 +492,7 @@ Pro 4K `ceil(0.30 × 90) = 27`.
 ### Pricing keys (v2 provider-cost rows)
 
 - `product_photo_nano_banana_per_image` — Basic ($0.039 → 4)
-- `product_photo_nano_banana_2_1k_per_image` — Balanced 1K ($0.067 → 7)
+- `product_photo_nano_banana_2_1k_per_image` — Balanced 1K ($0.067 → 7; raised to fal's $0.08 → 8 in #464, migration 120)
 - `product_photo_nano_banana_2_2k_per_image` — Balanced 2K ($0.101 → 10)
 - `product_photo_nano_banana_2_4k_per_image` — Balanced 4K ($0.151 → 14)
 - `product_photo_nano_banana_pro_1k_per_image` — Pro 1K ($0.15 → 14)

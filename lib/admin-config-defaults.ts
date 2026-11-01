@@ -402,9 +402,10 @@ export const PRICING_DEFAULTS: Record<string, PricingDefault> = {
     pricing_type: "per_image", credit_amount: 4, enabled: true,
     provider_cost_usd: 0.039, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "basic", currency: "USD",
   },
+  // Highest provider cost (fal $0.08; Replicate $0.067): ceil(0.08 x 90) = 8 (#464, migration 120).
   product_photo_nano_banana_2_1k_per_image: {
-    pricing_type: "per_image", credit_amount: 7, enabled: true,
-    provider_cost_usd: 0.067, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_1k", currency: "USD",
+    pricing_type: "per_image", credit_amount: 8, enabled: true,
+    provider_cost_usd: 0.08, cost_unit: "per_image", pricing_group: "product_photo", variant_key: "balanced_1k", currency: "USD",
   },
   product_photo_nano_banana_2_2k_per_image: {
     pricing_type: "per_image", credit_amount: 10, enabled: true,
