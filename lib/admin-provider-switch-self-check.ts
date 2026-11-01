@@ -6,7 +6,7 @@ import { getModelDefault, getPricingDefault } from "./admin-config-resolved-defa
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
 import { activePhotoProvider, isFalOnlyPhotoRole, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget, providerCostKey, providerMargins } from "./admin-provider-switch";
 
-const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2"];
+const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2", "image_krea2_large", "image_krea2_medium"];
 // #467: Fal-only tiers (no Replicate equivalent) offer only fal and reset to fal.
 const FAL_ONLY_TIERS = ["image_krea2_turbo"];
 assert.deepEqual(PRODUCT_PHOTO_TIERS.filter((t) => t.falOnly).map((t) => t.modelRole), FAL_ONLY_TIERS);
@@ -103,4 +103,17 @@ assert.equal(calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS.product_pho
 assert.equal(getPricingDefault("product_photo_krea_2_turbo_per_image")?.credit_amount, 1, "Krea 2 Turbo reset default is 1 credit");
 assert.equal(PRODUCT_PHOTO_TIERS.find((t) => t.id === "krea2_turbo")?.basicFallbackCredits, 1, "Krea 2 Turbo UI fallback matches");
 assert.ok((marginForCost(1, 0.008, DEFAULT_BILLING_SETTINGS)?.pct ?? -1) > 25, "Krea 2 Turbo at 1 credit keeps >25% margin on $0.008");
+// #474: Krea 2 Large / Medium run on Replicate or fal at the same flat per-image price; priced from the highest.
+for (const [key, tierId, credits, costs] of [
+  ["product_photo_krea_2_large_per_image", "krea2_large", 6, [0.06, 0.06]],
+  ["product_photo_krea_2_medium_per_image", "krea2_medium", 3, [0.03, 0.03]],
+] as const) {
+  assert.equal(getPricingDefault(key)?.credit_amount, credits, `${key} reset default is ${credits} credits`);
+  assert.equal(calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS[key].providerCostUsd, unitCount: 1, settings: DEFAULT_BILLING_SETTINGS }), credits, `${key} runtime fallback`);
+  assert.equal(PRODUCT_PHOTO_TIERS.find((t) => t.id === tierId)?.basicFallbackCredits, credits, `${key} UI fallback matches`);
+  for (const cost of costs) assert.ok((marginForCost(credits, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `${key} at ${credits} credits covers $${cost}`);
+}
+assert.equal(photoSwitchTarget("image_krea2_large", "fal")?.model, "krea/v2/large/text-to-image");
+assert.equal(photoSwitchTarget("image_krea2_medium", "replicate")?.model, "krea/krea-2-medium");
+assert.equal(activePhotoProvider("image_krea2_large", null), "replicate", "Krea 2 Large starts on Replicate");
 console.log("admin-provider-switch self-check ok");

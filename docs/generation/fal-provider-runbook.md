@@ -1,9 +1,11 @@
 # Fal.ai provider runbook (Photo tiers)
 
-Scope: the four Photo tiers that can run on Replicate (default) or Fal: Nano Banana (`image_basic`),
-Nano Banana 2 (`image_balanced`), Nano Banana Pro (`image_pro`) and GPT Image 2.5 Flare
-(`image_gpt_image_2`). Everything else (other photo tiers, video, motion control, reels, LLM, TTS)
-is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.md`](fal-provider-live-test-checklist.md).
+Scope: the six Photo tiers that can run on Replicate (default) or Fal: Nano Banana (`image_basic`),
+Nano Banana 2 (`image_balanced`), Nano Banana Pro (`image_pro`), GPT Image 2.5 Flare
+(`image_gpt_image_2`), and Krea 2 Large / Medium (`image_krea2_large` / `image_krea2_medium`, #474;
+fal partner endpoints `krea/v2/{large,medium}/text-to-image`, text-to-image only, same flat per-image price on
+both providers). Krea 2 Turbo runs only on Fal (below). Everything else (other photo tiers, video, motion
+control, reels, LLM, TTS) is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.md`](fal-provider-live-test-checklist.md).
 
 ## How it works
 

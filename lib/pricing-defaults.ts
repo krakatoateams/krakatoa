@@ -160,6 +160,11 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // Krea 2 Turbo (fal-ai/krea-2/turbo, Fal-only, #467): $0.008 per megapixel (fal.ai model page,
   // checked 2026-11-01); every size is pinned to <= 1 MP, so at most $0.008 per image -> 1 cr.
   product_photo_krea_2_turbo_per_image: { providerCostUsd: 0.008, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "krea2_turbo" },
+  // Krea 2 Large / Medium (#474): flat per image, text-to-image, the same on both providers (checked 2026-11-01):
+  // Replicate krea/krea-2-large $0.06 and krea/krea-2-medium $0.03; fal krea/v2/large|medium/text-to-image
+  // $0.060 and $0.030. Highest provider cost -> ceil(0.06 x 90) = 6 cr and ceil(0.03 x 90) = 3 cr.
+  product_photo_krea_2_large_per_image: { providerCostUsd: 0.06, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "krea2_large" },
+  product_photo_krea_2_medium_per_image: { providerCostUsd: 0.03, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "krea2_medium" },
   // Canvas Text — Gemini 2.5 Flash rewrite. ~0.01 USD → 1 cr at factor 90.
   canvas_text_per_run: { providerCostUsd: 0.01, costUnit: "per_run", pricingGroup: "canvas", variantKey: "text" },
 };

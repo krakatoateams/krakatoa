@@ -155,6 +155,7 @@ and 4K); before those run they are 0.067 / 7, 0.101 / 10 and 0.151 / 14.
 | `product_photo_nano_banana_pro_1k_per_image` / `_2k_` / `_4k_` | 0.15 / 0.15 / 0.30 | 14 / 14 / 27 |
 | `product_photo_gpt_image_2_low_per_image` / `_medium_` / `_high_` | 0.012 / 0.047 / 0.128 | 2 / 5 / 12 |
 | `product_photo_krea_2_turbo_per_image` (fal only, after `122_krea_2_turbo_pricing.sql`) | 0.008 | 1 |
+| `product_photo_krea_2_large_per_image` / `_medium_` (Replicate or fal, after `123_krea_2_large_medium_pricing.sql`) | 0.06 / 0.03 | 6 / 3 |
 | `grok_imagine_480p_per_second` / `grok_imagine_720p_per_second` | 0.05 / 0.08 | 5 / 8 |
 | `kling3_pro_per_second` | 0.224 | 21 |
 
@@ -269,6 +270,11 @@ Copy the closest existing entry of the same provider family; do not invent a new
 4. Extend `lib/ai-providers/fal-photo-self-check.ts` with the new mapping.
 5. Read the Fal sections of `docs/generation/fal-provider-runbook.md` before you start: switching,
    cancel, refunds, reconcile, cost approximation.
+6. A text-to-image-only model on both providers (pattern: Krea 2 Large / Medium, #474) uses a Fal entry
+   with no `editEndpoint` (the `krea_v2` family), its own Replicate `providerFamily`, and the tier's
+   `supportedAspectRatios` + `limitAspectRatioPicker` when the provider takes an aspect-ratio enum. Set
+   `rejectsReference: true` so the route refuses a reference with a 400 before the spend, and
+   `maxPromptChars` when the provider caps the prompt.
 
 **Fal-only model (Photo tier with no Replicate equivalent, #467), extra:**
 
@@ -285,8 +291,9 @@ Copy the closest existing entry of the same provider family; do not invent a new
      (`isFalOnlyPhotoRole`, `photoPatchUnit`, `getModelDefault`).
    - Turning it On checks `FAL_KEY` (`PROVIDER_NOT_CONFIGURED`), because `activePhotoProvider` is always
      `fal` for it.
-3. The mapper must reject reference images (last line of defence), and the generate route already
-   refuses them with a 400 before the spend for any tier with `supportsReference: false`.
+3. The mapper must reject reference images (last line of defence). Set `rejectsReference: true` (and
+   `maxPromptChars` when the provider caps the prompt) so the generate route refuses them with a 400
+   before the spend; other text-only tiers keep ignoring references.
 4. The migration (step 4) must also insert the tier's `model_configs` row (`provider 'fal'`, the endpoint
    id, `on conflict (tool_key, config_key) do nothing`). Until it exists, generations are refused with the
    503; nothing is charged. Pattern: `122_krea_2_turbo_pricing.sql`.

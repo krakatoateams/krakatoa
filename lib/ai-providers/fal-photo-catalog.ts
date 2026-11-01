@@ -1,6 +1,6 @@
 /**
  * Fal endpoints, input mapping, output normalizer and trusted output hosts for the Nano Banana,
- * GPT Image 2.5 Flare and Krea 2 Turbo (Fal-only, #467) photo tiers. Pure (no SDK, no env) so the self-check can run it directly.
+ * GPT Image 2.5 Flare, Krea 2 Turbo (Fal-only, #467) and Krea 2 Large / Medium (#474) photo tiers. Pure (no SDK, no env) so the self-check can run it directly.
  * Endpoint ids and field names come from fal's model pages and are NOT verified by a live
  * call yet (see the phase 4 PR notes).
  */
@@ -39,8 +39,13 @@ type FalPhotoModel =
     }
   | {
       configKey: string;
-      /** Text-to-image only: no edit endpoint, and reference images are refused. */
+      /** Text-to-image only (no edit endpoint, references refused). Turbo: a pixel `image_size`. */
       family: "krea_t2i";
+    }
+  | {
+      configKey: string;
+      /** Text-to-image only (no edit endpoint, references refused). Large / Medium: an `aspect_ratio` enum. */
+      family: "krea_v2";
     };
 
 /** Keyed by the text-to-image endpoint id, which is also the catalog `model`. */
@@ -72,6 +77,15 @@ export const FAL_PHOTO_MODELS: Readonly<Record<string, FalPhotoModel>> = {
   "fal-ai/krea-2/turbo": {
     configKey: "image_krea2_turbo",
     family: "krea_t2i",
+  },
+  // Second provider of the Replicate krea/krea-2-large and krea/krea-2-medium tiers (#474).
+  "krea/v2/large/text-to-image": {
+    configKey: "image_krea2_large",
+    family: "krea_v2",
+  },
+  "krea/v2/medium/text-to-image": {
+    configKey: "image_krea2_medium",
+    family: "krea_v2",
   },
 };
 
@@ -143,8 +157,11 @@ export const FAL_KREA_SIZES: Readonly<Record<string, { width: number; height: nu
   "21:9": { width: 1504, height: 640 },
 };
 
-/** fal's `Krea2TurboInput.prompt` maxLength; the generate route refuses longer prompts before the spend. */
+/** fal's Krea `prompt` maxLength; the generate route refuses longer prompts before the spend. */
 export const FAL_KREA_MAX_PROMPT_CHARS = 5000;
+
+/** fal's Krea 2 Large / Medium `aspect_ratio` enum (2.35:1 is never sent: the pickers lack it). */
+export const FAL_KREA_V2_ASPECT_RATIOS: readonly string[] = ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "2:3", "9:16"];
 
 /** Any reference image in the Replicate-shaped input (every family's field name). */
 function hasReferenceInput(input: Record<string, unknown>): boolean {
@@ -166,10 +183,12 @@ export function mapFalPhotoInput(
 ): { endpoint: string; input: Record<string, unknown> } {
   const spec = FAL_PHOTO_MODELS[model];
   if (!spec) throw new Error(`Unsupported Fal photo model "${model}".`);
+  if (spec.family === "krea_t2i" || spec.family === "krea_v2") {
+    // The route refuses references and long prompts before any spend; this is the last line of defence.
+    if (hasReferenceInput(input)) throw new Error("Krea does not accept reference images.");
+    if (String(input.prompt ?? "").length > FAL_KREA_MAX_PROMPT_CHARS) throw new Error("Prompt too long for Krea.");
+  }
   if (spec.family === "krea_t2i") {
-    // The route rejects reference images before any spend; this is the last line of defence.
-    if (hasReferenceInput(input)) throw new Error("Krea 2 Turbo does not accept reference images.");
-    if (String(input.prompt ?? "").length > FAL_KREA_MAX_PROMPT_CHARS) throw new Error("Prompt too long for Krea 2 Turbo.");
     const size = FAL_KREA_SIZES[String(input.aspect_ratio)];
     if (!size) throw new Error(`Unsupported aspect ratio "${String(input.aspect_ratio)}" for Krea 2 Turbo.`);
     return {
@@ -185,6 +204,21 @@ export function mapFalPhotoInput(
         enable_safety_checker: true,
         output_format: "png",
         sync_mode: false,
+      },
+    };
+  }
+  if (spec.family === "krea_v2") {
+    const aspectRatio = String(input.aspect_ratio);
+    if (!FAL_KREA_V2_ASPECT_RATIOS.includes(aspectRatio)) throw new Error(`Unsupported aspect ratio "${aspectRatio}" for Krea 2.`);
+    return {
+      endpoint: model,
+      input: {
+        prompt: input.prompt,
+        aspect_ratio: aspectRatio,
+        // Pinned to the provider default. styles, moodboards and image_style_references are never sent
+        // (image_style_references raises the price to $0.065 / $0.035).
+        creativity: "medium",
+        enable_safety_checker: true,
       },
     };
   }

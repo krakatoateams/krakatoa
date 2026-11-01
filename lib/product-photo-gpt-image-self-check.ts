@@ -13,7 +13,7 @@ import {
 } from "./product-photo";
 
 const tier = getProductPhotoTier("gpt_image_2");
-assert.deepEqual(PRODUCT_PHOTO_TIERS.slice(-2).map((t) => t.id), ["gpt_image_2", "krea2_turbo"], "appended at the end (Krea 2 Turbo after it, #467)");
+assert.deepEqual(PRODUCT_PHOTO_TIERS.slice(-4).map((t) => t.id), ["gpt_image_2", "krea2_turbo", "krea2_large", "krea2_medium"], "appended at the end (the Krea tiers after it, #467 / #474)");
 assert.equal(tier.providerModel, "openai/gpt-image-2.5-flare");
 assert.equal(tier.modelRole, "image_gpt_image_2");
 for (const f of ["product", "image", "character", "social"] as const) {
@@ -50,17 +50,17 @@ assert.equal("input_images" in buildPhotoProviderInput({
 }), false);
 assert.deepEqual(
   PRODUCT_PHOTO_TIERS.filter((t) => t.limitAspectRatioPicker).map((t) => t.id),
-  ["gpt_image_2"],
-  "only GPT Image 2 opts into the restricted aspect-ratio picker",
+  ["gpt_image_2", "krea2_large", "krea2_medium"],
+  "only GPT Image 2 and Krea 2 Large / Medium (#474) opt into the restricted aspect-ratio picker",
 );
-// Aspect-ratio picker: restricted for GPT Image 2 only; every other tier is unchanged.
+// Aspect-ratio picker: restricted for GPT Image 2 (and the Krea 2 tiers, pinned in fal-photo-self-check); every other tier is unchanged.
 assert.deepEqual(
   photoAspectRatioOptionsForTier(tier).map((a) => a.id),
   ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9"],
 );
 assert.equal(photoAspectRatioDisplayForTier(tier, "4:5"), "3:4");
 assert.equal(photoAspectRatioDisplayForTier(tier, "21:9"), "16:9");
-for (const other of PRODUCT_PHOTO_TIERS.filter((t) => t.id !== "gpt_image_2")) {
+for (const other of PRODUCT_PHOTO_TIERS.filter((t) => !["gpt_image_2", "krea2_large", "krea2_medium"].includes(t.id))) {
   assert.equal(photoAspectRatioOptionsForTier(other), PHOTO_ASPECT_RATIOS, `${other.id} keeps full picker`);
   for (const a of PHOTO_ASPECT_RATIOS) {
     assert.equal(photoAspectRatioDisplayForTier(other, a.id), a.id, `${other.id} shows selected ratio`);
