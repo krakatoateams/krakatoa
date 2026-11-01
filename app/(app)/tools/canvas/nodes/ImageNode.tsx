@@ -93,7 +93,7 @@ export default function ImageNode({
   const edges = useStore((s) => s.edges) as unknown as CanvasGraphEdge[];
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey, deliveredAfterCancelNotice } =
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, cancelRefused, activeKey, deliveredAfterCancelNotice } =
     useIdempotentSubmit(`canvas:image:${id}`);
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -516,7 +516,7 @@ export default function ImageNode({
             <GenerationCancelButton
               visible={data.loading}
               cancelling={cancelling}
-              cancelAllowed={cancelAllowed}
+              cancelAllowed={cancelAllowed && !cancelRefused}
               onCancel={() => void cancelWithNotice(cancelSubmit, (notice) => patch({ error: notice }))}
             />
           </div>

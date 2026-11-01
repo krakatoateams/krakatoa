@@ -65,7 +65,7 @@ export default function PromptNode({
   const edges = useStore((s) => s.edges) as unknown as CanvasGraphEdge[];
   const { status } = useCurrentUser();
   const { openSignInModal } = useAuthModal();
-  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, activeKey } =
+  const { begin: beginSubmit, cancel: cancelSubmit, cancelling, cancelRefused, activeKey } =
     useIdempotentSubmit(`canvas:prompt:${id}`);
   const { cancelAllowed } = useGenerationStatusPoll(activeKey);
   const { balance, refetch: refetchCredits } = useCreditBalance();
@@ -322,7 +322,7 @@ export default function PromptNode({
             <GenerationCancelButton
               visible={data.loading}
               cancelling={cancelling}
-              cancelAllowed={cancelAllowed}
+              cancelAllowed={cancelAllowed && !cancelRefused}
               onCancel={() => void cancelWithNotice(cancelSubmit, (notice) => patch({ error: notice }))}
             />
           </div>
