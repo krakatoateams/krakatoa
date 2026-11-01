@@ -135,10 +135,11 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // deprecated (migration 011) and intentionally NOT in this map — runtime never
   // resolves them.
   product_photo_nano_banana_per_image: { providerCostUsd: 0.039, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "basic" },
-  // 1K is priced off the highest provider cost (fal $0.08 > Replicate $0.067) so no provider loses money (#464).
+  // Priced off the highest provider cost so no provider loses money: fal > Replicate at every size
+  // (1K 0.08 > 0.067, #464; 2K 0.12 > 0.101 and 4K 0.16 > 0.151, #469).
   product_photo_nano_banana_2_1k_per_image: { providerCostUsd: 0.08, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_1k" },
-  product_photo_nano_banana_2_2k_per_image: { providerCostUsd: 0.101, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_2k" },
-  product_photo_nano_banana_2_4k_per_image: { providerCostUsd: 0.151, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_4k" },
+  product_photo_nano_banana_2_2k_per_image: { providerCostUsd: 0.12, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_2k" },
+  product_photo_nano_banana_2_4k_per_image: { providerCostUsd: 0.16, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_4k" },
   product_photo_nano_banana_pro_1k_per_image: { providerCostUsd: 0.15, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_1k" },
   product_photo_nano_banana_pro_2k_per_image: { providerCostUsd: 0.15, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_2k" },
   product_photo_nano_banana_pro_4k_per_image: { providerCostUsd: 0.30, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_4k" },

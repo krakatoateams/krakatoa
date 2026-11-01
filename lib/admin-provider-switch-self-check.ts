@@ -46,6 +46,24 @@ assert.equal(
 for (const cost of [0.067, 0.08]) {
   assert.ok((marginForCost(8, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `NB2 1K at 8 credits covers $${cost}`);
 }
+// #469: same rule for 2K (fal $0.12 > Replicate $0.101 -> 11) and 4K (fal $0.16 > Replicate $0.151 -> 15).
+const nb2Balanced = PRODUCT_PHOTO_TIERS.find((t) => t.id === "balanced")!;
+for (const [key, credits, costs] of [
+  ["product_photo_nano_banana_2_1k_per_image", 8, [0.067, 0.08]],
+  ["product_photo_nano_banana_2_2k_per_image", 11, [0.101, 0.12]],
+  ["product_photo_nano_banana_2_4k_per_image", 15, [0.151, 0.16]],
+] as const) {
+  assert.equal(getPricingDefault(key)?.credit_amount, credits, `${key} reset default is ${credits} credits`);
+  assert.equal(
+    calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS[key].providerCostUsd, unitCount: 1, settings: DEFAULT_BILLING_SETTINGS }),
+    credits,
+    `${key} runtime fallback matches the reset default`,
+  );
+  assert.equal(nb2Balanced.resolutions.find((r) => r.pricingKey === key)?.fallbackCredits, credits, `${key} UI fallback matches`);
+  for (const cost of costs) {
+    assert.ok((marginForCost(credits, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `${key} at ${credits} credits covers $${cost}`);
+  }
+}
 // #466: margin per provider (display only). Costs from provider_model_costs; Replicate falls back to the reference cost.
 const nb2Options = photoProviderOptions("image_balanced");
 const nb2Margins = providerMargins({
