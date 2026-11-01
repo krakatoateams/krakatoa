@@ -28,7 +28,9 @@ import {
   DEFAULT_CHARACTER_STYLE,
   DEFAULT_CHARACTER_GENDER,
   DEFAULT_CHARACTER_AGE,
+  KREA_2_TURBO_FAL_MODEL,
 } from "@/lib/product-photo";
+import { FAL_KREA_MAX_PROMPT_CHARS } from "@/lib/ai-providers/fal-photo-catalog";
 import { GENERATED_PHOTO_MIME, saveGeneratedProductPhoto } from "@/lib/product-photo-storage";
 import { getPhotoProvider, isGenerationCancelled, isProviderDefinitiveFailure, type PhotoProvider } from "@/lib/ai-providers";
 import { requireCurrentProfile } from "@/lib/profiles-db";
@@ -515,6 +517,16 @@ export async function POST(req: Request) {
         if (err) return NextResponse.json({ error: err }, { status: 400 });
         extraReferenceFiles.push(referenceFile);
       }
+    } else if (tier.falOnly && referenceFiles.length > 0) {
+      // Fal-only text-to-image tier (Krea 2 Turbo, #467): refuse a reference instead of silently
+      // dropping it, before any job, spend or provider call. The pickers never send one. Other
+      // text-only tiers keep ignoring it.
+      return NextResponse.json(
+        {
+          error: `${tier.modelLabel} doesn't support a reference image. Remove it or choose a reference-capable model.`,
+        },
+        { status: 400 }
+      );
     }
 
     // Product Try-on with a distinct character/model image. The references are sent
@@ -619,7 +631,14 @@ export async function POST(req: Request) {
     // id. The SAME resolved model is reused for createJob, createProcessingAsset,
     // the provider call, and recordUsageEvent so observability never disagrees with
     // what actually ran.
-    const photoModel = await getPhotoModel(modelTier);
+    // A Fal-only tier (#467) throws instead of falling back: retryable 503, nothing charged yet.
+    let photoModel: Awaited<ReturnType<typeof getPhotoModel>>;
+    try {
+      photoModel = await getPhotoModel(modelTier);
+    } catch (e) {
+      if (isModelStateUnavailable(e)) return modelStateUnavailableResponse();
+      throw e;
+    }
     const photoModelRef = replicateRef(photoModel);
 
     // ---- Request-level idempotency gate (Double-Charge Protection v1) ----
@@ -660,6 +679,41 @@ export async function POST(req: Request) {
       skillId: skillId ?? "",
       devBlank,
     });
+
+    // Product mode wraps the prompt in product-photography scaffolding; character
+    // mode builds a multi-angle turnaround sheet; social mode adds feed-native
+    // composition; image mode uses the prompt verbatim.
+    const basePrompt =
+      skillId
+        ? assembleSkillPrompt(skillId, userPrompt, skillOverride?.recipe)
+        : mode === "product"
+          ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
+          : mode === "character"
+            ? buildCharacterSheetPrompt({
+                userPrompt,
+                styleId: characterStyle,
+                genderId: characterGender,
+                ageId: characterAge,
+              })
+            : isSocialMode
+              ? buildSocialPostPrompt({ userPrompt, aspectRatio })
+              : userPrompt;
+
+    // @-mention guidance: tell the model that the trailing reference images depict the
+    // named subjects from the prompt, so it actually uses them as visual references.
+    const prompt = mentionRefs.length
+      ? `${basePrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim()
+      : basePrompt;
+
+    // Fal caps Krea 2 Turbo prompts (#467): refuse an over-long one here, before the spend,
+    // instead of charging for a run fal would reject.
+    if (photoModel.model === KREA_2_TURBO_FAL_MODEL && prompt.length > FAL_KREA_MAX_PROMPT_CHARS) {
+      return NextResponse.json(
+        { error: `This prompt is too long for ${tier.modelLabel} (max ${FAL_KREA_MAX_PROMPT_CHARS} characters). Shorten it or choose another model.` },
+        { status: 400 }
+      );
+    }
+
     const perImageCredits = devBlank ? 0 : await getProductPhotoCredits({ modelTier, resolution, quality });
     const requiredCredits = perImageCredits * imageCount;
     const assetMetadata = {
@@ -746,31 +800,6 @@ export async function POST(req: Request) {
     if (generationRequestId && profileId) {
       await assertNotCancelled(profileId, generationRequestId);
     }
-
-    // Product mode wraps the prompt in product-photography scaffolding; character
-    // mode builds a multi-angle turnaround sheet; social mode adds feed-native
-    // composition; image mode uses the prompt verbatim.
-    const basePrompt =
-      skillId
-        ? assembleSkillPrompt(skillId, userPrompt, skillOverride?.recipe)
-        : mode === "product"
-          ? buildProductPhotoPrompt(poseId, styleId, userPrompt, { hasCharacterReference })
-          : mode === "character"
-            ? buildCharacterSheetPrompt({
-                userPrompt,
-                styleId: characterStyle,
-                genderId: characterGender,
-                ageId: characterAge,
-              })
-            : isSocialMode
-              ? buildSocialPostPrompt({ userPrompt, aspectRatio })
-              : userPrompt;
-
-    // @-mention guidance: tell the model that the trailing reference images depict the
-    // named subjects from the prompt, so it actually uses them as visual references.
-    const prompt = mentionRefs.length
-      ? `${basePrompt}${buildMentionGuidanceSuffix(mentionRefs)}`.trim()
-      : basePrompt;
 
     // Non-product items aren't pose/style shots, so give the library a meaningful
     // title instead of the misleading "Standing · Minimalist Studio". Product

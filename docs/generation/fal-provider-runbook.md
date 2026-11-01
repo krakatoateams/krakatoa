@@ -121,6 +121,11 @@ is Replicate-only. Live verification steps: [`fal-provider-live-test-checklist.m
 3. Wait up to 60 s (resolver cache TTL). In-flight jobs finish on the provider they started on.
 4. Check (below).
 
+**Fal-only tiers (Krea 2 Turbo, #467)** have no switch and no rollback to Replicate: they run on Fal or
+not at all. Without `FAL_KEY`, without their `model_configs` row (migration 122), or when the row is off,
+their generations get the retryable 503 before any spend. In an outage, switch the model Off in
+Admin → Models instead of rolling back.
+
 ## Roll back
 
 Same dropdown → Replicate → save (or the tier's reset-to-default, which resets provider, model and

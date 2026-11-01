@@ -4,11 +4,15 @@ import {
   decodeFalPredictionId,
   encodeFalPredictionId,
   FAL_GPT_IMAGE_SIZES,
+  FAL_KREA_MAX_PIXELS,
+  FAL_KREA_MAX_PROMPT_CHARS,
+  FAL_KREA_SIZES,
   isTrustedFalOutputUrl,
   isValidFalCustomSize,
   mapFalPhotoInput,
   normalizeFalOutput,
 } from "./fal-photo-catalog";
+import { buildPhotoProviderInput, getProductPhotoTier, photoAspectRatioOptionsForTier } from "../product-photo";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`falPhotoSelfCheck: ${msg}`);
@@ -35,6 +39,31 @@ const t2i = mapFalPhotoInput("fal-ai/nano-banana-pro", { ...replicateInput, imag
 assert(t2i.endpoint === "fal-ai/nano-banana-pro" && !("image_urls" in t2i.input), "no refs pick text-to-image");
 assert(!("resolution" in mapFalPhotoInput("fal-ai/nano-banana", replicateInput).input), "basic has no resolution");
 assert((() => { try { mapFalPhotoInput("fal-ai/other", {}); return false; } catch { return true; } })(), "unknown model rejected");
+
+// Krea 2 Turbo (#467): text-to-image only, every offered ratio pinned to <= 1 MP (priced per MP).
+const KREA = "fal-ai/krea-2/turbo";
+const kreaTier = getProductPhotoTier("krea2_turbo");
+assert(kreaTier.falOnly === true && kreaTier.supportsReference === false && kreaTier.providerModel === KREA, "krea tier is Fal-only text-to-image");
+for (const size of Object.values(FAL_KREA_SIZES)) {
+  assert(size.width * size.height <= FAL_KREA_MAX_PIXELS && size.width % 16 === 0 && size.height % 16 === 0, `krea size ${size.width}x${size.height} <= 1 MP, multiple of 16`);
+}
+for (const ratio of photoAspectRatioOptionsForTier(kreaTier)) {
+  const built = buildPhotoProviderInput({ tier: kreaTier, prompt: "p", aspectRatio: ratio.id, imageInput: ["https://x/a.png"], providerResolution: null });
+  const mapped = mapFalPhotoInput(KREA, built);
+  assert(mapped.endpoint === KREA && JSON.stringify(mapped.input.image_size) === JSON.stringify(FAL_KREA_SIZES[ratio.id]), `krea ${ratio.id} maps to its pinned size`);
+}
+const kreaCall = mapFalPhotoInput(KREA, { prompt: "p", aspect_ratio: "1:1", output_format: "png" });
+assert(
+  JSON.stringify(kreaCall.input) ===
+    JSON.stringify({ prompt: "p", image_size: { width: 992, height: 992 }, num_images: 1, acceleration: "none", enable_prompt_expansion: false, enable_safety_checker: true, output_format: "png", sync_mode: false }),
+  "krea input is an allowlist with pinned count, acceleration, expansion, safety and sync_mode",
+);
+for (const ref of [{ image_input: ["https://x/a.png"] }, { input_images: ["https://x/a.png"] }, { input_image: "https://x/a.png" }]) {
+  assert((() => { try { mapFalPhotoInput(KREA, { prompt: "p", aspect_ratio: "1:1", ...ref }); return false; } catch { return true; } })(), `krea rejects ${Object.keys(ref)[0]}`);
+}
+assert((() => { try { mapFalPhotoInput(KREA, { prompt: "p", aspect_ratio: "5:4" }); return false; } catch { return true; } })(), "krea rejects an unpinned ratio");
+assert((() => { try { mapFalPhotoInput(KREA, { prompt: "x".repeat(FAL_KREA_MAX_PROMPT_CHARS + 1), aspect_ratio: "1:1" }); return false; } catch { return true; } })(), "krea rejects a prompt over fal's cap");
+assert(FAL_KREA_MAX_PROMPT_CHARS === 5000 && mapFalPhotoInput(KREA, { prompt: "x".repeat(5000), aspect_ratio: "1:1" }).endpoint === KREA, "krea accepts a prompt at the cap");
 
 // GPT Image 2.5 Flare on Fal.
 const FLARE = "openai/gpt-image-2.5/flare/text-to-image";

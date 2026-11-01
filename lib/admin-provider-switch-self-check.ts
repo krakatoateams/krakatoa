@@ -4,14 +4,20 @@ import { V2_PRICING_DEFAULTS } from "./pricing-defaults";
 import { isSupportedProviderModel } from "./ai-provider-catalog";
 import { getModelDefault, getPricingDefault } from "./admin-config-resolved-defaults";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
-import { activePhotoProvider, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget, providerCostKey, providerMargins } from "./admin-provider-switch";
+import { activePhotoProvider, isFalOnlyPhotoRole, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget, providerCostKey, providerMargins } from "./admin-provider-switch";
 
 const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2"];
+// #467: Fal-only tiers (no Replicate equivalent) offer only fal and reset to fal.
+const FAL_ONLY_TIERS = ["image_krea2_turbo"];
+assert.deepEqual(PRODUCT_PHOTO_TIERS.filter((t) => t.falOnly).map((t) => t.modelRole), FAL_ONLY_TIERS);
 for (const tier of PRODUCT_PHOTO_TIERS) {
   const providers = photoProviderOptions(tier.modelRole).map((o) => o.provider);
-  assert.deepEqual(providers, FAL_TIERS.includes(tier.modelRole) ? ["replicate", "fal"] : ["replicate"], tier.modelRole);
+  const falOnly = FAL_ONLY_TIERS.includes(tier.modelRole);
+  assert.equal(isFalOnlyPhotoRole(tier.modelRole), falOnly, tier.modelRole);
+  assert.deepEqual(providers, falOnly ? ["fal"] : FAL_TIERS.includes(tier.modelRole) ? ["replicate", "fal"] : ["replicate"], tier.modelRole);
   const def = getModelDefault("photo", tier.modelRole);
-  assert.ok(def?.provider === "replicate" && def.model === tier.providerModel && Object.keys(def.parameters).length === 0, "reset default is Replicate + catalog model + empty params");
+  const resetProvider = falOnly ? "fal" : "replicate";
+  assert.ok(def?.provider === resetProvider && def.model === tier.providerModel && Object.keys(def.parameters).length === 0, `reset default is ${resetProvider} + catalog model + empty params`);
   for (const o of photoProviderOptions(tier.modelRole)) {
     assert.ok(isSupportedProviderModel(o.provider, o.model, { toolKey: "photo", configKey: tier.modelRole }), "offered pair must pass the catalog");
   }
@@ -32,6 +38,16 @@ assert.deepEqual(photoPatchUnit("image_seedream4", { provider: "replicate", mode
 assert.equal(activePhotoProvider("image_basic", null), "replicate", "missing row is replicate");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "fal-ai/nano-banana", enabled: true }), "fal");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "bogus", enabled: true }), "replicate", "off-catalog is replicate");
+// #467: a Fal-only row can never be moved to Replicate, by the switch or by a PATCH.
+const krea = { provider: "fal", model: "fal-ai/krea-2/turbo" };
+assert.equal(photoSwitchTarget("image_krea2_turbo", "replicate"), null, "Fal-only tier has no Replicate target");
+assert.deepEqual(photoSwitchTarget("image_krea2_turbo", "fal"), { ...krea, parameters: {} });
+assert.equal(photoPatchUnit("image_krea2_turbo", krea, { provider: "replicate" }).ok, false, "Fal-only: provider move rejected");
+assert.equal(photoPatchUnit("image_krea2_turbo", krea, { provider: "replicate", model: "fal-ai/krea-2/turbo" }).ok, false, "Fal-only: Fal id never sent to Replicate");
+assert.equal(photoPatchUnit("image_krea2_turbo", krea, { model: "fal-ai/other" }).ok, false, "Fal-only: off-catalog model rejected");
+assert.deepEqual(photoPatchUnit("image_krea2_turbo", krea, { parameters: { x: 1 } }), { ok: true, parameters: {} }, "Fal-only: params reset to catalog");
+assert.equal(activePhotoProvider("image_krea2_turbo", null), "fal", "Fal-only missing row is still fal");
+assert.equal(activePhotoProvider("image_krea2_turbo", { ...krea, enabled: false }), "fal", "Fal-only disabled row is still fal");
 assert.equal(marginForCost(4, null, DEFAULT_BILLING_SETTINGS), null, "unknown cost has no margin");
 const m = marginForCost(4, 0.02, DEFAULT_BILLING_SETTINGS);
 assert.ok(m && Math.abs(m.usd - (800 / 18000 - 0.02)) < 1e-9 && m.pct > 50 && m.pct < 56, "margin = price - cost");
@@ -82,4 +98,9 @@ assert.deepEqual(nb2Margins.map((x) => [x.provider, x.costUsd, x.recorded, x.act
 assert.ok(nb2Margins[0].margin!.pct > 24 && nb2Margins[0].margin!.pct < 25 && nb2Margins[1].margin!.pct > 9 && nb2Margins[1].margin!.pct < 10.1, "Replicate ~25%, fal ~10%");
 const noRows = providerMargins({ credits: 8, pricingKey: "k", referenceUsd: 0.08, options: nb2Options, activeProvider: "replicate", costs: {}, settings: DEFAULT_BILLING_SETTINGS });
 assert.deepEqual(noRows.map((x) => [x.provider, x.costUsd, x.recorded, x.margin === null]), [["replicate", 0.08, false, false], ["fal", null, false, true]], "Replicate falls back to the reference cost; fal without a row is unknown, never a guess");
+// #467: Krea 2 Turbo is priced from the verified fal price ($0.008/MP); sizes are pinned to <= 1 MP so one image costs <= $0.008.
+assert.equal(calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS.product_photo_krea_2_turbo_per_image.providerCostUsd, unitCount: 1, settings: DEFAULT_BILLING_SETTINGS }), 1);
+assert.equal(getPricingDefault("product_photo_krea_2_turbo_per_image")?.credit_amount, 1, "Krea 2 Turbo reset default is 1 credit");
+assert.equal(PRODUCT_PHOTO_TIERS.find((t) => t.id === "krea2_turbo")?.basicFallbackCredits, 1, "Krea 2 Turbo UI fallback matches");
+assert.ok((marginForCost(1, 0.008, DEFAULT_BILLING_SETTINGS)?.pct ?? -1) > 25, "Krea 2 Turbo at 1 credit keeps >25% margin on $0.008");
 console.log("admin-provider-switch self-check ok");

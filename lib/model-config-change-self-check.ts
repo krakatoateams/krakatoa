@@ -253,13 +253,16 @@ async function main() {
       defaultModelCatalogRows().every((d) => d.enabled || !OFFERED_BEFORE_SHIP_DARK.has(d.modelId)),
       "models offered before #453 all stay offered by default",
     );
+    // #467: Krea 2 Turbo is the only model that ships hidden; every other model is offered.
+    const shippedDark = defaultModelCatalogRows().filter((d) => !d.enabled).map((d) => d.modelId);
+    assert.deepEqual(shippedDark, ["krea2_turbo"], "only Krea 2 Turbo ships hidden");
     const offeredPhoto = enabledIdsFromRows("photo", []).size;
     const tier = PRODUCT_PHOTO_TIERS.find((x) => x.id === plain)!;
     const prevFlag = tier.offeredByDefault;
     tier.offeredByDefault = false;
     try {
       const dark = defaultModelCatalogRows().filter((d) => !d.enabled);
-      assert.deepEqual(dark.map((d) => d.modelId), [plain]);
+      assert.deepEqual(dark.map((d) => d.modelId).filter((id) => !shippedDark.includes(id)), [plain]);
       assert.equal(catalogRowsFrom([{ id: "x", offeredByDefault: false }], [], []).at(0)!.enabled, false);
       // Missing-row path (no DB row) and materialized path both keep it hidden; every other model stays offered.
       assert.equal(enabledIdsFromRows("photo", []).has(plain), false);

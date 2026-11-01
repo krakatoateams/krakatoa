@@ -77,7 +77,8 @@ export type ProductPhotoModelTier =
   | "ideogram3"
   | "seedream3"
   | "flux_schnell"
-  | "gpt_image_2";
+  | "gpt_image_2"
+  | "krea2_turbo";
 export type ProductPhotoResolution = "1k" | "2k" | "4k";
 /** GPT Image 2 quality (the only input that changes Replicate's price). "auto" is not offered. */
 export type ProductPhotoQuality = "low" | "medium" | "high";
@@ -97,6 +98,9 @@ export type PhotoProviderFamily =
   | "imagen"
   | "ideogram"
   | "gpt_image";
+
+/** Fal endpoint for Krea 2 Turbo (#467): Fal-only, text-to-image only. */
+export const KREA_2_TURBO_FAL_MODEL = "fal-ai/krea-2/turbo";
 
 /** Replicate slug for GPT Image 2.5 Flare (Photo GPT Image tier and Storyboard sheets). */
 export const GPT_IMAGE_2_5_FLARE_MODEL = "openai/gpt-image-2.5-flare";
@@ -173,6 +177,12 @@ export type ProductPhotoTier = {
   modelLabel: string;
   /** model_configs config_key for this tier. */
   modelRole: string;
+  /**
+   * Fal-only tier (#467): no Replicate equivalent. `providerModel` is the Fal endpoint, and the
+   * resolver never falls back to Replicate: a missing/off Fal row, a missing FAL_KEY or a failed
+   * model-state read is a retryable 503 before any spend (`resolveFalOnlyPhotoModel`).
+   */
+  falOnly?: true;
   /** Provider model id (display/metadata only; resolved via model_configs). */
   providerModel: string;
   hasResolution: boolean;
@@ -394,6 +404,27 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
     // Provider ratios (verbatim): 4:5 and 21:9 are not offered and clamp to 3:4 / 16:9.
     supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9"],
     limitAspectRatioPicker: true,
+  },
+  {
+    // fal-ai/krea-2/turbo (#467). Fal-only and text-to-image only: never offered where a reference is
+    // required, and the route rejects reference images before any spend. Fal bills per megapixel, so
+    // every aspect ratio is pinned to a fixed size of at most 1 MP (FAL_KREA_SIZES).
+    id: "krea2_turbo",
+    offeredByDefault: false,
+    falOnly: true,
+    label: "Krea 2 Turbo",
+    subtitle: "Text-to-image · fal.ai",
+    modelLabel: "Krea 2 Turbo",
+    modelRole: "image_krea2_turbo",
+    providerModel: KREA_2_TURBO_FAL_MODEL,
+    hasResolution: false,
+    fixedResolutionLabel: "1K",
+    basicPricingKey: "product_photo_krea_2_turbo_per_image",
+    basicFallbackCredits: 1,
+    resolutions: [],
+    // Same Replicate-shaped fields (prompt, aspect_ratio, output_format); mapFalPhotoInput maps them.
+    providerFamily: "flux_t2i",
+    supportsReference: false,
   },
 ];
 
