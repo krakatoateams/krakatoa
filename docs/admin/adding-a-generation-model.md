@@ -119,6 +119,8 @@ audio variant). One pricing key per price variant: per image, per second (video)
   `image_output_count`.
 - Fal's price is on `https://fal.ai/models/<endpoint id>` ("Each image costs $0.0398").
 - Fal's pricing API (`api.fal.ai/v1/models/pricing`) needs a key, so do not use it.
+- If the tier can run on more than one provider, price it from the **highest** of their costs, so no
+  provider loses money. Store that cost as the key's `provider_cost_usd`.
 
 **What users pay:** at runtime the stored integer `credit_amount` wins over the cost
 (`imageCreditsFromRow` / `videoCreditsFromRow`, "Option A"). The total is:
@@ -139,12 +141,13 @@ So the migration's `credit_amount` IS the price. Compute it with the formula, th
 | Grok Imagine Video, 720p (per second) | 0.08 | 7.2 | 8, so a 10 s clip costs 80 | 8 |
 
 **Reference snapshot** (a sample, not the full list; the console snippet below lists all keys).
-Re-verify before you rely on it: an admin can edit prices.
+Re-verify before you rely on it: an admin can edit prices. The Nano Banana 2 1K row shows the price after
+`120_raise_nano_banana_2_1k_price.sql` (#464); before that SQL runs it is 0.067 / 7.
 
 | Pricing key | Cost (USD) | Credits |
 |---|---|---|
 | `product_photo_nano_banana_per_image` | 0.039 | 4 |
-| `product_photo_nano_banana_2_1k_per_image` / `_2k_` / `_4k_` | 0.067 / 0.101 / 0.151 | 7 / 10 / 14 |
+| `product_photo_nano_banana_2_1k_per_image` / `_2k_` / `_4k_` | 0.08 / 0.101 / 0.151 | 8 / 10 / 14 |
 | `product_photo_nano_banana_pro_1k_per_image` / `_2k_` / `_4k_` | 0.15 / 0.15 / 0.30 | 14 / 14 / 27 |
 | `product_photo_gpt_image_2_low_per_image` / `_medium_` / `_high_` | 0.012 / 0.047 / 0.128 | 2 / 5 / 12 |
 | `grok_imagine_480p_per_second` / `grok_imagine_720p_per_second` | 0.05 / 0.08 | 5 / 8 |
@@ -177,9 +180,11 @@ margin  = revenue − cost
 ```
 
 **Check the margin on every provider the tier can run on.** The price is one per key, but the cost
-differs per provider. Example: `product_photo_nano_banana_2_1k_per_image` charges 7 credits ($0.0778).
-Replicate costs $0.067, but Fal costs $0.08, so running that tier on Fal loses $0.002 per image.
-Show the human the margin per provider and let them choose the price.
+differs per provider. Example: `product_photo_nano_banana_2_1k_per_image` used to charge 7 credits
+($0.0778): Replicate costs $0.067, but Fal costs $0.08, so every Fal image lost $0.002. Since #464
+(`120_raise_nano_banana_2_1k_price.sql`) it is priced from the Fal cost: ceil(0.08 × 90) = 8 credits
+($0.0889). `_2k_` (10 credits, $0.111 against Fal $0.12) and `_4k_` (14 credits, $0.156 against Fal
+$0.16) still lose a little on Fal. Show the human the margin per provider and let them choose the price.
 
 ## 3. Code (ship dark)
 

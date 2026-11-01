@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { DEFAULT_BILLING_SETTINGS } from "./pricing-math";
+import { calculateCredits, DEFAULT_BILLING_SETTINGS } from "./pricing-math";
+import { V2_PRICING_DEFAULTS } from "./pricing-defaults";
 import { isSupportedProviderModel } from "./ai-provider-catalog";
-import { getModelDefault } from "./admin-config-resolved-defaults";
+import { getModelDefault, getPricingDefault } from "./admin-config-resolved-defaults";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
 import { activePhotoProvider, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget } from "./admin-provider-switch";
 
@@ -34,4 +35,15 @@ assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "bogus
 assert.equal(marginForCost(4, null, DEFAULT_BILLING_SETTINGS), null, "unknown cost has no margin");
 const m = marginForCost(4, 0.02, DEFAULT_BILLING_SETTINGS);
 assert.ok(m && Math.abs(m.usd - (800 / 18000 - 0.02)) < 1e-9 && m.pct > 50 && m.pct < 56, "margin = price - cost");
+// #464: Nano Banana 2 1K is priced off the highest provider cost (fal $0.08 > Replicate $0.067), so no provider loses money.
+const nb21k = getPricingDefault("product_photo_nano_banana_2_1k_per_image");
+assert.equal(nb21k?.credit_amount, 8, "NB2 1K reset default is 8 credits");
+assert.equal(
+  calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS.product_photo_nano_banana_2_1k_per_image.providerCostUsd, unitCount: 1, settings: DEFAULT_BILLING_SETTINGS }),
+  8,
+  "NB2 1K runtime fallback matches the reset default",
+);
+for (const cost of [0.067, 0.08]) {
+  assert.ok((marginForCost(8, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `NB2 1K at 8 credits covers $${cost}`);
+}
 console.log("admin-provider-switch self-check ok");

@@ -70,7 +70,7 @@ Harga awal yang dipakai:
 | Video Veo | 1080p | $0,08 / detik |
 | Storyboard (gambar) | auto/biasa | $0,128 / gambar |
 | Foto Produk | Basic (Nano Banana) | $0,039 / gambar |
-| Foto Produk | Balanced 1K (Nano Banana 2) | $0,067 / gambar |
+| Foto Produk | Balanced 1K (Nano Banana 2) | $0,08 / gambar (biaya fal, tertinggi; Replicate $0,067), #464 |
 | Foto Produk | Balanced 2K (Nano Banana 2) | $0,101 / gambar |
 | Foto Produk | Balanced 4K (Nano Banana 2) | $0,151 / gambar |
 | Foto Produk | Pro 1K (Nano Banana Pro) | $0,15 / gambar |
@@ -115,7 +115,7 @@ Selisihnya kelihatan kecil (203 vs 210), tapi prinsipnya: bulatkan **sekali saja
 | Veo 720p, 15 detik | 0,05 × 15 × 90 | **68** |
 | Veo 1080p, 15 detik | 0,08 × 15 × 90 | **108** |
 | Foto Produk Basic | 0,039 × 90 | **4** |
-| Foto Produk Balanced 1K | 0,067 × 90 | **7** |
+| Foto Produk Balanced 1K | 0,08 × 90 | **8** |
 | Foto Produk Balanced 2K | 0,101 × 90 | **10** |
 | Foto Produk Balanced 4K | 0,151 × 90 | **14** |
 | Foto Produk Pro 1K | 0,15 × 90 | **14** |

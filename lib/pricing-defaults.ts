@@ -135,7 +135,8 @@ export const V2_PRICING_DEFAULTS: Record<string, V2PricingDefault> = {
   // deprecated (migration 011) and intentionally NOT in this map — runtime never
   // resolves them.
   product_photo_nano_banana_per_image: { providerCostUsd: 0.039, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "basic" },
-  product_photo_nano_banana_2_1k_per_image: { providerCostUsd: 0.067, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_1k" },
+  // 1K is priced off the highest provider cost (fal $0.08 > Replicate $0.067) so no provider loses money (#464).
+  product_photo_nano_banana_2_1k_per_image: { providerCostUsd: 0.08, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_1k" },
   product_photo_nano_banana_2_2k_per_image: { providerCostUsd: 0.101, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_2k" },
   product_photo_nano_banana_2_4k_per_image: { providerCostUsd: 0.151, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "balanced_4k" },
   product_photo_nano_banana_pro_1k_per_image: { providerCostUsd: 0.15, costUnit: "per_image", pricingGroup: "product_photo", variantKey: "pro_1k" },
