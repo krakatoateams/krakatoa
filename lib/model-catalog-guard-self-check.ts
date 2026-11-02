@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { OFFERED_BEFORE_SHIP_DARK, catalogRowsFrom, defaultModelCatalogRows } from "./model-catalog-configs";
-import { PRODUCT_PHOTO_TIERS, DEFAULT_PRODUCT_PHOTO_TIER } from "./product-photo";
+import { PRODUCT_PHOTO_TIERS, DEFAULT_PRODUCT_PHOTO_TIER, RETIRED_PRODUCT_PHOTO_TIERS, normalizeProductPhotoOptions, retiredProductPhotoTier } from "./product-photo";
+import { getCreationModelLabel } from "./creation-model-label";
+import type { CreationHistoryItem } from "./creations";
 import {
   defaultTierForFeature,
   eligibleTiersForFeature,
@@ -280,7 +282,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   assert.equal(fail(restore([], "nope")).code, "UNKNOWN_MODEL");
 }
 
-// #460 One model list per tool card. The list and the "Add model" picker come from the same catalog rows:
+// #460 One model list per tool card. The list and the "Restore model" picker come from the same catalog rows:
 // a removed (archived) model is only in the picker, never offered, never a default; adding it back is
 // judged by the same guard minus ARCHIVED (price / provider still apply).
 {
@@ -312,7 +314,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   const gone = stale.models.find((m) => m.id === DEFAULT_PRODUCT_PHOTO_TIER)!;
   assert.equal(gone.enabled, false);
   assert.ok(gone.features.every((f) => !f.isDefault), "a removed model is never a mode default");
-  // A retired model (removed, every price deprecated) still shows under Add model; an unpriced live one does not.
+  // A retired model (removed, every price deprecated) still shows under Restore model; an unpriced live one does not.
   const retiredKeys = modelPricingKeys("photo", plain);
   assert.deepEqual(splitToolModels(tree([{ model_id: plain, enabled: false, archived_at: at }], retiredKeys).models).removed.map((m) => m.id), [plain]);
   assert.ok(!tree([], retiredKeys).models.some((m) => m.id === plain), "a live model with no price rows stays out of the card");
@@ -328,19 +330,23 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
     )!;
   const ready = reg(readyPricing);
   assert.equal(ready.enableCheck.code, "ARCHIVED", "the plain enable route still refuses a removed model");
-  assert.equal(ready.addCheck.ok, true, "Add model = restore then offer: allowed when price and provider are ready");
+  assert.equal(ready.addCheck.ok, true, "Restore model = restore then offer: allowed when price and provider are ready");
   const unpriced = reg(readyPricing.filter((r) => !modelPricingKeys("photo", plain).includes(r.pricing_key)));
-  assert.equal(unpriced.addCheck.code, "PRICING_NOT_READY", "Add model never skips the pricing guard");
+  assert.equal(unpriced.addCheck.code, "PRICING_NOT_READY", "Restore model never skips the pricing guard");
   const live = buildModelRegistry({ catalogRows: [], featureRows: [], pricingRows: readyPricing, modelConfigs: [] }).find((m) => m.modelId === plain)!;
   assert.deepEqual(live.addCheck, live.enableCheck, "for a model that is not removed, Add is the enable check");
 }
 
 // #453 Ship dark by default. Every model offered before the switch stays offered (frozen snapshot); an
 // entry with no explicit choice is hidden, and every entry outside the frozen list must choose.
+// #476: seven of the 2026-10-31 photo tiers (Seedream 4, FLUX Kontext Pro, FLUX 1.1 Pro, Imagen 4, Ideogram v3,
+// Seedream 3, FLUX Schnell) left the list because their registry entries were deleted: never priced in
+// pricing_configs, archived in Admin, and kept only as history labels (RETIRED_PRODUCT_PHOTO_TIERS). The list
+// below is the exact remainder; it still fails on any addition and on any other removal.
 {
+  const RETIRED_IN_476 = ["seedream4", "flux_kontext", "flux11", "imagen4", "ideogram3", "seedream3", "flux_schnell"];
   const OFFERED_ON_2026_10_31 = [
-    "basic", "balanced", "pro", "seedream4", "flux_kontext", "flux11", "imagen4", "ideogram3", "seedream3",
-    "flux_schnell", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
+    "basic", "balanced", "pro", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
     "seedance2_mini", "seedance2_fast", "seedance2", "veo31_lite", "veo31_fast", "kling15_standard",
     "kling16_standard", "kling21", "kling25_turbo_pro", "kling26", "kling15_pro", "kling16_pro", "kling_v3",
     "kling_v3_omni", "grok_imagine_video", "kling26_motion", "kling_v3_motion",
@@ -350,6 +356,29 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
     assert.equal(rows.find((r) => r.modelId === id)?.enabled, true, `${id} was offered before #453 and must stay offered`);
   }
   assert.deepEqual([...OFFERED_BEFORE_SHIP_DARK].sort(), [...OFFERED_ON_2026_10_31].sort(), "OFFERED_BEFORE_SHIP_DARK is frozen: never add to it");
+  assert.deepEqual(Object.keys(RETIRED_PRODUCT_PHOTO_TIERS).sort(), [...RETIRED_IN_476].sort(), "the ids that left the frozen list are exactly the retired photo tiers");
+  for (const id of RETIRED_IN_476) {
+    const retired = RETIRED_PRODUCT_PHOTO_TIERS[id];
+    assert.equal(rows.some((r) => r.modelId === id), false, `${id} is retired: no catalog entry`);
+    assert.equal(OFFERED_BEFORE_SHIP_DARK.has(id), false, `${id} is retired: not in the frozen list`);
+    // A request naming it fails closed with a clear 400 message (the route returns it before any spend).
+    const normalized = normalizeProductPhotoOptions({ modelTier: id });
+    assert.ok(!normalized.ok && normalized.error === `${retired.modelLabel} is no longer available. Choose another model.`, `${id}: clear refusal`);
+    assert.equal(retiredProductPhotoTier("constructor"), null, "inherited object keys are not retired tiers");
+    assert.ok(!normalizeProductPhotoOptions({ modelTier: "constructor" }).ok, "an inherited key is refused as an invalid tier");
+    // Old creations keep their model name, by provider slug or by stored tier id.
+    const item = (metadata: Record<string, unknown>) =>
+      ({ id: "c", tool: "product_photo", toolLabel: "Photo", mediaType: "image", mediaUrl: "", storagePath: "", title: "", createdAt: "", metadata }) as CreationHistoryItem;
+    assert.equal(getCreationModelLabel(item({ providerModel: retired.providerModel })), retired.modelLabel, `${id}: label by slug`);
+    assert.equal(getCreationModelLabel(item({ modelTier: id })), retired.modelLabel, `${id}: label by tier id`);
+    assert.equal(PRODUCT_PHOTO_TIERS.some((t) => t.providerModel === retired.providerModel), false, `${id}: slug never reused`);
+    assert.equal(modelPricingKeys("photo", id).length, 0, `${id}: no live pricing keys`);
+    assert.equal(
+      PRODUCT_PHOTO_TIERS.some((t) => modelPricingKeys("photo", t.id).includes(retired.pricingKey)),
+      false,
+      `${id}: pricing key never reused`,
+    );
+  }
   assert.equal(catalogRowsFrom([{ id: "brand_new" }], [], [])[0].enabled, false, "no explicit choice: hidden");
   assert.equal(catalogRowsFrom([{ id: "brand_new", offeredByDefault: true }], [], [])[0].enabled, true, "explicit true: offered");
   assert.equal(catalogRowsFrom([{ id: "basic", offeredByDefault: false }], [], [])[0].enabled, false, "explicit false wins");

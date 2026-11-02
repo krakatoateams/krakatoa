@@ -208,7 +208,7 @@ Check: `npm run probe:signed-url-cache`. Full write-up incl. measurements and wh
 | Doc | Purpose |
 |-----|---------|
 | [`docs/admin/adding-a-generation-model.md`](docs/admin/adding-a-generation-model.md) | Agent runbook: add a generation model end to end (Replicate or fal.ai schema, credit price formula, ship-dark code, pricing SQL, verify, turn On in Admin → Models) |
-| Admin tabs (#466) | **Config** (`/admin/config-v2`): per tool only On / Sidebar / Coming soon, then Platform availability. **Models** (`/admin/models?tool=…`): pick a tool, then its models (price, On/Off, Remove, Add model; the row opens provider, modes and the price table with highest cost, suggested credits and margin per provider) and its Pipeline. Both tabs share one client layout (`app/(app)/admin/(catalog)/`), so drafts survive switching tabs. |
+| Admin tabs (#466) | **Config** (`/admin/config-v2`): per tool only On / Sidebar / Coming soon, then Platform availability. **Models** (`/admin/models?tool=…`): pick a tool, then its models (price, On/Off, Remove, Restore model; the row opens provider, modes and the price table with highest cost, suggested credits and margin per provider) and its Pipeline. Both tabs share one client layout (`app/(app)/admin/(catalog)/`), so drafts survive switching tabs. |
 | [`docs/admin/admin-config-v2-plan.md`](docs/admin/admin-config-v2-plan.md) | Authoritative plan for agents (architecture, phases, parity checklist) |
 | [`docs/admin/admin-config-v2-ringkasan.md`](docs/admin/admin-config-v2-ringkasan.md) | Indonesian summary |
 | [`openspec/changes/admin-config-v2-unified/`](openspec/changes/admin-config-v2-unified/) | OpenSpec change (proposal, design, tasks, spec) |

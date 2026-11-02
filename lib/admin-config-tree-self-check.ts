@@ -100,8 +100,8 @@ assert.ok(
 );
 assert.ok(
   variantFromPricingRow(
-    "product_photo_seedream_4_per_image",
-    "Seedream 4",
+    "product_photo_krea_2_large_per_image",
+    "Krea 2 Large",
     new Map(),
     DEFAULT_BILLING_SETTINGS
   ),
@@ -184,6 +184,12 @@ function modelsTabSelfCheck(): void {
   renders("AdminModelsView", ["ToolModels"]);
   renders("ToolModels", ["ModelSection", "PipelineSection", "RemoveModelDialog", "AddModelDialog", "ChipDropdown", "OverrideDefaultDialog"]);
   renders("ModelSection", ["PhotoProviderSwitch", "ModesTable", "VariantTable"]);
+  // #476: the picker only restores removed models, so it says "Restore model", never "Add model".
+  const dialogs = readFileSync(join(admin, "(catalog)/ToolModelDialogs.tsx"), "utf8");
+  for (const copy of ["Restore a model to ${toolLabel}", 'confirmLabel="Restore model"', "No removed models to restore.", "No price yet, so it can't be restored."]) {
+    assert.ok(dialogs.includes(copy), `Restore dialog copy: ${copy}`);
+  }
+  assert.ok(src.includes("Restore model") && !/Add model|Add a model/.test(src + dialogs), "no 'Add model' copy left in the Models tab");
   renders("PipelineSection", ["PipelineRolesTable", "VariantTable"]);
   const toolRow = body("ToolRow");
   for (const field of ["tool.enabled", "tool.visibleInSidebar", "tool.comingSoon"]) {

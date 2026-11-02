@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Filter, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, RotateCcw } from "lucide-react";
 import { ChipDropdown } from "@/components/studio/ChipDropdown";
 import {
   type AdminCostVariant,
@@ -956,7 +956,7 @@ function ModelSection({
 
 /**
  * One tool's models in the Models tab: feature filter, model rows (switch, Remove, price details),
- * Add model and the Pipeline section. Formerly the body of the Config tool card (#466: moved, not rewritten).
+ * Restore model and the Pipeline section. Formerly the body of the Config tool card (#466: moved, not rewritten).
  */
 function ToolModels({
   tool,
@@ -1144,8 +1144,8 @@ function ToolModels({
                 onClick={() => setAdding(true)}
                 className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:border-white/30 hover:bg-white/[0.06]"
               >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                Add model
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                Restore model
               </button>
             </div>
           ) : null}
@@ -2010,7 +2010,7 @@ export function AdminConfigView() {
   );
 }
 
-/** Models tab: pick a tool, then its models with price, On/Off, Remove and Add model (#466). */
+/** Models tab: pick a tool, then its models with price, On/Off, Remove and Restore model (#466). */
 export function AdminModelsView() {
   const catalog = useCatalog();
   const router = useRouter();

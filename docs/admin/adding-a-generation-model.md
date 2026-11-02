@@ -414,12 +414,12 @@ the live `billing_settings`; the two match today. The migration stays the record
   - the last Reels engine (`REELS_ENGINE_LAST`).
 - Catalog rows are per tool, so a model is never shared between tools.
 
-**Add model** (one button per tool in the Models tab) lists only that tool's removed models:
+**Restore model** (one button per tool in the Models tab, formerly "Add model") lists only that tool's removed models:
 
 - Choosing one restores it (`POST …/[id]/restore`) and turns it on (`PATCH …/[id]`), re-running the price
   and provider guard.
 - A model that cannot be offered yet is listed with the reason and cannot be picked.
-- **Add model never shows a brand-new model.** A new model needs the code and pricing above. It then
+- **Restore model never shows a brand-new model.** A new model needs the code and pricing above. It then
   appears in its tool's list switched Off, and turning it On is how it is added.
 
 ## Retiring a model
@@ -428,8 +428,9 @@ Full runbook: [`retiring-a-generation-model.md`](retiring-a-generation-model.md)
 
 1. Remove it in Admin → Models first.
 2. Change code only after no jobs are in flight and the 72 h reconcile window has passed.
-3. Never delete the registry entry (set `offeredByDefault: false`), its rows or its pricing (deprecate
-   pricing, pattern `040_deprecate_kling20.sql`).
+3. Keep the registry entry (set `offeredByDefault: false`); never delete its rows or its pricing (deprecate
+   pricing, pattern `040_deprecate_kling20.sql`). Deleting the entry is an owner-decided exception that needs a
+   retired-label map and a history check first ("Deleting a registry entry", example #476).
 4. Never reuse its id, slug or pricing key.
 
 ## When the model settings cannot be read (fail closed)

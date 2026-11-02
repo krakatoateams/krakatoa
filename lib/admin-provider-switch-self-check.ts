@@ -22,7 +22,7 @@ for (const tier of PRODUCT_PHOTO_TIERS) {
     assert.ok(isSupportedProviderModel(o.provider, o.model, { toolKey: "photo", configKey: tier.modelRole }), "offered pair must pass the catalog");
   }
 }
-assert.equal(photoSwitchTarget("image_seedream4", "fal"), null, "no fal entry, no switch");
+assert.equal(photoSwitchTarget("image_seedream4", "fal"), null, "retired tier (#476): no options, no switch");
 assert.equal(photoSwitchTarget("image_basic", "fal")?.model, "fal-ai/nano-banana");
 assert.equal(photoSwitchTarget("image_basic", "replicate")?.model, "google/nano-banana");
 assert.deepEqual(photoSwitchTarget("image_basic", "replicate")?.parameters, {});
@@ -34,7 +34,7 @@ assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nan
 assert.equal(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { model: "fal-ai/other" }).ok, false, "off-catalog fal model rejected");
 assert.deepEqual(photoPatchUnit("image_basic", { provider: "replicate", model: "google/nano-banana" }, { model: "google/nano-banana-x" }), { ok: true }, "replicate model edit stays free");
 assert.deepEqual(photoPatchUnit("image_basic", { provider: "fal", model: "fal-ai/nano-banana" }, { parameters: { x: 1 } }), { ok: true, parameters: {} }, "free-form PATCH params on a Fal row reset to catalog");
-assert.deepEqual(photoPatchUnit("image_seedream4", { provider: "replicate", model: "a" }, { model: "b" }), { ok: true }, "non-switchable tier unconstrained");
+assert.deepEqual(photoPatchUnit("image_seedream4", { provider: "replicate", model: "a" }, { model: "b" }), { ok: true }, "a row for a retired tier (#476) is not constrained by the switch guard");
 assert.equal(activePhotoProvider("image_basic", null), "replicate", "missing row is replicate");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "fal-ai/nano-banana", enabled: true }), "fal");
 assert.equal(activePhotoProvider("image_basic", { provider: "fal", model: "bogus", enabled: true }), "replicate", "off-catalog is replicate");

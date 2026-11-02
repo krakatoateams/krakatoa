@@ -47,7 +47,7 @@ assert.equal(
 );
 
 const insert = buildMissingPricingConfigInsert(
-  "product_photo_seedream_4_per_image",
+  "product_photo_krea_2_medium_per_image",
   { credit_amount: 9, enabled: false },
   "admin-profile"
 );

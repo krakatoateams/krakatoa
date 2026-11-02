@@ -18,7 +18,7 @@ import {
 } from "@/lib/model-catalog-guard";
 
 /**
- * Read-only model view for the Admin Config tool cards (Add model picker guard results). Pure: rows in, JSON-safe payload out.
+ * Read-only model view for the Admin Config tool cards (Restore model picker guard results). Pure: rows in, JSON-safe payload out.
  * Provider is reported as a label + a boolean "configured" flag, never a key or env value.
  */
 
@@ -54,7 +54,7 @@ export type RegistryModel = {
   /** Not offered, not removed, and nothing blocks offering it. */
   availableToAdd: boolean;
   enableCheck: RegistryCheck;
-  /** Guard for "Add model" in a tool card: restore (if removed) then offer. Same rules as enable, minus ARCHIVED. */
+  /** Guard for "Restore model" in a tool card: restore (if removed) then offer. Same rules as enable, minus ARCHIVED. */
   addCheck: RegistryCheck;
   disableCheck: RegistryCheck;
   /** Guard result for Remove (same rules as hiding the model). */

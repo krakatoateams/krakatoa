@@ -75,7 +75,7 @@ not part of this tree.
 | `render.rendi` | Not in v2 | Infrastructure footer (low priority) |
 | IG / Schedule / Calendar | Empty model lists in tree | No generation catalog — tool toggle only |
 | Legacy cutover | Two panels coexist | Redirect + delete legacy after parity check |
-| Extended photo `model_configs` seed | Resolver falls back to code | Optional DB rows for `image_seedream4`, etc. |
+| Extended photo `model_configs` seed | Resolver falls back to code | Optional DB rows for `image_seedream4`, etc. (those tiers were retired from code in #476) |
 
 ### 3.3 Bugs fixed during prototype (do not regress)
 

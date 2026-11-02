@@ -8,6 +8,8 @@ import {
   getProductPhotoTier,
   isValidProductPhotoTier,
   PRODUCT_PHOTO_TIERS,
+  RETIRED_PRODUCT_PHOTO_TIERS,
+  retiredProductPhotoTier,
 } from "@/lib/product-photo";
 import { getVideoModel, isValidVideoModelId, VIDEO_MODELS } from "@/lib/video-models";
 
@@ -17,6 +19,8 @@ for (const m of MOTION_CONTROL_MODEL_REGISTRY) {
   LABEL_BY_PROVIDER.set(m.providerModel, m.modelLabel);
 }
 for (const t of PRODUCT_PHOTO_TIERS) LABEL_BY_PROVIDER.set(t.providerModel, t.modelLabel);
+// Retired photo tiers (#476): old creations keep their model name.
+for (const t of Object.values(RETIRED_PRODUCT_PHOTO_TIERS)) LABEL_BY_PROVIDER.set(t.providerModel, t.modelLabel);
 
 /** Known admin defaults when metadata predates modelLabel storage. */
 const TOOL_MODEL_FALLBACK: Partial<Record<CreationTool, string>> = {
@@ -51,6 +55,8 @@ export function getCreationModelLabel(item: CreationHistoryItem): string | null 
   if (typeof m.modelTier === "string" && isValidProductPhotoTier(m.modelTier)) {
     return getProductPhotoTier(m.modelTier).modelLabel;
   }
+  const retired = typeof m.modelTier === "string" ? retiredProductPhotoTier(m.modelTier) : null;
+  if (retired) return retired.modelLabel;
 
   if (typeof m.modelLabel === "string" && m.modelLabel.trim()) {
     return m.modelLabel.trim();
