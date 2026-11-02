@@ -87,6 +87,7 @@ import {
 import CreationsHistory from "@/components/CreationsHistory";
 import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   DevBlankTestToggle,
@@ -182,6 +183,7 @@ function StoryboardComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "photo:storyboard",
     refetchCredits,
@@ -446,6 +448,7 @@ function StoryboardComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
@@ -579,6 +582,7 @@ function PhotoOmniPage({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "photo:studio",
     refetchCredits,
@@ -1419,6 +1423,7 @@ function PhotoOmniPage({
             <span>{error}</span>
           </div>
         )}
+        <GenerationNotice text={cancelNotice} />
 
         {loading && (
           <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">

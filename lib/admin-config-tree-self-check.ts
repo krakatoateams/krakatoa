@@ -4,6 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildAdminConfigTree,
+  collectPricingBaselines,
+  isPricingDirty,
+  keepPricingDrafts,
   modelsTabTools,
   priceSummary,
   variantFromPricingRow,
@@ -117,6 +120,39 @@ assert.deepEqual(
   "GPT Image 2 quality variants must show in the admin tree"
 );
 
+// #484: a refresh keeps unsaved price drafts; clean rows and other fields take the server values.
+{
+  const variants = tree.flatMap((t) => t.models.flatMap((m) => m.variants));
+  assert.ok(variants.length >= 2, "fixture has priced variants");
+  const [a, b] = variants;
+  const saved = collectPricingBaselines(tree);
+  const edited = tree.map((t) => ({
+    ...t,
+    models: t.models.map((m) => ({
+      ...m,
+      variants: m.variants.map((v) => (v.pricingKey === a.pricingKey ? { ...v, credits: v.credits + 7 } : v)),
+    })),
+  }));
+  // The server meanwhile changed b's price and a's On flag.
+  const fresh = tree.map((t) => ({
+    ...t,
+    models: t.models.map((m) => ({
+      ...m,
+      variants: m.variants.map((v) =>
+        v.pricingKey === b.pricingKey ? { ...v, credits: v.credits + 3 } : v.pricingKey === a.pricingKey ? { ...v, enabled: !v.enabled } : v,
+      ),
+    })),
+  }));
+  const merged = keepPricingDrafts(fresh, edited, saved);
+  const find = (key: string) => merged.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey === key)!;
+  assert.equal(find(a.pricingKey).credits, a.credits + 7, "dirty row keeps its typed draft");
+  assert.equal(find(a.pricingKey).enabled, !a.enabled, "a kept draft still takes the server's other fields");
+  assert.equal(find(b.pricingKey).credits, b.credits + 3, "clean row takes the refreshed server price");
+  assert.ok(isPricingDirty(find(a.pricingKey), collectPricingBaselines(fresh)), "the kept draft still shows as unsaved");
+  assert.equal(keepPricingDrafts(fresh, tree, saved), fresh, "no drafts: the fresh tree is used as is");
+  assert.equal(keepPricingDrafts(fresh, [], {}), fresh, "first load has nothing to keep");
+}
+
 async function main(): Promise<void> {
   assert.throws(
     () => requireAdminConfigRows({}, "tools", "tool configs"),
@@ -213,6 +249,12 @@ function modelsTabSelfCheck(): void {
     assert.ok(src.includes(url), `still wired: ${url}`);
   }
   assert.ok(!src.includes("Replicate $"), "the cost column is labelled as the highest cost, not Replicate");
+  // #484: the optional costs / packs reads time out to "cost not set" / a dash; the tooltip names bonus credits.
+  assert.ok(src.includes("signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS)") && src.includes("OPTIONAL_READ_TIMEOUT_MS = 8_000"), "optional reads have an 8 s timeout");
+  assert.ok(src.includes("lowest pack price per credit, bonus credits included"), "margin tooltip says bonus credits are included");
+  // #484: browser Back asks before dropping drafts; Save stays focusable after it saves.
+  assert.ok(src.includes('window.addEventListener("popstate", onPopState)') && src.includes("BACK_GUARD_KEY"), "unsaved drafts guard browser Back");
+  assert.ok(src.includes("aria-disabled={!dirty || saving}") && !/(?<!aria-)disabled=\{!dirty \|\| saving\}/.test(src), "Save never disables itself while focused");
   for (const route of ["(catalog)/layout.tsx", "(catalog)/config-v2/page.tsx", "(catalog)/models/page.tsx"]) {
     assert.ok(existsSync(join(admin, route)), `route file ${route} exists`);
   }

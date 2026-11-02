@@ -12,6 +12,7 @@ import {
 } from "@/lib/aspect-ratio-match";
 import type { MentionAsset } from "@/lib/mention-assets";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -190,6 +191,7 @@ export default function ImageToVideoComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:image-to-video",
     refetchCredits,
@@ -624,6 +626,7 @@ export default function ImageToVideoComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {restoreNotice && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">

@@ -620,6 +620,56 @@ export function priceSummary(
   return `${amount} ${max === 1 ? "credit" : "credits"} ${unit}`.trim();
 }
 
+export type PricingBaseline = Pick<AdminCostVariant, "providerReferenceUsd" | "credits">;
+
+function allVariants(tools: readonly AdminToolNode[]): AdminCostVariant[] {
+  return tools.flatMap((t) => [...t.models.flatMap((m) => m.variants), ...t.pipelines.flatMap((g) => g.variants)]);
+}
+
+/** Last saved (server) price per pricing key; a row differing from it has an unsaved draft. */
+export function collectPricingBaselines(tools: readonly AdminToolNode[]): Record<string, PricingBaseline> {
+  const out: Record<string, PricingBaseline> = {};
+  for (const v of allVariants(tools)) {
+    out[v.pricingKey] = { providerReferenceUsd: v.providerReferenceUsd, credits: v.credits };
+  }
+  return out;
+}
+
+export function isPricingDirty(variant: AdminCostVariant, saved: Record<string, PricingBaseline>): boolean {
+  const baseline = saved[variant.pricingKey];
+  if (!baseline) return true;
+  return baseline.providerReferenceUsd !== variant.providerReferenceUsd || baseline.credits !== variant.credits;
+}
+
+/**
+ * A refreshed tree that keeps every unsaved price draft (#484): a row dirty against `prevSaved` keeps its
+ * typed cost and credits; clean rows and every other field take the fresh server values. The caller sets
+ * the new baselines from `next` itself, so a kept draft still shows as unsaved.
+ */
+export function keepPricingDrafts(
+  next: AdminToolNode[],
+  prev: readonly AdminToolNode[],
+  prevSaved: Record<string, PricingBaseline>
+): AdminToolNode[] {
+  const drafts = new Map<string, PricingBaseline>();
+  for (const v of allVariants(prev)) {
+    if (prevSaved[v.pricingKey] && isPricingDirty(v, prevSaved)) {
+      drafts.set(v.pricingKey, { providerReferenceUsd: v.providerReferenceUsd, credits: v.credits });
+    }
+  }
+  if (drafts.size === 0) return next;
+  const keep = (variants: AdminCostVariant[]) =>
+    variants.map((v) => {
+      const draft = drafts.get(v.pricingKey);
+      return draft ? { ...v, ...draft } : v;
+    });
+  return next.map((t) => ({
+    ...t,
+    models: t.models.map((m) => ({ ...m, variants: keep(m.variants) })),
+    pipelines: t.pipelines.map((g) => ({ ...g, variants: keep(g.variants) })),
+  }));
+}
+
 export function suggestCreditsFromProvider(
   providerReferenceUsd: number,
   settings: BillingSettings

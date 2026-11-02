@@ -27,6 +27,7 @@ import { consumePendingDraftForOwner } from "@/lib/pending-form-draft";
 import { useStudioGenerationSubmit } from "@/lib/studio-generation-submit";
 import { STUDIO_GENERATION_RECOVERABLE_FALLBACK } from "@/lib/studio-generation-response";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -194,6 +195,7 @@ export default function TextToVideoComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:text-to-video",
     refetchCredits,
@@ -740,6 +742,7 @@ export default function TextToVideoComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {restoreNotice && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">

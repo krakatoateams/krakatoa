@@ -158,7 +158,7 @@ export default function ImageNode({
     const preview = URL.createObjectURL(file);
     setLocalPreview(preview);
     setLocalPng(file.type === "image/png" || /\.png$/i.test(file.name));
-    patch({ uploading: true, error: null });
+    patch({ uploading: true, error: null, notice: null });
     try {
       const uploaded = await uploadRefFile(file);
       patch({
@@ -244,7 +244,7 @@ export default function ImageNode({
 
     let rotateKey = false;
     let outcome: CanvasRunOutcome = "failed";
-    patch({ loading: true, error: null });
+    patch({ loading: true, error: null, notice: null });
     try {
       const response = await fetch("/api/generate-photo", {
         method: "POST",
@@ -276,7 +276,8 @@ export default function ImageNode({
       const storagePath = pickGenerateStoragePath(result);
       patch({
         loading: false,
-        error: deliveredAfterCancelNotice(),
+        error: null,
+        notice: deliveredAfterCancelNotice(),
         imported: false,
         resultUrl: result.imageUrl ?? null,
         resultStoragePath: storagePath,
@@ -381,6 +382,7 @@ export default function ImageNode({
                           creationId: item.id,
                           imported: true,
                           error: null,
+                          notice: null,
                           uploading: false,
                         });
                       },
@@ -500,6 +502,11 @@ export default function ImageNode({
             <p className="mb-2 flex items-start gap-1.5 text-[11px] text-error">
               <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
               {data.error}
+            </p>
+          )}
+          {data.notice && (
+            <p role="status" className="mb-2 text-[11px] text-text-secondary">
+              {data.notice}
             </p>
           )}
           <div className="flex items-center gap-2">

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { TileSkeleton } from "@/components/ui/TileSkeleton";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -138,6 +139,7 @@ function ImportStoryboardModal({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:storyboard-import",
     refetchCredits,
@@ -425,6 +427,7 @@ function ImportStoryboardModal({
               <span>{error}</span>
             </div>
           )}
+          <GenerationNotice text={cancelNotice} />
 
           {restoreNotice && (
             <div className="flex items-start gap-2 rounded-xl border border-warning/20 bg-warning/10 p-3 text-sm text-warning">
@@ -551,6 +554,7 @@ export default function StoryboardToVideoComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:storyboard-to-video",
     refetchCredits,
@@ -1103,6 +1107,7 @@ export default function StoryboardToVideoComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {recoverableJobId && (
         <GenerationRecoverableBanner

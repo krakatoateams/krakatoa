@@ -12,7 +12,11 @@ import {
   type AdminPipelineRole,
   type AdminProviderChoice,
   type AdminToolNode,
+  type PricingBaseline,
   buildAdminConfigTree,
+  collectPricingBaselines,
+  isPricingDirty,
+  keepPricingDrafts,
   modelsTabTools,
   priceSummary,
   splitToolModels,
@@ -106,8 +110,11 @@ const HIGHEST_COST_HINT =
 function marginHint(sellIdrPerCredit: number | null): string {
   return sellIdrPerCredit === null
     ? "No enabled credit pack could be read, so no margin is shown."
-    : `Based on the lowest pack price per credit (${formatIdr(sellIdrPerCredit)}). Before payment fees.`;
+    : `Based on the lowest pack price per credit, bonus credits included (${formatIdr(sellIdrPerCredit)}). Before payment fees.`;
 }
+
+/** The optional provider-costs and packs reads give up after this and fall back to "cost not set" / a dash. */
+const OPTIONAL_READ_TIMEOUT_MS = 8_000;
 
 
 /** Provider-switch data shared by the Photo model sections (fetched once by the page). */
@@ -280,8 +287,6 @@ type DefaultOverridePrompt = {
   toModelLabel: string;
 };
 
-type PricingBaseline = Pick<AdminCostVariant, "providerReferenceUsd" | "credits">;
-
 function findVariantByPricingKey(
   tools: AdminToolNode[],
   pricingKey: string
@@ -323,41 +328,6 @@ function findPipelineRoleByConfigId(
     }
   }
   return null;
-}
-
-function collectPricingBaselines(tools: AdminToolNode[]): Record<string, PricingBaseline> {
-  const out: Record<string, PricingBaseline> = {};
-  for (const tool of tools) {
-    for (const model of tool.models) {
-      for (const v of model.variants) {
-        out[v.pricingKey] = {
-          providerReferenceUsd: v.providerReferenceUsd,
-          credits: v.credits,
-        };
-      }
-    }
-    for (const group of tool.pipelines) {
-      for (const v of group.variants) {
-        out[v.pricingKey] = {
-          providerReferenceUsd: v.providerReferenceUsd,
-          credits: v.credits,
-        };
-      }
-    }
-  }
-  return out;
-}
-
-function isPricingDirty(
-  variant: AdminCostVariant,
-  saved: Record<string, PricingBaseline>
-): boolean {
-  const baseline = saved[variant.pricingKey];
-  if (!baseline) return true;
-  return (
-    baseline.providerReferenceUsd !== variant.providerReferenceUsd ||
-    baseline.credits !== variant.credits
-  );
 }
 
 /** Who holds default for a mode across all models in a tool (exclusive per mode). */
@@ -573,15 +543,19 @@ function VariantTable({
                   />
                 </td>
                 <td className="px-2 py-1.5 text-right">
+                  {/* aria-disabled, not disabled: a focused button that disables itself after saving drops
+                      keyboard focus to the page (#484). */}
                   <button
                     type="button"
-                    disabled={!dirty || saving}
+                    aria-disabled={!dirty || saving}
                     title={dirty ? "Save pricing changes" : "No unsaved changes"}
-                    onClick={() => onSave(v)}
+                    onClick={() => {
+                      if (dirty && !saving) onSave(v);
+                    }}
                     className={
                       dirty
-                        ? "rounded bg-[#F26522] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#e05a1a] disabled:opacity-50"
-                        : "rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-gray-600 disabled:cursor-default"
+                        ? "rounded bg-[#F26522] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#e05a1a] aria-disabled:opacity-50"
+                        : "rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-gray-600 aria-disabled:cursor-default"
                     }
                   >
                     Save
@@ -1366,6 +1340,20 @@ function useCatalog(): CatalogState {
 const MODELS_PATH = "/admin/models";
 const CATALOG_PATHS = ["/admin/config-v2", MODELS_PATH];
 const UNSAVED_LEAVE_MESSAGE = "You have unsaved price changes. Leave without saving?";
+/** History-state keys of the browser Back guard: the parked same-URL entry, and the entry it sits on. */
+const BACK_GUARD_KEY = "__krakatoaUnsavedPrices";
+const BACK_BASE_KEY = "__krakatoaUnsavedBase";
+
+type BackGuardState = { base: string | null; leaving: boolean; dropping: boolean };
+
+/** Stamp the current history entry and park a same-URL guard entry on top of it (browser Back guard). */
+function parkBackGuard(g: BackGuardState): void {
+  const base = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  g.base = base;
+  const state = { ...window.history.state, [BACK_GUARD_KEY]: undefined };
+  window.history.replaceState({ ...state, [BACK_BASE_KEY]: base }, "", window.location.href);
+  window.history.pushState({ ...state, [BACK_BASE_KEY]: undefined, [BACK_GUARD_KEY]: base }, "", window.location.href);
+}
 
 function hasUnsavedPricing(tools: AdminToolNode[], saved: Record<string, PricingBaseline>): boolean {
   return tools.some(
@@ -1394,6 +1382,8 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
+  const savedPricingRef = useRef(savedPricing);
+  savedPricingRef.current = savedPricing;
   const [falConfigured, setFalConfigured] = useState(false);
   const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
   const [sellIdrPerCredit, setSellIdrPerCredit] = useState<number | null>(null);
@@ -1437,10 +1427,10 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       setFalConfigured(
         (modelsData as { configuredProviders?: { fal?: boolean } }).configuredProviders?.fal === true
       );
-      // Costs and packs are optional: a missing table or fetch failure leaves "cost not set" / a dash
-      // (never the old cost-basis margin), never an error.
+      // Costs and packs are optional: a missing table, a failure or no answer within 8 s leaves
+      // "cost not set" / a dash (never the old cost-basis margin), never an error or a hang.
       const optionalJson = (url: string) =>
-        fetch(url)
+        fetch(url, { signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS) })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null);
       const [costsData, packsData] = await Promise.all([
@@ -1533,15 +1523,20 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         modelConfigs,
         billingSettings: settings,
       });
+      // A refresh keeps every unsaved price draft; only clean rows take the server values (#484).
+      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current);
       setBillingSettings(settings);
-      setTools(tree);
-      toolsRef.current = tree;
+      setTools(merged);
+      toolsRef.current = merged;
       setSavedPricing(collectPricingBaselines(tree));
     } catch (e) {
-      setBillingSettings(DEFAULT_BILLING_SETTINGS);
-      setTools([]);
-      toolsRef.current = [];
-      setSavedPricing({});
+      // A failed refresh must not wipe unsaved drafts either: keep the current tree and show the error.
+      if (!hasUnsavedPricing(toolsRef.current, savedPricingRef.current)) {
+        setBillingSettings(DEFAULT_BILLING_SETTINGS);
+        setTools([]);
+        toolsRef.current = [];
+        setSavedPricing({});
+      }
       setLoadError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
       setLoading(false);
@@ -1929,6 +1924,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   );
 
   const unsaved = hasUnsavedPricing(tools, savedPricing);
+  const backGuardRef = useRef<BackGuardState>({ base: null, leaving: false, dropping: false });
   useEffect(() => {
     if (!unsaved) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -1947,12 +1943,67 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         e.stopPropagation();
       }
     };
+    // Browser Back (#484): park one same-URL entry on top of the current one, which gets a unique stamp.
+    // Landing back on the stamped entry means "leave": ask first. Stay steps forward onto the parked entry
+    // again (whatever tool it shows now); leave steps back once more. Next keeps custom history state on
+    // back/forward, so the stamp survives. Scroll restoration is manual while guarded so stepping between
+    // the two same-URL entries never jumps the page.
+    const g = backGuardRef.current;
+    window.history.scrollRestoration = "manual";
+    if (!g.dropping && !(g.base && window.history.state?.[BACK_GUARD_KEY] === g.base)) parkBackGuard(g);
+    const onPopState = (e: PopStateEvent) => {
+      if (g.dropping) return;
+      if (g.leaving) {
+        // Still on an older guard entry of this page: keep stepping back. Landed on another catalog tab
+        // (drafts survive there): guard again from here. Anywhere else this provider is about to unmount.
+        if (e.state?.[BACK_BASE_KEY] || e.state?.[BACK_GUARD_KEY]) {
+          window.history.back();
+          return;
+        }
+        g.leaving = false;
+        if (CATALOG_PATHS.some((p) => window.location.pathname.startsWith(p))) parkBackGuard(g);
+        return;
+      }
+      if (!g.base || e.state?.[BACK_BASE_KEY] !== g.base) return;
+      if (window.confirm(UNSAVED_LEAVE_MESSAGE)) {
+        g.leaving = true;
+        window.history.back();
+      } else {
+        window.history.forward();
+      }
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("click", onClick, true);
+    window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
+      window.removeEventListener("popstate", onPopState);
+      window.history.scrollRestoration = "auto";
     };
+  }, [unsaved]);
+  // Once everything is saved, step back off the parked entry so Back is not a dead press. Runs only while
+  // mounted (never on unmount) and only when the parked entry is still the current one. That step's own
+  // popstate is ignored, and if a draft appeared meanwhile the guard is parked again once it lands.
+  const wasUnsavedRef = useRef(false);
+  const unsavedRef = useRef(unsaved);
+  unsavedRef.current = unsaved;
+  useEffect(() => {
+    const g = backGuardRef.current;
+    if (wasUnsavedRef.current && !unsaved && g.base && window.history.state?.[BACK_GUARD_KEY] === g.base) {
+      g.dropping = true;
+      window.history.scrollRestoration = "manual";
+      const onDropped = () => {
+        window.removeEventListener("popstate", onDropped);
+        g.dropping = false;
+        g.base = null;
+        if (unsavedRef.current) parkBackGuard(g);
+        else window.history.scrollRestoration = "auto";
+      };
+      window.addEventListener("popstate", onDropped);
+      window.history.back();
+    }
+    wasUnsavedRef.current = unsaved;
   }, [unsaved]);
 
   if (loading) {

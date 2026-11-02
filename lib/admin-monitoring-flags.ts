@@ -159,6 +159,24 @@ function base(patch: Partial<JobFlagInput> = {}): JobFlagInput {
   };
 }
 
+/**
+ * How long a job step took, or null when unknown. Only a step still waiting or running measures to `nowMs`;
+ * a finished step without `finished_at` (e.g. the instant cancel trace steps) has no duration, instead of
+ * one that grows with the page's age ("3h 2m", #484).
+ */
+export function stepDurationMs(
+  step: { status: string; created_at: string; started_at: string | null; finished_at: string | null },
+  nowMs: number
+): number | null {
+  const start = Date.parse(step.started_at ?? step.created_at);
+  const end = step.finished_at
+    ? Date.parse(step.finished_at)
+    : step.status === "running" || step.status === "pending"
+      ? nowMs
+      : null;
+  return end === null || !Number.isFinite(start) || !Number.isFinite(end) ? null : end - start;
+}
+
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
 }
@@ -347,6 +365,17 @@ export function adminMonitoringFlagsSelfCheck(): void {
     ),
     "unknown submission with post-commit lock must not flag"
   );
+
+  // #484: step durations never measure a finished step to "now"
+  const T0 = "2026-11-02T10:00:00.000Z";
+  const now = Date.parse(T0) + 3 * 60 * MIN;
+  const step = (status: string, started_at: string | null, finished_at: string | null) => ({ status, created_at: T0, started_at, finished_at });
+  assert(stepDurationMs(step("succeeded", null, null), now) === null, "a finished trace step without finished_at has no duration (was 3h)");
+  assert(stepDurationMs(step("failed", null, null), now) === null, "same for a failed step");
+  assert(stepDurationMs(step("running", T0, null), now) === 3 * 60 * MIN, "a running step measures to now");
+  assert(stepDurationMs(step("pending", null, null), now) === 3 * 60 * MIN, "a waiting step measures from created_at to now");
+  assert(stepDurationMs(step("succeeded", T0, "2026-11-02T10:00:42.000Z"), now) === 42_000, "a finished step uses finished_at");
+  assert(stepDurationMs(step("succeeded", null, "2026-11-02T10:00:05.000Z"), now) === 5_000, "no started_at falls back to created_at");
 
   // stacking
   assert(

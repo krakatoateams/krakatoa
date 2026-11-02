@@ -247,7 +247,8 @@ COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRef
   cancel races an image that just started, that image commits and delivers; the images Fal already removed are refunded
   per image (`planBatchFailures`), so the user is never charged for a missing image.
 - A cancel the API accepted but Fal could not confirm (202 / unconfirmed): the image arrives, the user is charged,
-  and the form or canvas node shows the same refused message ("... Credits are used.") when it lands.
+  and the form or canvas node shows a calm grey note ("Cancel came too late, so this one finished. Credits are used.")
+  when it lands, not an error (#484).
 - Known limits (not fixed): (L1) if the generate route is killed while a request is still `IN_QUEUE`, nobody cancels
   it at Fal; (L4) `abortCheck` fails closed on a DB error (the request is treated as committed); (L5) in a raced batch
   the removed image is refunded as a partial refund (money correct, not the cancel path).
@@ -257,8 +258,8 @@ COMMITTED --> DELIVERED (charged once) | FAILED_DEFINITIVE (refund via shouldRef
 - UI (#472): Cancel is offered only while the status poll says `cancelAllowed` (no extra Fal calls). Once it is false,
   or on a 409 `CANCEL_NOT_ALLOWED`, the button gives way at once to one calm line in the same slot, "Already generating,
   can't be cancelled." (no error banner, no refund claim). Other cancel failures show "Couldn't cancel. Please try
-  again." in the error banner. A cancel the API accepted whose image still arrives shows "Generation already started
-  and can't be cancelled. Credits are used." in the error banner after delivery.
+  again." in the error banner. A cancel the API accepted whose image still arrives shows "Cancel came too late, so this
+  one finished. Credits are used." in a neutral grey banner after delivery (`GenerationNotice`, #484), never the red one.
 
 ### Live test steps for the cancel (run by hand, record results in the table below)
 
