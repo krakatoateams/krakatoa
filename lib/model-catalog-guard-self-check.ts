@@ -282,7 +282,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   assert.equal(fail(restore([], "nope")).code, "UNKNOWN_MODEL");
 }
 
-// #460 One model list per tool card. The list and the "Add model" picker come from the same catalog rows:
+// #460 One model list per tool card. The list and the "Restore model" picker come from the same catalog rows:
 // a removed (archived) model is only in the picker, never offered, never a default; adding it back is
 // judged by the same guard minus ARCHIVED (price / provider still apply).
 {
@@ -314,7 +314,7 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
   const gone = stale.models.find((m) => m.id === DEFAULT_PRODUCT_PHOTO_TIER)!;
   assert.equal(gone.enabled, false);
   assert.ok(gone.features.every((f) => !f.isDefault), "a removed model is never a mode default");
-  // A retired model (removed, every price deprecated) still shows under Add model; an unpriced live one does not.
+  // A retired model (removed, every price deprecated) still shows under Restore model; an unpriced live one does not.
   const retiredKeys = modelPricingKeys("photo", plain);
   assert.deepEqual(splitToolModels(tree([{ model_id: plain, enabled: false, archived_at: at }], retiredKeys).models).removed.map((m) => m.id), [plain]);
   assert.ok(!tree([], retiredKeys).models.some((m) => m.id === plain), "a live model with no price rows stays out of the card");
@@ -330,9 +330,9 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
     )!;
   const ready = reg(readyPricing);
   assert.equal(ready.enableCheck.code, "ARCHIVED", "the plain enable route still refuses a removed model");
-  assert.equal(ready.addCheck.ok, true, "Add model = restore then offer: allowed when price and provider are ready");
+  assert.equal(ready.addCheck.ok, true, "Restore model = restore then offer: allowed when price and provider are ready");
   const unpriced = reg(readyPricing.filter((r) => !modelPricingKeys("photo", plain).includes(r.pricing_key)));
-  assert.equal(unpriced.addCheck.code, "PRICING_NOT_READY", "Add model never skips the pricing guard");
+  assert.equal(unpriced.addCheck.code, "PRICING_NOT_READY", "Restore model never skips the pricing guard");
   const live = buildModelRegistry({ catalogRows: [], featureRows: [], pricingRows: readyPricing, modelConfigs: [] }).find((m) => m.modelId === plain)!;
   assert.deepEqual(live.addCheck, live.enableCheck, "for a model that is not removed, Add is the enable check");
 }

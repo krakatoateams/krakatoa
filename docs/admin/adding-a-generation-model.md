@@ -414,12 +414,12 @@ the live `billing_settings`; the two match today. The migration stays the record
   - the last Reels engine (`REELS_ENGINE_LAST`).
 - Catalog rows are per tool, so a model is never shared between tools.
 
-**Add model** (one button per tool in the Models tab) lists only that tool's removed models:
+**Restore model** (one button per tool in the Models tab, formerly "Add model") lists only that tool's removed models:
 
 - Choosing one restores it (`POST …/[id]/restore`) and turns it on (`PATCH …/[id]`), re-running the price
   and provider guard.
 - A model that cannot be offered yet is listed with the reason and cannot be picked.
-- **Add model never shows a brand-new model.** A new model needs the code and pricing above. It then
+- **Restore model never shows a brand-new model.** A new model needs the code and pricing above. It then
   appears in its tool's list switched Off, and turning it On is how it is added.
 
 ## Retiring a model

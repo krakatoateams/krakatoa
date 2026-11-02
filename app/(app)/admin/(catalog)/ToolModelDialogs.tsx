@@ -58,7 +58,7 @@ export function RemoveModelDialog({
     <ConfirmDialog
       open={model !== null}
       title={m ? `Remove ${m.label} from ${toolLabel}?` : ""}
-      description="Past creations keep working and prices are kept. You can add it back later with Add model."
+      description="Past creations keep working and prices are kept. You can bring it back later with Restore model."
       confirmLabel="Remove"
       confirmDisabled={blocked || (impact === null && !failed)}
       onConfirm={onConfirm}
@@ -114,8 +114,8 @@ export function RemoveModelDialog({
 }
 
 /**
- * "Add model" for one tool (Models tab): lists only this tool's models that are not in its list (removed ones).
- * Adding restores the model and turns it on; the server re-runs the same guard (price, provider).
+ * "Restore model" for one tool (Models tab): lists only this tool's models that are not in its list (removed ones).
+ * Restoring brings the model back and turns it on; the server re-runs the same guard (price, provider).
  */
 export function AddModelDialog({
   open,
@@ -154,16 +154,16 @@ export function AddModelDialog({
   const reasonFor = (m: AdminModelNode) => {
     const check = info(m)?.addCheck;
     if (!check || check.ok) return null;
-    if (check.code === "PRICING_NOT_READY") return "Needs a price before it can be added.";
-    return check.reasons[0] ?? "This model cannot be added yet.";
+    if (check.code === "PRICING_NOT_READY") return "No price yet, so it can't be restored.";
+    return check.reasons[0] ?? "This model can't be restored yet.";
   };
   const choice = candidates.find((m) => m.id === selected) ?? null;
 
   return (
     <ConfirmDialog
       open={open}
-      title={`Add a model to ${toolLabel}`}
-      confirmLabel="Add model"
+      title={`Restore a model to ${toolLabel}`}
+      confirmLabel="Restore model"
       confirmVariant="primary"
       confirmDisabled={!choice || registry === null || reasonFor(choice) !== null}
       onConfirm={() => choice && onAdd(choice)}
@@ -172,8 +172,8 @@ export function AddModelDialog({
       <div className="mt-3" aria-busy={registry === null}>
         {candidates.length === 0 ? (
           <p className="text-sm text-gray-400">
-            Every model for this tool is already in the list. New models are added by a developer and show up
-            in the list switched off.
+            No removed models to restore. New models are added by a developer or an agent (see the
+            adding-a-generation-model runbook).
           </p>
         ) : registry === null ? (
           <div className="space-y-2" aria-hidden>
@@ -188,7 +188,7 @@ export function AddModelDialog({
             ))}
           </div>
         ) : (
-          <ul className="max-h-72 space-y-1.5 overflow-y-auto" role="radiogroup" aria-label="Models you can add">
+          <ul className="max-h-72 space-y-1.5 overflow-y-auto" role="radiogroup" aria-label="Models you can restore">
             {candidates.map((m) => {
               const reason = reasonFor(m);
               const active = selected === m.id;

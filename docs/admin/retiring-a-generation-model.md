@@ -20,8 +20,8 @@ ignored by the runtime, and keeping them is the safer state (see "Why rows are n
    tool (`LAST_ENABLED_MODEL`), or the model behind the last offered Reels engine (`REELS_ENGINE_LAST`).
    Archiving sets `archived_at` and `enabled = false`; the catalog read has no cache, so users stop seeing
    it on the next request and generate routes reject it.
-   **Add model** for the same tool brings it back (restore, then turn on) at any time while the entry
-   stays in code; after step 5 it is listed there as "Needs a price before it can be added"
+   **Restore model** for the same tool brings it back (restore, then turn on) at any time while the entry
+   stays in code; after step 5 it is listed there as "No price yet, so it can't be restored"
    (`PRICING_NOT_READY`) until a price exists again.
 2. **Wait.** No in-flight jobs on the model (the impact preview's count is 0), and at least 72 h since
    its last job, so reconcile has settled every held Fal job and per-image row
@@ -107,7 +107,7 @@ Example: #476 (Seedream 4, FLUX Kontext Pro, FLUX 1.1 Pro, Imagen 4, Ideogram v3
 
 ## Verify
 
-1. Admin → Models: the model is gone from its tool's list and appears under that tool's **Add model**.
+1. Admin → Models: the model is gone from its tool's list and appears under that tool's **Restore model**.
 2. SQL: `select enabled, archived_at from model_catalog_configs where model_id = '<id>';` returns
    `false` and a timestamp. `select is_deprecated, enabled from pricing_configs where pricing_key in
    ('<key>', …);` returns `true, false`.

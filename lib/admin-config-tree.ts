@@ -402,7 +402,7 @@ function resolveCatalogModel(
 
 /**
  * A model with no live price rows is left out of the tree, except a removed one: retiring a model
- * deprecates its prices, and it must still show under "Add model" (blocked until priced again).
+ * deprecates its prices, and it must still show under "Restore model" (blocked until priced again).
  */
 function listedInTree(variants: readonly AdminCostVariant[], catalog: { archived: boolean }): boolean {
   return variants.length > 0 || catalog.archived;
@@ -576,7 +576,7 @@ export function buildAdminConfigTree(params: {
 }
 
 /**
- * A tool's model list (Models tab) and its "Add model" picker, from the same catalog rows: a removed
+ * A tool's model list (Models tab) and its "Restore model" picker, from the same catalog rows: a removed
  * (archived) model is only in the picker, so it can never linger in the list after Remove (#460).
  */
 export function splitToolModels(models: readonly AdminModelNode[]): {
