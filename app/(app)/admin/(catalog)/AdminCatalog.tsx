@@ -14,11 +14,13 @@ import {
   type AdminToolNode,
   type PricingBaseline,
   buildAdminConfigTree,
-  collectPricingBaselines,
+  createPriceSaveTracker,
   isPricingDirty,
   keepPricingDrafts,
   modelsTabTools,
   priceSummary,
+  pricingPatchBody,
+  refreshedBaselines,
   splitToolModels,
   suggestCreditsFromProvider,
 } from "@/lib/admin-config-tree";
@@ -1382,8 +1384,10 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
+  // Kept in step with every setSavedPricing call (Save and load), never copied back on render, so a
+  // refresh resolving before the next render (or during a higher-priority one) still sees the save.
   const savedPricingRef = useRef(savedPricing);
-  savedPricingRef.current = savedPricing;
+  const priceSavesRef = useRef(createPriceSaveTracker());
   const [falConfigured, setFalConfigured] = useState(false);
   const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
   const [sellIdrPerCredit, setSellIdrPerCredit] = useState<number | null>(null);
@@ -1406,6 +1410,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
     }
     if (!quiet) setLoading(true);
     setLoadError(null);
+    const refreshSeq = priceSavesRef.current.beginRefresh();
     try {
       const [toolsRes, pricingRes, fmRes, catalogRes, modelsRes, billingRes] = await Promise.all([
         fetch("/api/admin/config/tools"),
@@ -1523,12 +1528,16 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         modelConfigs,
         billingSettings: settings,
       });
-      // A refresh keeps every unsaved price draft; only clean rows take the server values (#484).
-      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current);
+      // A refresh keeps every unsaved price draft; only clean rows take the server values (#484). A row
+      // saved after this refresh started keeps its saved price too: this data predates that save (#487).
+      const stale = priceSavesRef.current.staleKeys(refreshSeq);
+      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale);
+      const baselines = refreshedBaselines(tree, savedPricingRef.current, stale);
       setBillingSettings(settings);
       setTools(merged);
       toolsRef.current = merged;
-      setSavedPricing(collectPricingBaselines(tree));
+      setSavedPricing(baselines);
+      savedPricingRef.current = baselines;
     } catch (e) {
       // A failed refresh must not wipe unsaved drafts either: keep the current tree and show the error.
       if (!hasUnsavedPricing(toolsRef.current, savedPricingRef.current)) {
@@ -1536,6 +1545,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         setTools([]);
         toolsRef.current = [];
         setSavedPricing({});
+        savedPricingRef.current = {};
       }
       setLoadError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
@@ -1720,19 +1730,13 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       scheduleAutosave(`pricing:${pricingKey}`, async () => {
         const live = findVariantByPricingKey(toolsRef.current, pricingKey);
         if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
-        await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
-          display_name: live.label,
-          credit_amount: Math.round(live.credits),
-          provider_cost_usd: live.providerReferenceUsd,
-          enabled: live.enabled,
-        });
-        setSavedPricing((prev) => ({
-          ...prev,
-          [pricingKey]: {
-            providerReferenceUsd: live.providerReferenceUsd,
-            credits: live.credits,
-          },
-        }));
+        await patchApi(`/api/admin/config/pricing/${pricingKey}`, pricingPatchBody(live));
+        priceSavesRef.current.markSaved(pricingKey);
+        savedPricingRef.current = {
+          ...savedPricingRef.current,
+          [pricingKey]: { providerReferenceUsd: live.providerReferenceUsd, credits: live.credits },
+        };
+        setSavedPricing(savedPricingRef.current);
       });
     },
     [scheduleAutosave]
@@ -1744,12 +1748,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       scheduleAutosave(`pricing-toggle:${pricingKey}`, async () => {
         const live = findVariantByPricingKey(toolsRef.current, pricingKey);
         if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
-        await patchApi(`/api/admin/config/pricing/${pricingKey}`, {
-          display_name: live.label,
-          credit_amount: Math.round(live.credits),
-          provider_cost_usd: live.providerReferenceUsd,
-          enabled: live.enabled,
-        });
+        await patchApi(`/api/admin/config/pricing/${pricingKey}`, pricingPatchBody(live));
       });
     },
     [scheduleAutosave]

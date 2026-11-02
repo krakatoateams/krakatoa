@@ -179,3 +179,9 @@ is, and a suggested fix. "Likely" is a rough guess: rare = needs two unusual thi
   (100 credits = $1 plus markup), so its numbers differ. The rate refreshes on tab reload.
 - **Suggested credits still use Rp200 per credit (#482).** By design, it is the pricing formula.
 - **Not yet seen in a real browser:** the Models tab after #480 and #482.
+
+## From #485 (cleanup bundle)
+
+- **Back guard edge:** if Models is the first page in the tab, choosing Leave has nowhere to go; a flag stays stuck and Forward bounces back once. Harmless, nothing lost.
+- **Save during Refresh race (old, not new):** if Save is pressed while a Refresh is already loading, the row can redisplay the old price as clean; a later On/off toggle on that row then re-saves the old price. Narrow window; DB is correct until that toggle. Worth fixing (price integrity): ignore refresh results that started before the last Save.
+- Also from the implementer: Back from Models to Config asks too; the calm cancel note stays until the next Generate; cancel trace steps are still stored without an end time (display handles it); phone price table scrolls sideways.
