@@ -80,6 +80,8 @@ interface Post {
   status: "draft" | "scheduled" | "published" | "failed" | "canceled";
   scheduled_time: string;
   youtube_video_id?: string | null;
+  tiktok_share_url?: string | null;
+  instagram_permalink?: string | null;
   platform: string;
   last_error?: string | null;
   publish_started_at?: string | null;
@@ -2683,6 +2685,29 @@ function RecentPostsCard({ posts, loading, onRetry, onCancel }: RecentPostsCardP
                   rel="noopener noreferrer"
                   aria-label="View on YouTube"
                   className="shrink-0 cursor-pointer rounded-md p-1.5 text-text-disabled transition-colors hover:bg-white/10 hover:text-red-400"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              {/* Same rule as the Calendar popup: only once a real link exists. */}
+              {post.status === "published" && post.tiktok_share_url && (
+                <a
+                  href={post.tiktok_share_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="View on TikTok"
+                  className="shrink-0 cursor-pointer rounded-md p-1.5 text-text-disabled transition-colors hover:bg-white/10 hover:text-pink-400"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              {post.status === "published" && post.instagram_permalink && (
+                <a
+                  href={post.instagram_permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="View on Instagram"
+                  className="shrink-0 cursor-pointer rounded-md p-1.5 text-text-disabled transition-colors hover:bg-white/10 hover:text-fuchsia-400"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>

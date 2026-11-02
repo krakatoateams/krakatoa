@@ -81,6 +81,7 @@
     "test:tiktok-creator-info": "tsx lib/tiktok-creator-info-pure.ts",
     "test:tiktok-oauth": "tsx lib/tiktok-oauth-pure.ts",
     "test:tiktok-publish": "tsx lib/tiktok-publish-self-check.ts",
+    "test:tiktok-share-url-backfill": "tsx lib/tiktok-share-url-backfill-pure.ts",
     "test:youtube-oauth": "tsx lib/youtube-oauth-pure.ts",
     "test:youtube-publish": "tsx lib/youtube-publish-pure.ts",
     "test:instagram-oauth": "tsx lib/instagram-oauth-pure.ts",

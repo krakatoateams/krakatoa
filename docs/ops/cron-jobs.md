@@ -46,6 +46,8 @@ Setelah ubah env di Vercel → **redeploy**.
 
 **User merasakan:** Video yang dijadwalkan benar-benar ter-upload; gagal auth/quota tercatat di post.
 
+**Tambahan (tick kosong, tiap 10 menit):** untuk post TikTok publik yang sudah `published` tapi belum punya `tiktok_share_url`, cek ulang ke TikTok (maks 5 post, window 48 jam dari `scheduled_time`) sampai post ID publik keluar setelah moderasi, lalu simpan link-nya untuk tombol "View on TikTok". Best-effort, tidak pernah mengubah status post. Code: `lib/tiktok-share-url-backfill.ts`.
+
 **Jadwal:** **Tidak** ada di `vercel.json`. Dipanggil dari luar:
 
 | Trigger | Cadence | Config |

@@ -39,6 +39,7 @@ import {
   isTikTokPermanentFailure,
 } from "@/lib/cron-publish-pure";
 import { cronAuthorizationFailure } from "@/lib/cron-auth";
+import { backfillTikTokShareUrls } from "@/lib/tiktok-share-url-backfill";
 
 // Stay within the hosting plan's serverless cap so one run can't time out mid-batch.
 export const maxDuration = 60;
@@ -193,7 +194,9 @@ export async function GET(req: NextRequest) {
   console.log(`[cron] ${posts.length} candidate post(s) due at ${now} (cap ${MAX_POSTS_PER_RUN})`);
 
   if (posts.length === 0) {
-    return NextResponse.json({ processed: 0, published: 0, failed: 0, skipped: 0 });
+    // Idle ticks only, so a due publish always gets the full time budget.
+    const shareUrlsBackfilled = await backfillTikTokShareUrls(nowMs);
+    return NextResponse.json({ processed: 0, published: 0, failed: 0, skipped: 0, shareUrlsBackfilled });
   }
 
   let published = 0;
