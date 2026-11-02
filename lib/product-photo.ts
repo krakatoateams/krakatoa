@@ -71,13 +71,6 @@ export type ProductPhotoModelTier =
   | "basic"
   | "balanced"
   | "pro"
-  | "seedream4"
-  | "flux_kontext"
-  | "flux11"
-  | "imagen4"
-  | "ideogram3"
-  | "seedream3"
-  | "flux_schnell"
   | "gpt_image_2"
   | "krea2_turbo"
   | "krea2_large"
@@ -95,11 +88,7 @@ export type PhotoProviderFamily =
   | "nano_basic"
   | "nano_balanced"
   | "nano_pro"
-  | "seedream"
-  | "flux_kontext"
   | "flux_t2i"
-  | "imagen"
-  | "ideogram"
   | "gpt_image"
   | "krea_v2";
 
@@ -286,117 +275,6 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
   // --- Extended models (omni-form /tools/photo-v2). No resolution tiers; single
   // per-image price each. Reference-capable models also work in Product Try-on. ---
   {
-    id: "seedream4",
-    label: "Seedream 4",
-    subtitle: "Reference + text-to-image",
-    modelLabel: "Seedream 4",
-    modelRole: "image_seedream4",
-    providerModel: "bytedance/seedream-4",
-    hasResolution: false,
-    fixedResolutionLabel: "2K",
-    basicPricingKey: "product_photo_seedream_4_per_image",
-    basicFallbackCredits: 3,
-    resolutions: [],
-    providerFamily: "seedream",
-    supportsReference: true,
-    referenceParam: "image_input",
-    supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"],
-  },
-  {
-    id: "flux_kontext",
-    label: "FLUX Kontext Pro",
-    subtitle: "Reference image editing",
-    modelLabel: "FLUX Kontext Pro",
-    modelRole: "image_flux_kontext",
-    providerModel: "black-forest-labs/flux-kontext-pro",
-    hasResolution: false,
-    fixedResolutionLabel: "1K",
-    basicPricingKey: "product_photo_flux_kontext_pro_per_image",
-    basicFallbackCredits: 4,
-    resolutions: [],
-    providerFamily: "flux_kontext",
-    supportsReference: true,
-    referenceParam: "input_image",
-  },
-  {
-    id: "flux11",
-    label: "FLUX 1.1 Pro",
-    subtitle: "Text-to-image",
-    modelLabel: "FLUX 1.1 Pro",
-    modelRole: "image_flux_1_1_pro",
-    providerModel: "black-forest-labs/flux-1.1-pro",
-    hasResolution: false,
-    fixedResolutionLabel: "1K",
-    basicPricingKey: "product_photo_flux_1_1_pro_per_image",
-    basicFallbackCredits: 4,
-    resolutions: [],
-    providerFamily: "flux_t2i",
-    supportsReference: false,
-  },
-  {
-    id: "imagen4",
-    label: "Imagen 4",
-    subtitle: "Text-to-image",
-    modelLabel: "Imagen 4",
-    modelRole: "image_imagen_4",
-    providerModel: "google/imagen-4",
-    hasResolution: false,
-    fixedResolutionLabel: "1K",
-    basicPricingKey: "product_photo_imagen_4_per_image",
-    basicFallbackCredits: 4,
-    resolutions: [],
-    providerFamily: "imagen",
-    supportsReference: false,
-    supportedAspectRatios: ["1:1", "9:16", "16:9", "3:4", "4:3"],
-  },
-  {
-    id: "ideogram3",
-    label: "Ideogram v3 Turbo",
-    subtitle: "Great text rendering",
-    modelLabel: "Ideogram v3",
-    modelRole: "image_ideogram_v3_turbo",
-    providerModel: "ideogram-ai/ideogram-v3-turbo",
-    hasResolution: false,
-    fixedResolutionLabel: "1K",
-    basicPricingKey: "product_photo_ideogram_v3_turbo_per_image",
-    basicFallbackCredits: 3,
-    resolutions: [],
-    providerFamily: "ideogram",
-    supportsReference: false,
-    supportedAspectRatios: ["1:1", "9:16", "16:9", "3:4", "4:3", "2:3", "3:2"],
-  },
-  {
-    id: "seedream3",
-    label: "Seedream 3",
-    subtitle: "Text-to-image",
-    modelLabel: "Seedream 3",
-    modelRole: "image_seedream3",
-    providerModel: "bytedance/seedream-3",
-    hasResolution: false,
-    fixedResolutionLabel: "2K",
-    basicPricingKey: "product_photo_seedream_3_per_image",
-    basicFallbackCredits: 3,
-    resolutions: [],
-    providerFamily: "seedream",
-    supportsReference: false,
-    supportedAspectRatios: ["1:1", "3:4", "2:3", "9:16", "3:2", "4:3", "16:9", "21:9"],
-  },
-  {
-    id: "flux_schnell",
-    label: "FLUX Schnell",
-    subtitle: "Fastest · lowest cost",
-    modelLabel: "FLUX Schnell",
-    modelRole: "image_flux_schnell",
-    providerModel: "black-forest-labs/flux-schnell",
-    hasResolution: false,
-    fixedResolutionLabel: "1K",
-    basicPricingKey: "product_photo_flux_schnell_per_image",
-    basicFallbackCredits: 1,
-    resolutions: [],
-    providerFamily: "flux_t2i",
-    supportsReference: false,
-  },
-  {
     id: "gpt_image_2",
     label: "GPT Image 2.5 Flare",
     subtitle: "Reference + text-to-image",
@@ -488,6 +366,21 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
   },
 ];
 
+/**
+ * Photo tiers removed from the code catalog (#476: never priced in pricing_configs, archived in Admin).
+ * Kept only so old creations keep their model name and a request naming one gets a clear 400.
+ * Never reuse these ids or slugs for a different model.
+ */
+export const RETIRED_PRODUCT_PHOTO_TIERS: Readonly<Record<string, { modelLabel: string; providerModel: string }>> = {
+  seedream4: { modelLabel: "Seedream 4", providerModel: "bytedance/seedream-4" },
+  flux_kontext: { modelLabel: "FLUX Kontext Pro", providerModel: "black-forest-labs/flux-kontext-pro" },
+  flux11: { modelLabel: "FLUX 1.1 Pro", providerModel: "black-forest-labs/flux-1.1-pro" },
+  imagen4: { modelLabel: "Imagen 4", providerModel: "google/imagen-4" },
+  ideogram3: { modelLabel: "Ideogram v3", providerModel: "ideogram-ai/ideogram-v3-turbo" },
+  seedream3: { modelLabel: "Seedream 3", providerModel: "bytedance/seedream-3" },
+  flux_schnell: { modelLabel: "FLUX Schnell", providerModel: "black-forest-labs/flux-schnell" },
+};
+
 const TIER_BY_ID = Object.fromEntries(
   PRODUCT_PHOTO_TIERS.map((t) => [t.id, t])
 ) as Record<ProductPhotoModelTier, ProductPhotoTier>;
@@ -503,10 +396,10 @@ export function isValidProductPhotoTier(id: string): id is ProductPhotoModelTier
 /**
  * Whether a tier can consume more than one reference image. Product Try-on with a
  * separate character/model image needs this (the references are [product, character]).
- * FLUX Kontext takes a single `input_image`, so it would silently drop the character.
+ * A model that takes a single `input_image` would silently drop the character.
  */
 export function tierSupportsMultiReference(tier: ProductPhotoTier): boolean {
-  return tier.providerFamily !== "flux_kontext";
+  return tier.referenceParam !== "input_image";
 }
 
 export function isValidProductPhotoResolution(id: string): id is ProductPhotoResolution {
@@ -624,7 +517,11 @@ export function normalizeProductPhotoOptions(input: {
     }
   | { ok: false; error: string } {
   if (!isValidProductPhotoTier(input.modelTier)) {
-    return { ok: false, error: "Invalid model tier." };
+    const retired = RETIRED_PRODUCT_PHOTO_TIERS[input.modelTier];
+    return {
+      ok: false,
+      error: retired ? `${retired.modelLabel} is no longer available. Choose another model.` : "Invalid model tier.",
+    };
   }
   const tier = input.modelTier;
   const qualities = getProductPhotoTier(tier).qualities;
@@ -945,19 +842,6 @@ export function buildPhotoProviderInput(params: {
         output_format: "png",
         allow_fallback_model: false,
       };
-    case "seedream":
-      return {
-        prompt,
-        ...(useRef ? { image_input: ref } : {}),
-        aspect_ratio: aspectRatio,
-      };
-    case "flux_kontext":
-      return {
-        prompt,
-        ...(useRef ? { input_image: ref![0] } : {}),
-        aspect_ratio: aspectRatio,
-        output_format: "png",
-      };
     case "flux_t2i":
       return {
         prompt,
@@ -985,8 +869,6 @@ export function buildPhotoProviderInput(params: {
         // Array of URLs, order preserved. The 8-image cap is repo-chosen; the provider documents none.
         ...(useRef ? { input_images: ref } : {}),
       };
-    case "imagen":
-    case "ideogram":
     default:
       return {
         prompt,

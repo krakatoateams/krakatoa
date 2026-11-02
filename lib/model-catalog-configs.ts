@@ -24,11 +24,11 @@ type CatalogSource = { id: string; offeredByDefault?: boolean };
 /**
  * Models offered before new models shipped dark by default (#453). They stay offered without a flag.
  * Every other registry entry must set `offeredByDefault` (test:model-catalog-guard fails otherwise), and
- * an entry without it is not offered. Frozen: never add to this list.
+ * an entry without it is not offered. Frozen: never add to this list. Ids leave it only when their
+ * registry entry is deleted (#476 removed seven unpriced photo tiers; see RETIRED_PRODUCT_PHOTO_TIERS).
  */
 export const OFFERED_BEFORE_SHIP_DARK: ReadonlySet<string> = new Set<ProductPhotoModelTier | VideoModelId | MotionControlModelId>([
-  "basic", "balanced", "pro", "seedream4", "flux_kontext", "flux11", "imagen4", "ideogram3", "seedream3",
-  "flux_schnell", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
+  "basic", "balanced", "pro", "gpt_image_2", "seedance15_pro", "seedance1_pro_fast", "seedance1_lite", "seedance1_pro",
   "seedance2_mini", "seedance2_fast", "seedance2", "veo31_lite", "veo31_fast", "kling15_standard",
   "kling16_standard", "kling21", "kling25_turbo_pro", "kling26", "kling15_pro", "kling16_pro", "kling_v3",
   "kling_v3_omni", "grok_imagine_video", "kling26_motion", "kling_v3_motion",

@@ -404,7 +404,7 @@ export async function POST(req: Request) {
     const { modelTier, resolution, quality } = normalized;
     const tier = getProductPhotoTier(modelTier);
     // Product Try-on requires a reference-capable model. Text-to-image-only models
-    // (e.g. Imagen 4, FLUX 1.1 Pro) can't consume the uploaded product image, so
+    // (e.g. the Krea tiers) can't consume the uploaded product image, so
     // reject before any job/spend/provider work. The omni-form already hides these
     // in product mode; this guards a stale/forged client value.
     if (requiresProductImage && !tier.supportsReference) {
@@ -592,7 +592,7 @@ export async function POST(req: Request) {
       if (!tier.supportsReference) {
         return NextResponse.json(
           {
-            error: `${tier.modelLabel} can't use mentioned references. Choose a reference-capable model such as Nano Banana or Seedream 4.`,
+            error: `${tier.modelLabel} can't use mentioned references. Choose a reference-capable model such as Nano Banana or GPT Image 2.5 Flare.`,
           },
           { status: 400 }
         );
@@ -607,7 +607,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Single-image models (e.g. FLUX Kontext) can't honor more than one reference,
+    // Single-image models (a single `input_image`) can't honor more than one reference,
     // whether that's a Product Try-on character or @-mentioned assets. Reject before
     // any spend rather than silently dropping references.
     const totalReferenceImages =
@@ -615,7 +615,7 @@ export async function POST(req: Request) {
     if (totalReferenceImages > 1 && !tierSupportsMultiReference(tier)) {
       return NextResponse.json(
         {
-          error: `${tier.modelLabel} can only use a single reference image. Choose Nano Banana or Seedream 4 to combine multiple references.`,
+          error: `${tier.modelLabel} can only use a single reference image. Choose Nano Banana or GPT Image 2.5 Flare to combine multiple references.`,
         },
         { status: 400 }
       );

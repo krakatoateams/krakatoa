@@ -35,8 +35,7 @@ ignored by the runtime, and keeping them is the safer state (see "Why rows are n
    the registry; without the entry an old creation shows a made-up name from the slug
    (`humanizeProviderSlug`) or a generic tool label. Other callers of `getProductPhotoTier` /
    `getVideoModel` / `getMotionControlModel` silently fall back to the DEFAULT model for an unknown id.
-   If an entry ever has to leave the registry, first add a retired-label map read by
-   `lib/creation-model-label.ts` (none exists today).
+   Deleting the entry is the exception; see "Deleting a registry entry" below.
 4. **Remove it from code defaults and eligibility.** It must not be anyone's default:
    `defaultTierForFeature` (`lib/creation-features.ts`), `defaultModelForComposer`
    (`lib/video-composer-features.ts`), `FALLBACKS` (`lib/model-resolver.ts`, only if it names the
@@ -54,6 +53,32 @@ ignored by the runtime, and keeping them is the safer state (see "Why rows are n
 7. **Never reuse the id.** A retired model id, provider slug (`providerModel`) or pricing key is never
    given to a different model. A new model gets a new id, slug entry and pricing key
    (`docs/admin/adding-a-generation-model.md`).
+
+## Deleting a registry entry (the exception)
+
+Only when the owner decides the model should not exist in code at all, for example because it can never
+be offered (#476: seven Product Photo tiers that never had a `pricing_configs` row and showed as "Needs a
+price" in Restore model). Steps 1, 2, 4 and 6 still apply, and no database row is deleted. Then:
+
+1. **History first.** Add the model to a retired map that `lib/creation-model-label.ts` reads, with its
+   label and provider slug: photo tiers go in `RETIRED_PRODUCT_PHOTO_TIERS` (`lib/product-photo.ts`). Old
+   creations keep their name by slug and by stored tier id. For video or motion control, add the same
+   kind of map first (none exists yet).
+2. **Fail closed with a clear message.** A request naming the id gets a 400 before any spend.
+   `normalizeProductPhotoOptions` answers "<Model> is no longer available. Choose another model."
+3. **Check every reference** (grep the id, slug, pricing key and label): defaults, eligibility,
+   skills, error messages that suggest the model, provider families only it used, self-check fixtures,
+   docs. Stored ids in drafts, canvas nodes and skills already snap to an available model.
+4. **Shrink the frozen list by exactly those ids.** If the model is in `OFFERED_BEFORE_SHIP_DARK`
+   (`lib/model-catalog-configs.ts`), remove it there and from the exact list in
+   `lib/model-catalog-guard-self-check.ts`, with a comment saying why. The pin must still fail on any
+   addition, and must check that the removed ids are exactly the retired map's.
+5. **Drop its code price default** (`V2_PRICING_DEFAULTS`) only if nothing else references the key.
+   Pricing rows, `provider_model_costs` and `model_configs` rows stay; the runtime ignores rows for
+   unknown ids.
+6. **Never reuse** the id, slug or pricing key (a self-check pins that no live tier uses a retired slug).
+
+Example: #476 (Seedream 4, FLUX Kontext Pro, FLUX 1.1 Pro, Imagen 4, Ideogram v3, Seedream 3, FLUX Schnell).
 
 ## Why rows are never deleted
 

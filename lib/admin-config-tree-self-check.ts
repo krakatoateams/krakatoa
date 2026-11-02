@@ -100,8 +100,8 @@ assert.ok(
 );
 assert.ok(
   variantFromPricingRow(
-    "product_photo_seedream_4_per_image",
-    "Seedream 4",
+    "product_photo_krea_2_large_per_image",
+    "Krea 2 Large",
     new Map(),
     DEFAULT_BILLING_SETTINGS
   ),
