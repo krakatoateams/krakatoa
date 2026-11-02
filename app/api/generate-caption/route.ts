@@ -17,6 +17,22 @@ import { GENERIC_GENERATION_CLIENT_ERROR } from "@/lib/generation-client-error";
 // Audio extraction (Rendi) + Whisper + Gemini — give the pipeline headroom
 export const maxDuration = 120;
 
+// The transcript is optional, so it gets a hard budget (Rendi + Whisper
+// together) and soft-fails past it; the caption step always keeps enough of
+// maxDuration to finish. A cold Whisper start alone can outlast the route.
+const TRANSCRIPT_BUDGET_MS = 45_000;
+// Only retry a cut-short caption if the request is still this young —
+// another full model call past this point risks the 120s cutoff.
+const CAPTION_RETRY_CUTOFF_MS = 60_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function captionMediaErrorResponse(error: unknown): NextResponse {
   const message = error instanceof Error ? error.message : String(error);
   const status = /not authenticated/i.test(message)
@@ -67,9 +83,11 @@ async function generateCaptionText(
   model: ReplicateModelRef,
   input: Record<string, unknown>,
   attempts = 3,
+  retryUntilMs = Number.POSITIVE_INFINITY,
 ): Promise<string> {
   let last = "";
   for (let i = 0; i < attempts; i++) {
+    if (i > 0 && Date.now() > retryUntilMs) break;
     const output = await runWithRetry(replicate, model, { input });
     last = joinReplicateOutput(output);
     if (last && !looksIncomplete(last)) return last;
@@ -285,6 +303,7 @@ function buildPolishPrompt(existingCaption: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   try {
     const sessionUserId = await getSessionUserId();
     if (!sessionUserId) {
@@ -481,26 +500,35 @@ export async function POST(req: NextRequest) {
       } catch (err: unknown) {
         return captionMediaErrorResponse(err);
       }
+      const transcriptStartedAt = Date.now();
       try {
-        // Whisper is unreliable demuxing audio straight from a video container,
-        // so extract a hosted MP3 via Rendi first, then transcribe that.
-        console.log("[generate-caption] extracting source audio.");
-        // Rendi's default poll budget (~6 min) outlives this route's
-        // maxDuration; cap it so a slow queue soft-fails to a caption
-        // without transcript instead of the whole request timing out.
-        const audioUrl = await extractAudioMp3(sourceUrl, { maxAttempts: 15 });
-        console.log("[generate-caption] transcribing extracted audio.");
-
-        const wRes = await runWithRetry(replicate, whisperModel, {
-          input: {
-            audio: audioUrl,
-            // No `language` pin → Whisper auto-detects the spoken language.
-            // The caption is forced to English via the Gemini prompt instead.
-            // `task: "transcribe"` = transcribe only, no translation.
-            task: "transcribe",
-            batch_size: 64,
-          },
-        });
+        const wRes = await withTimeout(
+          (async () => {
+            // Whisper is unreliable demuxing audio straight from a video container,
+            // so extract a hosted MP3 via Rendi first, then transcribe that.
+            console.log("[generate-caption] extracting source audio.");
+            // Rendi's default poll budget (~6 min) outlives this route's
+            // maxDuration; cap it so a slow queue soft-fails to a caption
+            // without transcript instead of the whole request timing out.
+            const audioUrl = await extractAudioMp3(sourceUrl, { maxAttempts: 15 });
+            console.log(
+              `[generate-caption] audio extracted in ${Date.now() - transcriptStartedAt}ms; transcribing.`,
+            );
+            return runWithRetry(replicate, whisperModel, {
+              input: {
+                audio: audioUrl,
+                // No `language` pin → Whisper auto-detects the spoken language.
+                // The caption is forced to English via the Gemini prompt instead.
+                // `task: "transcribe"` = transcribe only, no translation.
+                task: "transcribe",
+                batch_size: 64,
+              },
+            });
+          })(),
+          TRANSCRIPT_BUDGET_MS,
+          "transcript",
+        );
+        console.log(`[generate-caption] transcript stage done in ${Date.now() - transcriptStartedAt}ms.`);
         const text = extractTranscript(wRes);
         if (text.length > 0) {
           transcript = text;
@@ -515,7 +543,7 @@ export async function POST(req: NextRequest) {
         // description only rather than failing the whole request — but flag it
         // as "failed" (not "no_audio") so the UI doesn't wrongly claim silence.
         console.warn(
-          "[generate-caption] audio extraction or Whisper failed, continuing without transcript:",
+          `[generate-caption] audio extraction or Whisper failed after ${Date.now() - transcriptStartedAt}ms, continuing without transcript:`,
           generationErrorLogSafe(err)
         );
         transcript = null;
@@ -532,13 +560,23 @@ export async function POST(req: NextRequest) {
       hasImage: !!resolvedPhotoUrl,
     });
 
-    const caption = await generateCaptionText(replicate, llmModel, {
-      prompt,
-      ...(resolvedPhotoUrl ? { image_input: [resolvedPhotoUrl] } : {}),
-      // Long-form descriptions get more room than the 300-char Shorts caption.
-      max_completion_tokens: format === "video" ? 700 : 400,
-      reasoning_effort: "low",
-    });
+    const captionStartedAt = Date.now();
+    const caption = await generateCaptionText(
+      replicate,
+      llmModel,
+      {
+        prompt,
+        ...(resolvedPhotoUrl ? { image_input: [resolvedPhotoUrl] } : {}),
+        // Long-form descriptions get more room than the 300-char Shorts caption.
+        max_completion_tokens: format === "video" ? 700 : 400,
+        reasoning_effort: "low",
+      },
+      3,
+      startedAt + CAPTION_RETRY_CUTOFF_MS,
+    );
+    console.log(
+      `[generate-caption] caption stage ${Date.now() - captionStartedAt}ms, total ${Date.now() - startedAt}ms (transcript: ${transcriptStatus ?? "none"}).`,
+    );
 
     if (!caption) {
       return NextResponse.json(
