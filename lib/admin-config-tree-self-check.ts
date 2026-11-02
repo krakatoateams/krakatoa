@@ -304,6 +304,14 @@ function modelsTabSelfCheck(): void {
   assert.ok(src.includes("lowest pack price per credit, bonus credits included"), "margin tooltip says bonus credits are included");
   // #487: refreshes are ordered against saves, and Save and the toggle send one shared PATCH body.
   assert.ok(src.includes("const refreshSeq = priceSavesRef.current.beginRefresh();") && src.includes("priceSavesRef.current.staleKeys(refreshSeq)"), "load discards data older than a row's last save");
+  assert.ok(
+    src.includes("keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale)") &&
+      src.includes("refreshedBaselines(tree, savedPricingRef.current, stale)") &&
+      !src.includes("setSavedPricing(collectPricingBaselines("),
+    "load merges with the stale keys for both the rows and their saved baselines",
+  );
+  assert.equal(src.split("setSavedPricing(").length - 1, src.split("savedPricingRef.current = ").length - 1, "every saved-baseline update also updates the ref");
+  assert.ok(!src.includes("savedPricingRef.current = savedPricing;"), "the ref is never copied back from state on render");
   assert.ok(/patchApi\(`\/api\/admin\/config\/pricing\/\$\{pricingKey\}`, pricingPatchBody\(live\)\);\s*priceSavesRef\.current\.markSaved\(pricingKey\);/.test(src), "a successful Save is recorded");
   assert.equal(src.split("pricingPatchBody(live)").length - 1, 2, "Save and the On/Off toggle both send the row's current price");
   assert.ok(!src.includes("credit_amount: Math.round(live.credits)"), "no second hand-built pricing body");

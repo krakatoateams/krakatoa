@@ -1384,9 +1384,9 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
-  // Also set synchronously by Save and load, so a refresh resolving before the next render sees the save.
+  // Kept in step with every setSavedPricing call (Save and load), never copied back on render, so a
+  // refresh resolving before the next render (or during a higher-priority one) still sees the save.
   const savedPricingRef = useRef(savedPricing);
-  savedPricingRef.current = savedPricing;
   const priceSavesRef = useRef(createPriceSaveTracker());
   const [falConfigured, setFalConfigured] = useState(false);
   const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
