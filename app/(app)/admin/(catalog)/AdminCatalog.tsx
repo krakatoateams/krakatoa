@@ -110,8 +110,11 @@ const HIGHEST_COST_HINT =
 function marginHint(sellIdrPerCredit: number | null): string {
   return sellIdrPerCredit === null
     ? "No enabled credit pack could be read, so no margin is shown."
-    : `Based on the lowest pack price per credit (${formatIdr(sellIdrPerCredit)}). Before payment fees.`;
+    : `Based on the lowest pack price per credit, bonus credits included (${formatIdr(sellIdrPerCredit)}). Before payment fees.`;
 }
+
+/** The optional provider-costs and packs reads give up after this and fall back to "cost not set" / a dash. */
+const OPTIONAL_READ_TIMEOUT_MS = 8_000;
 
 
 /** Provider-switch data shared by the Photo model sections (fetched once by the page). */
@@ -1406,10 +1409,10 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       setFalConfigured(
         (modelsData as { configuredProviders?: { fal?: boolean } }).configuredProviders?.fal === true
       );
-      // Costs and packs are optional: a missing table or fetch failure leaves "cost not set" / a dash
-      // (never the old cost-basis margin), never an error.
+      // Costs and packs are optional: a missing table, a failure or no answer within 8 s leaves
+      // "cost not set" / a dash (never the old cost-basis margin), never an error or a hang.
       const optionalJson = (url: string) =>
-        fetch(url)
+        fetch(url, { signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS) })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null);
       const [costsData, packsData] = await Promise.all([

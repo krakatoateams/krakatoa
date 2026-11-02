@@ -249,6 +249,9 @@ function modelsTabSelfCheck(): void {
     assert.ok(src.includes(url), `still wired: ${url}`);
   }
   assert.ok(!src.includes("Replicate $"), "the cost column is labelled as the highest cost, not Replicate");
+  // #484: the optional costs / packs reads time out to "cost not set" / a dash; the tooltip names bonus credits.
+  assert.ok(src.includes("signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS)") && src.includes("OPTIONAL_READ_TIMEOUT_MS = 8_000"), "optional reads have an 8 s timeout");
+  assert.ok(src.includes("lowest pack price per credit, bonus credits included"), "margin tooltip says bonus credits are included");
   for (const route of ["(catalog)/layout.tsx", "(catalog)/config-v2/page.tsx", "(catalog)/models/page.tsx"]) {
     assert.ok(existsSync(join(admin, route)), `route file ${route} exists`);
   }
