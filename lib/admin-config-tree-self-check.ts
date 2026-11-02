@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 import {
   buildAdminConfigTree,
   collectPricingBaselines,
+  createPriceSaveTracker,
   isPricingDirty,
   keepPricingDrafts,
+  pricingPatchBody,
+  refreshedBaselines,
   modelsTabTools,
   priceSummary,
   variantFromPricingRow,
@@ -153,6 +156,53 @@ assert.deepEqual(
   assert.equal(keepPricingDrafts(fresh, [], {}), fresh, "first load has nothing to keep");
 }
 
+// #487: a refresh that started before a Save finished must not bring back the old price.
+{
+  const priced = (tools: typeof tree, key: string) =>
+    tools.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey === key)!;
+  const withCredits = (tools: typeof tree, key: string, credits: number) =>
+    tools.map((t) => ({
+      ...t,
+      models: t.models.map((m) => ({ ...m, variants: m.variants.map((v) => (v.pricingKey === key ? { ...v, credits } : v)) })),
+    }));
+  const row = tree.flatMap((t) => t.models.flatMap((m) => m.variants))[0];
+  const oldCredits = row.credits;
+  const newCredits = oldCredits + 5;
+  const tracker = createPriceSaveTracker();
+
+  // 1. A refresh starts; its server read happens before the save, so it will return the old price.
+  const seq = tracker.beginRefresh();
+  const staleServerTree = tree;
+  // 2. The admin saves a new price while that refresh is still loading.
+  const live = withCredits(tree, row.pricingKey, newCredits);
+  tracker.markSaved(row.pricingKey);
+  const saved = { ...collectPricingBaselines(tree), [row.pricingKey]: { providerReferenceUsd: row.providerReferenceUsd, credits: newCredits } };
+  // 3. The refresh resolves with the old data.
+  const stale = tracker.staleKeys(seq);
+  assert.ok(stale.has(row.pricingKey), "the refresh started before the save is stale for that row");
+  const merged = keepPricingDrafts(staleServerTree, live, saved, stale);
+  const mergedSaved = refreshedBaselines(staleServerTree, saved, stale);
+  assert.equal(priced(merged, row.pricingKey).credits, newCredits, "the row keeps the new price");
+  assert.equal(mergedSaved[row.pricingKey].credits, newCredits, "its saved baseline stays the new price");
+  assert.ok(!isPricingDirty(priced(merged, row.pricingKey), mergedSaved), "and it shows as saved, not unsaved");
+  // 4. A later On/Off toggle sends the row's current price, which is the new one.
+  const toggled = { ...priced(merged, row.pricingKey), enabled: !row.enabled };
+  assert.equal(pricingPatchBody(toggled).credit_amount, newCredits, "the toggle sends the new price, never the old one");
+  // Control: the old merge (no stale keys) brought the old price back as clean, which is the bug.
+  const buggy = keepPricingDrafts(staleServerTree, live, saved);
+  assert.equal(priced(buggy, row.pricingKey).credits, oldCredits, "without the save order the stale price wins");
+  // A refresh that starts after the save is trusted again.
+  assert.equal(tracker.staleKeys(tracker.beginRefresh()).size, 0, "a later refresh takes the server values");
+  // Other rows in the stale refresh still refresh normally.
+  const other = tree.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey !== row.pricingKey)!;
+  const serverChanged = withCredits(staleServerTree, other.pricingKey, other.credits + 2);
+  assert.equal(priced(keepPricingDrafts(serverChanged, live, saved, stale), other.pricingKey).credits, other.credits + 2, "other rows in that refresh still take the server values");
+  // A draft typed after the save survives the stale refresh and stays unsaved.
+  const drafted = withCredits(live, row.pricingKey, newCredits + 1);
+  const keptDraft = priced(keepPricingDrafts(staleServerTree, drafted, saved, stale), row.pricingKey);
+  assert.ok(keptDraft.credits === newCredits + 1 && isPricingDirty(keptDraft, refreshedBaselines(staleServerTree, saved, stale)), "a newer draft is kept and still unsaved");
+}
+
 async function main(): Promise<void> {
   assert.throws(
     () => requireAdminConfigRows({}, "tools", "tool configs"),
@@ -252,6 +302,11 @@ function modelsTabSelfCheck(): void {
   // #484: the optional costs / packs reads time out to "cost not set" / a dash; the tooltip names bonus credits.
   assert.ok(src.includes("signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS)") && src.includes("OPTIONAL_READ_TIMEOUT_MS = 8_000"), "optional reads have an 8 s timeout");
   assert.ok(src.includes("lowest pack price per credit, bonus credits included"), "margin tooltip says bonus credits are included");
+  // #487: refreshes are ordered against saves, and Save and the toggle send one shared PATCH body.
+  assert.ok(src.includes("const refreshSeq = priceSavesRef.current.beginRefresh();") && src.includes("priceSavesRef.current.staleKeys(refreshSeq)"), "load discards data older than a row's last save");
+  assert.ok(/patchApi\(`\/api\/admin\/config\/pricing\/\$\{pricingKey\}`, pricingPatchBody\(live\)\);\s*priceSavesRef\.current\.markSaved\(pricingKey\);/.test(src), "a successful Save is recorded");
+  assert.equal(src.split("pricingPatchBody(live)").length - 1, 2, "Save and the On/Off toggle both send the row's current price");
+  assert.ok(!src.includes("credit_amount: Math.round(live.credits)"), "no second hand-built pricing body");
   // #484: browser Back asks before dropping drafts; Save stays focusable after it saves.
   assert.ok(src.includes('window.addEventListener("popstate", onPopState)') && src.includes("BACK_GUARD_KEY"), "unsaved drafts guard browser Back");
   assert.ok(src.includes("aria-disabled={!dirty || saving}") && !/(?<!aria-)disabled=\{!dirty \|\| saving\}/.test(src), "Save never disables itself while focused");

@@ -643,17 +643,19 @@ export function isPricingDirty(variant: AdminCostVariant, saved: Record<string, 
 
 /**
  * A refreshed tree that keeps every unsaved price draft (#484): a row dirty against `prevSaved` keeps its
- * typed cost and credits; clean rows and every other field take the fresh server values. The caller sets
- * the new baselines from `next` itself, so a kept draft still shows as unsaved.
+ * typed cost and credits; clean rows and every other field take the fresh server values. Rows in
+ * `staleKeys` (saved after this refresh started, #487) also keep their current price. The caller takes the
+ * new baselines from `refreshedBaselines`, so a kept draft still shows as unsaved.
  */
 export function keepPricingDrafts(
   next: AdminToolNode[],
   prev: readonly AdminToolNode[],
-  prevSaved: Record<string, PricingBaseline>
+  prevSaved: Record<string, PricingBaseline>,
+  staleKeys: ReadonlySet<string> = new Set()
 ): AdminToolNode[] {
   const drafts = new Map<string, PricingBaseline>();
   for (const v of allVariants(prev)) {
-    if (prevSaved[v.pricingKey] && isPricingDirty(v, prevSaved)) {
+    if (staleKeys.has(v.pricingKey) || (prevSaved[v.pricingKey] && isPricingDirty(v, prevSaved))) {
       drafts.set(v.pricingKey, { providerReferenceUsd: v.providerReferenceUsd, credits: v.credits });
     }
   }
@@ -668,6 +670,52 @@ export function keepPricingDrafts(
     models: t.models.map((m) => ({ ...m, variants: keep(m.variants) })),
     pipelines: t.pipelines.map((g) => ({ ...g, variants: keep(g.variants) })),
   }));
+}
+
+/** Baselines after a refresh: the server's, except a stale row (#487) keeps its last saved price. */
+export function refreshedBaselines(
+  next: readonly AdminToolNode[],
+  prevSaved: Record<string, PricingBaseline>,
+  staleKeys: ReadonlySet<string>
+): Record<string, PricingBaseline> {
+  const out = collectPricingBaselines(next);
+  for (const key of staleKeys) if (prevSaved[key]) out[key] = prevSaved[key];
+  return out;
+}
+
+/**
+ * Orders refreshes against price saves (#487). A refresh that started before a row's last successful
+ * Save finished read that row's old price, so its data for that row is stale and must be discarded.
+ */
+export function createPriceSaveTracker() {
+  let refreshSeq = 0;
+  const savedAtSeq = new Map<string, number>();
+  return {
+    /** When a refresh starts; hand the number to `staleKeys` when it resolves. */
+    beginRefresh: (): number => ++refreshSeq,
+    /** After a Save of this pricing key succeeded. */
+    markSaved: (pricingKey: string): void => {
+      savedAtSeq.set(pricingKey, refreshSeq);
+    },
+    /** Keys whose data in refresh `seq` predates their last save. */
+    staleKeys: (seq: number): Set<string> =>
+      new Set([...savedAtSeq].filter(([, savedAt]) => seq <= savedAt).map(([key]) => key)),
+  };
+}
+
+/** The pricing PATCH body; Save and the On/Off toggle both send the row's current price through it. */
+export function pricingPatchBody(variant: AdminCostVariant): {
+  display_name: string;
+  credit_amount: number;
+  provider_cost_usd: number;
+  enabled: boolean;
+} {
+  return {
+    display_name: variant.label,
+    credit_amount: Math.round(variant.credits),
+    provider_cost_usd: variant.providerReferenceUsd,
+    enabled: variant.enabled,
+  };
 }
 
 export function suggestCreditsFromProvider(
