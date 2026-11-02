@@ -221,16 +221,6 @@ function PhotoProviderSwitch({ choice }: { choice: AdminProviderChoice }) {
           ))}
         </select>
         {busy ? <span className="text-[11px] text-gray-400">Saving…</span> : null}
-        {choice.provider !== "replicate" ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void switchTo("replicate")}
-            className="rounded border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:border-white/30 hover:text-white disabled:opacity-60"
-          >
-            Reset to Replicate
-          </button>
-        ) : null}
       </div>
       <p className="text-[11px] text-gray-500">
         Switches the model and its settings together. Applies to new generations within about 60 seconds.
