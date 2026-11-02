@@ -223,7 +223,7 @@ function extractFirstPublicPostId(rawText: string): string | null {
   return match ? match[1] : null;
 }
 
-async function fetchPublishStatus(accessToken: string, publishId: string): Promise<TikTokPublishStatus> {
+export async function fetchPublishStatus(accessToken: string, publishId: string): Promise<TikTokPublishStatus> {
   const res = await fetch(TIKTOK_STATUS_FETCH_URL, {
     method: "POST",
     headers: {
