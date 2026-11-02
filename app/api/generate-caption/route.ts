@@ -485,7 +485,10 @@ export async function POST(req: NextRequest) {
         // Whisper is unreliable demuxing audio straight from a video container,
         // so extract a hosted MP3 via Rendi first, then transcribe that.
         console.log("[generate-caption] extracting source audio.");
-        const audioUrl = await extractAudioMp3(sourceUrl);
+        // Rendi's default poll budget (~6 min) outlives this route's
+        // maxDuration; cap it so a slow queue soft-fails to a caption
+        // without transcript instead of the whole request timing out.
+        const audioUrl = await extractAudioMp3(sourceUrl, { maxAttempts: 15 });
         console.log("[generate-caption] transcribing extracted audio.");
 
         const wRes = await runWithRetry(replicate, whisperModel, {

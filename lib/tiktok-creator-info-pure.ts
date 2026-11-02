@@ -43,10 +43,19 @@ export function tiktokCreatorInfoPrivacyPlaceholder(opts: {
   optionCount: number;
   httpKind: TikTokCreatorInfoHttpKind | "loading";
 }): string {
+  if (opts.httpKind === "loading") return "Loading…";
   if (opts.httpKind === "reconnect") return "Reconnect TikTok…";
-  if (opts.httpKind === "unavailable") return "Couldn't load privacy options";
-  if (opts.optionCount === 0) return "Loading…";
+  if (opts.httpKind === "unavailable" || opts.optionCount === 0) return "Couldn't load privacy options";
   return "Select privacy…";
+}
+
+/**
+ * TikTok access tokens expire after 24h and come back as a creator-info
+ * error code, not an HTTP failure — the route must refresh on this code
+ * instead of classifying it as an account-level problem.
+ */
+export function isTikTokAccessTokenError(code: string): boolean {
+  return code === "access_token_invalid";
 }
 
 export function tiktokCreatorInfoBlocksSchedule(info: {
@@ -108,6 +117,18 @@ export function tiktokCreatorInfoClassifierSelfCheck(): void {
   }
   if (tiktokCreatorInfoPrivacyPlaceholder({ optionCount: 0, httpKind: "reconnect" }) === "Loading…") {
     throw new Error("reconnect must not reuse the Loading placeholder");
+  }
+  if (tiktokCreatorInfoPrivacyPlaceholder({ optionCount: 0, httpKind: "ok" }) === "Loading…") {
+    throw new Error("a finished request with no options must not look like it is still loading");
+  }
+  if (tiktokCreatorInfoPrivacyPlaceholder({ optionCount: 0, httpKind: "loading" }) !== "Loading…") {
+    throw new Error("an in-flight request must show Loading");
+  }
+  if (!isTikTokAccessTokenError("access_token_invalid")) {
+    throw new Error("an expired access token must be refreshed, not classified");
+  }
+  if (isTikTokAccessTokenError("spam_risk_too_many_posts")) {
+    throw new Error("account-level codes must not trigger a token refresh");
   }
   if (!tiktokCreatorInfoBlocksSchedule({ postingBlocked: false, httpKind: "reconnect" })) {
     throw new Error("reconnect must block scheduling");
