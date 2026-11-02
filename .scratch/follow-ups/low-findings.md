@@ -185,3 +185,12 @@ is, and a suggested fix. "Likely" is a rough guess: rare = needs two unusual thi
 - **Back guard edge:** if Models is the first page in the tab, choosing Leave has nowhere to go; a flag stays stuck and Forward bounces back once. Harmless, nothing lost.
 - **Save during Refresh race (old, not new):** if Save is pressed while a Refresh is already loading, the row can redisplay the old price as clean; a later On/off toggle on that row then re-saves the old price. Narrow window; DB is correct until that toggle. Worth fixing (price integrity): ignore refresh results that started before the last Save.
 - Also from the implementer: Back from Models to Config asks too; the calm cancel note stays until the next Generate; cancel trace steps are still stored without an end time (display handles it); phone price table scrolls sideways.
+
+## From #488 / #491 (stale refresh and On/Off fixes)
+
+- **Failed toggle is not reverted on screen (#491):** error toast shows but the box stays flipped until the next refresh, so the UI shows the wrong On/Off meanwhile. Suggested fix: revert the box on failure. Worth doing.
+- **Queue edge (#491):** with a Save in flight, two quick toggles on that row both wait for the Save, then send at the same time; the server may keep the first click. Fix: chain each task on the previous one, not only the in-flight one. Same root as: three rapid actions (Save, switch, switch) can run the two switches in parallel.
+- **Another admin saves a price between our load and our switch:** the switch resends our older saved price (single-admin today).
+- **Overlapping refreshes:** the older one finishing last can overwrite newer non-price fields (pre-existing).
+- **Naming:** createPriceSaveTracker now also tracks switches.
+- **Not browser-verified:** needs a real Save/switch, which writes to the DB.
