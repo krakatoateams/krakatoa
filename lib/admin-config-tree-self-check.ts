@@ -4,6 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildAdminConfigTree,
+  collectPricingBaselines,
+  isPricingDirty,
+  keepPricingDrafts,
   modelsTabTools,
   priceSummary,
   variantFromPricingRow,
@@ -116,6 +119,39 @@ assert.deepEqual(
   ["Low", "Medium", "High"],
   "GPT Image 2 quality variants must show in the admin tree"
 );
+
+// #484: a refresh keeps unsaved price drafts; clean rows and other fields take the server values.
+{
+  const variants = tree.flatMap((t) => t.models.flatMap((m) => m.variants));
+  assert.ok(variants.length >= 2, "fixture has priced variants");
+  const [a, b] = variants;
+  const saved = collectPricingBaselines(tree);
+  const edited = tree.map((t) => ({
+    ...t,
+    models: t.models.map((m) => ({
+      ...m,
+      variants: m.variants.map((v) => (v.pricingKey === a.pricingKey ? { ...v, credits: v.credits + 7 } : v)),
+    })),
+  }));
+  // The server meanwhile changed b's price and a's On flag.
+  const fresh = tree.map((t) => ({
+    ...t,
+    models: t.models.map((m) => ({
+      ...m,
+      variants: m.variants.map((v) =>
+        v.pricingKey === b.pricingKey ? { ...v, credits: v.credits + 3 } : v.pricingKey === a.pricingKey ? { ...v, enabled: !v.enabled } : v,
+      ),
+    })),
+  }));
+  const merged = keepPricingDrafts(fresh, edited, saved);
+  const find = (key: string) => merged.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey === key)!;
+  assert.equal(find(a.pricingKey).credits, a.credits + 7, "dirty row keeps its typed draft");
+  assert.equal(find(a.pricingKey).enabled, !a.enabled, "a kept draft still takes the server's other fields");
+  assert.equal(find(b.pricingKey).credits, b.credits + 3, "clean row takes the refreshed server price");
+  assert.ok(isPricingDirty(find(a.pricingKey), collectPricingBaselines(fresh)), "the kept draft still shows as unsaved");
+  assert.equal(keepPricingDrafts(fresh, tree, saved), fresh, "no drafts: the fresh tree is used as is");
+  assert.equal(keepPricingDrafts(fresh, [], {}), fresh, "first load has nothing to keep");
+}
 
 async function main(): Promise<void> {
   assert.throws(

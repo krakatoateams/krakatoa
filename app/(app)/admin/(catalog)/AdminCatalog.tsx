@@ -12,7 +12,11 @@ import {
   type AdminPipelineRole,
   type AdminProviderChoice,
   type AdminToolNode,
+  type PricingBaseline,
   buildAdminConfigTree,
+  collectPricingBaselines,
+  isPricingDirty,
+  keepPricingDrafts,
   modelsTabTools,
   priceSummary,
   splitToolModels,
@@ -280,8 +284,6 @@ type DefaultOverridePrompt = {
   toModelLabel: string;
 };
 
-type PricingBaseline = Pick<AdminCostVariant, "providerReferenceUsd" | "credits">;
-
 function findVariantByPricingKey(
   tools: AdminToolNode[],
   pricingKey: string
@@ -323,41 +325,6 @@ function findPipelineRoleByConfigId(
     }
   }
   return null;
-}
-
-function collectPricingBaselines(tools: AdminToolNode[]): Record<string, PricingBaseline> {
-  const out: Record<string, PricingBaseline> = {};
-  for (const tool of tools) {
-    for (const model of tool.models) {
-      for (const v of model.variants) {
-        out[v.pricingKey] = {
-          providerReferenceUsd: v.providerReferenceUsd,
-          credits: v.credits,
-        };
-      }
-    }
-    for (const group of tool.pipelines) {
-      for (const v of group.variants) {
-        out[v.pricingKey] = {
-          providerReferenceUsd: v.providerReferenceUsd,
-          credits: v.credits,
-        };
-      }
-    }
-  }
-  return out;
-}
-
-function isPricingDirty(
-  variant: AdminCostVariant,
-  saved: Record<string, PricingBaseline>
-): boolean {
-  const baseline = saved[variant.pricingKey];
-  if (!baseline) return true;
-  return (
-    baseline.providerReferenceUsd !== variant.providerReferenceUsd ||
-    baseline.credits !== variant.credits
-  );
 }
 
 /** Who holds default for a mode across all models in a tool (exclusive per mode). */
@@ -1394,6 +1361,8 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
+  const savedPricingRef = useRef(savedPricing);
+  savedPricingRef.current = savedPricing;
   const [falConfigured, setFalConfigured] = useState(false);
   const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
   const [sellIdrPerCredit, setSellIdrPerCredit] = useState<number | null>(null);
@@ -1533,15 +1502,20 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         modelConfigs,
         billingSettings: settings,
       });
+      // A refresh keeps every unsaved price draft; only clean rows take the server values (#484).
+      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current);
       setBillingSettings(settings);
-      setTools(tree);
-      toolsRef.current = tree;
+      setTools(merged);
+      toolsRef.current = merged;
       setSavedPricing(collectPricingBaselines(tree));
     } catch (e) {
-      setBillingSettings(DEFAULT_BILLING_SETTINGS);
-      setTools([]);
-      toolsRef.current = [];
-      setSavedPricing({});
+      // A failed refresh must not wipe unsaved drafts either: keep the current tree and show the error.
+      if (!hasUnsavedPricing(toolsRef.current, savedPricingRef.current)) {
+        setBillingSettings(DEFAULT_BILLING_SETTINGS);
+        setTools([]);
+        toolsRef.current = [];
+        setSavedPricing({});
+      }
       setLoadError(e instanceof Error ? e.message : "Failed to load.");
     } finally {
       setLoading(false);
