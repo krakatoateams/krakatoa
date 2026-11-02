@@ -1340,8 +1340,20 @@ function useCatalog(): CatalogState {
 const MODELS_PATH = "/admin/models";
 const CATALOG_PATHS = ["/admin/config-v2", MODELS_PATH];
 const UNSAVED_LEAVE_MESSAGE = "You have unsaved price changes. Leave without saving?";
-/** Marks the extra same-URL history entry that lets browser Back ask before dropping drafts. */
+/** History-state keys of the browser Back guard: the parked same-URL entry, and the entry it sits on. */
 const BACK_GUARD_KEY = "__krakatoaUnsavedPrices";
+const BACK_BASE_KEY = "__krakatoaUnsavedBase";
+
+type BackGuardState = { base: string | null; leaving: boolean; dropping: boolean };
+
+/** Stamp the current history entry and park a same-URL guard entry on top of it (browser Back guard). */
+function parkBackGuard(g: BackGuardState): void {
+  const base = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  g.base = base;
+  const state = { ...window.history.state, [BACK_GUARD_KEY]: undefined };
+  window.history.replaceState({ ...state, [BACK_BASE_KEY]: base }, "", window.location.href);
+  window.history.pushState({ ...state, [BACK_BASE_KEY]: undefined, [BACK_GUARD_KEY]: base }, "", window.location.href);
+}
 
 function hasUnsavedPricing(tools: AdminToolNode[], saved: Record<string, PricingBaseline>): boolean {
   return tools.some(
@@ -1912,6 +1924,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   );
 
   const unsaved = hasUnsavedPricing(tools, savedPricing);
+  const backGuardRef = useRef<BackGuardState>({ base: null, leaving: false, dropping: false });
   useEffect(() => {
     if (!unsaved) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -1930,20 +1943,33 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         e.stopPropagation();
       }
     };
-    // Browser Back (#484): park one same-URL entry on top. Landing back on the entry it was parked over
-    // means "leave": ask first, re-park on stay, or step back once more on leave. Matched by URL because
-    // a Next router.replace (picking a tool) drops custom history state.
-    const parkedOver = window.location.href;
-    const park = () => window.history.pushState({ ...window.history.state, [BACK_GUARD_KEY]: true }, "", window.location.href);
-    if (!window.history.state?.[BACK_GUARD_KEY]) park();
-    let leaving = false;
+    // Browser Back (#484): park one same-URL entry on top of the current one, which gets a unique stamp.
+    // Landing back on the stamped entry means "leave": ask first. Stay steps forward onto the parked entry
+    // again (whatever tool it shows now); leave steps back once more. Next keeps custom history state on
+    // back/forward, so the stamp survives. Scroll restoration is manual while guarded so stepping between
+    // the two same-URL entries never jumps the page.
+    const g = backGuardRef.current;
+    window.history.scrollRestoration = "manual";
+    if (!g.dropping && !(g.base && window.history.state?.[BACK_GUARD_KEY] === g.base)) parkBackGuard(g);
     const onPopState = (e: PopStateEvent) => {
-      if (leaving || e.state?.[BACK_GUARD_KEY] || window.location.href !== parkedOver) return;
+      if (g.dropping) return;
+      if (g.leaving) {
+        // Still on an older guard entry of this page: keep stepping back. Landed on another catalog tab
+        // (drafts survive there): guard again from here. Anywhere else this provider is about to unmount.
+        if (e.state?.[BACK_BASE_KEY] || e.state?.[BACK_GUARD_KEY]) {
+          window.history.back();
+          return;
+        }
+        g.leaving = false;
+        if (CATALOG_PATHS.some((p) => window.location.pathname.startsWith(p))) parkBackGuard(g);
+        return;
+      }
+      if (!g.base || e.state?.[BACK_BASE_KEY] !== g.base) return;
       if (window.confirm(UNSAVED_LEAVE_MESSAGE)) {
-        leaving = true;
+        g.leaving = true;
         window.history.back();
       } else {
-        park();
+        window.history.forward();
       }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
@@ -1953,13 +1979,30 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
       window.removeEventListener("popstate", onPopState);
+      window.history.scrollRestoration = "auto";
     };
   }, [unsaved]);
-  // Once everything is saved, drop the parked entry so Back is not a dead press. Runs only while mounted
-  // (never on unmount), and only when the parked entry is still the current one.
+  // Once everything is saved, step back off the parked entry so Back is not a dead press. Runs only while
+  // mounted (never on unmount) and only when the parked entry is still the current one. That step's own
+  // popstate is ignored, and if a draft appeared meanwhile the guard is parked again once it lands.
   const wasUnsavedRef = useRef(false);
+  const unsavedRef = useRef(unsaved);
+  unsavedRef.current = unsaved;
   useEffect(() => {
-    if (wasUnsavedRef.current && !unsaved && window.history.state?.[BACK_GUARD_KEY]) window.history.back();
+    const g = backGuardRef.current;
+    if (wasUnsavedRef.current && !unsaved && g.base && window.history.state?.[BACK_GUARD_KEY] === g.base) {
+      g.dropping = true;
+      window.history.scrollRestoration = "manual";
+      const onDropped = () => {
+        window.removeEventListener("popstate", onDropped);
+        g.dropping = false;
+        g.base = null;
+        if (unsavedRef.current) parkBackGuard(g);
+        else window.history.scrollRestoration = "auto";
+      };
+      window.addEventListener("popstate", onDropped);
+      window.history.back();
+    }
     wasUnsavedRef.current = unsaved;
   }, [unsaved]);
 

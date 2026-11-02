@@ -42,6 +42,7 @@ export function flowFromGraph(graph: SavedCanvasGraph): {
         loading: false,
         uploading: false,
         error: null,
+        notice: null,
       } as CanvasNodeData;
       if (!data.label.trim()) {
         data.label = nextCanvasNodeName(data.kind, labels);
