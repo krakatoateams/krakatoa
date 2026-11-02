@@ -11,6 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { summarizeFalFailures } from "@/lib/admin-fal-health";
+import { stepDurationMs } from "@/lib/admin-monitoring-flags";
 import { AdminTableSkeleton } from "../admin-ui";
 
 /**
@@ -376,8 +377,6 @@ function JobDetail({ jobId }: { jobId: string }) {
         ) : (
           <ol className="space-y-2">
             {steps.map((s) => {
-              const start = s.started_at ?? s.created_at;
-              const end = s.finished_at ?? new Date().toISOString();
               return (
                 <li
                   key={s.id}
@@ -387,7 +386,7 @@ function JobDetail({ jobId }: { jobId: string }) {
                     <span className="font-mono text-xs text-gray-200">{s.step_key}</span>
                     <StatusPill status={s.status} />
                     <span className="text-xs tabular-nums text-gray-500">
-                      {fmtDur(Date.parse(end) - Date.parse(start))}
+                      {fmtDur(stepDurationMs(s, Date.now()) ?? NaN)}
                       {!s.finished_at && s.status === "running" ? " (running)" : ""}
                     </span>
                   </div>
@@ -773,8 +772,6 @@ export default function AdminMonitoringPage() {
                     {pageRows.map((r) => {
                       const open = expanded === r.id;
                       const step = r.currentStep;
-                      const stepEnd = step?.finished_at ?? new Date().toISOString();
-                      const stepStart = step?.started_at ?? step?.created_at;
                       return [
                         <tr
                           key={r.id}
@@ -815,7 +812,7 @@ export default function AdminMonitoringPage() {
                                 </span>
                                 <div className="text-xs tabular-nums text-gray-500">
                                   {step.status} ·{" "}
-                                  {fmtDur(Date.parse(stepEnd) - Date.parse(stepStart ?? stepEnd))}
+                                  {fmtDur(stepDurationMs(step, Date.now()) ?? NaN)}
                                   {r.stepCount > 1 ? ` · ${r.stepCount} steps` : ""}
                                 </div>
                               </>

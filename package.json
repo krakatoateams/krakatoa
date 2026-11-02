@@ -57,7 +57,7 @@
     "test:deny-by-default-rls": "tsx lib/deny-by-default-rls-self-check.ts",
     "test:migration-catalog": "tsx lib/migration-catalog-self-check.ts",
     "test:admin-auth": "tsx lib/admin-auth-self-check.ts",
-    "test:admin-metrics": "tsx lib/admin-metrics-pure.ts",
+    "test:admin-metrics": "tsx lib/admin-metrics-pure.ts && tsx lib/admin-monitoring-flags.ts",
     "test:admin-log-redaction": "tsx lib/admin-log-redaction-self-check.ts",
     "test:generation-log-redaction": "tsx lib/generation-log-redaction-self-check.ts",
     "test:admin-config-validation": "tsx lib/admin-config-validation.ts",
