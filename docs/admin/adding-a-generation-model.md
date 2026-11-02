@@ -198,6 +198,10 @@ In Admin → Models, a row's price table shows this directly (display only, #466
 - **Highest cost $** is the key's `provider_cost_usd`, and the **→ N** button suggests credits from it.
 - **Margin per provider** lists each provider's cost from `provider_model_costs` and its margin. If
   Replicate has no row there, its margin uses the highest cost. A Fal tier without a row shows "cost not set".
+  The percent is the gross margin on what users really pay: the lowest price per credit across enabled
+  packs (`priceIdr ÷ (credits + bonus)`, about Rp271 on 2026-11-02), before payment fees (#481). It is not
+  the `credit_value_idr` cost basis above, so a price of exactly cost × 90 credits (no rounding up) shows about 26%, not 0%.
+  With no readable enabled pack it shows a dash. The column's tooltip names the rate.
 
 ## 3. Code (ship dark)
 

@@ -118,6 +118,8 @@ export type ProviderMargin = {
  * Margin of one variant's price on every provider the tier can run on (display only, #466).
  * Costs come from provider_model_costs. Replicate without a recorded row falls back to the
  * variant's reference cost, which was the old margin source; Fal without a row stays unknown.
+ * Revenue is what users really pay per credit (`sellIdrPerCredit`, the lowest pack rate, #481),
+ * not the formula's `creditValueIdr` cost basis; null (no readable pack) shows no margin.
  */
 export function providerMargins(params: {
   credits: number;
@@ -127,6 +129,7 @@ export function providerMargins(params: {
   activeProvider: PhotoProviderId;
   costs: Record<string, number>;
   settings: BillingSettings;
+  sellIdrPerCredit: number | null;
 }): ProviderMargin[] {
   return params.options.map((o) => {
     const recordedCost = params.costs[providerCostKey(o.provider, o.model, params.pricingKey)];
@@ -137,7 +140,10 @@ export function providerMargins(params: {
       costUsd,
       recorded,
       active: o.provider === params.activeProvider,
-      margin: marginForCost(params.credits, costUsd, params.settings),
+      margin:
+        params.sellIdrPerCredit === null
+          ? null
+          : marginForCost(params.credits, costUsd, { ...params.settings, creditValueIdr: params.sellIdrPerCredit }),
     };
   });
 }

@@ -67,6 +67,17 @@ export function packTotalCredits(pack: CreditPack): number {
 }
 
 /**
+ * Lowest effective IDR a user pays per credit (priceIdr / base+bonus) across enabled packs; null when
+ * none is usable. Display only (admin margin, #481); never feeds pricing.
+ */
+export function lowestPackIdrPerCredit(packs: readonly (CreditPack & { isActive?: boolean })[]): number | null {
+  const rates = packs
+    .filter((p) => p.isActive !== false && p.priceIdr > 0 && packTotalCredits(p) > 0)
+    .map((p) => p.priceIdr / packTotalCredits(p));
+  return rates.length ? Math.min(...rates) : null;
+}
+
+/**
  * Cosmetic IDR value of the bonus credits, priced at the pack's own base
  * rate (priceIdr / credits). Used only to show a "Saved Rp X" hint — it does
  * not affect the amount charged.
