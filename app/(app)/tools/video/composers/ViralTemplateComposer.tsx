@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { AlertCircle, ArrowRight, Clock, Cpu, Crop, Film, Layers, Loader2, Maximize2 } from "lucide-react";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -192,6 +193,7 @@ export default function ViralTemplateComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:viral-template",
     refetchCredits,
@@ -528,6 +530,7 @@ export default function ViralTemplateComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
       {recoverableJobId && (
         <GenerationRecoverableBanner
           message={error ?? STUDIO_GENERATION_RECOVERABLE_FALLBACK}

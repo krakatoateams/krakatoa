@@ -335,6 +335,17 @@ async function main(): Promise<void> {
       assert(/cancelAllowed\s*=?\s*\{?\s*\w*[cC]ancelAllowed && !cancelRefused/.test(readFileSync(f, "utf8")), `7: ${f} hides Cancel after a 409`);
     }
     assert(cancelUiState("cancelling").notice === null && cancelUiState("idle").notice === null, "7: success path shows no notice");
+    // #484: cancel accepted but the output arrived: a calm neutral note, never the red error banner.
+    const studio = readFileSync("lib/studio-generation-submit.ts", "utf8");
+    assert(/if \(notice && mountedRef\.current\) setCancelNotice\(notice\)/.test(studio), "7: studio forms get the delivered-anyway note as cancelNotice, not error");
+    const imageNode = readFileSync("app/(app)/tools/canvas/nodes/ImageNode.tsx", "utf8");
+    assert(/error: null,\s*notice: deliveredAfterCancelNotice\(\)/.test(imageNode), "7: canvas Image node shows it as a calm notice, not error");
+    for (const f of ["app/(app)/tools/video/composers/ViralTemplateComposer.tsx", "app/(app)/tools/video/composers/TextToVideoComposer.tsx", "app/(app)/tools/video/composers/ImageToVideoComposer.tsx", "app/(app)/tools/video/composers/MotionControlComposer.tsx", "app/(app)/tools/video/composers/StoryboardToVideoComposer.tsx", "app/(app)/tools/video/composers/ReelsCreatorComposer.tsx", "app/(app)/tools/photo-v2/page.tsx", "app/(app)/tools/skills/SkillComposer.tsx"]) {
+      const src = readFileSync(f, "utf8");
+      const hooks = src.split("useStudioGenerationSubmit({").length - 1;
+      const notes = src.split("<GenerationNotice text={cancelNotice} />").length - 1;
+      assert(hooks > 0 && notes === hooks, `7: ${f} renders the calm note once per submit hook`);
+    }
   }
 
   console.log("falCancelSelfCheck: ok");

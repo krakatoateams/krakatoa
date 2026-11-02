@@ -8,6 +8,7 @@ export {
 } from "./CreditButton";
 export { GenerationCancelButton } from "./GenerationCancelButton";
 export { StudioGenerationFeedback } from "./StudioGenerationFeedback";
+export { GenerationNotice } from "./GenerationNotice";
 export { DevBlankTestToggle } from "./DevBlankTestToggle";
 export {
   StudioForm,

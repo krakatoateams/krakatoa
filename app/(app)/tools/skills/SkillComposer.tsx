@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -119,6 +120,7 @@ function SkillOmniInner({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "skills:composer",
     refetchCredits,
@@ -944,6 +946,7 @@ function SkillOmniInner({
         loading={loading}
         onResume={resumeRecoverable}
       />
+      <GenerationNotice text={cancelNotice} />
 
       {loading && skill && (
         <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">

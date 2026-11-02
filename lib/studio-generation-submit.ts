@@ -42,6 +42,8 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Calm, non-error note (neutral banner): a cancel was accepted but the output arrived anyway.
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const resumeLockRef = useRef(createStudioGenerationSubmitLock());
@@ -83,6 +85,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
 
       setLoading(true);
       setError(null);
+      setCancelNotice(null);
       setRecoverableJobId(null);
 
       try {
@@ -116,9 +119,9 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
           return false;
         }
         if (result.kind === "success") {
-          // Accepted cancel but the image arrived (unconfirmed Fal cancel): say so, credits are used.
+          // Accepted cancel but the output arrived (unconfirmed Fal cancel): a calm note, not an error.
           const notice = deliveredAfterCancelNotice();
-          if (notice && mountedRef.current) setError(notice);
+          if (notice && mountedRef.current) setCancelNotice(notice);
           return true;
         }
         return false;
@@ -192,6 +195,7 @@ export function useStudioGenerationSubmit(config: UseStudioGenerationSubmitConfi
   return {
     loading,
     error,
+    cancelNotice,
     clearError,
     recoverableJobId,
     submit,

@@ -1,8 +1,11 @@
 /** Client-side outcome of a Cancel click (no React): lets the UI tell cancelled / refused / failed apart. */
 export type CancelResult = "cancelling" | "not_allowed" | "failed" | "idle";
 
-/** Shown after a run delivered although its cancel was accepted (unconfirmed Fal cancel): credits are used. */
-export const CANCEL_DELIVERED_ANYWAY_MESSAGE = "Generation already started and can't be cancelled. Credits are used.";
+/**
+ * Calm note (neutral, never the red error banner, #484) after a run delivered although its cancel was
+ * accepted (unconfirmed Fal cancel): the output is there and credits are used.
+ */
+export const CANCEL_DELIVERED_ANYWAY_MESSAGE = "Cancel came too late, so this one finished. Credits are used.";
 /** The calm line that replaces Cancel once the server says cancel can't succeed (#472). Never claims a refund. */
 export const CANCEL_LOCKED_MESSAGE = "Already generating, can't be cancelled.";
 export const CANCEL_FAILED_MESSAGE = "Couldn't cancel. Please try again.";

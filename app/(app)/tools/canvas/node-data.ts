@@ -51,6 +51,8 @@ export type ImageNodeData = SavedRunState & {
   uploading: boolean;
   loading: boolean;
   error: string | null;
+  /** Calm, non-error note after a run (a cancel that came too late); never persisted. */
+  notice?: string | null;
 };
 
 export type VideoNodeData = SavedRunState & {

@@ -18,6 +18,7 @@ import {
   Type,
 } from "lucide-react";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -309,6 +310,7 @@ export default function ReelsCreatorComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:reels",
     refetchCredits,
@@ -987,6 +989,7 @@ export default function ReelsCreatorComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {loading && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">

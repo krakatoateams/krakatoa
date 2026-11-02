@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AlertCircle, ChevronDown, Clock, Cpu, Film, Layers, Loader2, Maximize2, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
 import {
+  GenerationNotice,
   ChipDropdown,
   CreditActionButton,
   GENERATE_BTN_CLASS,
@@ -184,6 +185,7 @@ export default function MotionControlComposer({
     cancel: cancelSubmit,
     cancelling,
     cancelAllowed,
+    cancelNotice,
   } = useStudioGenerationSubmit({
     idempotencyScope: "video:motion-control",
     refetchCredits,
@@ -612,6 +614,7 @@ export default function MotionControlComposer({
           <span>{error}</span>
         </div>
       )}
+      <GenerationNotice text={cancelNotice} />
 
       {restoreNotice && (
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
