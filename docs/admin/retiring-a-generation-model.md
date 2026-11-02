@@ -4,8 +4,9 @@ Use this when a catalog model (photo tier, video model, motion control model) sh
 for good. Retiring never touches users' past creations, jobs or charges. The short version:
 
 - **Archive first** (Admin → Models → pick its tool → **Remove** in the model's row). Do code changes after.
-- **Never delete** the registry entry, the `model_catalog_configs` row, the `feature_model_configs` rows
-  or the pricing rows.
+- **Never delete** the `model_catalog_configs` row, the `feature_model_configs` rows or the pricing rows.
+- **Keep the registry entry** by default. Deleting it is an owner-decided exception with its own checklist
+  (see "Deleting a registry entry", example #476).
 - **Never reuse** a retired model id, provider slug or pricing key for a different model.
 
 There is no "Delete permanently" button, on purpose (issue #429). Leftover rows for a retired model are
