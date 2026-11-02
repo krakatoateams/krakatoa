@@ -2734,6 +2734,27 @@ function RecentPostsCard({ posts, loading, onRetry, onCancel }: RecentPostsCardP
 
 // ─── Caption AI (shared logic) ────────────────────────────────────────────────
 
+// A platform timeout (504) or crash returns an HTML/text page, not JSON —
+// parse defensively so the user sees a readable error instead of a
+// "Unexpected token" message.
+async function readCaptionResponse(res: Response): Promise<Record<string, unknown>> {
+  let data: Record<string, unknown> = {};
+  try {
+    data = await res.json();
+  } catch {
+    if (res.ok) throw new Error("Something went wrong. Please try again.");
+  }
+  if (!res.ok) {
+    if (typeof data.error === "string") throw new Error(data.error);
+    throw new Error(
+      res.status === 504
+        ? "Caption generation took too long. Please try again."
+        : `Request failed (${res.status})`,
+    );
+  }
+  return data;
+}
+
 // Prompt 2 (Option A): reusable caption generation for bulk cards + the shared
 // "same for all" box. Returns the caption so the caller decides where to store
 // it (single item vs broadcast to all). DescriptionCard intentionally keeps its
@@ -2787,8 +2808,7 @@ function useCaptionAI() {
             format: input.format ?? "short",
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+        const data = await readCaptionResponse(res);
         setLastUsedTranscript(data.usedTranscript === true);
         setLastTranscriptStatus(
           data.transcriptStatus === "ok" ||
@@ -2823,8 +2843,7 @@ function useCaptionAI() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "general", videos }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+        const data = await readCaptionResponse(res);
         return data.caption as string;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -2847,8 +2866,7 @@ function useCaptionAI() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "polish", existingCaption }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+      const data = await readCaptionResponse(res);
       return data.caption as string;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -3941,7 +3959,9 @@ export default function SchedulerDashboardPage() {
       setTiktokCreatorInfo(DEFAULT_TIKTOK_CREATOR_INFO);
       return;
     }
-    fetch("/api/connections/tiktok/creator-info")
+    // Bounded so a hung request surfaces as "unavailable" instead of an
+    // endless "Loading…" in the required privacy dropdown.
+    fetch("/api/connections/tiktok/creator-info", { signal: AbortSignal.timeout(20_000) })
       .then(async (res) => {
         const httpKind = classifyTikTokCreatorInfoHttp(res.status).kind;
         const data: Partial<TikTokCreatorInfoState> = res.ok ? await res.json() : {};

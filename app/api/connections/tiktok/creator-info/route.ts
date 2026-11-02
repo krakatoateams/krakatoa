@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/resolve-user";
 import { supabaseServer } from "@/lib/supabase-server";
 import { getCreatorInfo, TikTokCreatorInfoError, type TikTokCreatorInfo } from "@/lib/tiktok";
-import { classifyTikTokCreatorInfoError } from "@/lib/tiktok-creator-info-pure";
+import { classifyTikTokCreatorInfoError, isTikTokAccessTokenError } from "@/lib/tiktok-creator-info-pure";
 import { refreshTikTokTokensLocked } from "@/lib/tiktok-refresh-locked";
 import { updatePlatformUsername } from "@/lib/platform-tokens";
 
@@ -25,6 +25,12 @@ function successResponse(info: TikTokCreatorInfo) {
 // problem, not the access token — never worth a token refresh+retry.
 function classifiedResponse(err: TikTokCreatorInfoError) {
   const cls = classifyTikTokCreatorInfoError(err.code);
+  // An unrecognized code has no privacy options to offer; a 200 with an empty
+  // list would leave the scheduler's dropdown looking like it's still loading.
+  if (cls.severity === "unknown") {
+    console.error("[tiktok-creator-info] unclassified TikTok error:", err.code);
+    return NextResponse.json({ error: cls.message }, { status: 502 });
+  }
   return NextResponse.json({
     privacyLevelOptions: [],
     creatorNickname: "",
@@ -70,7 +76,7 @@ export async function GET() {
     await updatePlatformUsername(userId, "tiktok", info.creatorNickname);
     return successResponse(info);
   } catch (err) {
-    if (err instanceof TikTokCreatorInfoError) {
+    if (err instanceof TikTokCreatorInfoError && !isTikTokAccessTokenError(err.code)) {
       return classifiedResponse(err);
     }
 
@@ -92,6 +98,9 @@ export async function GET() {
       return successResponse(info);
     } catch (retryErr) {
       if (retryErr instanceof TikTokCreatorInfoError) {
+        if (isTikTokAccessTokenError(retryErr.code)) {
+          return NextResponse.json({ error: "TikTok connection needs to be re-authorized." }, { status: 409 });
+        }
         return classifiedResponse(retryErr);
       }
       console.error("[tiktok-creator-info] failed after refresh:", retryErr);
