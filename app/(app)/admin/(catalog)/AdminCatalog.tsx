@@ -41,6 +41,7 @@ import {
   type PhotoProviderId,
   type PhotoProviderOption,
 } from "@/lib/admin-provider-switch";
+import { creditPacksFromApiPayload, formatIdr, lowestPackIdrPerCredit } from "@/lib/credit-packs";
 import { PHOTO_FEATURES } from "@/lib/creation-features";
 import { VIDEO_COMPOSER_FEATURES } from "@/lib/video-composer-features";
 import { AddModelDialog, RemoveModelDialog } from "./ToolModelDialogs";
@@ -102,12 +103,20 @@ const TH =
 const HIGHEST_COST_HINT =
   "Highest cost: the most any provider charges for this variant. Suggested credits use it, so no provider loses money.";
 
+function marginHint(sellIdrPerCredit: number | null): string {
+  return sellIdrPerCredit === null
+    ? "No enabled credit pack could be read, so no margin is shown."
+    : `Based on the lowest pack price per credit (${formatIdr(sellIdrPerCredit)}). Before payment fees.`;
+}
+
 
 /** Provider-switch data shared by the Photo model sections (fetched once by the page). */
 type ProviderAdmin = {
   falConfigured: boolean;
   /** `${provider}|${model}|${pricing_key}` -> cost_usd, from provider_model_costs. */
   costs: Record<string, number>;
+  /** Lowest enabled pack price per credit (IDR), the margin's revenue; null when no pack is readable. */
+  sellIdrPerCredit: number | null;
   onSwitched: (configKey: string, provider: PhotoProviderId) => void;
 };
 /** Inline "why this was refused / what changed" messages per model id (rendered next to the model). */
@@ -144,6 +153,7 @@ const postApi = (url: string, body: Record<string, unknown>) => sendApi("POST", 
 const ProviderAdminContext = createContext<ProviderAdmin>({
   falConfigured: false,
   costs: {},
+  sellIdrPerCredit: null,
   onSwitched: () => {},
 });
 
@@ -458,7 +468,7 @@ function VariantTable({
   onSave: (variant: AdminCostVariant) => void;
   onToggle: (variant: AdminCostVariant) => void;
 }) {
-  const { costs } = useContext(ProviderAdminContext);
+  const { costs, sellIdrPerCredit } = useContext(ProviderAdminContext);
   return (
     <div>
     <div className="overflow-x-auto rounded-lg border border-white/10">
@@ -468,7 +478,11 @@ function VariantTable({
             <th className={TH}>Variant</th>
             <th className={`${TH} w-24`} title={HIGHEST_COST_HINT}>Highest cost $</th>
             <th className={`${TH} w-20`}>Credits</th>
-            {providers ? <th className={`${TH} w-40`}>Margin per provider</th> : null}
+            {providers ? (
+              <th className={`${TH} w-40`} title={marginHint(sellIdrPerCredit)}>
+                Margin per provider
+              </th>
+            ) : null}
             <th className={`${TH} w-16`}></th>
             <th className={`${TH} w-10`}>On</th>
             <th className={`${TH} w-16`}></th>
@@ -489,6 +503,7 @@ function VariantTable({
                   activeProvider: providers.active,
                   costs,
                   settings: billingSettings,
+                  sellIdrPerCredit,
                 })
               : null;
             return (
@@ -531,7 +546,7 @@ function VariantTable({
                         }`}
                       >
                         {PROVIDER_LABEL[row.provider]} {row.costUsd === null ? "cost not set" : `$${row.costUsd}`}
-                        {row.margin ? ` · ${row.margin.pct.toFixed(0)}%` : ""}
+                        {row.margin ? ` · ${row.margin.pct.toFixed(0)}%` : row.costUsd === null ? "" : " · —"}
                       </div>
                     ))}
                   </td>
@@ -1381,6 +1396,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const [savedPricing, setSavedPricing] = useState<Record<string, PricingBaseline>>({});
   const [falConfigured, setFalConfigured] = useState(false);
   const [providerCosts, setProviderCosts] = useState<Record<string, number>>({});
+  const [sellIdrPerCredit, setSellIdrPerCredit] = useState<number | null>(null);
   const { toast, dismiss, show: showToast } = useAdminToast();
   const debouncersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const savingCountRef = useRef(0);
@@ -1421,10 +1437,16 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       setFalConfigured(
         (modelsData as { configuredProviders?: { fal?: boolean } }).configuredProviders?.fal === true
       );
-      // Costs are optional: a missing table or fetch failure leaves "cost not set", never an error.
-      const costsData = await fetch("/api/admin/config/provider-costs")
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
+      // Costs and packs are optional: a missing table or fetch failure leaves "cost not set" / a dash
+      // (never the old cost-basis margin), never an error.
+      const optionalJson = (url: string) =>
+        fetch(url)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+      const [costsData, packsData] = await Promise.all([
+        optionalJson("/api/admin/config/provider-costs"),
+        optionalJson("/api/credits/packs"),
+      ]);
       setProviderCosts(
         Object.fromEntries(
           ((costsData?.costs ?? []) as { provider: string; model: string; pricing_key: string; cost_usd: number }[]).map(
@@ -1432,6 +1454,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
           )
         )
       );
+      setSellIdrPerCredit(lowestPackIdrPerCredit(creditPacksFromApiPayload(packsData) ?? []));
       const billingResData = billingRes.ok
         ? await billingRes.json().catch(() => null)
         : null;
@@ -1959,7 +1982,7 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       }}
     >
     <ModelNoticeContext.Provider value={modelNotices}>
-    <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, onSwitched: onProviderSwitched }}>
+    <ProviderAdminContext.Provider value={{ falConfigured, costs: providerCosts, sellIdrPerCredit, onSwitched: onProviderSwitched }}>
       {toast ? <AdminToast toast={toast} onDismiss={dismiss} /> : null}
       <div className="mx-auto max-w-5xl space-y-3">
       <div className="flex items-center justify-end">

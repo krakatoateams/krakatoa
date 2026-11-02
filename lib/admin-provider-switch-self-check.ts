@@ -4,6 +4,7 @@ import { V2_PRICING_DEFAULTS } from "./pricing-defaults";
 import { isSupportedProviderModel } from "./ai-provider-catalog";
 import { getModelDefault, getPricingDefault } from "./admin-config-resolved-defaults";
 import { PRODUCT_PHOTO_TIERS } from "./product-photo";
+import { lowestPackIdrPerCredit, type CreditPack } from "./credit-packs";
 import { activePhotoProvider, isFalOnlyPhotoRole, marginForCost, photoPatchUnit, photoProviderOptions, photoSwitchTarget, providerCostKey, providerMargins } from "./admin-provider-switch";
 
 const FAL_TIERS = ["image_basic", "image_balanced", "image_pro", "image_gpt_image_2", "image_krea2_large", "image_krea2_medium"];
@@ -80,6 +81,22 @@ for (const [key, credits, costs] of [
     assert.ok((marginForCost(credits, cost, DEFAULT_BILLING_SETTINGS)?.usd ?? -1) > 0, `${key} at ${credits} credits covers $${cost}`);
   }
 }
+// #481: the margin's revenue is the lowest real pack price per credit (base + bonus), not creditValueIdr (200).
+const pack = (id: string, credits: number, priceIdr: number, bonusCredits?: number): CreditPack => ({ id, credits, bonusCredits, priceIdr, priceUsdCents: 0, label: id });
+const LIVE_PACKS = [pack("p1", 100, 29_000), pack("p3", 250, 69_000), pack("p4", 500, 142_500, 25), pack("p5", 1_000, 299_000, 100)];
+const SELL = 142_500 / 525; // p4 with its 25 bonus credits (~Rp271) beats p5 (~Rp272) and the no-bonus packs
+assert.equal(lowestPackIdrPerCredit(LIVE_PACKS), SELL, "lowest effective rate counts bonus credits");
+assert.equal(lowestPackIdrPerCredit([]), null, "no packs: no rate");
+assert.equal(lowestPackIdrPerCredit([{ ...LIVE_PACKS[3], isActive: false }, { ...LIVE_PACKS[0], isActive: true }]), 290, "disabled packs are ignored");
+assert.equal(lowestPackIdrPerCredit([{ ...LIVE_PACKS[0], isActive: false }]), null, "only disabled packs: no rate");
+assert.equal(lowestPackIdrPerCredit([pack("free", 100, 0), pack("bad", 0, 1_000)]), null, "zero price or zero credits is unusable");
+// Nano Banana Pro 4K: 27 credits on a $0.30 cost read 0% on the old cost basis; at the real pack rate it is ~26%.
+const pro4k = (sell: number | null, costUsd: number) =>
+  providerMargins({ credits: 27, pricingKey: "k", referenceUsd: costUsd, options: [{ provider: "replicate", model: "m" }], activeProvider: "replicate", costs: {}, settings: DEFAULT_BILLING_SETTINGS, sellIdrPerCredit: sell })[0].margin;
+assert.ok(Math.abs(marginForCost(27, 0.3, DEFAULT_BILLING_SETTINGS)!.pct) < 1e-9, "old basis showed 0%");
+assert.ok(Math.abs(pro4k(SELL, 0.3)!.pct - (1 - 0.3 / ((27 * SELL) / 18000)) * 100) < 1e-9 && pro4k(SELL, 0.3)!.pct > 26 && pro4k(SELL, 0.3)!.pct < 27, "Pro 4K ~26%");
+assert.equal(pro4k(null, 0.3), null, "no readable pack: no margin (a dash), never the old number");
+assert.equal(pro4k(SELL, 0)!.pct, 100, "zero cost is a 100% margin");
 // #466: margin per provider (display only). Costs from provider_model_costs; Replicate falls back to the reference cost.
 const nb2Options = photoProviderOptions("image_balanced");
 const nb2Margins = providerMargins({
@@ -93,10 +110,12 @@ const nb2Margins = providerMargins({
     [providerCostKey("fal", "fal-ai/nano-banana-2", "product_photo_nano_banana_2_1k_per_image")]: 0.08,
   },
   settings: DEFAULT_BILLING_SETTINGS,
+  sellIdrPerCredit: SELL,
 });
 assert.deepEqual(nb2Margins.map((x) => [x.provider, x.costUsd, x.recorded, x.active]), [["replicate", 0.067, true, false], ["fal", 0.08, true, true]]);
-assert.ok(nb2Margins[0].margin!.pct > 24 && nb2Margins[0].margin!.pct < 25 && nb2Margins[1].margin!.pct > 9 && nb2Margins[1].margin!.pct < 10.1, "Replicate ~25%, fal ~10%");
-const noRows = providerMargins({ credits: 8, pricingKey: "k", referenceUsd: 0.08, options: nb2Options, activeProvider: "replicate", costs: {}, settings: DEFAULT_BILLING_SETTINGS });
+// 8 credits at ~Rp271 = ~$0.121: Replicate $0.067 ~44%, fal $0.08 ~34% (on the old cost basis these read ~25% / ~10%).
+assert.ok(nb2Margins[0].margin!.pct > 44 && nb2Margins[0].margin!.pct < 45 && nb2Margins[1].margin!.pct > 33 && nb2Margins[1].margin!.pct < 34, "Replicate ~44%, fal ~34%");
+const noRows = providerMargins({ credits: 8, pricingKey: "k", referenceUsd: 0.08, options: nb2Options, activeProvider: "replicate", costs: {}, settings: DEFAULT_BILLING_SETTINGS, sellIdrPerCredit: SELL });
 assert.deepEqual(noRows.map((x) => [x.provider, x.costUsd, x.recorded, x.margin === null]), [["replicate", 0.08, false, false], ["fal", null, false, true]], "Replicate falls back to the reference cost; fal without a row is unknown, never a guess");
 // #467: Krea 2 Turbo is priced from the verified fal price ($0.008/MP); sizes are pinned to <= 1 MP so one image costs <= $0.008.
 assert.equal(calculateCredits({ providerCostUsd: V2_PRICING_DEFAULTS.product_photo_krea_2_turbo_per_image.providerCostUsd, unitCount: 1, settings: DEFAULT_BILLING_SETTINGS }), 1);
