@@ -543,15 +543,19 @@ function VariantTable({
                   />
                 </td>
                 <td className="px-2 py-1.5 text-right">
+                  {/* aria-disabled, not disabled: a focused button that disables itself after saving drops
+                      keyboard focus to the page (#484). */}
                   <button
                     type="button"
-                    disabled={!dirty || saving}
+                    aria-disabled={!dirty || saving}
                     title={dirty ? "Save pricing changes" : "No unsaved changes"}
-                    onClick={() => onSave(v)}
+                    onClick={() => {
+                      if (dirty && !saving) onSave(v);
+                    }}
                     className={
                       dirty
-                        ? "rounded bg-[#F26522] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#e05a1a] disabled:opacity-50"
-                        : "rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-gray-600 disabled:cursor-default"
+                        ? "rounded bg-[#F26522] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#e05a1a] aria-disabled:opacity-50"
+                        : "rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-gray-600 aria-disabled:cursor-default"
                     }
                   >
                     Save
@@ -1336,6 +1340,8 @@ function useCatalog(): CatalogState {
 const MODELS_PATH = "/admin/models";
 const CATALOG_PATHS = ["/admin/config-v2", MODELS_PATH];
 const UNSAVED_LEAVE_MESSAGE = "You have unsaved price changes. Leave without saving?";
+/** Marks the extra same-URL history entry that lets browser Back ask before dropping drafts. */
+const BACK_GUARD_KEY = "__krakatoaUnsavedPrices";
 
 function hasUnsavedPricing(tools: AdminToolNode[], saved: Record<string, PricingBaseline>): boolean {
   return tools.some(
@@ -1924,12 +1930,37 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
         e.stopPropagation();
       }
     };
+    // Browser Back (#484): park one same-URL entry on top. Landing back on the entry it was parked over
+    // means "leave": ask first, re-park on stay, or step back once more on leave. Matched by URL because
+    // a Next router.replace (picking a tool) drops custom history state.
+    const parkedOver = window.location.href;
+    const park = () => window.history.pushState({ ...window.history.state, [BACK_GUARD_KEY]: true }, "", window.location.href);
+    if (!window.history.state?.[BACK_GUARD_KEY]) park();
+    let leaving = false;
+    const onPopState = (e: PopStateEvent) => {
+      if (leaving || e.state?.[BACK_GUARD_KEY] || window.location.href !== parkedOver) return;
+      if (window.confirm(UNSAVED_LEAVE_MESSAGE)) {
+        leaving = true;
+        window.history.back();
+      } else {
+        park();
+      }
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("click", onClick, true);
+    window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
+      window.removeEventListener("popstate", onPopState);
     };
+  }, [unsaved]);
+  // Once everything is saved, drop the parked entry so Back is not a dead press. Runs only while mounted
+  // (never on unmount), and only when the parked entry is still the current one.
+  const wasUnsavedRef = useRef(false);
+  useEffect(() => {
+    if (wasUnsavedRef.current && !unsaved && window.history.state?.[BACK_GUARD_KEY]) window.history.back();
+    wasUnsavedRef.current = unsaved;
   }, [unsaved]);
 
   if (loading) {

@@ -252,6 +252,9 @@ function modelsTabSelfCheck(): void {
   // #484: the optional costs / packs reads time out to "cost not set" / a dash; the tooltip names bonus credits.
   assert.ok(src.includes("signal: AbortSignal.timeout(OPTIONAL_READ_TIMEOUT_MS)") && src.includes("OPTIONAL_READ_TIMEOUT_MS = 8_000"), "optional reads have an 8 s timeout");
   assert.ok(src.includes("lowest pack price per credit, bonus credits included"), "margin tooltip says bonus credits are included");
+  // #484: browser Back asks before dropping drafts; Save stays focusable after it saves.
+  assert.ok(src.includes('window.addEventListener("popstate", onPopState)') && src.includes("BACK_GUARD_KEY"), "unsaved drafts guard browser Back");
+  assert.ok(src.includes("aria-disabled={!dirty || saving}") && !/(?<!aria-)disabled=\{!dirty \|\| saving\}/.test(src), "Save never disables itself while focused");
   for (const route of ["(catalog)/layout.tsx", "(catalog)/config-v2/page.tsx", "(catalog)/models/page.tsx"]) {
     assert.ok(existsSync(join(admin, route)), `route file ${route} exists`);
   }
