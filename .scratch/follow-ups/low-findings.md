@@ -167,3 +167,15 @@ is, and a suggested fix. "Likely" is a rough guess: rare = needs two unusual thi
 - **How likely:** some small issue is likely.
 - **Suggested fix:** one manual pass on a preview deployment (desktop and phone width), with
   screenshots.
+
+## From #480 / #482 (margin display, Reset button removal)
+
+- **Packs and costs reads have no timeout (#482).** If `/api/credits/packs` hangs instead of
+  erroring, the Models tab waits until the server gives up. DB errors already fail fast; same
+  pattern as the existing costs read. Suggested fix: a short timeout that falls back to the dash.
+- **Margin tooltip omits bonus credits (#482).** It says "lowest pack price per credit" but not
+  that bonus credits are included (the docs say it). Cosmetic.
+- **Margin is before payment fees (#482).** Tooltip says so. Admin > Pricing uses another basis
+  (100 credits = $1 plus markup), so its numbers differ. The rate refreshes on tab reload.
+- **Suggested credits still use Rp200 per credit (#482).** By design, it is the pricing formula.
+- **Not yet seen in a real browser:** the Models tab after #480 and #482.
