@@ -9,6 +9,7 @@ import {
   isPricingDirty,
   keepPricingDrafts,
   pricingPatchBody,
+  pricingToggleBody,
   refreshedBaselines,
   modelsTabTools,
   priceSummary,
@@ -185,9 +186,10 @@ assert.deepEqual(
   assert.equal(priced(merged, row.pricingKey).credits, newCredits, "the row keeps the new price");
   assert.equal(mergedSaved[row.pricingKey].credits, newCredits, "its saved baseline stays the new price");
   assert.ok(!isPricingDirty(priced(merged, row.pricingKey), mergedSaved), "and it shows as saved, not unsaved");
-  // 4. A later On/Off toggle sends the row's current price, which is the new one.
+  // 4. A later Save sends the new price; a later On/Off toggle sends no price at all (#490).
   const toggled = { ...priced(merged, row.pricingKey), enabled: !row.enabled };
-  assert.equal(pricingPatchBody(toggled).credit_amount, newCredits, "the toggle sends the new price, never the old one");
+  assert.equal(pricingPatchBody(toggled).credit_amount, newCredits, "a later Save sends the new price, never the old one");
+  assert.equal(pricingToggleBody(toggled, toggled.enabled, mergedSaved[row.pricingKey]).credit_amount, newCredits, "a later toggle sends the saved new price");
   // Control: the old merge (no stale keys) brought the old price back as clean, which is the bug.
   const buggy = keepPricingDrafts(staleServerTree, live, saved);
   assert.equal(priced(buggy, row.pricingKey).credits, oldCredits, "without the save order the stale price wins");
@@ -201,6 +203,68 @@ assert.deepEqual(
   const drafted = withCredits(live, row.pricingKey, newCredits + 1);
   const keptDraft = priced(keepPricingDrafts(staleServerTree, drafted, saved, stale), row.pricingKey);
   assert.ok(keptDraft.credits === newCredits + 1 && isPricingDirty(keptDraft, refreshedBaselines(staleServerTree, saved, stale)), "a newer draft is kept and still unsaved");
+}
+
+// #490: the On/Off toggle changes only the flag (it resends the SAVED price, never a draft), and a refresh
+// older than a toggle never brings back the old flag. Each "control" runs the pre-#490 logic and shows it fails.
+{
+  const variantOf = (tools: typeof tree, key: string) =>
+    tools.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey === key)!;
+  const patchRow = (tools: typeof tree, key: string, patch: Partial<AdminCostVariant>) =>
+    tools.map((t) => ({
+      ...t,
+      models: t.models.map((m) => ({ ...m, variants: m.variants.map((v) => (v.pricingKey === key ? { ...v, ...patch } : v)) })),
+    }));
+  const row = tree.flatMap((t) => t.models.flatMap((m) => m.variants))[0];
+  const saved = collectPricingBaselines(tree);
+  // The pre-#490 body: Save and the toggle both sent the live row, draft price and On/Off included.
+  const oldBody = (v: AdminCostVariant) => ({
+    display_name: v.label,
+    credit_amount: Math.round(v.credits),
+    provider_cost_usd: v.providerReferenceUsd,
+    enabled: v.enabled,
+  });
+
+  // 1. A row with an unsaved price draft is toggled: the request carries the saved price, the draft stays unsaved.
+  {
+    const draftCredits = row.credits + 9;
+    const draftUsd = row.providerReferenceUsd + 0.5;
+    const toggled = patchRow(tree, row.pricingKey, { credits: draftCredits, providerReferenceUsd: draftUsd, enabled: !row.enabled });
+    const live = variantOf(toggled, row.pricingKey);
+    const body = pricingToggleBody(live, live.enabled, saved[row.pricingKey]);
+    assert.deepEqual(
+      body,
+      { display_name: row.label, credit_amount: row.credits, provider_cost_usd: row.providerReferenceUsd, enabled: !row.enabled },
+      "the toggle sends the new flag with the saved price, never the draft",
+    );
+    assert.equal(oldBody(live).credit_amount, draftCredits, "control: the old toggle sent the draft price");
+    assert.ok(live.credits === draftCredits && isPricingDirty(live, saved), "the draft is kept and still shows as unsaved");
+  }
+
+  // 2. Refresh starts -> admin toggles -> the stale refresh lands -> the row keeps the new flag.
+  {
+    const tracker = createPriceSaveTracker();
+    const seq = tracker.beginRefresh();
+    const staleServerTree = tree; // read before the toggle: the old flag
+    tracker.markToggled(row.pricingKey);
+    const live = patchRow(tree, row.pricingKey, { enabled: !row.enabled });
+    const staleFlags = tracker.staleFlagKeys(seq);
+    assert.ok(staleFlags.has(row.pricingKey) && tracker.staleKeys(seq).size === 0, "only the flag is stale, not the price");
+    const merged = keepPricingDrafts(staleServerTree, live, saved, tracker.staleKeys(seq), staleFlags);
+    assert.equal(variantOf(merged, row.pricingKey).enabled, !row.enabled, "the row keeps the new On/Off");
+    assert.equal(variantOf(merged, row.pricingKey).credits, row.credits, "its price still refreshes normally");
+    // Control: the old merge brought the old flag back, and the old Save then resent that stale flag.
+    const oldMerged = keepPricingDrafts(staleServerTree, live, saved);
+    assert.equal(variantOf(oldMerged, row.pricingKey).enabled, row.enabled, "control: without the toggle order the stale flag wins");
+    assert.equal(oldBody(variantOf(oldMerged, row.pricingKey)).enabled, row.enabled, "control: the old Save resent the stale flag");
+    // A later Save never sends On/Off at all, so Save can never change it.
+    assert.ok(!("enabled" in pricingPatchBody(variantOf(merged, row.pricingKey))), "Save never sends On/Off");
+    // A refresh that starts after the toggle is trusted again; other rows refresh normally.
+    assert.equal(tracker.staleFlagKeys(tracker.beginRefresh()).size, 0, "a later refresh takes the server flag");
+    const other = tree.flatMap((t) => t.models.flatMap((m) => m.variants)).find((v) => v.pricingKey !== row.pricingKey)!;
+    const serverChanged = patchRow(staleServerTree, other.pricingKey, { enabled: !other.enabled });
+    assert.equal(variantOf(keepPricingDrafts(serverChanged, live, saved, new Set(), staleFlags), other.pricingKey).enabled, !other.enabled, "other rows take the server flag");
+  }
 }
 
 async function main(): Promise<void> {
@@ -305,7 +369,7 @@ function modelsTabSelfCheck(): void {
   // #487: refreshes are ordered against saves, and Save and the toggle send one shared PATCH body.
   assert.ok(src.includes("const refreshSeq = priceSavesRef.current.beginRefresh();") && src.includes("priceSavesRef.current.staleKeys(refreshSeq)"), "load discards data older than a row's last save");
   assert.ok(
-    src.includes("keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale)") &&
+    src.includes("keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale, staleFlags)") &&
       src.includes("refreshedBaselines(tree, savedPricingRef.current, stale)") &&
       !src.includes("setSavedPricing(collectPricingBaselines("),
     "load merges with the stale keys for both the rows and their saved baselines",
@@ -313,7 +377,12 @@ function modelsTabSelfCheck(): void {
   assert.equal(src.split("setSavedPricing(").length - 1, src.split("savedPricingRef.current = ").length - 1, "every saved-baseline update also updates the ref");
   assert.ok(!src.includes("savedPricingRef.current = savedPricing;"), "the ref is never copied back from state on render");
   assert.ok(/patchApi\(`\/api\/admin\/config\/pricing\/\$\{pricingKey\}`, pricingPatchBody\(live\)\);\s*priceSavesRef\.current\.markSaved\(pricingKey\);/.test(src), "a successful Save is recorded");
-  assert.equal(src.split("pricingPatchBody(live)").length - 1, 2, "Save and the On/Off toggle both send the row's current price");
+  // #490: the toggle sends only the flag and is ordered against refreshes; Save is the only price sender.
+  assert.equal(src.split("pricingPatchBody(live)").length - 1, 1, "only Save sends a price");
+  assert.ok(/priceSavesRef\.current\.markToggled\(pricingKey\);[\s\S]{0,240}?scheduleAutosave\(`pricing:\$\{pricingKey\}`/.test(src), "the toggle is recorded before it saves, on Save's queue key");
+  assert.ok(!src.includes("pricing-toggle:"), "Save and the toggle share one queue, so a toggle never sends a price from before a Save in flight");
+  assert.ok(src.includes("pricingToggleBody(live, variant.enabled, saved)") && src.includes("const saved = savedPricingRef.current[pricingKey];"), "the toggle sends the clicked flag with the saved price");
+  assert.ok(src.includes("priceSavesRef.current.staleFlagKeys(refreshSeq)") && src.includes("keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale, staleFlags)"), "load keeps a flag toggled after it started");
   assert.ok(!src.includes("credit_amount: Math.round(live.credits)"), "no second hand-built pricing body");
   // #484: browser Back asks before dropping drafts; Save stays focusable after it saves.
   assert.ok(src.includes('window.addEventListener("popstate", onPopState)') && src.includes("BACK_GUARD_KEY"), "unsaved drafts guard browser Back");

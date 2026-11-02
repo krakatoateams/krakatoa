@@ -644,26 +644,32 @@ export function isPricingDirty(variant: AdminCostVariant, saved: Record<string, 
 /**
  * A refreshed tree that keeps every unsaved price draft (#484): a row dirty against `prevSaved` keeps its
  * typed cost and credits; clean rows and every other field take the fresh server values. Rows in
- * `staleKeys` (saved after this refresh started, #487) also keep their current price. The caller takes the
- * new baselines from `refreshedBaselines`, so a kept draft still shows as unsaved.
+ * `staleKeys` (saved after this refresh started, #487) also keep their current price, and rows in
+ * `staleFlagKeys` (toggled after it started, #490) keep their current On/Off. The caller takes the new
+ * baselines from `refreshedBaselines`, so a kept draft still shows as unsaved.
  */
 export function keepPricingDrafts(
   next: AdminToolNode[],
   prev: readonly AdminToolNode[],
   prevSaved: Record<string, PricingBaseline>,
-  staleKeys: ReadonlySet<string> = new Set()
+  staleKeys: ReadonlySet<string> = new Set(),
+  staleFlagKeys: ReadonlySet<string> = new Set()
 ): AdminToolNode[] {
-  const drafts = new Map<string, PricingBaseline>();
+  const kept = new Map<string, Partial<AdminCostVariant>>();
   for (const v of allVariants(prev)) {
+    const current: Partial<AdminCostVariant> = {};
     if (staleKeys.has(v.pricingKey) || (prevSaved[v.pricingKey] && isPricingDirty(v, prevSaved))) {
-      drafts.set(v.pricingKey, { providerReferenceUsd: v.providerReferenceUsd, credits: v.credits });
+      current.providerReferenceUsd = v.providerReferenceUsd;
+      current.credits = v.credits;
     }
+    if (staleFlagKeys.has(v.pricingKey)) current.enabled = v.enabled;
+    if (Object.keys(current).length > 0) kept.set(v.pricingKey, current);
   }
-  if (drafts.size === 0) return next;
+  if (kept.size === 0) return next;
   const keep = (variants: AdminCostVariant[]) =>
     variants.map((v) => {
-      const draft = drafts.get(v.pricingKey);
-      return draft ? { ...v, ...draft } : v;
+      const row = kept.get(v.pricingKey);
+      return row ? { ...v, ...row } : v;
     });
   return next.map((t) => ({
     ...t,
@@ -684,38 +690,58 @@ export function refreshedBaselines(
 }
 
 /**
- * Orders refreshes against price saves (#487). A refresh that started before a row's last successful
- * Save finished read that row's old price, so its data for that row is stale and must be discarded.
+ * Orders refreshes against price saves (#487) and On/Off toggles (#490). A refresh that started before a
+ * row's last successful Save, or before its last toggle, read that row's old value, so its data for that
+ * value is stale and must be discarded.
  */
 export function createPriceSaveTracker() {
   let refreshSeq = 0;
   const savedAtSeq = new Map<string, number>();
+  const toggledAtSeq = new Map<string, number>();
+  const since = (marks: Map<string, number>, seq: number) =>
+    new Set([...marks].filter(([, markedAt]) => seq <= markedAt).map(([key]) => key));
   return {
-    /** When a refresh starts; hand the number to `staleKeys` when it resolves. */
+    /** When a refresh starts; hand the number to `staleKeys` / `staleFlagKeys` when it resolves. */
     beginRefresh: (): number => ++refreshSeq,
     /** After a Save of this pricing key succeeded. */
     markSaved: (pricingKey: string): void => {
       savedAtSeq.set(pricingKey, refreshSeq);
     },
-    /** Keys whose data in refresh `seq` predates their last save. */
-    staleKeys: (seq: number): Set<string> =>
-      new Set([...savedAtSeq].filter(([, savedAt]) => seq <= savedAt).map(([key]) => key)),
+    /** When the admin flips this row's On/Off (the UI already shows the new value). */
+    markToggled: (pricingKey: string): void => {
+      toggledAtSeq.set(pricingKey, refreshSeq);
+    },
+    /** Keys whose price in refresh `seq` predates their last save. */
+    staleKeys: (seq: number): Set<string> => since(savedAtSeq, seq),
+    /** Keys whose On/Off in refresh `seq` predates their last toggle. */
+    staleFlagKeys: (seq: number): Set<string> => since(toggledAtSeq, seq),
   };
 }
 
-/** The pricing PATCH body; Save and the On/Off toggle both send the row's current price through it. */
+/** The Save PATCH body: the row's price only. On/Off is never sent here; only the toggle changes it (#490). */
 export function pricingPatchBody(variant: AdminCostVariant): {
   display_name: string;
   credit_amount: number;
   provider_cost_usd: number;
-  enabled: boolean;
 } {
   return {
     display_name: variant.label,
     credit_amount: Math.round(variant.credits),
     provider_cost_usd: variant.providerReferenceUsd,
-    enabled: variant.enabled,
   };
+}
+
+/**
+ * The On/Off PATCH body: the new flag with the last SAVED price, never the draft, so an unsaved price never
+ * goes live with a toggle (#490). The saved price (not just the flag) is sent so a row with no database row
+ * yet is created at the price the admin sees, not a code default.
+ */
+export function pricingToggleBody(
+  variant: AdminCostVariant,
+  enabled: boolean,
+  saved: PricingBaseline
+): ReturnType<typeof pricingPatchBody> & { enabled: boolean } {
+  return { ...pricingPatchBody({ ...variant, ...saved }), enabled };
 }
 
 export function suggestCreditsFromProvider(

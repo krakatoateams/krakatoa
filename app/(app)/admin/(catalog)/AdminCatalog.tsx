@@ -20,6 +20,7 @@ import {
   modelsTabTools,
   priceSummary,
   pricingPatchBody,
+  pricingToggleBody,
   refreshedBaselines,
   splitToolModels,
   suggestCreditsFromProvider,
@@ -1530,8 +1531,10 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
       });
       // A refresh keeps every unsaved price draft; only clean rows take the server values (#484). A row
       // saved after this refresh started keeps its saved price too: this data predates that save (#487).
+      // Likewise a row toggled after it started keeps its current On/Off (#490).
       const stale = priceSavesRef.current.staleKeys(refreshSeq);
-      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale);
+      const staleFlags = priceSavesRef.current.staleFlagKeys(refreshSeq);
+      const merged = keepPricingDrafts(tree, toolsRef.current, savedPricingRef.current, stale, staleFlags);
       const baselines = refreshedBaselines(tree, savedPricingRef.current, stale);
       setBillingSettings(settings);
       setTools(merged);
@@ -1745,10 +1748,14 @@ export function AdminCatalogProvider({ children }: { children: ReactNode }) {
   const toggleVariant = useCallback(
     (variant: AdminCostVariant) => {
       const { pricingKey } = variant;
-      scheduleAutosave(`pricing-toggle:${pricingKey}`, async () => {
+      priceSavesRef.current.markToggled(pricingKey);
+      // Same queue key as Save: a toggle clicked while a Save is in flight waits for it, so it never sends
+      // the price from before that Save (#490).
+      scheduleAutosave(`pricing:${pricingKey}`, async () => {
         const live = findVariantByPricingKey(toolsRef.current, pricingKey);
-        if (!live) throw new Error("Pricing row not found — click Refresh, then try again.");
-        await patchApi(`/api/admin/config/pricing/${pricingKey}`, pricingPatchBody(live));
+        const saved = savedPricingRef.current[pricingKey];
+        if (!live || !saved) throw new Error("Pricing row not found — click Refresh, then try again.");
+        await patchApi(`/api/admin/config/pricing/${pricingKey}`, pricingToggleBody(live, variant.enabled, saved));
       });
     },
     [scheduleAutosave]
