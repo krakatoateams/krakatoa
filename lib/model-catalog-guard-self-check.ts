@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { OFFERED_BEFORE_SHIP_DARK, catalogRowsFrom, defaultModelCatalogRows } from "./model-catalog-configs";
-import { PRODUCT_PHOTO_TIERS, DEFAULT_PRODUCT_PHOTO_TIER, RETIRED_PRODUCT_PHOTO_TIERS, normalizeProductPhotoOptions } from "./product-photo";
+import { PRODUCT_PHOTO_TIERS, DEFAULT_PRODUCT_PHOTO_TIER, RETIRED_PRODUCT_PHOTO_TIERS, normalizeProductPhotoOptions, retiredProductPhotoTier } from "./product-photo";
 import { getCreationModelLabel } from "./creation-model-label";
 import type { CreationHistoryItem } from "./creations";
 import {
@@ -364,12 +364,20 @@ assert.doesNotMatch(JSON.stringify(registry), /FAL_KEY|secret|apiKey|Bearer/i);
     // A request naming it fails closed with a clear 400 message (the route returns it before any spend).
     const normalized = normalizeProductPhotoOptions({ modelTier: id });
     assert.ok(!normalized.ok && normalized.error === `${retired.modelLabel} is no longer available. Choose another model.`, `${id}: clear refusal`);
+    assert.equal(retiredProductPhotoTier("constructor"), null, "inherited object keys are not retired tiers");
+    assert.ok(!normalizeProductPhotoOptions({ modelTier: "constructor" }).ok, "an inherited key is refused as an invalid tier");
     // Old creations keep their model name, by provider slug or by stored tier id.
     const item = (metadata: Record<string, unknown>) =>
       ({ id: "c", tool: "product_photo", toolLabel: "Photo", mediaType: "image", mediaUrl: "", storagePath: "", title: "", createdAt: "", metadata }) as CreationHistoryItem;
     assert.equal(getCreationModelLabel(item({ providerModel: retired.providerModel })), retired.modelLabel, `${id}: label by slug`);
     assert.equal(getCreationModelLabel(item({ modelTier: id })), retired.modelLabel, `${id}: label by tier id`);
     assert.equal(PRODUCT_PHOTO_TIERS.some((t) => t.providerModel === retired.providerModel), false, `${id}: slug never reused`);
+    assert.equal(modelPricingKeys("photo", id).length, 0, `${id}: no live pricing keys`);
+    assert.equal(
+      PRODUCT_PHOTO_TIERS.some((t) => modelPricingKeys("photo", t.id).includes(retired.pricingKey)),
+      false,
+      `${id}: pricing key never reused`,
+    );
   }
   assert.equal(catalogRowsFrom([{ id: "brand_new" }], [], [])[0].enabled, false, "no explicit choice: hidden");
   assert.equal(catalogRowsFrom([{ id: "brand_new", offeredByDefault: true }], [], [])[0].enabled, true, "explicit true: offered");

@@ -428,8 +428,9 @@ Full runbook: [`retiring-a-generation-model.md`](retiring-a-generation-model.md)
 
 1. Remove it in Admin → Models first.
 2. Change code only after no jobs are in flight and the 72 h reconcile window has passed.
-3. Never delete the registry entry (set `offeredByDefault: false`), its rows or its pricing (deprecate
-   pricing, pattern `040_deprecate_kling20.sql`).
+3. Keep the registry entry (set `offeredByDefault: false`); never delete its rows or its pricing (deprecate
+   pricing, pattern `040_deprecate_kling20.sql`). Deleting the entry is an owner-decided exception that needs a
+   retired-label map and a history check first ("Deleting a registry entry", example #476).
 4. Never reuse its id, slug or pricing key.
 
 ## When the model settings cannot be read (fail closed)

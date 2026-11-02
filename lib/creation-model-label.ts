@@ -9,6 +9,7 @@ import {
   isValidProductPhotoTier,
   PRODUCT_PHOTO_TIERS,
   RETIRED_PRODUCT_PHOTO_TIERS,
+  retiredProductPhotoTier,
 } from "@/lib/product-photo";
 import { getVideoModel, isValidVideoModelId, VIDEO_MODELS } from "@/lib/video-models";
 
@@ -54,9 +55,8 @@ export function getCreationModelLabel(item: CreationHistoryItem): string | null 
   if (typeof m.modelTier === "string" && isValidProductPhotoTier(m.modelTier)) {
     return getProductPhotoTier(m.modelTier).modelLabel;
   }
-  if (typeof m.modelTier === "string" && RETIRED_PRODUCT_PHOTO_TIERS[m.modelTier]) {
-    return RETIRED_PRODUCT_PHOTO_TIERS[m.modelTier].modelLabel;
-  }
+  const retired = typeof m.modelTier === "string" ? retiredProductPhotoTier(m.modelTier) : null;
+  if (retired) return retired.modelLabel;
 
   if (typeof m.modelLabel === "string" && m.modelLabel.trim()) {
     return m.modelLabel.trim();

@@ -369,16 +369,21 @@ export const PRODUCT_PHOTO_TIERS: ProductPhotoTier[] = [
 /**
  * Photo tiers removed from the code catalog (#476: never priced in pricing_configs, archived in Admin).
  * Kept only so old creations keep their model name and a request naming one gets a clear 400.
- * Never reuse these ids or slugs for a different model.
+ * Never reuse these ids, slugs or pricing keys for a different model.
  */
-export const RETIRED_PRODUCT_PHOTO_TIERS: Readonly<Record<string, { modelLabel: string; providerModel: string }>> = {
-  seedream4: { modelLabel: "Seedream 4", providerModel: "bytedance/seedream-4" },
-  flux_kontext: { modelLabel: "FLUX Kontext Pro", providerModel: "black-forest-labs/flux-kontext-pro" },
-  flux11: { modelLabel: "FLUX 1.1 Pro", providerModel: "black-forest-labs/flux-1.1-pro" },
-  imagen4: { modelLabel: "Imagen 4", providerModel: "google/imagen-4" },
-  ideogram3: { modelLabel: "Ideogram v3", providerModel: "ideogram-ai/ideogram-v3-turbo" },
-  seedream3: { modelLabel: "Seedream 3", providerModel: "bytedance/seedream-3" },
-  flux_schnell: { modelLabel: "FLUX Schnell", providerModel: "black-forest-labs/flux-schnell" },
+
+/** The retired photo tier for an id (own keys only, so "constructor" and friends are not tiers). */
+export function retiredProductPhotoTier(id: string): { modelLabel: string; providerModel: string; pricingKey: string } | null {
+  return Object.hasOwn(RETIRED_PRODUCT_PHOTO_TIERS, id) ? RETIRED_PRODUCT_PHOTO_TIERS[id] : null;
+}
+export const RETIRED_PRODUCT_PHOTO_TIERS: Readonly<Record<string, { modelLabel: string; providerModel: string; pricingKey: string }>> = {
+  seedream4: { modelLabel: "Seedream 4", providerModel: "bytedance/seedream-4", pricingKey: "product_photo_seedream_4_per_image" },
+  flux_kontext: { modelLabel: "FLUX Kontext Pro", providerModel: "black-forest-labs/flux-kontext-pro", pricingKey: "product_photo_flux_kontext_pro_per_image" },
+  flux11: { modelLabel: "FLUX 1.1 Pro", providerModel: "black-forest-labs/flux-1.1-pro", pricingKey: "product_photo_flux_1_1_pro_per_image" },
+  imagen4: { modelLabel: "Imagen 4", providerModel: "google/imagen-4", pricingKey: "product_photo_imagen_4_per_image" },
+  ideogram3: { modelLabel: "Ideogram v3", providerModel: "ideogram-ai/ideogram-v3-turbo", pricingKey: "product_photo_ideogram_v3_turbo_per_image" },
+  seedream3: { modelLabel: "Seedream 3", providerModel: "bytedance/seedream-3", pricingKey: "product_photo_seedream_3_per_image" },
+  flux_schnell: { modelLabel: "FLUX Schnell", providerModel: "black-forest-labs/flux-schnell", pricingKey: "product_photo_flux_schnell_per_image" },
 };
 
 const TIER_BY_ID = Object.fromEntries(
@@ -517,7 +522,7 @@ export function normalizeProductPhotoOptions(input: {
     }
   | { ok: false; error: string } {
   if (!isValidProductPhotoTier(input.modelTier)) {
-    const retired = RETIRED_PRODUCT_PHOTO_TIERS[input.modelTier];
+    const retired = retiredProductPhotoTier(input.modelTier);
     return {
       ok: false,
       error: retired ? `${retired.modelLabel} is no longer available. Choose another model.` : "Invalid model tier.",
