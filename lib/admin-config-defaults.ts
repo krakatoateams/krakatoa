@@ -56,7 +56,7 @@ export type ToolDefault = {
 };
 
 const WHISPER_VERSION =
-  "3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c";
+  "c6433aab18b7318bbae316495f1a097fc067deef7d59dc2f33e45077ae5956c7";
 
 /**
  * Reset defaults keyed by pricing_key. Legacy rows (seed 007 6c) take amounts from
