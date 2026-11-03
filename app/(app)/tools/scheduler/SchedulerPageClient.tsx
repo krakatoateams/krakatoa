@@ -572,6 +572,9 @@ function UploadCard({
   const { openSignInModal } = useAuthModal();
   const [isDragging, setIsDragging] = useState(false);
   const [tab, setTab] = useState<"upload" | "assets">("upload");
+  // My Assets picker filter (#500) — maps straight onto CreationsHistory's
+  // server-side mediaType param, so paging stays correct.
+  const [assetMediaFilter, setAssetMediaFilter] = useState<"all" | "video" | "image">("all");
   // Task 2.1: local object URL for instant preview
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
@@ -1049,7 +1052,7 @@ function UploadCard({
         )}
 
         {tab === "assets" && (
-          // No mediaType filter (mixes videos and photos in one gallery) and
+          // No fixed mediaType (All mixes videos and photos; the filter above narrows it) and
           // no `tools` allowlist either: every generation tool produces
           // something schedulable (a photo or a video), so this shows
           // everything rather than hand-maintaining a duplicate tool-id list
@@ -1058,15 +1061,43 @@ function UploadCard({
           // "storyboard", across two rounds of this same bug). Picking any
           // item derives contentType from that asset's own kind (see
           // onAssetSelected), same as a raw drop would.
-          <CreationsHistory
-            title="Your assets"
-            description="Pick a generated video or photo to schedule — no re-upload needed."
-            limit={24}
-            selectedUrl={videoUrl ?? undefined}
-            onSelect={(item) => onAssetSelected(item)}
-            showCreateCta
-            className="!mt-0 !border-t-0 !pt-0"
-          />
+          <>
+            <div role="group" aria-label="Filter assets" className="mb-4 inline-flex rounded-lg border border-white/10 bg-white/10 p-0.5">
+              {(
+                [
+                  ["all", "All"],
+                  ["video", "Videos"],
+                  ["image", "Photos"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={assetMediaFilter === value}
+                  onClick={() => setAssetMediaFilter(value)}
+                  className={`cursor-pointer rounded-radius-xl px-3 py-1.5 text-xs font-medium transition-colors ${
+                    assetMediaFilter === value
+                      ? "bg-bg-static-white text-text-static-black"
+                      : "text-text-secondary hover:text-N900"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <CreationsHistory
+              title="Your assets"
+              description="Pick a generated video or photo to schedule — no re-upload needed."
+              limit={24}
+              mediaType={assetMediaFilter === "all" ? undefined : assetMediaFilter}
+              // Half-width card: the library's 5-column default cut titles to a few letters.
+              gridClassName="grid grid-cols-2 sm:grid-cols-3 gap-3"
+              selectedUrl={videoUrl ?? undefined}
+              onSelect={(item) => onAssetSelected(item)}
+              showCreateCta
+              className="!mt-0 !border-t-0 !pt-0"
+            />
+          </>
         )}
 
         {/* Video preview + duration. Frame adapts to the chosen format:
