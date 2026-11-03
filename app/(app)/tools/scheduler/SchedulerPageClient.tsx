@@ -28,6 +28,13 @@ import { INSTAGRAM_CAROUSEL_MAX_ITEMS } from "@/lib/instagram-publish-pure";
 import PageContainer from "../../dashboard/PageContainer";
 import PageHeader from "../../dashboard/PageHeader";
 import {
+  nextSchedulePreferences,
+  parseSchedulePreferences,
+  schedulePreferencesKey,
+  videoPlatformsFromPreferences,
+  type SchedulePreferences,
+} from "@/lib/schedule-preferences-pure";
+import {
   Upload,
   Zap,
   RefreshCw,
@@ -3779,12 +3786,23 @@ function DeepLinkIntake({
 
 export default function SchedulerDashboardPage() {
   const router = useRouter();
-  const { status } = useCurrentUser();
+  const { status, user } = useCurrentUser();
+  const userId = user?.id ?? null;
   const { openSignInModal } = useAuthModal();
   const today = new Date().toISOString().split("T")[0];
   // Unified state: single mode = one item, bulk mode = 2..5 items.
   // Always holds at least one (empty) draft so the form is editable pre-upload.
   const [items, setItems] = useState<VideoItem[]>(() => [makeDraft(today)]);
+  // Last-used settings (#494), loaded once the user is known. A ref, not state:
+  // only new drafts read it, so it never needs to re-render anything itself.
+  const schedulePrefsRef = useRef<SchedulePreferences | null>(null);
+  const freshDraft = useCallback((): VideoItem => {
+    const draft = makeDraft(today);
+    const prefs = schedulePrefsRef.current;
+    return prefs
+      ? { ...draft, platforms: [...prefs.platforms], youtubePrivacyStatus: prefs.youtubePrivacyStatus }
+      : draft;
+  }, [today]);
   const [toast, setToast] = useState<ToastState | null>(null);
   // Task 5.1: posts state
   const [posts, setPosts] = useState<Post[]>([]);
@@ -3802,10 +3820,10 @@ export default function SchedulerDashboardPage() {
     (id: string) => {
       setItems((prev) => {
         const next = prev.filter((i) => i.id !== id);
-        return next.length === 0 ? [makeDraft(today)] : next;
+        return next.length === 0 ? [freshDraft()] : next;
       });
     },
-    [today],
+    [freshDraft],
   );
 
   // Stable callbacks for the single-mode item. Stable identity matters because
@@ -4056,6 +4074,45 @@ export default function SchedulerDashboardPage() {
 
   // ── Bulk caption state (Prompt 2) ──
   const [captionMode, setCaptionMode] = useState<"individual" | "same">("individual");
+
+  // Load the last-used settings once per signed-in user and prefill drafts the
+  // user hasn't touched yet (no media, no platform picked). Platform
+  // availability is enforced afterwards by the existing usability filter.
+  useEffect(() => {
+    if (!userId) return;
+    let prefs: SchedulePreferences | null = null;
+    try {
+      prefs = parseSchedulePreferences(window.localStorage.getItem(schedulePreferencesKey(userId)));
+    } catch {
+      prefs = null;
+    }
+    schedulePrefsRef.current = prefs;
+    if (!prefs) return;
+    const loaded = prefs;
+    setItems((prev) =>
+      prev.map((i) =>
+        !i.file && !i.videoUrl && !i.storagePath && i.photoUrls.length === 0 && i.platforms.length === 0
+          ? { ...i, platforms: [...loaded.platforms], youtubePrivacyStatus: loaded.youtubePrivacyStatus }
+          : i,
+      ),
+    );
+    setCaptionMode(loaded.captionMode);
+  }, [userId]);
+
+  const rememberScheduleSettings = useCallback(
+    (scheduled: Pick<VideoItem, "contentType" | "platforms" | "youtubePrivacyStatus">) => {
+      if (!userId) return;
+      const next = nextSchedulePreferences(schedulePrefsRef.current, { ...scheduled, captionMode });
+      schedulePrefsRef.current = next;
+      try {
+        window.localStorage.setItem(schedulePreferencesKey(userId), JSON.stringify(next));
+      } catch {
+        // Private mode / blocked storage: next post just starts from defaults.
+      }
+    },
+    [userId, captionMode],
+  );
+
   const [sharedCaption, setSharedCaption] = useState("");
   const sharedAi = useCaptionAI();
 
@@ -4228,7 +4285,8 @@ export default function SchedulerDashboardPage() {
           file,
           uploadStatus: "idle",
           contentType,
-          platforms: ["youtube"],
+          platforms: videoPlatformsFromPreferences(schedulePrefsRef.current),
+          youtubePrivacyStatus: schedulePrefsRef.current?.youtubePrivacyStatus ?? "public",
         });
       }
 
@@ -4307,7 +4365,7 @@ export default function SchedulerDashboardPage() {
         return;
       }
 
-      const newItem: VideoItem = { ...makeDraft(today), ...assetPatch };
+      const newItem: VideoItem = { ...freshDraft(), ...assetPatch };
       if (items.length + 1 >= 2) {
         const anchorDate = items[0]?.date ?? today;
         const slot = spacedSlot(anchorDate, items.length);
@@ -4316,7 +4374,7 @@ export default function SchedulerDashboardPage() {
       }
       setItems((prev) => [...prev, newItem]);
     },
-    [items, today, updateItem],
+    [freshDraft, items, today, updateItem],
   );
 
   // Deep-link hand-off: Reels Creator → "Schedule this post" (a video) and Photo
@@ -4364,9 +4422,10 @@ export default function SchedulerDashboardPage() {
   );
 
   const handleSuccess = useCallback(() => {
-    setItems([makeDraft(today)]);
+    rememberScheduleSettings(item0);
+    setItems([freshDraft()]);
     fetchPosts();
-  }, [fetchPosts, today]);
+  }, [fetchPosts, freshDraft, item0, rememberScheduleSettings]);
 
   // ── Schedule All (Prompt 3) ──
   const [schedulingAll, setSchedulingAll] = useState(false);
@@ -4481,6 +4540,9 @@ export default function SchedulerDashboardPage() {
     // that partially failed no longer re-POSTs the platform(s) that already
     // created a `posts` row.
     let success = 0;
+    // Remember settings from a scheduled video card if there is one (a photo
+    // card is TikTok-only by force, so it says nothing about video platforms).
+    let rememberFrom: VideoItem | null = null;
     for (const it of targets) {
       // Upload the staged file now, if there is one — this is the point
       // upload was deferred to (see handleFilesAdded). A failure here skips
@@ -4580,6 +4642,7 @@ export default function SchedulerDashboardPage() {
 
       if (failed.length === 0) {
         success += 1;
+        if (!rememberFrom || (rememberFrom.contentType === "photo" && it.contentType === "video")) rememberFrom = it;
         updateItem(it.id, { scheduleStatus: "scheduled", scheduleError: null, platformResults: mergedResults });
       } else {
         updateItem(it.id, { scheduleStatus: "failed", scheduleError: failed.join("; "), platformResults: mergedResults });
@@ -4587,6 +4650,7 @@ export default function SchedulerDashboardPage() {
     }
 
     setSchedulingAll(false);
+    if (rememberFrom) rememberScheduleSettings(rememberFrom);
     setToast({
       type: success === targets.length ? "success" : "error",
       message: `${success}/${targets.length} videos scheduled successfully`,
@@ -4599,9 +4663,9 @@ export default function SchedulerDashboardPage() {
   const clearScheduledItems = useCallback(() => {
     setItems((prev) => {
       const next = prev.filter((i) => i.scheduleStatus !== "scheduled");
-      return next.length === 0 ? [makeDraft(today)] : next;
+      return next.length === 0 ? [freshDraft()] : next;
     });
-  }, [today]);
+  }, [freshDraft]);
 
   // Task 5.6: retry a failed post
   const handleRetry = useCallback(async (postId: string) => {
