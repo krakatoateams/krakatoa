@@ -2793,6 +2793,14 @@ function RecentPostsCard({ posts, loading, onRetry, onCancel }: RecentPostsCardP
 // A platform timeout (504) or crash returns an HTML/text page, not JSON —
 // parse defensively so the user sees a readable error instead of a
 // "Unexpected token" message.
+class CaptionRequestError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 async function readCaptionResponse(res: Response): Promise<Record<string, unknown>> {
   let data: Record<string, unknown> = {};
   try {
@@ -2801,7 +2809,9 @@ async function readCaptionResponse(res: Response): Promise<Record<string, unknow
     if (res.ok) throw new Error("Something went wrong. Please try again.");
   }
   if (!res.ok) {
-    if (typeof data.error === "string") throw new Error(data.error);
+    if (typeof data.error === "string") {
+      throw new CaptionRequestError(data.error, typeof data.code === "string" ? data.code : undefined);
+    }
     throw new Error(
       res.status === 504
         ? "Caption generation took too long. Please try again."
@@ -2827,9 +2837,14 @@ function useCaptionAI() {
     "ok" | "no_audio" | "failed" | null
   >(null);
 
+  // No words heard and no title/tags: the server asks for context instead of
+  // inventing a caption (#499). A prompt to act, not a red failure.
+  const [needsContext, setNeedsContext] = useState(false);
+
   const resetWarning = useCallback(() => {
     setLastUsedTranscript(null);
     setLastTranscriptStatus(null);
+    setNeedsContext(false);
   }, []);
   const clearError = useCallback(() => setError(null), []);
 
@@ -2848,6 +2863,7 @@ function useCaptionAI() {
     }): Promise<string> => {
       setBusy("generate");
       setError(null);
+      setNeedsContext(false);
       setLastUsedTranscript(null);
       setLastTranscriptStatus(null);
       try {
@@ -2875,7 +2891,11 @@ function useCaptionAI() {
         );
         return data.caption as string;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong.");
+        if (err instanceof CaptionRequestError && err.code === "NEEDS_CONTEXT") {
+          setNeedsContext(true);
+        } else {
+          setError(err instanceof Error ? err.message : "Something went wrong.");
+        }
         throw err;
       } finally {
         setBusy(null);
@@ -2932,7 +2952,7 @@ function useCaptionAI() {
     }
   }, []);
 
-  return { busy, error, lastUsedTranscript, lastTranscriptStatus, resetWarning, clearError, generate, generateGeneral, polish };
+  return { busy, error, needsContext, lastUsedTranscript, lastTranscriptStatus, resetWarning, clearError, generate, generateGeneral, polish };
 }
 
 // Buttons + status + transcript warning + error, driven by a useCaptionAI() instance.
@@ -2972,25 +2992,31 @@ function CaptionControls({
 
   return (
     <div className="space-y-2">
+      {/* A caption only comes back without a transcript when the creator gave
+          some context (the server asks for it otherwise, #499), so name only
+          what they actually filled in. */}
       {hasContent && ai.lastTranscriptStatus === "failed" && (
         <p className="mt-1 text-xs text-warning">
-          ⚠️ Couldn&apos;t read the audio this time — caption was generated from your title and tags.
-          Try generating again.
+          ⚠️ Couldn&apos;t read the audio this time — caption was written from your{" "}
+          {hasTitle ? "title and tags" : "tags"}. Try generating again.
         </p>
       )}
 
-      {hasContent &&
-        ai.lastTranscriptStatus === "no_audio" &&
-        (hasTitle ? (
-          <p className="mt-1 text-xs text-text-secondary">
-            🎵 No audio detected — caption was generated from your title and tags.
+      {hasContent && ai.lastTranscriptStatus === "no_audio" && (
+        <p className="mt-1 text-xs text-text-secondary">
+          🎵 No spoken words found — caption was written from your {hasTitle ? "title and tags" : "tags"}.
+        </p>
+      )}
+
+      {ai.needsContext && (
+        <div role="status" className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-3">
+          <AlertCircle className="mt-px h-4 w-4 shrink-0 text-warning" />
+          <p className="text-xs text-warning">
+            We couldn&apos;t hear any words in this video. Add a title or a few tags, then generate
+            again.
           </p>
-        ) : (
-          <p className="mt-1 text-xs text-warning">
-            ⚠️ No audio detected and no title added. Your caption may not be relevant — try adding a
-            title and tags, then regenerate.
-          </p>
-        ))}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <button
