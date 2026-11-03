@@ -551,6 +551,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Nothing real to write from: no words heard and no creator context. A
+    // caption here would be invented, so ask for a title or tags instead —
+    // before spending a model call (#499).
+    if (!transcript && !resolvedPhotoUrl && !title && !tags && !description) {
+      return NextResponse.json(
+        {
+          error: "We couldn't hear any words in this video. Add a title or a few tags, then generate again.",
+          code: "NEEDS_CONTEXT",
+          transcriptStatus,
+        },
+        { status: 422 },
+      );
+    }
+
     const prompt = buildPrompt({
       transcript,
       title: title || undefined,
